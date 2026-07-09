@@ -2,15 +2,13 @@ import { Bot, UserRound } from 'lucide-react';
 import { classNames, formatSeq } from '../../lib/format.js';
 import { PermissionCard } from '../PermissionCard.jsx';
 import { ToolCallCard } from '../ToolCallCard.jsx';
+import { EmptyState } from '../ui/feedback.jsx';
 
 export function ChatConversation({ messages, permissions, tools, onResolvePermission }) {
   return (
     <div className="conversation" data-testid="chat-conversation">
       {messages.length === 0 ? (
-        <div className="empty-conversation">
-          <strong>Ready to start</strong>
-          <span>After the gateway connects, new tasks enter the Agent Runtime through WebSocket run.start.</span>
-        </div>
+        <EmptyState className="empty-conversation" title="准备开始" />
       ) : null}
 
       {messages.map((message) => (

@@ -21,6 +21,8 @@ Updated: 2026-07-09
 - Desktop SettingsPanel exposes `runtime_mode`, `tool_policy`, `permission_mode`, `spawn_subagents`, `subagent_backend`, `model`, `tool_allowlist`, and `tool_denylist`, and sends those values as WebSocket `run.start` options to Gateway.
 - Desktop SettingsPanel manages Gateway provider profiles: it can list, select, create, update, and delete profiles, keeps only masked API key state, and sends the selected `provider_profile_id` as a WebSocket `run.start` option.
 - Desktop RunActivityPanel includes an Event Timeline backed by the run event query API, with event kind/agent filters, grouped summaries, and expandable payload inspection.
+- Desktop UI primitives are normalized for v0.1.1: shared buttons, status badges, panel headers, tabs, fields, feedback states, and `SelectMenu` custom dropdowns are used across Settings, Activity, Workspace, Subagents, chat, and Memory surfaces. Native Desktop `<select>` controls are intentionally not used.
+- Desktop clarity and localization stabilization is implemented for v0.1.3: user-facing status/risk/memory/event/runtime labels are Chinese, main panels avoid explanatory subtitles by default, and timeline UI tests tolerate valid Gateway event projection count variance.
 - Desktop frontend has unit-level automation for provider profile DTO/payload handling, `run.start` option construction, and WebSocket reconnect resume cursors; browser-level Playwright fixture coverage for restore, permissions, tool cards, subagents, and Activity timeline filters/grouping/payload inspection through `npm run test:ui`; and Gateway-backed Playwright e2e coverage for `/read README.md`, inactive provider profile UI failure handling, denied permission rendering, denied tool failure rendering, pending permission run cancellation, and reconnect/resume after missed permission approval events over the real HTTP/WebSocket loop.
 - Gateway-backed Playwright e2e also covers `runtime_process` subagent startup failure using `RED_PANDA_SUBAGENT_COMMAND`, verifying SubAgentPanel failed state and Activity timeline visibility over the real Gateway/Runtime/Desktop chain.
 - `scripts/protocol-compat.ps1` covers public WebSocket/API failed tool and failed subagent paths: denied `shell.exec` produces `tool_failed` plus denied projections, and invalid `RED_PANDA_SUBAGENT_COMMAND` produces failed `subagent_update` events in persisted timeline.
@@ -165,6 +167,17 @@ Updated: 2026-07-09
     - project/session memory list, create, edit, disable, delete, and preview controls,
     - Activity timeline classifies `memory_injected` events as memory,
     - Playwright fixture coverage and Gateway-backed E2E for memory creation, preview, Runtime injection, and Activity visibility.
+89. Added v0.1.1 Desktop UI normalization:
+    - shared `Badge` / `StatusBadge`, `PanelHeader`, `TabButton`, `Field`, `EmptyState`, `InlineEmpty`, `ErrorMessage`, and `SelectMenu` primitives,
+    - tokenized Desktop colors, radii, focus states, and status styles in `app.css`,
+    - Settings, Activity, Workspace, Subagents, chat, tool cards, permission cards, and Memory surfaces migrated to shared primitives,
+    - native Desktop `<select>` controls replaced by `SelectMenu`,
+    - Playwright fixture and Gateway-backed tests updated for custom dropdown interactions.
+90. Added v0.1.3 Desktop clarity and localization stabilization:
+    - shared display labels for visible statuses, risk levels, memory values, event kinds, runtime modes, session kinds, and subagent backends,
+    - concise panel headers and reduced explanatory subtitle/helper text,
+    - Chinese visible labels while keeping protocol names, tool names, API fields, and backend error data unchanged,
+    - Gateway-backed timeline assertions allow the valid 4-6 event projection range while still verifying tool timeline behavior.
 
 ## Modules
 
@@ -173,7 +186,7 @@ Updated: 2026-07-09
 | `modules/protocol` | Complete | JSON-RPC, WebSocket envelope, agent event, permission DTO, tool DTO, subagent lifecycle DTO |
 | `modules/agent` | MVP complete | stdio JSON-RPC Runtime, Provider abstraction, per-run OpenAI-compatible provider override with env fallback, ToolRunner MVP, low-risk `workspace.list`, `workspace.grep`, and `workspace.diff_file`, medium-risk `memory.list`, high-risk `workspace.edit_file`, `workspace.apply_patch`, and `memory.create/update/delete`, permission blocking, in-process subagent lifecycle/query/cancel, `runtime_process` child-process subagent backend, reusable `process_pool` child-process subagent backend |
 | `modules/gateway` | MVP complete | Gin/GORM/SQLite(no cgo), Runtime subprocess client, WebSocket channel, persistence replay, workspace/session/run/tool/permission/event APIs, provider profile CRUD APIs, `provider_profile_id` run resolution, subagent list/cancel routing, root-run `per_run_process` runtime mode, Gateway-mediated memory tool execution |
-| `modules/desktop` | MVP complete | Wails v3, React/Vite, chat, permissions, tool cards, subagent status/cancel, workspace panel, session restore, searchable RunActivityPanel with Event Timeline filters, grouped summaries, payload inspection, global pending approval entry, SettingsPanel runtime/policy options and provider profile management UI |
+| `modules/desktop` | MVP complete | Wails v3, React/Vite, chat, permissions, tool cards, subagent status/cancel, workspace panel, session restore, searchable RunActivityPanel with Event Timeline filters, grouped summaries, payload inspection, global pending approval entry, SettingsPanel runtime/policy options and provider profile management UI, and normalized shared UI primitives with custom dropdowns |
 | `modules/cli` | Placeholder | Future debugging entry |
 
 ## Current Triggers
@@ -216,7 +229,7 @@ Full v0.1.0 gate status: Pass on 2026-07-09. Agent/Gateway binaries were rebuilt
 | `go test ./modules/cli/...` | Pass |
 | `go test ./modules/gateway/internal/gateway/repository ./modules/gateway/internal/gateway/service` | Pass |
 | `npm test` in `modules/desktop/frontend` | Pass, includes reconnect resume cursor coverage |
-| `npm run test:ui` in `modules/desktop/frontend` | Pass, 13 tests, includes Activity, Workflow, Memory fixture, and Gateway-backed workflows |
+| `npm run test:ui` in `modules/desktop/frontend` | Pass, 13 tests, includes Activity, Workflow, Memory fixture, custom dropdown interactions, and Gateway-backed workflows |
 | `npm run test:ui -- --grep @gateway-backed` in `modules/desktop/frontend` | Pass, 10 tests, includes `/read README.md`, inactive provider profile UI failure, denied permission/tool rendering, pending permission cancel, `runtime_process` subagent failure visibility, running subagent cancel, session fork/compact, Desktop memory preview/injection visibility, reconnect/resume permission wait coverage, and process leak assertions during teardown |
 | `npm run build` in `modules/desktop/frontend` | Pass |
 | `CGO_ENABLED=0 go build` agent | Pass |
@@ -263,7 +276,7 @@ Desktop SettingsPanel uses these APIs to list, select, create, update, and delet
 `scripts/protocol-compat.ps1` is the lightweight HTTP/WebSocket compatibility script. It covers the client-facing protocol matrix for run lifecycle, replay ordering, malformed WebSocket payload recovery, permission approve/deny resolution, failed tool events/projections, failed subagent events/timeline, provider profile selection, inactive provider profile failure handling, and persisted timeline query shape without requiring a full desktop build.
 It also covers session fork, compact preview, compact apply, memory CRUD, memory soft delete, memory preview selection, and Runtime `memory.*` tool create/list/deny behavior.
 
-Frontend tests include Playwright UI fixture coverage for restore, permission approve/deny visible states, failed/completed tool cards, subagents, Activity timeline event kind and agent filtering, grouped summaries, and expandable payload inspection. The UI fixture suite continues to run through `npm run test:ui`.
+Frontend tests include Playwright UI fixture coverage for restore, permission approve/deny visible states, failed/completed tool cards, subagents, Activity timeline event kind and agent filtering, custom dropdown interactions, grouped summaries, and expandable payload inspection. The UI fixture suite continues to run through `npm run test:ui`.
 
 Gateway-backed Playwright e2e coverage starts `bin\red-panda-gateway.exe` and `bin\red-panda-agent.exe` on an isolated test port, points the Vite frontend at Gateway through the built-in dev proxy, sends `/read README.md` from the browser over HTTP/WebSocket, verifies the rendered assistant message, tool card, and Activity timeline, verifies inactive provider profile UI failure handling, verifies denied permission/tool rendering, verifies pending permission run cancellation, verifies `runtime_process` subagent startup failure visibility, verifies running subagent cancellation, verifies session fork/compact restore, and verifies reconnect/resume while a permission-gated run finishes during browser disconnection. The test helper cleans up the Gateway process tree on teardown and fails if newly created Gateway/Agent processes remain. Run it from `modules\desktop\frontend` with:
 
@@ -276,12 +289,14 @@ npm run test:ui -- --grep @gateway-backed
 The following should not be claimed as complete:
 
 1. Additional persisted event replay edge cases beyond the current reconnect/resume and timeline coverage.
-2. MCP stdio tools and context compaction.
+2. MCP stdio Runtime execution, tool discovery, and tool calls.
+3. MCP config DTOs and Gateway config CRUD are designated for v0.1.2 but not implemented yet.
 
 ## Next Development Steps
 
-1. Treat v0.1.0 as release-gate complete.
-2. Use `docs/18-v0.1.1-development-plan.md` as the v0.1.1 release scope.
-3. Use `docs/12-current-execution-plan.md` as the short-cycle execution board to avoid unordered parallel development.
-4. MCP stdio tools design is now documented in `docs/19-mcp-stdio-tools-design.md`; do not implement MCP until the next implementation slice is explicitly opened.
-5. Keep the v0.1.0 gate reproducible while doing v0.1.1 planning work.
+1. Treat v0.1.1 as the completed stabilization/design baseline once it is released or tagged.
+2. Use `docs/22-v0.1.2-development-plan.md` as the v0.1.2 release scope.
+3. Use `docs/24-v0.1.3-development-plan.md`, `docs/25-v0.1.4-development-plan.md`, and `docs/26-v0.1.5-development-plan.md` for the next three ordered slices.
+4. Use `docs/12-current-execution-plan.md` as the short-cycle execution board to avoid unordered parallel development.
+5. Implement only MCP-1 in v0.1.2: protocol/config DTOs and Gateway config CRUD.
+6. Keep Runtime MCP stdio process execution blocked until the config and read-only discovery slices explicitly permit it.

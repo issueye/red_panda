@@ -12,24 +12,24 @@ test('Memory panel manages records and preview in browser', async ({ page }) => 
   await expect(page.getByTestId('memory-title-input')).toHaveValue('Session decision');
   await page.getByTestId('memory-content-input').fill('Keep the Memory panel compact and inspectable.');
   await page.getByTestId('memory-save').click();
-  await expect(page.getByTestId('memory-item').filter({ hasText: 'Session decision' })).toContainText('active');
+  await expect(page.getByTestId('memory-item').filter({ hasText: 'Session decision' })).toContainText('启用');
 
-  await page.getByRole('button', { name: 'New' }).click();
+  await page.getByRole('button', { name: '新建' }).click();
   await page.getByTestId('memory-title-input').fill('Created memory');
   await page.getByTestId('memory-content-input').fill('Created from the Memory panel.');
   await page.getByTestId('memory-save').click();
   await expect(page.getByText('Created memory')).toBeVisible();
 
   await page.getByText('Created memory').click();
-  await page.getByRole('button', { name: 'Disable' }).click();
+  await page.getByRole('button', { name: '停用' }).click();
   await expect(page.getByTestId('memory-list')).not.toContainText('Created memory');
 
-  await page.getByRole('button', { name: 'Preview' }).click();
+  await page.getByRole('button', { name: '预览' }).click();
   await expect(page.getByTestId('memory-preview-context')).toContainText('Session decision');
   await expect(page.getByTestId('memory-preview-context')).toContainText('Project command');
   await expect(page.getByTestId('memory-preview-context')).not.toContainText('Disabled note');
 
   await page.getByTestId('memory-item').filter({ hasText: 'Project command' }).click();
-  await page.getByLabel('Delete memory').click();
+  await page.getByLabel('删除记忆').click();
   await expect(page.getByTestId('memory-list')).not.toContainText('Project command');
 });

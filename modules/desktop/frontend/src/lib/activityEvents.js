@@ -1,3 +1,5 @@
+import { displayEventKind, displayRisk, displayStatus } from './displayLabels.js';
+
 export function normalizeRunEvent(item) {
   const type = item.type || 'event';
   const agentRole = item.agent_role || item.agent?.role || 'root';
@@ -32,30 +34,30 @@ export function summarizeRunEvent(event) {
     const name = firstPresent(payload.tool_name, payload.toolName, payload.name, payload.display_name);
     const status = firstPresent(payload.status, payload.state, payload.result_status);
     const input = summarizeToolInput(payload);
-    return trimSummary(joinParts([name || 'tool', status, input]));
+    return trimSummary(joinParts([name || '工具', status ? displayStatus(status) : '', input]));
   }
 
   if (kind === 'permission') {
     const action = firstPresent(payload.action, payload.decision, payload.status, payload.state);
     const toolName = firstPresent(payload.tool_name, payload.toolName, payload.name);
-    const reason = firstPresent(payload.summary, payload.reason, payload.risk);
-    return trimSummary(joinParts(['permission', action, toolName, reason]));
+    const reason = firstPresent(payload.summary, payload.reason, payload.risk ? `${displayRisk(payload.risk)}风险` : '');
+    return trimSummary(joinParts(['授权', action ? displayStatus(action) : '', toolName, reason]));
   }
 
   if (kind === 'error') {
-    return trimSummary(firstPresent(payload.error, payload.message, payload.summary, event?.type, 'error'));
+    return trimSummary(firstPresent(payload.error, payload.message, payload.summary, event?.type, '错误'));
   }
 
   if (kind === 'done') {
     const status = firstPresent(payload.status, payload.state, payload.reason);
-    return trimSummary(joinParts(['done', status]));
+    return trimSummary(joinParts(['完成', status ? displayStatus(status) : '']));
   }
 
   if (payload.delta) return trimSummary(payload.delta);
   if (payload.message) return trimSummary(payload.message);
   if (payload.summary) return trimSummary(payload.summary);
-  if (payload.status) return trimSummary(payload.status);
-  return trimSummary(event?.streamKind || event?.agentName || 'event');
+  if (payload.status) return trimSummary(displayStatus(payload.status));
+  return trimSummary(event?.streamKind || event?.agentName || displayEventKind('event'));
 }
 
 export function getRunEventTimelineMeta(event) {
@@ -127,7 +129,7 @@ export function formatRunEventPayload(event) {
   if (text.length <= 4000) {
     return text;
   }
-  return `${text.slice(0, 4000)}\n... truncated`;
+  return `${text.slice(0, 4000)}\n... 已截断`;
 }
 
 export function classifyRunEventKind(type, streamKind, payload = {}) {

@@ -12,19 +12,18 @@ export function ChatComposer({ value, running, onChange, onSend, onCancel }) {
       <textarea
         data-testid="chat-composer-input"
         onChange={(event) => onChange(event.target.value)}
-        placeholder="Type a task and send it through the gateway WebSocket..."
+        placeholder="输入任务..."
         rows={3}
         value={value}
       />
       <div className="composer-actions">
-        <span>Main agent and subagent output is merged by root_seq.</span>
         {running ? (
-          <IconButton data-testid="chat-composer-cancel" label="Cancel run" onClick={onCancel}>
+          <IconButton data-testid="chat-composer-cancel" label="取消运行" onClick={onCancel}>
             <Square size={16} />
           </IconButton>
         ) : (
           <Button data-testid="chat-composer-send" icon={<Send size={15} />} type="submit">
-            Send
+            发送
           </Button>
         )}
       </div>

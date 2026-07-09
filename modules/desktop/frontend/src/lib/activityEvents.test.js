@@ -59,7 +59,7 @@ test('getRunEventTimelineMeta distinguishes subagent scope and sequence', () => 
   assert.equal(meta.scope, 'subagent:researcher');
   assert.equal(meta.sequence, 'root#8 agent#3');
   assert.equal(meta.title, 'tool_started');
-  assert.equal(meta.summary, 'web_search - running - q=issue timeline');
+  assert.equal(meta.summary, 'web_search - 运行中 - q=issue timeline');
 });
 
 test('getRunEventTimelineMeta keeps root events compact', () => {
@@ -74,7 +74,7 @@ test('getRunEventTimelineMeta keeps root events compact', () => {
   assert.equal(meta.kind, 'done');
   assert.equal(meta.scope, 'root');
   assert.equal(meta.sequence, 'root#9');
-  assert.equal(meta.summary, 'done - completed');
+  assert.equal(meta.summary, '完成 - 已完成');
 });
 
 test('summarizeRunEvent formats permission and error payloads', () => {
@@ -85,7 +85,7 @@ test('summarizeRunEvent formats permission and error payloads', () => {
       tool_name: 'shell_command',
       reason: 'writes files',
     },
-  }), 'permission - pending - shell_command - writes files');
+  }), '授权 - 待处理 - shell_command - writes files');
 
   assert.equal(summarizeRunEvent({
     type: 'run_error',
@@ -179,7 +179,7 @@ test('formatRunEventPayload returns pretty JSON only when payload exists', () =>
     '{\n  "tool_name": "workspace.list",\n  "arguments": {\n    "path": "."\n  }\n}',
   );
   const longPayload = formatRunEventPayload({ payload: { output: 'x'.repeat(5000) } });
-  assert.equal(longPayload.endsWith('... truncated'), true);
+  assert.equal(longPayload.endsWith('... 已截断'), true);
   assert.equal(longPayload.length < 4100, true);
 });
 

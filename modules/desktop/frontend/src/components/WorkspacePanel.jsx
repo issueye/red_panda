@@ -1,6 +1,8 @@
 import { FileText, Folder, GitCompare, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from './ui/button.jsx';
+import { ErrorMessage, InlineEmpty } from './ui/feedback.jsx';
+import { PanelHeader } from './ui/panel.jsx';
 
 function flattenTree(node, depth = 0, items = []) {
   if (!node) return items;
@@ -13,8 +15,8 @@ function flattenTree(node, depth = 0, items = []) {
 
 function displayContent(file, diff) {
   if (diff?.diff) return diff.diff;
-  if (!file) return 'Select a file from the workspace tree.';
-  if (file.binary) return 'Binary file preview is disabled.';
+  if (!file) return '请从工作区树中选择文件。';
+  if (file.binary) return '二进制文件暂不支持预览。';
   return file.content || '';
 }
 
@@ -82,19 +84,18 @@ export function WorkspacePanel({ apiJson, workspace }) {
 
   return (
     <section className="workspace-panel-content">
-      <div className="panel-header">
-        <div>
-          <strong>Workspace</strong>
-          <span>{workspace?.root_path || workspace?.root || 'No workspace open'}</span>
-        </div>
-        <Button icon={<RefreshCw size={14} />} onClick={loadTree} variant="ghost">
-          Refresh
-        </Button>
-      </div>
+      <PanelHeader
+        action={(
+          <Button icon={<RefreshCw size={14} />} onClick={loadTree} variant="ghost">
+            刷新
+          </Button>
+        )}
+        title="工作区"
+      />
 
       <div className="workspace-panel-grid">
         <div className="workspace-tree">
-          {items.length === 0 ? <div className="workspace-empty">No files loaded</div> : null}
+          {items.length === 0 ? <InlineEmpty as="div" className="workspace-empty">暂无文件</InlineEmpty> : null}
           {items.map((item) => {
             const isFile = item.type === 'file';
             const Icon = isFile ? FileText : Folder;
@@ -117,13 +118,13 @@ export function WorkspacePanel({ apiJson, workspace }) {
 
         <div className="workspace-preview">
           <div className="workspace-preview-head">
-            <span>{selectedPath || 'Preview'}</span>
+            <span>{selectedPath || '预览'}</span>
             <Button icon={<GitCompare size={14} />} onClick={loadDiff} variant="soft">
-              Diff
+              差异
             </Button>
           </div>
-          {error ? <div className="workspace-error">{error}</div> : null}
-          <pre>{loading ? 'Loading...' : displayContent(file, diff)}</pre>
+          <ErrorMessage as="div" className="workspace-error">{error}</ErrorMessage>
+          <pre>{loading ? '加载中...' : displayContent(file, diff)}</pre>
         </div>
       </div>
     </section>

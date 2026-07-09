@@ -7,10 +7,12 @@ import { Sidebar } from './components/Sidebar.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
 import { SubAgentPanel } from './components/SubAgentPanel.jsx';
 import { TopBar } from './components/TopBar.jsx';
+import { TabButton } from './components/ui/tabs.jsx';
 import { WorkspacePanel } from './components/WorkspacePanel.jsx';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { gatewayBaseURL } from './lib/config.js';
+import { displayRuntimeMode, displaySessionKind, displayStatus } from './lib/displayLabels.js';
 import {
   normalizeProviderProfile,
   providerProfileCreatePayload,
@@ -21,7 +23,7 @@ import { buildRunStartOptions, defaultRunSettings } from './lib/runOptions.js';
 const gatewayBase = gatewayBaseURL();
 
 const initialSessions = [
-  { id: 'local-design', title: 'Architecture', subtitle: 'WebSocket / JSON-RPC / subagents' },
+  { id: 'local-design', title: '架构', subtitle: 'WebSocket / JSON-RPC / 子代理' },
 ];
 
 const initialMessages = [
@@ -30,7 +32,7 @@ const initialMessages = [
     role: 'assistant',
     agent: 'root',
     rootSeq: 1,
-    text: 'Desktop is connected to the gateway protocol. Start a task, add /permission to test approvals, or /subagent to test subagent output.',
+    text: '已连接。请输入任务。',
   },
 ];
 
@@ -63,11 +65,12 @@ async function apiJson(path, options = {}) {
 
 function normalizeSession(session) {
   const kind = session.kind && session.kind !== 'normal' ? session.kind : '';
-  const detail = session.working_dir || session.workspace_root || session.status || 'active';
+  const detail = session.working_dir || session.workspace_root || displayStatus(session.status || 'active');
+  const kindLabel = displaySessionKind(kind);
   return {
     id: session.id,
     title: session.title || session.name || session.id,
-    subtitle: kind ? `${kind} - ${detail}` : detail,
+    subtitle: kind ? `${kindLabel || kind} - ${detail}` : detail,
     kind,
     parentId: session.parent_id || '',
   };
@@ -91,7 +94,7 @@ function normalizeToolCall(item) {
     id: item.id,
     rootRunId: item.root_run_id,
     name: item.tool_name || 'tool',
-    displayName: item.display_name || item.tool_name || 'Tool',
+    displayName: item.display_name || item.tool_name || '工具',
     risk: item.risk || 'low',
     arguments: item.arguments || {},
     status: item.status || 'running',
@@ -127,8 +130,8 @@ function normalizePermission(item) {
     runId: item.run_id,
     status: item.status || 'pending',
     decision: item.decision || '',
-    summary: item.summary || 'Permission required',
-    detail: item.detail || item.tool_name || 'Agent Runtime is waiting for a decision.',
+    summary: item.summary || '需要授权',
+    detail: item.detail || item.tool_name || 'Agent Runtime 正在等待处理决定。',
     risk: item.risk,
     toolName: item.tool_name,
     arguments: item.arguments || {},
@@ -312,6 +315,7 @@ export function App() {
   const { status, lastError, request, reconnect } = useGatewayConnection({
     baseUrl: gatewayBase,
     resumeCursors,
+    // 网关事件按类型增量合并到本地投影，避免流式输出时反复拉取整段会话。
     onEvent: (event) => {
       const payload = event.payload || {};
       setRootSeq((current) => Math.max(current, payload.root_seq || current));
@@ -349,8 +353,8 @@ export function App() {
           runId: payload.payload?.run_id || payload.root_run_id,
           sessionId: payload.session_id,
           status: 'pending',
-          summary: payload.payload?.summary || 'Permission required',
-          detail: payload.payload?.detail || payload.payload?.tool_name || 'Agent Runtime is waiting for a decision.',
+          summary: payload.payload?.summary || '需要授权',
+          detail: payload.payload?.detail || payload.payload?.tool_name || 'Agent Runtime 正在等待处理决定。',
           risk: payload.payload?.risk,
           toolName: payload.payload?.tool_name,
           arguments: payload.payload?.arguments || {},
@@ -380,7 +384,7 @@ export function App() {
             id: toolID,
             rootRunId: payload.root_run_id,
             name: payload.payload?.tool_name || 'tool',
-            displayName: payload.payload?.display_name || payload.payload?.tool_name || 'Tool',
+            displayName: payload.payload?.display_name || payload.payload?.tool_name || '工具',
             risk: payload.payload?.risk || 'low',
             arguments: payload.payload?.arguments || {},
             status: payload.payload?.status || 'running',
@@ -483,7 +487,7 @@ export function App() {
               role: 'assistant',
               agent: payload.agent?.name || 'runtime',
               rootSeq: payload.root_seq,
-              text: 'Run cancelled.',
+              text: '运行已取消。',
             },
           ]);
         }
@@ -523,7 +527,7 @@ export function App() {
     const session = await apiJson('/api/v1/sessions', {
       method: 'POST',
       body: JSON.stringify({
-        name: 'New session',
+        name: '新会话',
         workspace_root: workspace?.root_path || workspace?.root || '',
       }),
     });
@@ -550,7 +554,7 @@ export function App() {
     const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(currentSessionId)}/fork`, {
       method: 'POST',
       body: JSON.stringify({
-        name: `Fork of ${current?.title || 'session'}`,
+        name: `${current?.title || '会话'} 的分叉`,
       }),
     });
     const normalized = normalizeSession(result.session);
@@ -569,7 +573,7 @@ export function App() {
     const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(currentSessionId)}/compact`, {
       method: 'POST',
       body: JSON.stringify({
-        name: `Compact of ${current?.title || 'session'}`,
+        name: `${current?.title || '会话'} 的压缩版`,
         keep_tail_messages: 1,
         summary: preview.preview?.summary,
       }),
@@ -641,7 +645,7 @@ export function App() {
           id: `gateway_error_${Date.now()}`,
           role: 'assistant',
           agent: 'gateway',
-          text: `run.start failed: ${error.message}`,
+          text: `启动运行失败：${error.message}`,
         },
       ]);
       setRunning(false);
@@ -664,7 +668,7 @@ export function App() {
     }
     setSubAgents((items) => items.map((item) => (
       item.id === agent.id
-        ? { ...item, status: 'cancelling', summary: 'Cancellation requested' }
+        ? { ...item, status: 'cancelling', summary: '已请求取消' }
         : item
     )));
     try {
@@ -676,7 +680,7 @@ export function App() {
       if (!result?.cancelled) {
         setSubAgents((items) => items.map((item) => (
           item.id === agent.id
-            ? { ...item, status: 'completed', summary: 'Subagent was already finished' }
+            ? { ...item, status: 'completed', summary: '子代理已结束' }
             : item
         )));
       }
@@ -692,7 +696,7 @@ export function App() {
           id: `subagent_cancel_error_${Date.now()}`,
           role: 'assistant',
           agent: 'gateway',
-          text: `subagent.cancel failed: ${error.message}`,
+          text: `取消子代理失败：${error.message}`,
         },
       ]);
     }
@@ -816,36 +820,32 @@ export function App() {
         />
         <aside className="right-panel">
           <div className="right-panel-tabs">
-            <button
-              className={rightPanelTab === 'workspace' ? 'right-tab active' : 'right-tab'}
+            <TabButton
+              active={rightPanelTab === 'workspace'}
               onClick={() => setRightPanelTab('workspace')}
-              type="button"
             >
-              Workspace
-            </button>
-            <button
-              className={rightPanelTab === 'subagents' ? 'right-tab active' : 'right-tab'}
+              工作区
+            </TabButton>
+            <TabButton
+              active={rightPanelTab === 'subagents'}
               onClick={() => setRightPanelTab('subagents')}
-              type="button"
             >
-              Subagents
-            </button>
-            <button
-              className={rightPanelTab === 'activity' ? 'right-tab active' : 'right-tab'}
+              子代理
+            </TabButton>
+            <TabButton
+              active={rightPanelTab === 'activity'}
               data-testid="right-tab-activity"
               onClick={() => setRightPanelTab('activity')}
-              type="button"
             >
-              Activity
-            </button>
-            <button
-              className={rightPanelTab === 'memory' ? 'right-tab active' : 'right-tab'}
+              活动
+            </TabButton>
+            <TabButton
+              active={rightPanelTab === 'memory'}
               data-testid="right-tab-memory"
               onClick={() => setRightPanelTab('memory')}
-              type="button"
             >
-              Memory
-            </button>
+              记忆
+            </TabButton>
           </div>
           {rightPanelTab === 'workspace' ? (
             <WorkspacePanel apiJson={apiJson} workspace={workspace} />
@@ -876,7 +876,7 @@ export function App() {
       {lastError ? <div className="toast">{lastError}</div> : null}
       <StatusBar
         rootSeq={rootSeq}
-        runtimeStatus={running ? `running (${runSettings.runtimeMode})` : `${runSettings.runtimeMode} standby`}
+        runtimeStatus={running ? `运行中（${displayRuntimeMode(runSettings.runtimeMode)}）` : `${displayRuntimeMode(runSettings.runtimeMode)} 待命`}
         status={status}
       />
     </div>

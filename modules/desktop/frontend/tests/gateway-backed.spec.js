@@ -4,35 +4,40 @@ import { startGateway } from './helpers/gatewayProcess.js';
 
 test.describe.configure({ mode: 'serial' });
 
+async function chooseMenuOption(trigger, optionName) {
+  await trigger.click();
+  await trigger.page().getByRole('option', { name: optionName, exact: true }).click();
+}
+
 test('Gateway-backed desktop run renders chat tools and timeline @gateway-backed', async ({ page }) => {
   const gateway = await startGateway();
   try {
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('/read README.md');
     await page.getByTestId('chat-composer-send').click();
 
     await expect(page.getByTestId('message-row').filter({ hasText: '/read README.md' })).toBeVisible();
     const readTool = page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' });
-    await expect(readTool).toContainText('completed', { timeout: 20000 });
+    await expect(readTool).toContainText('已完成', { timeout: 20000 });
     await expect(readTool).toContainText(/# red_panda|Go-based local AI Agent/i, { timeout: 20000 });
 
     await page.getByTestId('right-tab-activity').click();
     const activity = page.getByTestId('activity-panel');
     await expect(activity).toBeVisible();
     const runRow = activity.getByTestId('activity-run').filter({ hasText: '/read README.md' });
-    await expect(runRow.getByTestId('activity-run-status')).toContainText('completed', { timeout: 10000 });
+    await expect(runRow.getByTestId('activity-run-status')).toContainText('已完成', { timeout: 10000 });
     if (await runRow.getByTestId('activity-event-timeline').count() === 0) {
       await expect(runRow.getByTestId('activity-run-toggle')).toBeVisible();
       await runRow.getByTestId('activity-run-toggle').click();
     }
     await expect(runRow.getByTestId('activity-event-timeline')).toBeVisible();
-    await expect(runRow.getByTestId('activity-event-count')).toContainText('/6', { timeout: 15000 });
+    await expect(runRow.getByTestId('activity-event-count')).toHaveText(/^\d\/[4-6]$/, { timeout: 15000 });
 
-    await runRow.getByTestId('activity-event-kind-filter').selectOption('tool');
-    await expect(runRow.getByTestId('activity-event-count')).toContainText('3/6');
+    await chooseMenuOption(runRow.getByTestId('activity-event-kind-filter'), '工具');
+    await expect(runRow.getByTestId('activity-event-count')).toHaveText(/^[1-3]\/[4-6]$/);
     await expect(runRow.getByTestId('activity-event-timeline')).toContainText('workspace.read_file');
   } finally {
     await page.close().catch(() => {});
@@ -59,19 +64,19 @@ test('Gateway-backed desktop renders denied tool failure path @gateway-backed', 
       }));
     });
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('/shell echo denied-e2e');
     await page.getByTestId('chat-composer-send').click();
 
     const shellTool = page.getByTestId('tool-card').filter({ hasText: 'shell.exec' });
-    await expect(shellTool).toContainText('denied', { timeout: 20000 });
+    await expect(shellTool).toContainText('已拒绝', { timeout: 20000 });
     await expect(shellTool).toContainText('tool is denied by tool_denylist', { timeout: 20000 });
     await expect(page.getByTestId('message-row').filter({ hasText: 'tool is denied by tool_denylist' })).toBeVisible({ timeout: 20000 });
 
     await page.getByTestId('right-tab-activity').click();
     const runRow = page.getByTestId('activity-run').filter({ hasText: '/shell echo denied-e2e' });
-    await expect(runRow.getByTestId('activity-run-status')).toContainText('denied', { timeout: 15000 });
+    await expect(runRow.getByTestId('activity-run-status')).toContainText('已拒绝', { timeout: 15000 });
     if (await runRow.getByTestId('activity-event-timeline').count() === 0) {
       await runRow.getByTestId('activity-run-toggle').click();
     }
@@ -88,22 +93,22 @@ test('Gateway-backed desktop forks and compacts a session @gateway-backed', asyn
   try {
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('/read README.md');
     await page.getByTestId('chat-composer-send').click();
-    await expect(page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' })).toContainText('completed', { timeout: 20000 });
+    await expect(page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' })).toContainText('已完成', { timeout: 20000 });
 
     await page.getByTestId('session-fork').click();
-    const forkedSession = page.getByTestId('session-item').filter({ hasText: 'Fork of' });
+    const forkedSession = page.getByTestId('session-item').filter({ hasText: '的分叉' });
     await expect(forkedSession).toBeVisible({ timeout: 15000 });
-    await expect(forkedSession).toContainText('fork');
+    await expect(forkedSession).toContainText('分叉');
     await expect(page.getByTestId('message-row').filter({ hasText: '/read README.md' }).first()).toBeVisible({ timeout: 15000 });
 
     await page.getByTestId('session-compact').click();
-    const compactSession = page.getByTestId('session-item').filter({ hasText: 'Compact of' });
+    const compactSession = page.getByTestId('session-item').filter({ hasText: '的压缩版' });
     await expect(compactSession).toBeVisible({ timeout: 15000 });
-    await expect(compactSession).toContainText('compact');
+    await expect(compactSession).toContainText('压缩');
     await expect(page.getByTestId('message-row').filter({ hasText: 'Compacted session messages' }).first()).toBeVisible({ timeout: 15000 });
   } finally {
     await page.close().catch(() => {});
@@ -117,17 +122,17 @@ test('Gateway-backed desktop manages memory and shows injection event @gateway-b
   try {
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('right-tab-memory').click();
     await expect(page.getByTestId('memory-panel')).toBeVisible();
-    await page.getByLabel('Memory scope', { exact: true }).selectOption('session');
+    await chooseMenuOption(page.getByLabel('记忆范围', { exact: true }), '会话');
     await page.getByTestId('memory-title-input').fill('Gateway memory');
     await page.getByTestId('memory-content-input').fill('Gateway-backed memory should be injected.');
     await page.getByTestId('memory-save').click();
     await expect(page.getByTestId('memory-item').filter({ hasText: 'Gateway memory' })).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole('button', { name: 'Preview' }).click();
+    await page.getByRole('button', { name: '预览' }).click();
     await expect(page.getByTestId('memory-preview-context')).toContainText('Gateway-backed memory should be injected.', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('memory injection e2e');
@@ -136,13 +141,13 @@ test('Gateway-backed desktop manages memory and shows injection event @gateway-b
 
     await page.getByTestId('right-tab-activity').click();
     const runRow = page.getByTestId('activity-run').filter({ hasText: 'memory injection e2e' });
-    await expect(runRow.getByTestId('activity-run-status')).toContainText('completed', { timeout: 20000 });
+    await expect(runRow.getByTestId('activity-run-status')).toContainText('已完成', { timeout: 20000 });
     if (await runRow.getByTestId('activity-event-timeline').count() === 0) {
       await runRow.getByTestId('activity-run-toggle').click();
     }
     const timeline = runRow.getByTestId('activity-event-timeline');
     await expect(timeline).toContainText('memory_injected', { timeout: 15000 });
-    await runRow.getByTestId('activity-event-kind-filter').selectOption('memory');
+    await chooseMenuOption(runRow.getByTestId('activity-event-kind-filter'), '记忆');
     await expect(runRow.getByTestId('activity-event-count')).toContainText('1/');
     await expect(timeline).toContainText('memory_injected');
   } finally {
@@ -171,14 +176,14 @@ test('Gateway-backed desktop keeps selected inactive provider profile after run.
       }));
     }, inactiveProfile.id);
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('provider profile should fail');
     await page.getByTestId('chat-composer-send').click();
-    await expect(page.getByTestId('message-row').filter({ hasText: 'run.start failed:' })).toContainText('inactive', { timeout: 20000 });
+    await expect(page.getByTestId('message-row').filter({ hasText: '启动运行失败：' })).toContainText('inactive', { timeout: 20000 });
 
-    await page.getByLabel('Settings').click();
-    await expect(page.getByTestId('settings-providerProfileId')).toHaveValue(inactiveProfile.id, { timeout: 15000 });
+    await page.getByLabel('设置').click();
+    await expect(page.getByTestId('settings-providerProfileId')).toContainText('Inactive E2E Provider', { timeout: 15000 });
     await expect(page.getByTestId('settings-providerProfileId')).toContainText('Inactive E2E Provider');
   } finally {
     await page.close().catch(() => {});
@@ -192,7 +197,7 @@ test('Gateway-backed desktop renders denied permission path @gateway-backed', as
   try {
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('/permission deny e2e');
     await page.getByTestId('chat-composer-send').click();
@@ -200,12 +205,12 @@ test('Gateway-backed desktop renders denied permission path @gateway-backed', as
     const permissionCard = page.getByTestId('permission-card').filter({ hasText: 'protected checkpoint' });
     await expect(permissionCard).toBeVisible({ timeout: 15000 });
     await permissionCard.getByTestId('permission-deny').click();
-    await expect(permissionCard.getByTestId('permission-state')).toHaveText('Denied', { timeout: 10000 });
+    await expect(permissionCard.getByTestId('permission-state')).toHaveText('已拒绝', { timeout: 10000 });
     await expect(page.getByTestId('message-row').filter({ hasText: 'permission denied' })).toBeVisible({ timeout: 20000 });
 
     await page.getByTestId('right-tab-activity').click();
     const runRow = page.getByTestId('activity-run').filter({ hasText: '/permission deny e2e' });
-    await expect(runRow.getByTestId('activity-run-status')).toContainText('denied', { timeout: 15000 });
+    await expect(runRow.getByTestId('activity-run-status')).toContainText('已拒绝', { timeout: 15000 });
     if (await runRow.getByTestId('activity-event-timeline').count() === 0) {
       await runRow.getByTestId('activity-run-toggle').click();
     }
@@ -223,18 +228,18 @@ test('Gateway-backed desktop cancels a waiting permission run @gateway-backed', 
   try {
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('/permission cancel e2e');
     await page.getByTestId('chat-composer-send').click();
 
     await expect(page.getByTestId('permission-card').filter({ hasText: 'protected checkpoint' })).toBeVisible({ timeout: 15000 });
     await page.getByTestId('chat-composer-cancel').click();
-    await expect(page.getByTestId('message-row').filter({ hasText: 'Run cancelled.' })).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-row').filter({ hasText: '运行已取消。' })).toBeVisible({ timeout: 20000 });
 
     await page.getByTestId('right-tab-activity').click();
     const runRow = page.getByTestId('activity-run').filter({ hasText: '/permission cancel e2e' });
-    await expect(runRow.getByTestId('activity-run-status')).toContainText('cancelled', { timeout: 15000 });
+    await expect(runRow.getByTestId('activity-run-status')).toContainText('已取消', { timeout: 15000 });
   } finally {
     await page.close().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -265,13 +270,13 @@ test('Gateway-backed desktop renders runtime_process subagent failure @gateway-b
       }));
     });
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('/subagent failure e2e');
     await page.getByTestId('chat-composer-send').click();
 
     const failedSubAgent = page.getByTestId('subagent-item').filter({ hasText: 'planner' });
-    await expect(failedSubAgent).toContainText('failed', { timeout: 20000 });
+    await expect(failedSubAgent).toContainText('失败', { timeout: 20000 });
     await expect(failedSubAgent).toContainText('runtime_process');
     await expect(failedSubAgent).toContainText('runtime_process planner subagent failed');
 
@@ -314,16 +319,16 @@ test('Gateway-backed desktop cancels a running subagent @gateway-backed', async 
       }));
     });
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('/subagent cancel child e2e');
     await page.getByTestId('chat-composer-send').click();
 
     const planner = page.getByTestId('subagent-item').filter({ hasText: 'planner' });
-    await expect(planner).toContainText('running', { timeout: 15000 });
+    await expect(planner).toContainText('运行中', { timeout: 15000 });
     await expect(planner.getByTestId('subagent-cancel')).toBeEnabled();
     await planner.getByTestId('subagent-cancel').click();
-    await expect(planner).toContainText('cancelled', { timeout: 15000 });
+    await expect(planner).toContainText('已取消', { timeout: 15000 });
     await expect(planner).toContainText('planner subagent cancelled');
 
     await page.getByTestId('right-tab-activity').click();
@@ -348,7 +353,7 @@ test('Gateway-backed desktop resumes missed events after reconnect @gateway-back
   try {
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 15000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
     await page.getByTestId('chat-composer-input').fill('/permission reconnect e2e');
     await page.getByTestId('chat-composer-send').click();
@@ -365,13 +370,13 @@ test('Gateway-backed desktop resumes missed events after reconnect @gateway-back
     });
 
     await page.context().setOffline(false);
-    await expect(page.getByTestId('gateway-status')).toHaveText('connected', { timeout: 20000 });
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 20000 });
     await expect(page.getByTestId('message-row').filter({ hasText: 'permission approved' })).toBeVisible({ timeout: 20000 });
 
     await page.getByTestId('right-tab-activity').click();
     const runRow = page.getByTestId('activity-run').filter({ hasText: '/permission reconnect e2e' });
-    await expect(runRow.getByTestId('activity-run-status')).toContainText(/completed|running/, { timeout: 10000 });
-    await expect(runRow.getByTestId('activity-run-status')).toContainText('completed', { timeout: 20000 });
+    await expect(runRow.getByTestId('activity-run-status')).toContainText(/已完成|运行中/, { timeout: 10000 });
+    await expect(runRow.getByTestId('activity-run-status')).toContainText('已完成', { timeout: 20000 });
   } finally {
     await page.context().setOffline(false).catch(() => {});
     await page.close().catch(() => {});

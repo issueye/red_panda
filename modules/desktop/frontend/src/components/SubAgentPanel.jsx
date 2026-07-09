@@ -1,16 +1,14 @@
 import { Bot, CircleStop } from 'lucide-react';
+import { displaySubAgentBackend } from '../lib/displayLabels.js';
 import { formatSeq } from '../lib/format.js';
+import { displayStatus } from './ui/badge.jsx';
 import { IconButton } from './ui/button.jsx';
+import { PanelHeader } from './ui/panel.jsx';
 
 export function SubAgentPanel({ agents, onCancelSubAgent }) {
   return (
     <section className="subagent-panel-content">
-      <div className="panel-header">
-        <div>
-          <strong>Subagents</strong>
-          <span>Shared root run event channel</span>
-        </div>
-      </div>
+      <PanelHeader title="子代理" />
       <div className="subagent-list">
         {agents.map((agent) => {
           const isSubAgent = agent.role === 'subagent';
@@ -20,21 +18,21 @@ export function SubAgentPanel({ agents, onCancelSubAgent }) {
               <Bot size={16} />
               <div>
                 <strong>{agent.name}</strong>
-                <span>{agent.status} - seq {formatSeq(agent.seq)}</span>
-                {agent.backend ? <em>{agent.backend}</em> : null}
+                <span>{displayStatus(agent.status)} - seq {formatSeq(agent.seq)}</span>
+                {agent.backend ? <em>{displaySubAgentBackend(agent.backend)}</em> : null}
                 {agent.summary ? <small>{agent.summary}</small> : null}
               </div>
               {isSubAgent ? (
                 <IconButton
                   data-testid="subagent-cancel"
                   disabled={!canCancel}
-                  label={canCancel ? 'Cancel subagent' : 'Subagent cannot be cancelled'}
+                  label={canCancel ? '取消子代理' : '当前子代理不可取消'}
                   onClick={() => onCancelSubAgent?.(agent)}
                 >
                   <CircleStop size={15} />
                 </IconButton>
               ) : (
-                <span className="subagent-root-marker">Root</span>
+                <span className="subagent-root-marker">根</span>
               )}
             </article>
           );

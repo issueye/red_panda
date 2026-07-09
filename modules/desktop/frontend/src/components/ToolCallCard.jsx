@@ -1,4 +1,6 @@
 import { CheckCircle2, Loader2, Wrench, XCircle } from 'lucide-react';
+import { displayRisk } from '../lib/displayLabels.js';
+import { StatusBadge } from './ui/badge.jsx';
 
 function statusIcon(status) {
   if (status === 'completed') return <CheckCircle2 size={15} />;
@@ -14,12 +16,14 @@ export function ToolCallCard({ item }) {
         <Wrench size={16} />
         <div>
           <strong>{item.displayName || item.name}</strong>
-          <span>{item.name} - {item.risk || 'low'} risk</span>
+          <span>{item.name} - {displayRisk(item.risk || 'low')}风险</span>
         </div>
-        <div className="tool-status" data-testid="tool-status">
-          {statusIcon(item.status)}
-          <span>{item.status || 'running'}</span>
-        </div>
+        <StatusBadge
+          className="tool-status"
+          data-testid="tool-status"
+          icon={statusIcon(item.status)}
+          status={item.status || 'running'}
+        />
       </div>
       {args ? <pre className="tool-args">{args}</pre> : null}
       {item.output ? <pre className="tool-output">{item.output}</pre> : null}

@@ -2,55 +2,53 @@ import { RefreshCw, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { emptyProfileDraft, profileDraftFrom } from '../lib/providerProfiles.js';
 import { Button, IconButton } from './ui/button.jsx';
+import { ErrorMessage } from './ui/feedback.jsx';
+import { Field } from './ui/field.jsx';
+import { SelectMenu } from './ui/select.jsx';
 
 const RUNTIME_MODES = [
-  ['single_core', 'Single core'],
-  ['per_run_process', 'Per-run process'],
+  ['single_core', '单核心'],
+  ['per_run_process', '每次运行独立进程'],
 ];
 
 const TOOL_POLICIES = [
-  ['risk_based', 'Risk based'],
-  ['allow_all', 'Allow all'],
-  ['ask_all', 'Ask all'],
-  ['deny_all', 'Deny all'],
+  ['risk_based', '按风险处理'],
+  ['allow_all', '全部允许'],
+  ['ask_all', '全部询问'],
+  ['deny_all', '全部拒绝'],
 ];
 
 const PERMISSION_MODES = [
-  ['strict', 'Strict'],
-  ['permissive', 'Permissive'],
-  ['allow_all', 'Allow all'],
-  ['deny_all', 'Deny all'],
+  ['strict', '严格'],
+  ['permissive', '宽松'],
+  ['allow_all', '全部允许'],
+  ['deny_all', '全部拒绝'],
 ];
 
 const SUB_AGENT_BACKENDS = [
-  ['in_process', 'In process'],
-  ['runtime_process', 'Runtime process'],
-  ['process_pool', 'Process pool'],
+  ['in_process', '进程内'],
+  ['runtime_process', '运行时进程'],
+  ['process_pool', '进程池'],
 ];
 
 function SettingRow({ children, label }) {
   return (
-    <label className="settings-row">
-      <span>{label}</span>
+    <Field className="settings-row" label={label}>
       {children}
-    </label>
+    </Field>
   );
 }
 
 function SettingSelect({ label, options, settings, settingKey, onUpdate }) {
   return (
     <SettingRow label={label}>
-      <select
-        data-testid={`settings-${settingKey}`}
+      <SelectMenu
+        ariaLabel={label}
+        testId={`settings-${settingKey}`}
+        options={options}
         value={settings?.[settingKey] ?? options[0]?.[0] ?? ''}
-        onChange={(event) => onUpdate(settingKey, event.target.value)}
-      >
-        {options.map(([value, text]) => (
-          <option key={value} value={value}>
-            {text}
-          </option>
-        ))}
-      </select>
+        onChange={(nextValue) => onUpdate(settingKey, nextValue)}
+      />
     </SettingRow>
   );
 }
@@ -107,10 +105,10 @@ export function SettingsPanel({
     setProfileDraft((current) => ({ ...current, [key]: value }));
   };
   const providerProfileOptions = [
-    ['', 'Environment / echo fallback'],
+    ['', '环境变量 / echo 回退'],
     ...providerProfiles.map((item) => [
       item.id,
-      `${item.name}${item.isDefault ? ' (default)' : ''}`,
+      `${item.name}${item.isDefault ? '（默认）' : ''}`,
     ]),
   ];
 
@@ -153,20 +151,19 @@ export function SettingsPanel({
 
   return (
     <div className="settings-overlay" role="presentation">
-      <aside className="settings-panel" aria-label="Settings" role="dialog" aria-modal="true">
+      <aside className="settings-panel" aria-label="设置" role="dialog" aria-modal="true">
         <header className="settings-header">
           <div>
-            <strong>Settings</strong>
-            <span>Runtime and tool controls</span>
+            <strong>设置</strong>
           </div>
-          <IconButton label="Close settings" onClick={onClose}>
+          <IconButton label="关闭设置" onClick={onClose}>
             <X size={17} />
           </IconButton>
         </header>
 
         <div className="settings-content">
           <SettingSelect
-            label="Provider profile"
+            label="模型服务配置"
             options={providerProfileOptions}
             settings={settings}
             settingKey="providerProfileId"
@@ -178,53 +175,49 @@ export function SettingsPanel({
           />
           <div className="settings-profile-panel">
             <div className="settings-profile-head">
-              <strong>Provider profiles</strong>
+              <strong>模型服务配置</strong>
               <IconButton
                 disabled={providerProfilesLoading || profileSaving}
-                label="Refresh provider profiles"
+                label="刷新模型服务配置"
                 onClick={onRefreshProviderProfiles}
               >
                 <RefreshCw size={15} />
               </IconButton>
             </div>
-            {providerProfilesError ? <p className="settings-error">{providerProfilesError}</p> : null}
-            {profileError ? <p className="settings-error">{profileError}</p> : null}
-            <label className="settings-row">
-              <span>Name</span>
+            <ErrorMessage className="settings-error">{providerProfilesError}</ErrorMessage>
+            <ErrorMessage className="settings-error">{profileError}</ErrorMessage>
+            <Field className="settings-row" label="名称">
               <input
                 onChange={(event) => updateProfileDraft('name', event.target.value)}
-                placeholder="Work OpenAI"
+                placeholder="工作 OpenAI"
                 type="text"
                 value={profileDraft.name}
               />
-            </label>
-            <label className="settings-row">
-              <span>Base URL</span>
+            </Field>
+            <Field className="settings-row" label="基础 URL">
               <input
                 onChange={(event) => updateProfileDraft('baseUrl', event.target.value)}
                 placeholder="https://api.openai.com"
                 type="text"
                 value={profileDraft.baseUrl}
               />
-            </label>
-            <label className="settings-row">
-              <span>Profile model</span>
+            </Field>
+            <Field className="settings-row" label="配置模型">
               <input
                 onChange={(event) => updateProfileDraft('model', event.target.value)}
                 placeholder="gpt-4.1-mini"
                 type="text"
                 value={profileDraft.model}
               />
-            </label>
-            <label className="settings-row">
-              <span>API key</span>
+            </Field>
+            <Field className="settings-row" label="API 密钥">
               <input
                 onChange={(event) => updateProfileDraft('apiKey', event.target.value)}
-                placeholder={selectedProfile?.apiKeySet ? selectedProfile.apiKeyMasked || 'Saved key' : 'Optional'}
+                placeholder={selectedProfile?.apiKeySet ? selectedProfile.apiKeyMasked || '已保存密钥' : '可选'}
                 type="password"
                 value={profileDraft.apiKey}
               />
-            </label>
+            </Field>
             <div className="settings-profile-flags">
               <label className="settings-check">
                 <input
@@ -232,7 +225,7 @@ export function SettingsPanel({
                   onChange={(event) => updateProfileDraft('isDefault', event.target.checked)}
                   type="checkbox"
                 />
-                <span>Default</span>
+                <span>默认</span>
               </label>
               <label className="settings-check">
                 <input
@@ -240,7 +233,7 @@ export function SettingsPanel({
                   onChange={(event) => updateProfileDraft('active', event.target.checked)}
                   type="checkbox"
                 />
-                <span>Active</span>
+                <span>启用</span>
               </label>
             </div>
             <div className="settings-profile-actions">
@@ -248,14 +241,14 @@ export function SettingsPanel({
                 updateSetting('providerProfileId', '');
                 setProfileDraft(emptyProfileDraft);
               }} variant="ghost">
-                New
+                新建
               </Button>
               <Button disabled={profileSaving || !profileDraft.baseUrl} onClick={saveProviderProfile} variant="soft">
-                {settings.providerProfileId ? 'Save' : 'Create'}
+                {settings.providerProfileId ? '保存' : '创建'}
               </Button>
               <IconButton
                 disabled={profileSaving || !settings.providerProfileId}
-                label="Delete provider profile"
+                label="删除模型服务配置"
                 onClick={deleteSelectedProfile}
               >
                 <Trash2 size={15} />
@@ -264,21 +257,21 @@ export function SettingsPanel({
           </div>
 
           <SettingSelect
-            label="Runtime mode"
+            label="运行模式"
             options={RUNTIME_MODES}
             settings={settings}
             settingKey="runtimeMode"
             onUpdate={updateSetting}
           />
           <SettingSelect
-            label="Tool policy"
+            label="工具策略"
             options={TOOL_POLICIES}
             settings={settings}
             settingKey="toolPolicy"
             onUpdate={updateSetting}
           />
           <SettingSelect
-            label="Permission mode"
+            label="授权模式"
             options={PERMISSION_MODES}
             settings={settings}
             settingKey="permissionMode"
@@ -291,32 +284,32 @@ export function SettingsPanel({
               checked={Boolean(settings?.spawnSubAgents)}
               onChange={(event) => updateSetting('spawnSubAgents', event.target.checked)}
             />
-            <span>Spawn sub-agents</span>
+            <span>启用子代理</span>
           </label>
 
           <SettingSelect
-            label="Sub-agent backend"
+            label="子代理后端"
             options={SUB_AGENT_BACKENDS}
             settings={settings}
             settingKey="subAgentBackend"
             onUpdate={updateSetting}
           />
           <SettingTextInput
-            label="Model"
-            placeholder="Optional"
+            label="模型"
+            placeholder="可选"
             settings={settings}
             settingKey="model"
             onUpdate={updateSetting}
           />
           <SettingTextInput
-            label="Tool allowlist"
+            label="工具允许列表"
             placeholder="workspace.read_file, workspace.list"
             settings={settings}
             settingKey="toolAllowlist"
             onUpdate={updateSetting}
           />
           <SettingTextInput
-            label="Tool denylist"
+            label="工具拒绝列表"
             placeholder="shell.exec, workspace.write_file"
             settings={settings}
             settingKey="toolDenylist"
@@ -326,7 +319,7 @@ export function SettingsPanel({
 
         <footer className="settings-footer">
           <Button onClick={onClose} variant="soft">
-            Close
+            关闭
           </Button>
         </footer>
       </aside>

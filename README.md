@@ -45,6 +45,12 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 - [v0.1.1 Development Plan](docs/18-v0.1.1-development-plan.md)
 - [MCP stdio Tools Design](docs/19-mcp-stdio-tools-design.md)
 - [v0.1.1 Release Notes](docs/20-v0.1.1-release-notes.md)
+- [UI Normalization](docs/21-ui-normalization.md)
+- [v0.1.2 Development Plan](docs/22-v0.1.2-development-plan.md)
+- [v0.1.2 Release Notes](docs/23-v0.1.2-release-notes.md)
+- [v0.1.3 Development Plan](docs/24-v0.1.3-development-plan.md)
+- [v0.1.4 Development Plan](docs/25-v0.1.4-development-plan.md)
+- [v0.1.5 Development Plan](docs/26-v0.1.5-development-plan.md)
 
 ## Current Running Loop
 
@@ -90,6 +96,8 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 - Runtime memory injection: Gateway resolves active project/session memory before `agent.reply`, passes structured memory context to Runtime, Runtime emits `memory_injected`, and OpenAI-compatible provider requests include memory as a separate system message before the current user message.
 - Runtime memory tools: `memory.list`, `memory.create`, `memory.update`, and `memory.delete` are exposed to the provider/tool loop. Runtime keeps tool policy, permission, and tool events; Gateway executes persistence through internal `memory.tool.execute` stdio JSON-RPC and validates session/workspace scope.
 - Desktop Memory UI: the right panel includes a Memory tab for listing project/session records, creating and editing memory, disabling/deleting records, previewing injected context, and seeing `memory_injected` in Activity.
+- Desktop UI normalization: shared primitives now cover buttons, icon buttons, status badges, panel headers, tabs, fields, empty/error feedback, and custom dropdown menus. Native Desktop `<select>` controls are not used.
+- Desktop clarity pass: main panels use concise titles, explanatory subtitles are reduced, visible status/risk/memory/event labels are normalized to Chinese, and Gateway-backed timeline assertions tolerate valid event projection count variance.
 - Runtime per-run provider override: Agent Runtime can use the provider, model, base URL, and key supplied by Gateway for a single OpenAI-compatible chat completion run while retaining environment-variable provider fallback.
 - Desktop SubAgentPanel: shows subagent `root_run_id`, backend, and status, and exposes cancel for running subagents through WebSocket `subagent.cancel`.
 - OpenAI-compatible provider streaming: when `RED_PANDA_PROVIDER_STREAM=true`, provider requests to `/v1/chat/completions` use `stream=true`, parse `text/event-stream` data chunks, forward content deltas through the existing `message_delta` WebSocket flow, and accumulate streaming `tool_calls` before entering the existing tool-call loop. Desktop and Gateway still use WebSocket and do not use SSE.
@@ -217,5 +225,6 @@ Desktop SettingsPanel manages these profiles through the Gateway APIs. It lists 
 
 ## Next Focus
 
-- Follow [v0.1.1 Development Plan](docs/18-v0.1.1-development-plan.md): stabilize the v0.1.0 baseline and use [MCP stdio Tools Design](docs/19-mcp-stdio-tools-design.md) as the implementation gate for future MCP work.
-- MCP stdio implementation remains gated behind a scoped design document.
+- Follow [v0.1.2 Development Plan](docs/22-v0.1.2-development-plan.md): implement MCP-1 only, covering protocol/config DTOs and Gateway config CRUD.
+- Use [v0.1.3 Development Plan](docs/24-v0.1.3-development-plan.md), [v0.1.4 Development Plan](docs/25-v0.1.4-development-plan.md), and [v0.1.5 Development Plan](docs/26-v0.1.5-development-plan.md) as the next ordered slices after the MCP config baseline.
+- MCP stdio Runtime process execution remains blocked until the v0.1.2 config slice and later read-only discovery gates explicitly allow it.

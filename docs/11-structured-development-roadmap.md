@@ -15,7 +15,15 @@ For the current short-cycle execution board, use `docs/12-current-execution-plan
 
 For the v0.1.0 release boundary, use `docs/16-v0.1.0-release-plan.md`. That document records the completed release gate.
 
-For the v0.1.1 planning slice, use `docs/18-v0.1.1-development-plan.md`. v0.1.1 is a stabilization/design release centered on MCP stdio tools design, not MCP implementation.
+For the v0.1.1 planning slice, use `docs/18-v0.1.1-development-plan.md`. v0.1.1 is a stabilization/design release centered on Desktop UI normalization and MCP stdio tools design, not MCP implementation.
+
+For the v0.1.2 implementation slice, use `docs/22-v0.1.2-development-plan.md`. v0.1.2 is MCP-1 only: protocol/config DTOs and Gateway config CRUD.
+
+For the next planned slices, use:
+
+- `docs/24-v0.1.3-development-plan.md`: Desktop clarity and localization stabilization.
+- `docs/25-v0.1.4-development-plan.md`: Desktop MCP configuration UI after Gateway config CRUD exists.
+- `docs/26-v0.1.5-development-plan.md`: MCP read-only startup/discovery before tool execution.
 
 ## 1. Current System State
 
@@ -23,11 +31,11 @@ For the v0.1.1 planning slice, use `docs/18-v0.1.1-development-plan.md`. v0.1.1 
 
 | Area | Current state | Evidence | Main remaining risk |
 | --- | --- | --- | --- |
-| Protocol | JSON-RPC, WebSocket envelopes, run lifecycle, permissions, tools, subagents, replay, and resume are implemented. | `modules/protocol`, `scripts/protocol-compat.ps1` | External-client compatibility is still broader than current script coverage. |
+| Protocol | JSON-RPC, WebSocket envelopes, run lifecycle, permissions, tools, subagents, replay, and resume are implemented. | `modules/protocol`, `scripts/protocol-compat.ps1` | MCP config DTOs are next. |
 | Agent Runtime | Provider abstraction, tool loop, permission gating, cancellation, in-process subagent, `runtime_process`, `process_pool`, memory context injection, and Gateway-mediated `memory.*` tools are implemented. | `modules/agent/internal/runtime`, runtime unit tests | MCP capability is not started. |
 | Gateway | Gin/GORM/SQLite MVC, Runtime subprocess client, persistence, projections, provider profiles, and WebSocket routing are implemented. | `modules/gateway`, repository/service tests | Long-running process supervision and external access hardening remain shallow. |
-| Desktop | Wails v3 + React UI with chat, tools, permissions, subagents, settings, workspace, activity timeline, restore, reconnect/resume, and Memory panel. | `modules/desktop/frontend`, Playwright tests | MCP and optional memory tools are not started. |
-| Persistence | Sessions, messages, run events, run records, tools, permissions, provider profiles, session lineage, compactions, and memory records are persisted. | Gateway repositories and APIs | MCP configuration persistence is not started. |
+| Desktop | Wails v3 + React UI with chat, tools, permissions, subagents, settings, workspace, activity timeline, restore, reconnect/resume, Memory panel, and shared UI primitives including custom dropdowns. | `modules/desktop/frontend`, Playwright tests | MCP UI is not started. |
+| Persistence | Sessions, messages, run events, run records, tools, permissions, provider profiles, session lineage, compactions, and memory records are persisted. | Gateway repositories and APIs | MCP configuration persistence is the v0.1.2 target. |
 | Verification | Unit tests, Playwright fixtures, Gateway-backed E2E, protocol compatibility, Wails build. | `npm test`, `npm run test:ui`, `go test`, scripts | Full smoke is slower; test matrix needs tiers to avoid wasting time. |
 
 ## 2. Development Priority Rules
@@ -157,11 +165,12 @@ Goal: support external MCP-style stdio tools without compromising the existing R
 Work items, in order:
 
 1. Define MCP tool process model separately from Agent Runtime process model. Status: complete in `docs/19-mcp-stdio-tools-design.md`.
-2. Add tool registry and capability discovery.
-3. Add permission and risk mapping.
-4. Add execution, timeout, and process cleanup.
-5. Add Desktop tool audit display.
-6. Add protocol and E2E tests.
+2. Add MCP config DTOs and Gateway config CRUD. Status: designated for v0.1.2.
+3. Add tool registry and capability discovery.
+4. Add permission and risk mapping.
+5. Add execution, timeout, and process cleanup.
+6. Add Desktop tool audit display.
+7. Add protocol and E2E tests.
 
 Guardrails:
 
@@ -236,10 +245,15 @@ Next work should be picked from this queue, top first:
 7. Desktop Memory UI. Status: complete.
 8. Optional `memory.*` Runtime tools. Status: complete.
 9. MCP stdio tools design. Status: complete for v0.1.1.
+10. Desktop UI normalization. Status: complete for v0.1.1.
+11. MCP config DTOs and Gateway config CRUD. Status: designated for v0.1.2.
+12. Desktop clarity and localization stabilization. Status: implemented for v0.1.3.
+13. Desktop MCP config UI. Status: planned for v0.1.4 after v0.1.2 backend.
+14. MCP read-only discovery. Status: planned for v0.1.5.
 
 Do not start MCP implementation before items 1-6 are complete or explicitly deferred in this document.
 
-For v0.1.1, item 9 is complete. MCP implementation remains blocked until a new implementation slice is explicitly opened.
+For v0.1.2, item 11 is the active backend slice. Runtime MCP process execution remains blocked until v0.1.2 is complete and verified. v0.1.3 may ship Desktop clarity work without changing MCP backend behavior.
 
 The active owner/work-lane split and stop rules for this queue are tracked in `docs/12-current-execution-plan.md`.
 

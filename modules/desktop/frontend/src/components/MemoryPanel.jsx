@@ -1,6 +1,11 @@
 import { Database, Eye, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  displayConfidence,
+  displayMemoryKind,
+  displayMemoryScope,
+} from '../lib/displayLabels.js';
+import {
   emptyMemoryDraft,
   memoryCreatePayload,
   memoryDraftFrom,
@@ -9,17 +14,17 @@ import {
   memoryUpdatePayload,
   normalizeMemoryRecord,
 } from '../lib/memory.js';
+import { StatusBadge } from './ui/badge.jsx';
 import { Button, IconButton } from './ui/button.jsx';
-
-const scopeOptions = ['all', 'project', 'session'];
-const statusOptions = ['active', 'disabled', 'deleted', 'all'];
-const kindOptions = ['fact', 'preference', 'decision', 'task', 'summary', 'warning'];
-const confidenceOptions = ['low', 'medium', 'high'];
+import { ErrorMessage, InlineEmpty } from './ui/feedback.jsx';
+import { Field } from './ui/field.jsx';
+import { PanelHeader } from './ui/panel.jsx';
+import { SelectMenu } from './ui/select.jsx';
 
 function compactTime(value) {
-  if (!value) return 'not recorded';
+  if (!value) return '未记录';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'not recorded';
+  if (Number.isNaN(date.getTime())) return '未记录';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
@@ -178,35 +183,43 @@ export function MemoryPanel({ apiJson, currentSessionId, workspaceRoot }) {
 
   return (
     <section className="memory-panel-content" data-testid="memory-panel">
-      <div className="panel-header">
-        <div>
-          <strong>Memory</strong>
-          <span>{workspaceRoot || currentSessionId || 'No session'}</span>
-        </div>
-        <IconButton label="Refresh memory" onClick={loadMemory}>
-          <RefreshCw size={14} />
-        </IconButton>
-      </div>
+      <PanelHeader
+        action={(
+          <IconButton label="刷新记忆" onClick={loadMemory}>
+            <RefreshCw size={14} />
+          </IconButton>
+        )}
+        title="记忆"
+      />
 
       <div className="memory-toolbar">
-        <select
-          aria-label="Memory scope filter"
-          onChange={(event) => setScopeFilter(event.target.value)}
+        <SelectMenu
+          aria-label="记忆范围筛选"
+          ariaLabel="记忆范围筛选"
+          onChange={setScopeFilter}
+          options={[
+            ['all', '全部'],
+            ['project', '项目'],
+            ['session', '会话'],
+          ]}
           value={scopeFilter}
-        >
-          {scopeOptions.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
-        </select>
-        <select
-          aria-label="Memory status filter"
-          onChange={(event) => setStatusFilter(event.target.value)}
+        />
+        <SelectMenu
+          aria-label="记忆状态筛选"
+          ariaLabel="记忆状态筛选"
+          onChange={setStatusFilter}
+          options={[
+            ['active', '启用'],
+            ['disabled', '停用'],
+            ['deleted', '已删除'],
+            ['all', '全部'],
+          ]}
           value={statusFilter}
-        >
-          {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
-        </select>
+        />
       </div>
 
       <div className="memory-list" data-testid="memory-list">
-        {items.length === 0 ? <p className="activity-empty">{loading ? 'Loading memory' : 'No memory records'}</p> : null}
+        {items.length === 0 ? <InlineEmpty className="activity-empty">{loading ? '正在加载记忆' : '暂无记忆记录'}</InlineEmpty> : null}
         {items.map((item) => (
           <button
             className={item.id === selectedId ? 'memory-item active' : 'memory-item'}
@@ -218,81 +231,90 @@ export function MemoryPanel({ apiJson, currentSessionId, workspaceRoot }) {
             <Database size={14} />
             <span>
               <strong>{item.title}</strong>
-              <em>{item.scope} / {item.kind} / {item.confidence}</em>
+              <em>{displayMemoryScope(item.scope)} / {displayMemoryKind(item.kind)} / {displayConfidence(item.confidence)}</em>
             </span>
-            <small className={`memory-status memory-status-${item.status}`}>{item.status}</small>
+            <StatusBadge className={`memory-status memory-status-${item.status}`} status={item.status} />
           </button>
         ))}
       </div>
 
       <div className="memory-editor">
         <div className="memory-editor-head">
-          <strong>{selected ? 'Edit memory' : 'New memory'}</strong>
+          <strong>{selected ? '编辑记忆' : '新建记忆'}</strong>
           <Button icon={<Plus size={14} />} onClick={clearSelection} variant="ghost">
-            New
+            新建
           </Button>
         </div>
         <div className="memory-editor-grid">
           <label>
-            <span>Scope</span>
-            <select
-              aria-label="Memory scope"
+            <span>范围</span>
+            <SelectMenu
+              ariaLabel="记忆范围"
               disabled={Boolean(selected)}
-              onChange={(event) => setDraft((current) => ({ ...current, scope: event.target.value }))}
+              onChange={(nextValue) => setDraft((current) => ({ ...current, scope: nextValue }))}
+              options={[
+                ['project', '项目'],
+                ['session', '会话'],
+              ]}
               value={draft.scope}
-            >
-              <option value="project">project</option>
-              <option value="session">session</option>
-            </select>
+            />
           </label>
           <label>
-            <span>Kind</span>
-            <select
-              aria-label="Memory kind"
-              onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value }))}
+            <span>类型</span>
+            <SelectMenu
+              ariaLabel="记忆类型"
+              onChange={(nextValue) => setDraft((current) => ({ ...current, kind: nextValue }))}
+              options={[
+                ['fact', '事实'],
+                ['preference', '偏好'],
+                ['decision', '决策'],
+                ['task', '任务'],
+                ['summary', '摘要'],
+                ['warning', '提醒'],
+              ]}
               value={draft.kind}
-            >
-              {kindOptions.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
-            </select>
+            />
           </label>
           <label>
-            <span>Status</span>
-            <select
-              aria-label="Memory status"
-              onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))}
+            <span>状态</span>
+            <SelectMenu
+              ariaLabel="记忆状态"
+              onChange={(nextValue) => setDraft((current) => ({ ...current, status: nextValue }))}
+              options={[
+                ['active', '启用'],
+                ['disabled', '停用'],
+              ]}
               value={draft.status}
-            >
-              <option value="active">active</option>
-              <option value="disabled">disabled</option>
-            </select>
+            />
           </label>
           <label>
-            <span>Confidence</span>
-            <select
-              aria-label="Memory confidence"
-              onChange={(event) => setDraft((current) => ({ ...current, confidence: event.target.value }))}
+            <span>置信度</span>
+            <SelectMenu
+              ariaLabel="记忆置信度"
+              onChange={(nextValue) => setDraft((current) => ({ ...current, confidence: nextValue }))}
+              options={[
+                ['low', '低'],
+                ['medium', '中'],
+                ['high', '高'],
+              ]}
               value={draft.confidence}
-            >
-              {confidenceOptions.map((confidence) => <option key={confidence} value={confidence}>{confidence}</option>)}
-            </select>
+            />
           </label>
         </div>
-        <label className="memory-field">
-          <span>Title</span>
+        <Field className="memory-field" label="标题">
           <input
             data-testid="memory-title-input"
             onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
             value={draft.title}
           />
-        </label>
-        <label className="memory-field">
-          <span>Content</span>
+        </Field>
+        <Field className="memory-field" label="内容">
           <textarea
             data-testid="memory-content-input"
             onChange={(event) => setDraft((current) => ({ ...current, content: event.target.value }))}
             value={draft.content}
           />
-        </label>
+        </Field>
         <div className="memory-actions">
           <Button
             data-testid="memory-save"
@@ -300,34 +322,34 @@ export function MemoryPanel({ apiJson, currentSessionId, workspaceRoot }) {
             icon={<Save size={14} />}
             onClick={saveMemory}
           >
-            Save
+            保存
           </Button>
           <Button disabled={!selected || saving || selected.status !== 'active'} onClick={disableMemory} variant="soft">
-            Disable
+            停用
           </Button>
-          <IconButton disabled={!selected || saving || selected.status === 'deleted'} label="Delete memory" onClick={deleteMemory} variant="ghost">
+          <IconButton disabled={!selected || saving || selected.status === 'deleted'} label="删除记忆" onClick={deleteMemory} variant="ghost">
             <Trash2 size={14} />
           </IconButton>
         </div>
-        {selected ? <span className="memory-updated">Updated {compactTime(selected.updatedAt)}</span> : null}
+        {selected ? <span className="memory-updated">更新于 {compactTime(selected.updatedAt)}</span> : null}
       </div>
 
       <div className="memory-preview">
         <div className="memory-editor-head">
-          <strong>Preview</strong>
+          <strong>预览</strong>
           <Button icon={<Eye size={14} />} onClick={previewMemory} variant="ghost">
-            Preview
+            预览
           </Button>
         </div>
         {preview ? (
           <>
-            <span>{preview.items.length} records</span>
-            <pre data-testid="memory-preview-context">{preview.context || 'No memory selected'}</pre>
+            <span>{preview.items.length} 条记录</span>
+            <pre data-testid="memory-preview-context">{preview.context || '未选择记忆'}</pre>
           </>
         ) : null}
       </div>
 
-      {error ? <p className="activity-error">{error}</p> : null}
+      <ErrorMessage className="activity-error">{error}</ErrorMessage>
     </section>
   );
 }
