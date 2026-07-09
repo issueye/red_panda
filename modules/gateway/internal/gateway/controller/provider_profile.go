@@ -1,0 +1,101 @@
+package controller
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"redpanda/gateway/internal/gateway/service"
+)
+
+type ProviderProfileController struct {
+	Services service.Set
+}
+
+type providerProfileCreateRequest struct {
+	Name      string `json:"name"`
+	Provider  string `json:"provider"`
+	BaseURL   string `json:"base_url"`
+	Model     string `json:"model"`
+	APIKey    string `json:"api_key"`
+	IsDefault bool   `json:"is_default"`
+}
+
+type providerProfileUpdateRequest struct {
+	Name      *string `json:"name"`
+	Provider  *string `json:"provider"`
+	BaseURL   *string `json:"base_url"`
+	Model     *string `json:"model"`
+	APIKey    *string `json:"api_key"`
+	IsDefault *bool   `json:"is_default"`
+	Active    *bool   `json:"active"`
+}
+
+func (p ProviderProfileController) List(c *gin.Context) {
+	items, err := p.Services.Provider.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_list_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, items))
+}
+
+func (p ProviderProfileController) Create(c *gin.Context) {
+	var req providerProfileCreateRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_payload", "message": "invalid provider profile payload"}})
+		return
+	}
+	item, err := p.Services.Provider.Create(service.ProviderProfileCreate{
+		Name:      req.Name,
+		Provider:  req.Provider,
+		BaseURL:   req.BaseURL,
+		Model:     req.Model,
+		APIKey:    req.APIKey,
+		IsDefault: req.IsDefault,
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_create_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, item))
+}
+
+func (p ProviderProfileController) Get(c *gin.Context) {
+	item, err := p.Services.Provider.Get(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_not_found", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, item))
+}
+
+func (p ProviderProfileController) Update(c *gin.Context) {
+	var req providerProfileUpdateRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_payload", "message": "invalid provider profile payload"}})
+		return
+	}
+	item, err := p.Services.Provider.Update(c.Param("id"), service.ProviderProfileUpdate{
+		Name:      req.Name,
+		Provider:  req.Provider,
+		BaseURL:   req.BaseURL,
+		Model:     req.Model,
+		APIKey:    req.APIKey,
+		IsDefault: req.IsDefault,
+		Active:    req.Active,
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_update_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, item))
+}
+
+func (p ProviderProfileController) Delete(c *gin.Context) {
+	if err := p.Services.Provider.Delete(c.Param("id")); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_delete_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, gin.H{"deleted": true}))
+}

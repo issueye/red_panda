@@ -1,0 +1,187 @@
+package service
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"redpanda/gateway/internal/gateway/model"
+	"redpanda/gateway/internal/gateway/repository"
+)
+
+type ProviderProfileService struct {
+	repos repository.Set
+}
+
+type ProviderProfileDTO struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Provider     string    `json:"provider"`
+	BaseURL      string    `json:"base_url"`
+	Model        string    `json:"model"`
+	APIKeySet    bool      `json:"api_key_set"`
+	APIKeyMasked string    `json:"api_key_masked,omitempty"`
+	IsDefault    bool      `json:"is_default"`
+	Active       bool      `json:"active"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type ProviderProfileCreate struct {
+	Name      string
+	Provider  string
+	BaseURL   string
+	Model     string
+	APIKey    string
+	IsDefault bool
+}
+
+type ProviderProfileUpdate struct {
+	Name      *string
+	Provider  *string
+	BaseURL   *string
+	Model     *string
+	APIKey    *string
+	IsDefault *bool
+	Active    *bool
+}
+
+func NewProviderProfileService(repos repository.Set) ProviderProfileService {
+	return ProviderProfileService{repos: repos}
+}
+
+func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderProfileDTO, error) {
+	profile, err := normalizeProvider(input.Provider)
+	if err != nil {
+		return ProviderProfileDTO{}, err
+	}
+	baseURL := strings.TrimSpace(input.BaseURL)
+	if baseURL == "" {
+		return ProviderProfileDTO{}, fmt.Errorf("base_url is required")
+	}
+	row, err := s.repos.Providers.Create(model.ProviderProfile{
+		Name:         strings.TrimSpace(input.Name),
+		Provider:     profile,
+		BaseURL:      strings.TrimRight(baseURL, "/"),
+		Model:        strings.TrimSpace(input.Model),
+		APIKeySecret: input.APIKey,
+		IsDefault:    input.IsDefault,
+	})
+	if err != nil {
+		return ProviderProfileDTO{}, err
+	}
+	return providerProfileDTO(row), nil
+}
+
+func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (ProviderProfileDTO, error) {
+	current, err := s.repos.Providers.Get(id)
+	if err != nil {
+		return ProviderProfileDTO{}, err
+	}
+	next := model.ProviderProfile{
+		ID:           id,
+		Name:         current.Name,
+		Provider:     current.Provider,
+		BaseURL:      current.BaseURL,
+		Model:        current.Model,
+		APIKeySecret: current.APIKeySecret,
+		IsDefault:    current.IsDefault,
+		Active:       current.Active,
+	}
+	if input.Name != nil {
+		next.Name = strings.TrimSpace(*input.Name)
+	}
+	if input.Provider != nil {
+		profile, err := normalizeProvider(*input.Provider)
+		if err != nil {
+			return ProviderProfileDTO{}, err
+		}
+		next.Provider = profile
+	}
+	if input.BaseURL != nil {
+		next.BaseURL = strings.TrimRight(strings.TrimSpace(*input.BaseURL), "/")
+		if next.BaseURL == "" {
+			return ProviderProfileDTO{}, fmt.Errorf("base_url is required")
+		}
+	}
+	if input.Model != nil {
+		next.Model = strings.TrimSpace(*input.Model)
+	}
+	if input.APIKey != nil {
+		next.APIKeySecret = *input.APIKey
+	}
+	if input.IsDefault != nil {
+		next.IsDefault = *input.IsDefault
+	}
+	if input.Active != nil {
+		next.Active = *input.Active
+	}
+	row, err := s.repos.Providers.Update(next)
+	if err != nil {
+		return ProviderProfileDTO{}, err
+	}
+	return providerProfileDTO(row), nil
+}
+
+func (s ProviderProfileService) Get(id string) (ProviderProfileDTO, error) {
+	row, err := s.repos.Providers.Get(id)
+	if err != nil {
+		return ProviderProfileDTO{}, err
+	}
+	return providerProfileDTO(row), nil
+}
+
+func (s ProviderProfileService) List() ([]ProviderProfileDTO, error) {
+	rows, err := s.repos.Providers.List(100)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ProviderProfileDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, providerProfileDTO(row))
+	}
+	return items, nil
+}
+
+func (s ProviderProfileService) Delete(id string) error {
+	return s.repos.Providers.Delete(id)
+}
+
+func normalizeProvider(value string) (string, error) {
+	provider := strings.ToLower(strings.TrimSpace(value))
+	if provider == "" {
+		provider = "openai_compatible"
+	}
+	switch provider {
+	case "openai_compatible", "http_compatible":
+		return "openai_compatible", nil
+	default:
+		return "", fmt.Errorf("unsupported provider %q", value)
+	}
+}
+
+func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
+	return ProviderProfileDTO{
+		ID:           row.ID,
+		Name:         row.Name,
+		Provider:     row.Provider,
+		BaseURL:      row.BaseURL,
+		Model:        row.Model,
+		APIKeySet:    row.APIKeySecret != "",
+		APIKeyMasked: maskSecret(row.APIKeySecret),
+		IsDefault:    row.IsDefault,
+		Active:       row.Active,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+	}
+}
+
+func maskSecret(value string) string {
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 4 {
+		return "****"
+	}
+	return "****" + value[len(value)-4:]
+}

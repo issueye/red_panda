@@ -1,0 +1,292 @@
+package runtime
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"redpanda/protocol/methods"
+	"redpanda/protocol/tools"
+)
+
+func TestRunListWorkspace(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "README.md"), "red panda\n")
+	mustWriteFile(t, filepath.Join(root, "cmd", "main.go"), "package main\n")
+	mustWriteFile(t, filepath.Join(root, "node_modules", "ignored.js"), "ignored\n")
+
+	output, err := runListWorkspace(root, ".", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"./", "README.md", "cmd/", "cmd/main.go"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected list output to contain %q, got:\n%s", expected, output)
+		}
+	}
+	if strings.Contains(output, "node_modules/ignored.js") {
+		t.Fatalf("expected skipped directory to be omitted, got:\n%s", output)
+	}
+}
+
+func TestRunGrepWorkspace(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "README.md"), "red panda\nblack bear\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "notes.md"), "red fox\nred panda again\n")
+	mustWriteFile(t, filepath.Join(root, "bin", "ignored.txt"), "red panda hidden\n")
+
+	output, err := runGrepWorkspace(root, "red panda", ".", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"README.md:1: red panda", "docs/notes.md:2: red panda again"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected grep output to contain %q, got:\n%s", expected, output)
+		}
+	}
+	if strings.Contains(output, "bin/ignored.txt") {
+		t.Fatalf("expected skipped directory to be omitted, got:\n%s", output)
+	}
+}
+
+func TestWorkspaceToolsRejectTraversal(t *testing.T) {
+	root := t.TempDir()
+	_, err := runListWorkspace(root, "..", 1)
+	if err == nil || !strings.Contains(err.Error(), "escapes workspace root") {
+		t.Fatalf("expected traversal rejection, got %v", err)
+	}
+	_, err = runGrepWorkspace(root, "anything", "..", 10)
+	if err == nil || !strings.Contains(err.Error(), "escapes workspace root") {
+		t.Fatalf("expected traversal rejection, got %v", err)
+	}
+}
+
+func TestRunEditFile(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "note.txt")
+	mustWriteFile(t, target, "hello red panda\n")
+
+	output, err := runEditFile(root, "note.txt", "red panda", "scarlet panda", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "replaced 1 occurrence") {
+		t.Fatalf("unexpected edit output: %s", output)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "hello scarlet panda\n" {
+		t.Fatalf("edited content = %q", string(raw))
+	}
+}
+
+func TestRunEditFileRequiresUniqueMatchByDefault(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "note.txt"), "red panda\nred panda\n")
+
+	_, err := runEditFile(root, "note.txt", "red panda", "scarlet panda", false)
+	if err == nil || !strings.Contains(err.Error(), "occurs 2 times") {
+		t.Fatalf("expected duplicate match error, got %v", err)
+	}
+	output, err := runEditFile(root, "note.txt", "red panda", "scarlet panda", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "replaced 2 occurrence") {
+		t.Fatalf("unexpected edit output: %s", output)
+	}
+}
+
+func TestRunDiffFilePreviewsReplacementWithoutWriting(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "note.txt")
+	mustWriteFile(t, target, "alpha\n")
+
+	output, err := runDiffFile(root, "note.txt", "", false, "alpha", "beta", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"--- a/note.txt", "+++ b/note.txt", "-alpha", "+beta"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected diff output to contain %q, got:\n%s", expected, output)
+		}
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "alpha\n" {
+		t.Fatalf("diff preview should not write file, got %q", string(raw))
+	}
+}
+
+func TestRunApplyPatchAppliesUnifiedPatch(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "note.txt")
+	mustWriteFile(t, target, "alpha\n")
+	patch := `diff --git a/note.txt b/note.txt
+index 4a58007..65b2df8 100644
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-alpha
++beta
+`
+
+	output, err := runApplyPatch(root, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "applied patch to 1 file") {
+		t.Fatalf("unexpected patch output: %s", output)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "beta\n" {
+		t.Fatalf("patched content = %q", string(raw))
+	}
+}
+
+func TestRunApplyPatchRejectsEscapingPath(t *testing.T) {
+	root := t.TempDir()
+	patch := `--- a/../outside.txt
++++ b/../outside.txt
+@@ -1 +1 @@
+-alpha
++beta
+`
+	_, err := runApplyPatch(root, patch)
+	if err == nil || !strings.Contains(err.Error(), "invalid patch path") {
+		t.Fatalf("expected invalid patch path error, got %v", err)
+	}
+}
+
+func TestToolRunnerAcceptsListAndGrepCalls(t *testing.T) {
+	runner := ToolRunner{}
+	for _, call := range []tools.Call{
+		{Name: "workspace.list", Arguments: map[string]any{"path": "."}},
+		{Name: "workspace.grep", Arguments: map[string]any{"pattern": "red", "path": "."}},
+	} {
+		invocation, err := runner.InvocationFromCall("run_tools", 0, call)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if invocation.Call.ID == "" || invocation.Call.Risk != tools.RiskLow {
+			t.Fatalf("expected low risk invocation with generated id, got %#v", invocation.Call)
+		}
+	}
+}
+
+func TestToolRunnerAcceptsEditCall(t *testing.T) {
+	runner := ToolRunner{}
+	for _, call := range []tools.Call{
+		{Name: "workspace.edit_file", Arguments: map[string]any{"path": "note.txt", "old_text": "a", "new_text": "b"}},
+		{Name: "workspace.apply_patch", Arguments: map[string]any{"patch": "--- a/note.txt\n+++ b/note.txt\n"}},
+	} {
+		invocation, err := runner.InvocationFromCall("run_tools", 0, call)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if invocation.Call.Risk != tools.RiskHigh {
+			t.Fatalf("expected high risk invocation, got %#v", invocation.Call)
+		}
+	}
+	diffInvocation, err := runner.InvocationFromCall("run_tools", 0, tools.Call{
+		Name:      "workspace.diff_file",
+		Arguments: map[string]any{"path": "note.txt", "old_text": "a", "new_text": "b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diffInvocation.Call.Risk != tools.RiskLow {
+		t.Fatalf("expected diff tool to be low risk, got %#v", diffInvocation.Call)
+	}
+}
+
+func TestToolRunnerRunsListSlashCommand(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "README.md"), "red panda\n")
+
+	runner := ToolRunner{}
+	invocation, ok := runner.Parse("/list .", "run_list")
+	if !ok {
+		t.Fatal("expected /list to parse")
+	}
+	result, output := runner.Run(context.Background(), root, invocation)
+	if result.Status != tools.CallStatusCompleted {
+		t.Fatalf("expected completed result, got %#v", result)
+	}
+	if !strings.Contains(output, "README.md") {
+		t.Fatalf("expected output to include README.md, got:\n%s", output)
+	}
+}
+
+func TestToolRunnerMemoryToolsUseExecutor(t *testing.T) {
+	var captured methods.MemoryToolExecuteParams
+	runner := ToolRunner{
+		MemoryExecutor: func(ctx context.Context, params methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error) {
+			captured = params
+			return methods.MemoryToolExecuteResult{
+				Status:   "completed",
+				Output:   `{"action":"memory.create"}`,
+				RecordID: "mem_1",
+			}, nil
+		},
+	}
+
+	listInvocation, err := runner.InvocationFromCall("run_memory_tool", 0, tools.Call{
+		Name:      "memory.list",
+		Arguments: map[string]any{"scope": "session"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listInvocation.Call.Risk != tools.RiskMedium {
+		t.Fatalf("memory.list risk = %s, want medium", listInvocation.Call.Risk)
+	}
+
+	createInvocation, err := runner.InvocationFromCall("run_memory_tool", 1, tools.Call{
+		Name:      "memory.create",
+		Arguments: map[string]any{"scope": "session", "content": "remember this"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createInvocation.Call.Risk != tools.RiskHigh {
+		t.Fatalf("memory.create risk = %s, want high", createInvocation.Call.Risk)
+	}
+
+	result, output := runner.RunWithContext(context.Background(), ToolRunContext{
+		WorkingDir: "D:/workspace",
+		RunID:      "run_memory_tool",
+		SessionID:  "session_memory_tool",
+	}, createInvocation)
+	if result.Status != tools.CallStatusCompleted {
+		t.Fatalf("expected completed result, got %#v", result)
+	}
+	if !strings.Contains(output, "memory.create") {
+		t.Fatalf("unexpected output: %s", output)
+	}
+	if captured.RunID != "run_memory_tool" || captured.SessionID != "session_memory_tool" || captured.WorkspaceRoot != "D:/workspace" {
+		t.Fatalf("executor params mismatch: %#v", captured)
+	}
+	if captured.ToolName != "memory.create" || captured.ToolCallID == "" {
+		t.Fatalf("executor tool identity mismatch: %#v", captured)
+	}
+}
+
+func mustWriteFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

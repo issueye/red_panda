@@ -1,0 +1,24 @@
+# Go build output
+bin/
+*.exe
+*.test
+
+# Local runtime data
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+
+# Frontend dependencies and build output
+node_modules/
+dist/
+test-results/
+playwright-report/
+.wails-template-probe/
+tmp/
+
+# Logs and local env
+*.log
+.env
+.env.*
+.task/
