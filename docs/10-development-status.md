@@ -281,6 +281,7 @@ The following should not be claimed as complete:
 ## Next Development Steps
 
 1. Treat v0.1.0 as release-gate complete.
-2. Follow `docs/11-structured-development-roadmap.md` as the ordering source for new work.
+2. Use `docs/18-v0.1.1-development-plan.md` as the v0.1.1 release scope.
 3. Use `docs/12-current-execution-plan.md` as the short-cycle execution board to avoid unordered parallel development.
-4. Start MCP stdio tools with design only; do not implement MCP until the scoped design is written and accepted.
+4. MCP stdio tools design is now documented in `docs/19-mcp-stdio-tools-design.md`; do not implement MCP until the next implementation slice is explicitly opened.
+5. Keep the v0.1.0 gate reproducible while doing v0.1.1 planning work.

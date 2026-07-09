@@ -42,6 +42,9 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 - [Memory and History Design](docs/14-memory-history-design.md)
 - [v0.1.0 Release Plan](docs/16-v0.1.0-release-plan.md)
 - [v0.1.0 Release Notes](docs/17-v0.1.0-release-notes.md)
+- [v0.1.1 Development Plan](docs/18-v0.1.1-development-plan.md)
+- [MCP stdio Tools Design](docs/19-mcp-stdio-tools-design.md)
+- [v0.1.1 Release Notes](docs/20-v0.1.1-release-notes.md)
 
 ## Current Running Loop
 
@@ -214,5 +217,5 @@ Desktop SettingsPanel manages these profiles through the Gateway APIs. It lists 
 
 ## Next Focus
 
-- Finish the remaining v0.1.0 release work in [v0.1.0 Release Plan](docs/16-v0.1.0-release-plan.md): release docs, versioned builds, and the final release gate. Gateway-mediated `memory.*` Runtime tools and protocol compatibility coverage are implemented.
-- MCP stdio implementation remains excluded from v0.1.0.
+- Follow [v0.1.1 Development Plan](docs/18-v0.1.1-development-plan.md): stabilize the v0.1.0 baseline and use [MCP stdio Tools Design](docs/19-mcp-stdio-tools-design.md) as the implementation gate for future MCP work.
+- MCP stdio implementation remains gated behind a scoped design document.

@@ -13,7 +13,9 @@ This document controls the next development order for `red_panda`. It is meant t
 
 For the current short-cycle execution board, use `docs/12-current-execution-plan.md`. This roadmap remains the milestone-level ordering source; the execution plan is the active work queue.
 
-For the v0.1.0 release boundary, use `docs/16-v0.1.0-release-plan.md`. That document decides what blocks the release and what moves to v0.2.0.
+For the v0.1.0 release boundary, use `docs/16-v0.1.0-release-plan.md`. That document records the completed release gate.
+
+For the v0.1.1 planning slice, use `docs/18-v0.1.1-development-plan.md`. v0.1.1 is a stabilization/design release centered on MCP stdio tools design, not MCP implementation.
 
 ## 1. Current System State
 
@@ -154,7 +156,7 @@ Goal: support external MCP-style stdio tools without compromising the existing R
 
 Work items, in order:
 
-1. Define MCP tool process model separately from Agent Runtime process model.
+1. Define MCP tool process model separately from Agent Runtime process model. Status: complete in `docs/19-mcp-stdio-tools-design.md`.
 2. Add tool registry and capability discovery.
 3. Add permission and risk mapping.
 4. Add execution, timeout, and process cleanup.
@@ -233,11 +235,11 @@ Next work should be picked from this queue, top first:
 6. Runtime memory injection. Status: complete.
 7. Desktop Memory UI. Status: complete.
 8. Optional `memory.*` Runtime tools. Status: complete.
-9. MCP stdio tools design.
+9. MCP stdio tools design. Status: complete for v0.1.1.
 
 Do not start MCP implementation before items 1-6 are complete or explicitly deferred in this document.
 
-For v0.1.0, item 8 is complete. MCP implementation is outside v0.1.0.
+For v0.1.1, item 9 is complete. MCP implementation remains blocked until a new implementation slice is explicitly opened.
 
 The active owner/work-lane split and stop rules for this queue are tracked in `docs/12-current-execution-plan.md`.
 
