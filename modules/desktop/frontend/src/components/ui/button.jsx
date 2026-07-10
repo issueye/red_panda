@@ -1,19 +1,21 @@
+import { forwardRef } from 'react';
 import { classNames } from '../../lib/format.js';
 
-export function Button({ className, children, icon, variant = 'default', ...props }) {
+export const Button = forwardRef(function Button({ className, children, icon, variant = 'default', ...props }, ref) {
   return (
-    <button className={classNames('button', `button-${variant}`, className)} type="button" {...props}>
+    <button className={classNames('button', `button-${variant}`, className)} ref={ref} type="button" {...props}>
       {icon ? <span className="button-icon">{icon}</span> : null}
       <span>{children}</span>
     </button>
   );
-}
+});
 
-export function IconButton({ label, className, children, variant = 'ghost', ...props }) {
+export const IconButton = forwardRef(function IconButton({ label, className, children, variant = 'ghost', ...props }, ref) {
   return (
     <button
       aria-label={label}
       className={classNames('icon-button', `button-${variant}`, className)}
+      ref={ref}
       title={label}
       type="button"
       {...props}
@@ -21,4 +23,4 @@ export function IconButton({ label, className, children, variant = 'ghost', ...p
       {children}
     </button>
   );
-}
+});

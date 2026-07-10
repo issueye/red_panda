@@ -227,7 +227,7 @@ export function RunActivityPanel({
                     icon={statusIcon(run.status)}
                     status={run.status || 'unknown'}
                   />
-                  <span>seq {formatSeq(run.lastRootSeq || 0)}</span>
+                  <span>事件 {formatSeq(run.lastRootSeq || 0)}</span>
                 </div>
                 <strong>{run.input || run.id}</strong>
                 <div className="activity-row-meta">
@@ -248,7 +248,7 @@ export function RunActivityPanel({
                     <div className="activity-detail-group">
                       <strong>工具</strong>
                       {runTools.length === 0 ? <span>本次运行没有工具调用。</span> : runTools.map((tool) => (
-                        <p key={tool.id}>{tool.displayName || tool.name} - {displayStatus(tool.status || 'running')} - seq {formatSeq(tool.rootSeq || 0)}</p>
+                        <p key={tool.id}>{tool.displayName || tool.name} - {displayStatus(tool.status || 'running')} - 事件 {formatSeq(tool.rootSeq || 0)}</p>
                       ))}
                     </div>
                     <div className="activity-detail-group">
@@ -302,7 +302,7 @@ export function RunActivityPanel({
                             return (
                               <div className="activity-event-row" key={eventKey}>
                                 <div className="activity-event-meta">
-                                  <span>{meta.sequence || `root#${formatSeq(event.rootSeq)}`}</span>
+                                  <span>{meta.sequence || `事件 ${formatSeq(event.rootSeq)}`}</span>
                                   <span>{meta.scope}</span>
                                   {payload ? (
                                     <button

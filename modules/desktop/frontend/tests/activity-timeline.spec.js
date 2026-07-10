@@ -19,7 +19,7 @@ test('Activity timeline filters groups and payload inspection work in browser', 
   await expect(timeline.getByText('planner saw the file')).toHaveCount(0);
 
   await chooseMenuOption(page.getByTestId('activity-event-kind-filter'), '全部类型');
-  await chooseMenuOption(page.getByTestId('activity-event-agent-filter'), 'subagent:planner');
+  await chooseMenuOption(page.getByTestId('activity-event-agent-filter'), '子代理 · planner');
   await expect(page.getByTestId('activity-event-count')).toHaveText('1/4');
   await expect(timeline.getByText('planner saw the file')).toBeVisible();
   await expect(timeline.getByText('workspace.read_file')).toHaveCount(0);

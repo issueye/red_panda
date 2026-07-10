@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import { ChatPanel } from './components/chat/ChatPanel.jsx';
 import { MemoryPanel } from './components/MemoryPanel.jsx';
 import { RunActivityPanel } from './components/RunActivityPanel.jsx';
@@ -7,6 +8,7 @@ import { Sidebar } from './components/Sidebar.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
 import { SubAgentPanel } from './components/SubAgentPanel.jsx';
 import { TopBar } from './components/TopBar.jsx';
+import { IconButton } from './components/ui/button.jsx';
 import { TabButton } from './components/ui/tabs.jsx';
 import { WorkspacePanel } from './components/WorkspacePanel.jsx';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
@@ -23,7 +25,7 @@ import { buildRunStartOptions, defaultRunSettings } from './lib/runOptions.js';
 const gatewayBase = gatewayBaseURL();
 
 const initialSessions = [
-  { id: 'local-design', title: '架构', subtitle: 'WebSocket / JSON-RPC / 子代理' },
+  { id: 'local-design', title: '架构', subtitle: '本地任务与子代理' },
 ];
 
 const initialMessages = [
@@ -34,6 +36,13 @@ const initialMessages = [
     rootSeq: 1,
     text: '已连接。请输入任务。',
   },
+];
+
+const rightPanelTabs = [
+  { id: 'workspace', label: '工作区', testId: '' },
+  { id: 'subagents', label: '子代理', testId: '' },
+  { id: 'activity', label: '活动', testId: 'right-tab-activity' },
+  { id: 'memory', label: '记忆', testId: 'right-tab-memory' },
 ];
 
 function loadRunSettings() {
@@ -84,7 +93,9 @@ function normalizeHistoryMessage(message) {
     id: message.id,
     role: message.role === 'user' ? 'user' : 'assistant',
     agent: message.role === 'subagent' ? 'subagent' : message.role,
-    rootSeq: message.seq || 0,
+    messageSeq: message.seq || 0,
+    runId: message.run_id || '',
+    createdAt: message.created_at,
     text: firstText || '',
   };
 }
@@ -101,7 +112,9 @@ function normalizeToolCall(item) {
     output: item.output || '',
     error: item.error || '',
     durationMs: item.duration_ms,
+    startedSeq: item.started_seq || 0,
     rootSeq: item.finished_seq || item.started_seq || 0,
+    startedAt: item.started_at,
   };
 }
 
@@ -131,12 +144,52 @@ function normalizePermission(item) {
     status: item.status || 'pending',
     decision: item.decision || '',
     summary: item.summary || '需要授权',
-    detail: item.detail || item.tool_name || 'Agent Runtime 正在等待处理决定。',
+    detail: item.detail || item.tool_name || '系统正在等待处理决定。',
     risk: item.risk,
     toolName: item.tool_name,
     arguments: item.arguments || {},
     rootSeq: item.root_seq || 0,
+    createdAt: item.created_at,
   };
+}
+
+function appendAgentText(items, payload, text) {
+  const agentName = payload.agent?.name || payload.agent?.role || payload.agent_name || payload.agent_role || 'agent';
+  const runId = payload.run_id || payload.root_run_id || '';
+  const eventSeq = Number(payload.root_seq) || 0;
+  const previous = items[items.length - 1];
+  const canAppend = payload.type === 'message_delta'
+    && previous?.role === 'assistant'
+    && previous.agent === agentName
+    && previous.runId === runId
+    && previous.eventSeq > 0
+    && eventSeq === previous.eventSeq + 1;
+
+  if (canAppend) {
+    return [
+      ...items.slice(0, -1),
+      {
+        ...previous,
+        eventSeq,
+        rootSeq: eventSeq,
+        text: `${previous.text}${text}`,
+      },
+    ];
+  }
+
+  return [
+    ...items,
+    {
+      id: payload.event_id || payload.id || `evt_${Date.now()}`,
+      role: 'assistant',
+      agent: agentName,
+      runId,
+      eventSeq,
+      rootSeq: eventSeq,
+      createdAt: payload.created_at || new Date().toISOString(),
+      text,
+    },
+  ];
 }
 
 function latestActiveRun(runs) {
@@ -191,11 +244,17 @@ export function App() {
   const [runEventsLoading, setRunEventsLoading] = useState({});
   const [runEventsError, setRunEventsError] = useState({});
   const [rightPanelTab, setRightPanelTab] = useState('workspace');
+  const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
+  const [compactLayout, setCompactLayout] = useState(() => (
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 1100px)').matches
+  ));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [runSettings, setRunSettings] = useState(loadRunSettings);
   const [providerProfiles, setProviderProfiles] = useState([]);
   const [providerProfilesLoading, setProviderProfilesLoading] = useState(false);
   const [providerProfilesError, setProviderProfilesError] = useState('');
+  const rightPanelCloseRef = useRef(null);
+  const rightPanelReturnFocusRef = useRef(null);
 
   const agents = useMemo(() => [
     { id: 'root', name: 'root', role: 'root', status: running ? 'running' : 'idle', seq: rootSeq },
@@ -221,6 +280,23 @@ export function App() {
       // Local storage is optional in embedded desktop previews.
     }
   }, [runSettings]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1100px)');
+    const handleChange = (event) => {
+      setCompactLayout(event.matches);
+      if (!event.matches) setRightPanelDrawerOpen(false);
+    };
+    setCompactLayout(media.matches);
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, []);
+
+  useEffect(() => {
+    if (!compactLayout || !rightPanelDrawerOpen) return undefined;
+    const frame = window.requestAnimationFrame(() => rightPanelCloseRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [compactLayout, rightPanelDrawerOpen]);
 
   async function loadGlobalPendingPermissions() {
     const items = await apiJson('/api/v1/permissions/pending').catch(() => []);
@@ -354,11 +430,13 @@ export function App() {
           sessionId: payload.session_id,
           status: 'pending',
           summary: payload.payload?.summary || '需要授权',
-          detail: payload.payload?.detail || payload.payload?.tool_name || 'Agent Runtime 正在等待处理决定。',
+          detail: payload.payload?.detail || payload.payload?.tool_name || '系统正在等待处理决定。',
           risk: payload.payload?.risk,
           toolName: payload.payload?.tool_name,
           arguments: payload.payload?.arguments || {},
           rootSeq: payload.root_seq,
+          agent: payload.agent?.name || payload.agent?.role || payload.agent_name || payload.agent_role || '',
+          createdAt: payload.created_at || new Date().toISOString(),
         };
         setPermissions((items) => upsertByID(items, nextPermission));
         setGlobalPendingPermissions((items) => upsertByID(items, nextPermission));
@@ -390,7 +468,9 @@ export function App() {
             status: payload.payload?.status || 'running',
             output: '',
             error: '',
+            startedSeq: payload.root_seq,
             rootSeq: payload.root_seq,
+            startedAt: payload.created_at || new Date().toISOString(),
           };
           const nextTools = [
             ...items.filter((item) => item.id !== toolID),
@@ -499,16 +579,7 @@ export function App() {
         return;
       }
 
-      setMessages((items) => [
-        ...items,
-        {
-          id: payload.event_id || `evt_${Date.now()}`,
-          role: 'assistant',
-          agent: payload.agent?.name || payload.agent?.role || 'agent',
-          rootSeq: payload.root_seq,
-          text,
-        },
-      ]);
+      setMessages((items) => appendAgentText(items, payload, text));
       setRuns((items) => items.map((item) => (
         item.id === payload.root_run_id
           ? {
@@ -607,7 +678,7 @@ export function App() {
     setSubAgents([]);
     setMessages((items) => [
       ...items,
-      { id: `user_${Date.now()}`, role: 'user', text },
+      { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text },
     ]);
 
     try {
@@ -644,7 +715,7 @@ export function App() {
         {
           id: `gateway_error_${Date.now()}`,
           role: 'assistant',
-          agent: 'gateway',
+          agent: 'system',
           text: `启动运行失败：${error.message}`,
         },
       ]);
@@ -695,7 +766,7 @@ export function App() {
         {
           id: `subagent_cancel_error_${Date.now()}`,
           role: 'assistant',
-          agent: 'gateway',
+          agent: 'system',
           text: `取消子代理失败：${error.message}`,
         },
       ]);
@@ -776,6 +847,78 @@ export function App() {
     ));
   }
 
+  function selectRightPanelTab(tab) {
+    setRightPanelTab(tab);
+    if (compactLayout) {
+      if (!rightPanelDrawerOpen) rightPanelReturnFocusRef.current = document.activeElement;
+      setRightPanelDrawerOpen(true);
+    }
+  }
+
+  function closeRightPanelDrawer() {
+    setRightPanelDrawerOpen(false);
+    const returnTarget = rightPanelReturnFocusRef.current;
+    window.requestAnimationFrame(() => {
+      if (returnTarget && typeof returnTarget.focus === 'function' && document.contains(returnTarget)) {
+        returnTarget.focus();
+      }
+    });
+  }
+
+  function handleRightPanelTabsKeyDown(event) {
+    const currentIndex = rightPanelTabs.findIndex((tab) => tab.id === rightPanelTab);
+    if (currentIndex < 0) {
+      return;
+    }
+
+    const lastIndex = rightPanelTabs.length - 1;
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = lastIndex;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    const tabList = event.currentTarget;
+    const nextTab = rightPanelTabs[nextIndex];
+    setRightPanelTab(nextTab.id);
+    window.requestAnimationFrame(() => {
+      tabList.querySelector(`[data-right-panel-tab="${nextTab.id}"]`)?.focus();
+    });
+  }
+
+  const rightPanelContent = rightPanelTab === 'workspace' ? (
+    <WorkspacePanel apiJson={apiJson} workspace={workspace} />
+  ) : rightPanelTab === 'subagents' ? (
+    <SubAgentPanel agents={agents} onCancelSubAgent={cancelSubAgent} />
+  ) : rightPanelTab === 'memory' ? (
+    <MemoryPanel
+      apiJson={apiJson}
+      currentSessionId={currentSessionId}
+      workspaceRoot={workspace?.root_path || workspace?.root || ''}
+    />
+  ) : (
+    <RunActivityPanel
+      currentRunId={currentRunId}
+      globalPendingPermissions={globalPendingPermissions}
+      onLoadRunEvents={loadRunEvents}
+      onResolvePermission={resolvePermission}
+      permissions={permissions}
+      runEventsByRun={runEventsByRun}
+      runEventsError={runEventsError}
+      runEventsLoading={runEventsLoading}
+      runs={runs}
+      tools={tools}
+    />
+  );
+
   return (
     <div className="app-shell">
       <TopBar
@@ -818,62 +961,74 @@ export function App() {
           running={running}
           tools={tools}
         />
-        <aside className="right-panel">
-          <div className="right-panel-tabs">
+        <div
+          aria-label="辅助面板"
+          className="right-panel-rail"
+          onKeyDown={handleRightPanelTabsKeyDown}
+          role="tablist"
+        >
+          {rightPanelTabs.map((tab) => (
             <TabButton
-              active={rightPanelTab === 'workspace'}
-              onClick={() => setRightPanelTab('workspace')}
+              active={rightPanelTab === tab.id}
+              data-right-panel-tab={tab.id}
+              data-testid={tab.testId ? `${tab.testId}-rail` : undefined}
+              key={tab.id}
+              onClick={() => selectRightPanelTab(tab.id)}
+              panelId="right-panel-content"
             >
-              工作区
+              {tab.label}
             </TabButton>
-            <TabButton
-              active={rightPanelTab === 'subagents'}
-              onClick={() => setRightPanelTab('subagents')}
-            >
-              子代理
-            </TabButton>
-            <TabButton
-              active={rightPanelTab === 'activity'}
-              data-testid="right-tab-activity"
-              onClick={() => setRightPanelTab('activity')}
-            >
-              活动
-            </TabButton>
-            <TabButton
-              active={rightPanelTab === 'memory'}
-              data-testid="right-tab-memory"
-              onClick={() => setRightPanelTab('memory')}
-            >
-              记忆
-            </TabButton>
+          ))}
+        </div>
+        {rightPanelDrawerOpen ? (
+          <button
+            aria-label="关闭辅助面板"
+            aria-hidden="true"
+            className="right-panel-backdrop"
+            onClick={closeRightPanelDrawer}
+            tabIndex={-1}
+            type="button"
+          />
+        ) : null}
+        <aside
+          aria-hidden={compactLayout && !rightPanelDrawerOpen ? 'true' : undefined}
+          className={rightPanelDrawerOpen ? 'right-panel drawer-open' : 'right-panel'}
+          inert={compactLayout && !rightPanelDrawerOpen ? '' : undefined}
+          onKeyDown={(event) => {
+            if (compactLayout && event.key === 'Escape') closeRightPanelDrawer();
+          }}
+        >
+          <div className="right-panel-mobile-header">
+            <strong>{rightPanelTabs.find((tab) => tab.id === rightPanelTab)?.label || '辅助面板'}</strong>
+            <IconButton label="关闭辅助面板" onClick={closeRightPanelDrawer} ref={rightPanelCloseRef}>
+              <X size={17} />
+            </IconButton>
           </div>
-          {rightPanelTab === 'workspace' ? (
-            <WorkspacePanel apiJson={apiJson} workspace={workspace} />
-          ) : rightPanelTab === 'subagents' ? (
-            <SubAgentPanel agents={agents} onCancelSubAgent={cancelSubAgent} />
-          ) : rightPanelTab === 'memory' ? (
-            <MemoryPanel
-              apiJson={apiJson}
-              currentSessionId={currentSessionId}
-              workspaceRoot={workspace?.root_path || workspace?.root || ''}
-            />
-          ) : (
-            <RunActivityPanel
-              currentRunId={currentRunId}
-              globalPendingPermissions={globalPendingPermissions}
-              onLoadRunEvents={loadRunEvents}
-              onResolvePermission={resolvePermission}
-              permissions={permissions}
-              runEventsByRun={runEventsByRun}
-              runEventsError={runEventsError}
-              runEventsLoading={runEventsLoading}
-              runs={runs}
-              tools={tools}
-            />
-          )}
+          <div
+            aria-label="辅助面板"
+            className="right-panel-tabs"
+            onKeyDown={handleRightPanelTabsKeyDown}
+            role="tablist"
+          >
+            {rightPanelTabs.map((tab) => (
+              <TabButton
+                active={rightPanelTab === tab.id}
+                data-right-panel-tab={tab.id}
+                data-testid={tab.testId || undefined}
+                key={tab.id}
+                onClick={() => selectRightPanelTab(tab.id)}
+                panelId="right-panel-content"
+              >
+                {tab.label}
+              </TabButton>
+            ))}
+          </div>
+          <div className="right-panel-content" id="right-panel-content" role="tabpanel">
+            {rightPanelContent}
+          </div>
         </aside>
       </main>
-      {lastError ? <div className="toast">{lastError}</div> : null}
+      {lastError ? <div className="toast" role="alert">{lastError}</div> : null}
       <StatusBar
         rootSeq={rootSeq}
         runtimeStatus={running ? `运行中（${displayRuntimeMode(runSettings.runtimeMode)}）` : `${displayRuntimeMode(runSettings.runtimeMode)} 待命`}

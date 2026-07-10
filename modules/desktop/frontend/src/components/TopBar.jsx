@@ -19,8 +19,8 @@ export function TopBar({ status, gatewayBase, onReconnect, onSettings }) {
           className={classNames('connection-pill', `state-${status}`)}
           data-testid="gateway-status"
           status={status}
+          title={`连接地址：${gatewayBase}`}
         />
-        <span className="gateway-address">{gatewayBase}</span>
         <Button icon={<RefreshCw size={15} />} onClick={onReconnect} variant="soft">
           重新连接
         </Button>

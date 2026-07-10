@@ -1,5 +1,5 @@
 import { RefreshCw, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { emptyProfileDraft, profileDraftFrom } from '../lib/providerProfiles.js';
 import { Button, IconButton } from './ui/button.jsx';
 import { ErrorMessage } from './ui/feedback.jsx';
@@ -30,6 +30,14 @@ const SUB_AGENT_BACKENDS = [
   ['runtime_process', '运行时进程'],
   ['process_pool', '进程池'],
 ];
+
+const focusableSelector = [
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'textarea:not([disabled])',
+  '[href]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
 
 function SettingRow({ children, label }) {
   return (
@@ -79,6 +87,9 @@ export function SettingsPanel({
   onDeleteProviderProfile,
   onRefreshProviderProfiles,
 }) {
+  const panelRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const previousActiveElementRef = useRef(null);
   const selectedProfile = useMemo(
     () => providerProfiles.find((item) => item.id === settings.providerProfileId) || null,
     [providerProfiles, settings.providerProfileId],
@@ -93,6 +104,25 @@ export function SettingsPanel({
       setProfileError('');
     }
   }, [open, selectedProfile]);
+
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    previousActiveElementRef.current = document.activeElement;
+    const frame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      const previous = previousActiveElementRef.current;
+      if (previous && typeof previous.focus === 'function' && document.contains(previous)) {
+        previous.focus();
+      }
+    };
+  }, [open]);
 
   if (!open) {
     return null;
@@ -149,14 +179,50 @@ export function SettingsPanel({
     }
   }
 
+  function handleDialogKeyDown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (event.key !== 'Tab') {
+      return;
+    }
+
+    const focusable = Array.from(panelRef.current?.querySelectorAll(focusableSelector) || [])
+      .filter((element) => element.offsetParent !== null || element === document.activeElement);
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   return (
     <div className="settings-overlay" role="presentation">
-      <aside className="settings-panel" aria-label="设置" role="dialog" aria-modal="true">
+      <aside
+        aria-label="设置"
+        className="settings-panel"
+        onKeyDown={handleDialogKeyDown}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+      >
         <header className="settings-header">
           <div>
             <strong>设置</strong>
           </div>
-          <IconButton label="关闭设置" onClick={onClose}>
+          <IconButton label="关闭设置" onClick={onClose} ref={closeButtonRef}>
             <X size={17} />
           </IconButton>
         </header>
@@ -256,6 +322,7 @@ export function SettingsPanel({
             </div>
           </div>
 
+          <h2 className="settings-section-title">运行与代理</h2>
           <SettingSelect
             label="运行模式"
             options={RUNTIME_MODES}
@@ -263,21 +330,6 @@ export function SettingsPanel({
             settingKey="runtimeMode"
             onUpdate={updateSetting}
           />
-          <SettingSelect
-            label="工具策略"
-            options={TOOL_POLICIES}
-            settings={settings}
-            settingKey="toolPolicy"
-            onUpdate={updateSetting}
-          />
-          <SettingSelect
-            label="授权模式"
-            options={PERMISSION_MODES}
-            settings={settings}
-            settingKey="permissionMode"
-            onUpdate={updateSetting}
-          />
-
           <label className="settings-check">
             <input
               type="checkbox"
@@ -299,6 +351,22 @@ export function SettingsPanel({
             placeholder="可选"
             settings={settings}
             settingKey="model"
+            onUpdate={updateSetting}
+          />
+
+          <h2 className="settings-section-title">工具与授权</h2>
+          <SettingSelect
+            label="工具策略"
+            options={TOOL_POLICIES}
+            settings={settings}
+            settingKey="toolPolicy"
+            onUpdate={updateSetting}
+          />
+          <SettingSelect
+            label="授权模式"
+            options={PERMISSION_MODES}
+            settings={settings}
+            settingKey="permissionMode"
             onUpdate={updateSetting}
           />
           <SettingTextInput

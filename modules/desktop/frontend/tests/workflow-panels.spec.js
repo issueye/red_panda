@@ -17,13 +17,28 @@ test('Restored workflow panels render permissions tools and subagent actions', a
   await expect(failedTool).toContainText('exit status 1');
 
   await expect(page.getByTestId('permission-card')).toHaveCount(2);
+  expect(await page.locator('.conversation > [data-timeline-type]').evaluateAll((items) => (
+    items.map((item) => item.dataset.timelineType)
+  ))).toEqual([
+    'message',
+    'tool',
+    'tool',
+    'message',
+    'permission',
+    'permission',
+  ]);
   const approvePermission = page.getByTestId('permission-card').filter({ hasText: 'Allow shell read' });
+  await expect(approvePermission).toContainText('中风险');
+  await expect(approvePermission).toContainText('shell.exec');
+  await expect(approvePermission).toContainText('cat README.md');
   await approvePermission.getByTestId('permission-approve').click();
   await expect(approvePermission.getByTestId('permission-state')).toHaveText('已允许');
   await expect(approvePermission.getByTestId('permission-approve')).toHaveCount(0);
   await expect(page.getByTestId('permission-result')).toHaveText('perm_approve_restore:approve');
 
   const denyPermission = page.getByTestId('permission-card').filter({ hasText: 'Allow destructive shell command' });
+  await expect(denyPermission).toContainText('高风险');
+  await expect(denyPermission).toContainText('子代理 planner');
   await denyPermission.getByTestId('permission-deny').click();
   await expect(denyPermission.getByTestId('permission-state')).toHaveText('已拒绝');
   await expect(denyPermission.getByTestId('permission-deny')).toHaveCount(0);
@@ -38,4 +53,23 @@ test('Restored workflow panels render permissions tools and subagent actions', a
   await expect(archivist.getByTestId('subagent-cancel')).toBeDisabled();
   await planner.getByTestId('subagent-cancel').click();
   await expect(page.getByTestId('subagent-result')).toHaveText('planner:running');
+});
+
+test('Conversation pauses following after manual scroll and can return to latest', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+  const conversation = page.getByTestId('chat-conversation');
+
+  await expect.poll(() => conversation.evaluate((element) => (
+    element.scrollHeight - element.scrollTop - element.clientHeight
+  ))).toBeLessThan(2);
+
+  await conversation.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(page.getByTestId('conversation-latest')).toBeVisible();
+  await page.getByTestId('conversation-latest').click();
+  await expect.poll(() => conversation.evaluate((element) => (
+    element.scrollHeight - element.scrollTop - element.clientHeight
+  ))).toBeLessThan(2);
 });

@@ -191,13 +191,13 @@ function eventKindRank(kind) {
 function formatRunEventScope(event) {
   const role = event?.agentRole || 'root';
   if (role === 'root') {
-    return 'root';
+    return '主代理';
   }
   if (role === 'subagent') {
-    return event?.agentName ? `subagent:${event.agentName}` : event?.agentId ? `subagent:${event.agentId}` : 'subagent';
+    return event?.agentName ? `子代理 · ${event.agentName}` : event?.agentId ? `子代理 · ${event.agentId}` : '子代理';
   }
   if (event?.agentName) {
-    return `${role}:${event.agentName}`;
+    return `${role} · ${event.agentName}`;
   }
   if (event?.agentId) {
     return `${role}:${event.agentId}`;
@@ -209,9 +209,9 @@ function formatRunEventSequence(event) {
   const rootSeq = Number(event?.rootSeq || 0);
   const agentSeq = Number(event?.agentSeq || 0);
   if (agentSeq > 0 && event?.agentRole && event.agentRole !== 'root') {
-    return `root#${rootSeq} agent#${agentSeq}`;
+    return `事件 ${String(rootSeq).padStart(3, '0')} · 代理事件 ${String(agentSeq).padStart(3, '0')}`;
   }
-  return `root#${rootSeq}`;
+  return `事件 ${String(rootSeq).padStart(3, '0')}`;
 }
 
 function summarizeToolInput(payload) {

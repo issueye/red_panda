@@ -18,7 +18,7 @@ export function SubAgentPanel({ agents, onCancelSubAgent }) {
               <Bot size={16} />
               <div>
                 <strong>{agent.name}</strong>
-                <span>{displayStatus(agent.status)} - seq {formatSeq(agent.seq)}</span>
+                <span>{displayStatus(agent.status)} - 事件 {formatSeq(agent.seq)}</span>
                 {agent.backend ? <em>{displaySubAgentBackend(agent.backend)}</em> : null}
                 {agent.summary ? <small>{agent.summary}</small> : null}
               </div>

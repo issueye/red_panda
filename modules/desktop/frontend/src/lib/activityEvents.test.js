@@ -56,8 +56,8 @@ test('getRunEventTimelineMeta distinguishes subagent scope and sequence', () => 
   const meta = getRunEventTimelineMeta(event);
 
   assert.equal(meta.kind, 'tool');
-  assert.equal(meta.scope, 'subagent:researcher');
-  assert.equal(meta.sequence, 'root#8 agent#3');
+  assert.equal(meta.scope, '子代理 · researcher');
+  assert.equal(meta.sequence, '事件 008 · 代理事件 003');
   assert.equal(meta.title, 'tool_started');
   assert.equal(meta.summary, 'web_search - 运行中 - q=issue timeline');
 });
@@ -72,8 +72,8 @@ test('getRunEventTimelineMeta keeps root events compact', () => {
   }));
 
   assert.equal(meta.kind, 'done');
-  assert.equal(meta.scope, 'root');
-  assert.equal(meta.sequence, 'root#9');
+  assert.equal(meta.scope, '主代理');
+  assert.equal(meta.sequence, '事件 009');
   assert.equal(meta.summary, '完成 - 已完成');
 });
 
@@ -132,14 +132,14 @@ test('filterRunEvents applies kind and agent scope filters', () => {
   ];
 
   assert.deepEqual(
-    filterRunEvents(events, { kind: 'tool', scope: 'subagent:planner' }).map((event) => event.id),
+    filterRunEvents(events, { kind: 'tool', scope: '子代理 · planner' }).map((event) => event.id),
     ['evt_sub_tool'],
   );
   assert.deepEqual(
-    filterRunEvents(events, { kind: 'all', scope: 'root' }).map((event) => event.id),
+    filterRunEvents(events, { kind: 'all', scope: '主代理' }).map((event) => event.id),
     ['evt_root_tool'],
   );
-  assert.deepEqual(filterRunEvents(null, { kind: 'tool', scope: 'root' }), []);
+  assert.deepEqual(filterRunEvents(null, { kind: 'tool', scope: '主代理' }), []);
 });
 
 test('groupRunEventsByKind returns stable inspection groups with ordered events', () => {
@@ -169,7 +169,7 @@ test('getRunEventFilterOptions includes all option and sorted scopes', () => {
   ]);
 
   assert.deepEqual(options.kinds, ['all', 'permission', 'message', 'done']);
-  assert.deepEqual(options.scopes, ['all', 'root', 'runtime:worker', 'subagent:coder']);
+  assert.deepEqual(options.scopes, ['all', 'runtime · worker', '主代理', '子代理 · coder']);
 });
 
 test('formatRunEventPayload returns pretty JSON only when payload exists', () => {
@@ -192,5 +192,5 @@ test('getRunEventTimelineMeta preserves non-subagent roles', () => {
     payload: { message: 'ready' },
   }));
 
-  assert.equal(meta.scope, 'runtime:pool');
+  assert.equal(meta.scope, 'runtime · pool');
 });

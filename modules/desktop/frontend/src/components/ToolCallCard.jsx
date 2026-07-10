@@ -11,7 +11,7 @@ function statusIcon(status) {
 export function ToolCallCard({ item }) {
   const args = item.arguments ? JSON.stringify(item.arguments, null, 2) : '';
   return (
-    <article className={`tool-card tool-${item.status || 'running'}`} data-testid="tool-card">
+    <article className={`tool-card tool-${item.status || 'running'}`} data-testid="tool-card" data-timeline-type="tool">
       <div className="tool-title">
         <Wrench size={16} />
         <div>

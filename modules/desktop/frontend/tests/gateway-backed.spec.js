@@ -289,7 +289,7 @@ test('Gateway-backed desktop renders runtime_process subagent failure @gateway-b
     const timeline = runRow.getByTestId('activity-event-timeline');
     await expect(timeline).toContainText('subagent_update', { timeout: 15000 });
     await expect(timeline).toContainText('missing-red-panda-subagent');
-    await expect(timeline).toContainText('subagent:planner');
+    await expect(timeline).toContainText('子代理 · planner');
   } finally {
     await page.close().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -340,7 +340,7 @@ test('Gateway-backed desktop cancels a running subagent @gateway-backed', async 
     const timeline = runRow.getByTestId('activity-event-timeline');
     await expect(timeline).toContainText('subagent_update', { timeout: 15000 });
     await expect(timeline).toContainText('planner subagent cancelled');
-    await expect(timeline).toContainText('subagent:planner');
+    await expect(timeline).toContainText('子代理 · planner');
   } finally {
     await page.close().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, 300));

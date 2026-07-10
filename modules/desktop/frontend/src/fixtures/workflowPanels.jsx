@@ -54,6 +54,10 @@ const permissions = [
     detail: 'Agent Runtime is waiting for a restored approval.',
     status: 'pending',
     toolName: 'shell.exec',
+    risk: 'medium',
+    arguments: { command: 'cat README.md' },
+    agent: '主代理',
+    rootSeq: 5,
   },
   {
     id: 'perm_deny_restore',
@@ -62,6 +66,10 @@ const permissions = [
     detail: 'Agent Runtime wants to remove a generated file.',
     status: 'pending',
     toolName: 'shell.exec',
+    risk: 'high',
+    arguments: { command: 'rm generated.tmp' },
+    agent: '子代理 planner',
+    rootSeq: 6,
   },
 ];
 
