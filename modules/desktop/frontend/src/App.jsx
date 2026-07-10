@@ -18,6 +18,7 @@ import { displayRuntimeMode, displaySessionKind, displayStatus } from './lib/dis
 import {
   mcpServerCreatePayload,
   mcpServerUpdatePayload,
+  normalizeMcpDiscovery,
   normalizeMcpServer,
 } from './lib/mcpServers.js';
 import {
@@ -261,6 +262,7 @@ export function App() {
   const [mcpServers, setMcpServers] = useState([]);
   const [mcpServersLoading, setMcpServersLoading] = useState(false);
   const [mcpServersError, setMcpServersError] = useState('');
+  const [mcpDiscoveryByServer, setMcpDiscoveryByServer] = useState({});
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
 
@@ -915,8 +917,37 @@ export function App() {
     try {
       await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
       setMcpServers((items) => items.filter((item) => item.id !== id));
+      setMcpDiscoveryByServer((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
     } catch (error) {
       setMcpServersError(error.message);
+      throw error;
+    }
+  }
+
+  async function discoverMcpServer(id) {
+    setMcpDiscoveryByServer((current) => ({
+      ...current,
+      [id]: { ...current[id], loading: true, error: '' },
+    }));
+    try {
+      const data = await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}/discover`, {
+        method: 'POST',
+      });
+      const result = normalizeMcpDiscovery(data);
+      setMcpDiscoveryByServer((current) => ({
+        ...current,
+        [id]: { loading: false, error: '', result },
+      }));
+      return result;
+    } catch (error) {
+      setMcpDiscoveryByServer((current) => ({
+        ...current,
+        [id]: { ...current[id], loading: false, error: error.message },
+      }));
       throw error;
     }
   }
@@ -1005,10 +1036,12 @@ export function App() {
         mcpServers={mcpServers}
         mcpServersError={mcpServersError}
         mcpServersLoading={mcpServersLoading}
+        mcpDiscoveryByServer={mcpDiscoveryByServer}
         onCreateMcpServer={createMcpServer}
         onCreateProviderProfile={createProviderProfile}
         onDeleteMcpServer={deleteMcpServer}
         onDeleteProviderProfile={deleteProviderProfile}
+        onDiscoverMcpServer={discoverMcpServer}
         onChange={setRunSettings}
         onClose={() => setSettingsOpen(false)}
         onRefreshMcpServers={loadMcpServers}

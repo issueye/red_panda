@@ -236,12 +236,12 @@ Desktop SettingsPanel manages these profiles through the Gateway APIs. It lists 
 
 ## MCP Configuration
 
-Gateway manages MCP server configuration records through `/api/v1/mcp/servers`. The Desktop MCP Settings tab uses these APIs for list, create, edit, enable/disable, and delete operations. Configuration includes command argv, environment entries, working directory, normalized phase timeouts, raw tool allowlists, and risk overrides. Sensitive environment values are masked in API responses.
+Gateway manages MCP server configuration records through `/api/v1/mcp/servers`. The Desktop MCP Settings tab uses these APIs for list, create, edit, enable/disable, delete, and read-only discovery operations. Configuration includes command argv, environment entries, working directory, normalized phase timeouts, raw tool allowlists, and risk overrides. Sensitive environment values are masked in API responses.
 
-This is configuration management only. Gateway does not execute configured commands, and Agent Runtime does not yet start MCP processes, initialize servers, discover tools with `tools/list`, register MCP tools, or call `tools/call`.
+For discovery, Gateway forwards one enabled configuration to Agent Runtime. Runtime directly starts the stdio process, performs `initialize` and `tools/list`, applies the server tool allowlist, sanitizes diagnostics, and always cleans up the child process. Discovered tools are inspectable in Desktop but are not registered with providers and cannot be called.
 
 ## Next Focus
 
-- Treat the v0.1.2 Gateway MCP config CRUD and v0.1.4 Desktop MCP config management slices as implemented.
-- Follow [v0.1.5 Development Plan](docs/26-v0.1.5-development-plan.md) for the next controlled read-only startup, initialize, and `tools/list` discovery slice.
+- Treat the v0.1.2 Gateway MCP config CRUD, v0.1.4 Desktop MCP config management, and v0.1.5 read-only discovery slices as implemented.
+- Keep Runtime-owned discovery separate from provider-facing tool registration and execution.
 - Keep MCP `tools/call`, provider-facing execution, permission integration, cancellation/restart policy, and production process lifecycle claims blocked until their later implementation and verification gates pass.

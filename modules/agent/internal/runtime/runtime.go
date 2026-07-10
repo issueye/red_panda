@@ -43,6 +43,7 @@ type Runtime struct {
 	provider           Provider
 	tools              ToolRunner
 	processPool        *subAgentProcessPool
+	mcpProcesses       map[*mcpProcess]struct{}
 	newProcessSubAgent func(context.Context, methods.ReplyParams, string) (processSubAgent, error)
 }
 
@@ -69,6 +70,7 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 		permissions:    map[string]chan permission.ResolveParams{},
 		activeRuns:     map[string]context.CancelFunc{},
 		subagents:      map[string]*runtimeSubAgent{},
+		mcpProcesses:   map[*mcpProcess]struct{}{},
 		provider:       newProviderFromEnv(log),
 		tools:          ToolRunner{},
 	}
@@ -135,6 +137,7 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 	case methods.CorePing:
 		return r.handlePing(req)
 	case methods.CoreShutdown:
+		r.closeMCPProcesses()
 		if r.processPool != nil {
 			r.processPool.Close(context.Background())
 		}
@@ -145,6 +148,8 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 		return r.writeResponse(resp)
 	case methods.AgentReply:
 		return r.handleReply(ctx, req)
+	case methods.MCPDiscover:
+		return r.handleMCPDiscover(ctx, req)
 	case methods.AgentCancel:
 		return r.handleCancel(req)
 	case methods.AgentSubAgents:
@@ -193,6 +198,7 @@ func (r *Runtime) handleInitialize(req jsonrpc.Request) error {
 			{Name: methods.AgentSubAgents, Version: 1},
 			{Name: methods.AgentSubAgentCancel, Version: 1},
 			{Name: methods.AgentEvent, Version: 1},
+			{Name: methods.MCPDiscover, Version: 1},
 			{Name: methods.PermissionResolve, Version: 1},
 		},
 	}

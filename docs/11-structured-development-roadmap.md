@@ -34,7 +34,7 @@ For the next planned slices, use:
 | Protocol | JSON-RPC, WebSocket envelopes, run lifecycle, permissions, tools, subagents, replay/resume, and MCP config CRUD DTOs are implemented. | `modules/protocol`, `scripts/protocol-compat.ps1` | MCP initialize/discovery/call contracts remain. |
 | Agent Runtime | Provider abstraction, sequential tool loop, permission gating, cancellation, subagents, memory context injection, and Gateway-mediated `memory.*` tools are implemented. | `modules/agent/internal/runtime`, runtime unit tests | MCP process lifecycle, discovery, and calls are not implemented. |
 | Gateway | Gin/GORM/SQLite MVC, Runtime subprocess client, persistence, projections, provider profiles, MCP config CRUD, and WebSocket routing are implemented. | `modules/gateway`, repository/service/controller tests | Gateway does not and must not execute MCP commands. |
-| Desktop | Wails v3 + React UI with chat, tools, permissions, subagents, settings, workspace, activity timeline, Memory, and Gateway-backed MCP config management. | `modules/desktop/frontend`, Playwright tests | No live MCP discovery, status, or callable tools exist yet. |
+| Desktop | Wails v3 + React UI with chat, tools, permissions, subagents, settings, workspace, activity timeline, Memory, and Gateway-backed MCP management. | `modules/desktop/frontend`, Playwright tests | Read-only MCP discovery and health are visible; callable MCP tools do not exist yet. |
 | Persistence | Sessions, messages, run events, runs, tools, permissions, providers, lineage, compactions, memory, and MCP server configs are persisted. | Gateway repositories and APIs | MCP runtime state is intentionally not persisted yet. |
 | Verification | Unit tests, Playwright fixtures, Gateway-backed E2E, protocol compatibility, Wails build. | `npm test`, `npm run test:ui`, `go test`, scripts | Full smoke is slower; test matrix needs tiers to avoid wasting time. |
 
@@ -254,11 +254,11 @@ Next work should be picked from this queue, top first:
 12. MCP config DTOs and Gateway config CRUD. Status: complete for v0.1.2.
 13. Desktop clarity and localization stabilization. Status: implemented for v0.1.3.
 14. Desktop MCP config UI. Status: complete for v0.1.4; config management only.
-15. MCP read-only startup and discovery. Status: next planned slice for v0.1.5.
+15. MCP read-only startup and discovery. Status: complete for v0.1.5.
 
 Do not start MCP implementation before items 1-6 are complete or explicitly deferred in this document.
 
-Items 12 and 14 complete the configuration surface but do not make MCP tools executable. The next slice may implement controlled startup, initialize, and read-only `tools/list`; `tools/call`, provider-facing execution, permission integration, and restart policy remain blocked.
+Items 12, 14, and 15 provide configuration plus Runtime-owned one-shot startup, initialize, and read-only `tools/list`. MCP tools remain non-executable; `tools/call`, provider-facing execution, permission integration, long-lived reuse, and restart policy remain blocked.
 
 The active owner/work-lane split and stop rules for this queue are tracked in `docs/12-current-execution-plan.md`.
 

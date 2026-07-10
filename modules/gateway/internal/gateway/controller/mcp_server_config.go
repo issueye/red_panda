@@ -93,6 +93,24 @@ func (m MCPServerConfigController) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, protocolmcp.MCPServerDeleteResponse{ID: id, Deleted: true}))
 }
 
+func (m MCPServerConfigController) Discover(c *gin.Context) {
+	var req struct {
+		WorkspaceRoot string `json:"workspace_root"`
+	}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_payload", "message": "invalid MCP discovery payload"}})
+			return
+		}
+	}
+	result, err := m.Services.MCPServers.Discover(c.Request.Context(), c.Param("id"), req.WorkspaceRoot)
+	if err != nil {
+		writeMCPServerError(c, "discover", err)
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, result))
+}
+
 func writeMCPServerError(c *gin.Context, operation string, err error) {
 	status := http.StatusInternalServerError
 	code := "mcp_server_" + operation + "_failed"

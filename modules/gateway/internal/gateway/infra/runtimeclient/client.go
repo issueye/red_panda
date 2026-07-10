@@ -14,6 +14,7 @@ import (
 
 	"redpanda/protocol/events"
 	"redpanda/protocol/jsonrpc"
+	protocolmcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
 )
@@ -165,6 +166,21 @@ func (c *Client) ResolvePermission(ctx context.Context, params permission.Resolv
 	var result permission.ResolveResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return permission.ResolveResult{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) DiscoverMCP(ctx context.Context, params methods.MCPDiscoverParams) (protocolmcp.MCPDiscoveryResult, error) {
+	if err := c.Initialize(ctx); err != nil {
+		return protocolmcp.MCPDiscoveryResult{}, err
+	}
+	raw, err := c.call(ctx, methods.MCPDiscover, params)
+	if err != nil {
+		return protocolmcp.MCPDiscoveryResult{}, err
+	}
+	var result protocolmcp.MCPDiscoveryResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return protocolmcp.MCPDiscoveryResult{}, err
 	}
 	return result, nil
 }

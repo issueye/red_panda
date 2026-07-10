@@ -33,6 +33,26 @@ export function mcpServerUpdatePayload(input = {}) {
   return payload;
 }
 
+export function normalizeMcpDiscovery(data = {}) {
+  return {
+    servers: Array.isArray(data.servers) ? data.servers.map((server) => ({
+      name: server.name || '',
+      status: server.status || 'unknown',
+      serverInfo: {
+        name: server.server_info?.name || '',
+        version: server.server_info?.version || '',
+      },
+      tools: Array.isArray(server.tools) ? server.tools.map((tool) => ({
+        name: tool.name || '',
+        description: tool.description || '',
+      })) : [],
+      error: server.error || '',
+      stderrSummary: server.stderr_summary || '',
+      durationMs: Number.isFinite(server.duration_ms) ? server.duration_ms : 0,
+    })) : [],
+  };
+}
+
 function mcpServerPayload(input) {
   return {
     name: input.name || '',

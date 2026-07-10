@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   mcpServerCreatePayload,
   mcpServerUpdatePayload,
+  normalizeMcpDiscovery,
   normalizeMcpServer,
 } from './mcpServers.js';
 
@@ -42,6 +43,32 @@ test('normalizeMcpServer maps API fields and renders one argument per line', () 
   assert.deepEqual(server.riskOverrides, { read_file: 'low' });
   assert.equal(server.createdAt, '2026-07-09T00:00:00Z');
   assert.equal(server.updatedAt, '2026-07-10T00:00:00Z');
+});
+
+test('normalizeMcpDiscovery keeps only read-only discovery fields', () => {
+  const result = normalizeMcpDiscovery({
+    servers: [{
+      name: 'filesystem',
+      status: 'connected',
+      server_info: { name: 'Filesystem MCP', version: '1.2.0' },
+      tools: [{ name: 'read_file', description: 'Read a file', input_schema: { type: 'object' } }],
+      duration_ms: 37,
+      env: { SECRET: 'must-not-leak' },
+    }],
+  });
+
+  assert.deepEqual(result, {
+    servers: [{
+      name: 'filesystem',
+      status: 'connected',
+      serverInfo: { name: 'Filesystem MCP', version: '1.2.0' },
+      tools: [{ name: 'read_file', description: 'Read a file' }],
+      error: '',
+      stderrSummary: '',
+      durationMs: 37,
+    }],
+  });
+  assert.equal(JSON.stringify(result).includes('SECRET'), false);
 });
 
 test('normalizeMcpServer keeps masked env values exactly as returned by API', () => {

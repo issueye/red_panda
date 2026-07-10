@@ -1,5 +1,7 @@
 package methods
 
+import protocolmcp "redpanda/protocol/mcp"
+
 const (
 	CoreInitialize      = "core.initialize"
 	CorePing            = "core.ping"
@@ -11,6 +13,7 @@ const (
 	AgentSubAgentCancel = "agent.subagent.cancel"
 	AgentSkills         = "agent.skills"
 	AgentSkillLoad      = "agent.skill.load"
+	MCPDiscover         = "mcp.discover"
 	PermissionResolve   = "permission.resolve"
 	AgentEvent          = "agent.event"
 	MemoryToolExecute   = "memory.tool.execute"
@@ -52,6 +55,11 @@ type PingParams struct {
 type PingResult struct {
 	Nonce  string `json:"nonce,omitempty"`
 	Status string `json:"status"`
+}
+
+type MCPDiscoverParams struct {
+	WorkspaceRoot string                        `json:"workspace_root,omitempty"`
+	Servers       []protocolmcp.MCPServerConfig `json:"servers"`
 }
 
 type ReplyParams struct {

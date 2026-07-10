@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -121,6 +122,22 @@ func TestMCPServerConfigServiceRejectsInvalidConfig(t *testing.T) {
 				t.Fatalf("Create() error = %v, want invalid config", err)
 			}
 		})
+	}
+}
+
+func TestMCPServerConfigServiceRejectsDiscoveryForDisabledServer(t *testing.T) {
+	_, service := newMCPServerConfigServiceFixture(t)
+	created, err := service.Create(protocolmcp.MCPServerConfig{
+		Name:    "disabled",
+		Command: "mcp-disabled",
+		Enabled: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Discover(context.Background(), created.ID, "")
+	if !errors.Is(err, ErrInvalidMCPServerConfig) {
+		t.Fatalf("Discover error = %v, want invalid config", err)
 	}
 }
 

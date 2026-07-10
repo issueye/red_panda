@@ -39,6 +39,6 @@ func NewSet(opts Options) Set {
 		Tool:       NewToolService(opts.Repos),
 		Permission: NewPermissionService(opts.Repos),
 		Provider:   NewProviderProfileService(opts.Repos),
-		MCPServers: NewMCPServerConfigService(opts.Repos),
+		MCPServers: NewMCPServerConfigService(opts.Repos, opts.RuntimeClient),
 	}
 }

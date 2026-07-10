@@ -77,3 +77,28 @@ type MCPServerDeleteResponse struct {
 	ID      string `json:"id"`
 	Deleted bool   `json:"deleted"`
 }
+
+type MCPToolDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
+type MCPServerInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type MCPServerDiscovery struct {
+	Name          string              `json:"name"`
+	Status        string              `json:"status"`
+	ServerInfo    MCPServerInfo       `json:"server_info"`
+	Tools         []MCPToolDefinition `json:"tools"`
+	Error         string              `json:"error"`
+	StderrSummary string              `json:"stderr_summary"`
+	DurationMS    int64               `json:"duration_ms"`
+}
+
+type MCPDiscoveryResult struct {
+	Servers []MCPServerDiscovery `json:"servers"`
+}

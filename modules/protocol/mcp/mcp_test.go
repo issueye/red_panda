@@ -122,3 +122,74 @@ func TestMCPServerCRUDDTOJSONShape(t *testing.T) {
 		t.Fatalf("serialized list response is missing servers: %s", listRaw)
 	}
 }
+
+func TestMCPDiscoveryResultJSONRoundTrip(t *testing.T) {
+	want := MCPDiscoveryResult{Servers: []MCPServerDiscovery{
+		{
+			Name:   "filesystem",
+			Status: "ready",
+			ServerInfo: MCPServerInfo{
+				Name:    "filesystem-server",
+				Version: "1.2.3",
+			},
+			Tools: []MCPToolDefinition{
+				{
+					Name:        "read_file",
+					Description: "Read a workspace file.",
+					InputSchema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"path": map[string]any{"type": "string"},
+						},
+					},
+				},
+			},
+			StderrSummary: "diagnostic output",
+			DurationMS:    42,
+		},
+		{
+			Name:       "broken",
+			Status:     "failed",
+			Tools:      []MCPToolDefinition{},
+			Error:      "initialize failed",
+			DurationMS: 15,
+		},
+	}}
+
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fields["servers"]; !ok {
+		t.Fatalf("serialized discovery result is missing servers: %s", raw)
+	}
+	var serializedServers []map[string]json.RawMessage
+	if err := json.Unmarshal(fields["servers"], &serializedServers); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"name", "status", "server_info", "tools", "error", "stderr_summary", "duration_ms"} {
+		if _, ok := serializedServers[0][field]; !ok {
+			t.Fatalf("serialized server discovery is missing %q: %s", field, raw)
+		}
+	}
+	var serializedTools []map[string]json.RawMessage
+	if err := json.Unmarshal(serializedServers[0]["tools"], &serializedTools); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"name", "description", "input_schema"} {
+		if _, ok := serializedTools[0][field]; !ok {
+			t.Fatalf("serialized tool definition is missing %q: %s", field, raw)
+		}
+	}
+	var got MCPDiscoveryResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("discovery round trip mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+}

@@ -1,6 +1,6 @@
 # Current Execution Plan
 
-Updated: 2026-07-10
+Updated: 2026-07-11
 
 This document is the active execution board for the next development slice. It keeps `red_panda` work ordered, reviewable, and safe for parallel workers.
 
@@ -27,26 +27,25 @@ Current state by layer:
 
 | Layer | Current state | Stability | Next concern |
 | --- | --- | --- | --- |
-| Protocol | Existing run/memory contracts plus MCP server config, timeout, and CRUD DTOs. | MCP config complete | MCP initialize/discovery/call contracts remain. |
-| Agent Runtime | Ordered session context, sequential tool rounds, built-in/memory tools, permissions, cancellation, and subagents. | M0 gate passed | MCP process lifecycle, `tools/list`, and `tools/call` are not implemented. |
-| Gateway | Existing APIs plus validated, persisted, redacted MCP server config CRUD under `/api/v1/mcp/servers`. | MCP config complete | Gateway does not start or call MCP servers. |
-| Desktop | Existing workbench plus Gateway-backed MCP list/create/edit/enable-disable/delete management in Settings. | MCP config UI complete | No live MCP discovery, process state, or callable MCP tools. |
-| Verification | MCP protocol DTO tests, Gateway repository/service/controller coverage, frontend DTO/UI coverage, and protocol CRUD compatibility are present. | Configuration slices covered | Runtime MCP process and IO-isolation gates remain future work. |
+| Protocol | Existing run/memory contracts plus MCP config and discovery DTOs. | Read-only discovery contract complete | MCP call contracts remain. |
+| Agent Runtime | Existing Agent features plus one-shot MCP stdio initialize and `tools/list` discovery. | v0.1.5 discovery gate passed | MCP tool registration and `tools/call` are not implemented. |
+| Gateway | Validated MCP config CRUD plus discovery proxy under `/api/v1/mcp/servers/:id/discover`. | Discovery proxy complete | Gateway never owns MCP processes or calls tools. |
+| Desktop | MCP configuration management plus health, server metadata, and read-only discovered tool visibility. | v0.1.5 UI complete | No callable MCP tools. |
+| Verification | Fake MCP process, timeout, IO isolation, cleanup, Gateway proxy, frontend, protocol compatibility, and race coverage pass. | Read-only discovery covered | Executable MCP gates remain future work. |
 
 ## 2. Active Rule
 
-M0 stabilization, v0.1.2 MCP config CRUD, and v0.1.4 Desktop MCP config management are implemented. The next controlled slice is v0.1.5 read-only startup and discovery.
+M0 stabilization through v0.1.5 read-only MCP discovery is implemented. The next controlled slice is stabilization before executable MCP integration.
 
 Allowed now:
 
-1. Final integration verification and release status synchronization for the configuration slices.
-2. v0.1.5 design-conformant MCP process supervisor work.
-3. MCP initialize and read-only `tools/list` discovery with deterministic cleanup.
-4. Fake-server tests for stdout/stderr isolation, timeout, and process-leak behavior.
+1. Fix process-child failed, denied, and cancelled terminal-state projection.
+2. Expand skill subagent failure and cancellation coverage.
+3. Design the later MCP registry and permission integration without enabling `tools/call` yet.
 
 Not allowed now:
 
-1. Runtime MCP stdio process implementation.
+1. Provider-facing MCP tool registration or execution.
 2. Plugin marketplace work.
 3. Remote access hardening.
 4. Broad Desktop UI redesign.
@@ -68,7 +67,8 @@ Only the following tasks are active, in this order.
 | 6 | Gateway MCP config CRUD | Gateway model/repository/service/controller | Status: implemented without executing commands. |
 | 7 | Desktop MCP config management | Desktop DTO/App/Settings/UI tests | Status: implemented against Gateway APIs. |
 | 8 | Configuration slice integration gate | Go/frontend/protocol compatibility | Status: passed, including Wails build and real-provider smoke. |
-| 9 | MCP read-only discovery | v0.1.5 scope | Start only after the configuration gate is accepted. |
+| 9 | MCP read-only discovery | v0.1.5 scope | Status: implemented and verified. |
+| 10 | Process-child terminal-state stabilization | Agent Runtime | Status: next controlled slice. |
 
 ## 4. Parallel Worker Plan
 

@@ -122,6 +122,7 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/mcp/servers/:id", controllers.MCPServers.Get)
 	api.PUT("/mcp/servers/:id", controllers.MCPServers.Update)
 	api.DELETE("/mcp/servers/:id", controllers.MCPServers.Delete)
+	api.POST("/mcp/servers/:id/discover", controllers.MCPServers.Discover)
 	api.GET("/runs/:id", controllers.Run.Get)
 	api.GET("/runs/:id/events", controllers.Run.Events)
 	api.GET("/runs/:id/permissions", controllers.Permission.ListByRun)

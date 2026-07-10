@@ -4,6 +4,7 @@ import {
   Plus,
   PlugZap,
   RefreshCw,
+  Search,
   SlidersHorizontal,
   Trash2,
   X,
@@ -127,9 +128,14 @@ function ModuleHeader({ badge, children, title }) {
   );
 }
 
-function ManagerItem({ active, disabled = false, enabled, icon: Icon, meta, name, onDelete, onSelect, onToggle }) {
+function ManagerItem({ active, children, disabled = false, enabled, icon: Icon, meta, name, onDelete, onSelect, onToggle }) {
+  const className = [
+    'settings-manager-item',
+    active ? 'active' : '',
+    children ? 'has-extra-action' : '',
+  ].filter(Boolean).join(' ');
   return (
-    <div className={active ? 'settings-manager-item active' : 'settings-manager-item'}>
+    <div className={className}>
       <button className="settings-manager-select" disabled={disabled} onClick={onSelect} type="button">
         <Icon aria-hidden="true" size={16} />
         <span>
@@ -137,6 +143,7 @@ function ManagerItem({ active, disabled = false, enabled, icon: Icon, meta, name
           <small>{meta}</small>
         </span>
       </button>
+      {children}
       <label className="settings-switch" title={enabled ? '停用' : '启用'}>
         <input
           aria-label={`${enabled ? '停用' : '启用'} ${name}`}
@@ -154,6 +161,66 @@ function ManagerItem({ active, disabled = false, enabled, icon: Icon, meta, name
   );
 }
 
+function McpDiscoveryPanel({ state }) {
+  if (!state) {
+    return (
+      <section className="mcp-discovery" data-testid="mcp-discovery-empty">
+        <span className="mcp-discovery-heading">可用工具</span>
+        <small>使用列表中的发现按钮读取服务器信息和工具清单。</small>
+      </section>
+    );
+  }
+  if (state.loading) {
+    return (
+      <section className="mcp-discovery" data-testid="mcp-discovery-loading">
+        <span className="mcp-discovery-heading">正在发现</span>
+        <small>正在连接服务器并读取工具清单。</small>
+      </section>
+    );
+  }
+  if (state.error) {
+    return (
+      <section className="mcp-discovery" data-testid="mcp-discovery-error">
+        <span className="mcp-discovery-heading">发现失败</span>
+        <ErrorMessage>{state.error}</ErrorMessage>
+      </section>
+    );
+  }
+
+  const servers = state.result?.servers || [];
+  return (
+    <section className="mcp-discovery" data-testid="mcp-discovery-result">
+      <span className="mcp-discovery-heading">可用工具</span>
+      {servers.length === 0 ? <small>服务器未返回发现结果。</small> : servers.map((server, index) => {
+        const healthy = ['connected', 'healthy', 'ready', 'ok', 'success'].includes(server.status);
+        const info = [server.serverInfo?.name, server.serverInfo?.version].filter(Boolean).join(' ');
+        return (
+          <div className="mcp-discovery-server" key={`${server.name}-${index}`}>
+            <div className="mcp-discovery-summary">
+              <strong>{server.name || info || 'MCP 服务器'}</strong>
+              <Badge tone={healthy ? 'success' : server.error ? 'danger' : 'neutral'}>
+                {healthy ? '健康' : server.status}
+              </Badge>
+              {server.durationMs > 0 ? <small>{server.durationMs} ms</small> : null}
+            </div>
+            {info ? <small>{info}</small> : null}
+            {server.error ? <ErrorMessage>{server.error}</ErrorMessage> : null}
+            {server.stderrSummary ? <small className="mcp-discovery-stderr">{server.stderrSummary}</small> : null}
+            <div className="mcp-tool-list">
+              {server.tools.length === 0 ? <small>未发现工具。</small> : server.tools.map((tool) => (
+                <div className="mcp-tool-item" key={tool.name}>
+                  <strong>{tool.name}</strong>
+                  {tool.description ? <small>{tool.description}</small> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 export function SettingsPanel({
   open,
   settings = {},
@@ -163,6 +230,7 @@ export function SettingsPanel({
   mcpServers = [],
   mcpServersLoading = false,
   mcpServersError = '',
+  mcpDiscoveryByServer = {},
   onClose,
   onChange,
   onCreateProviderProfile,
@@ -172,6 +240,7 @@ export function SettingsPanel({
   onCreateMcpServer,
   onUpdateMcpServer,
   onDeleteMcpServer,
+  onDiscoverMcpServer,
   onRefreshMcpServers,
 }) {
   const panelRef = useRef(null);
@@ -351,6 +420,16 @@ export function SettingsPanel({
     setMcpError('');
     try {
       await onRefreshMcpServers();
+    } catch (error) {
+      setMcpError(error.message);
+    }
+  }
+
+  async function discoverMcpServer(server) {
+    setMcpError('');
+    setMcpDraft({ ...server });
+    try {
+      await onDiscoverMcpServer(server.id);
     } catch (error) {
       setMcpError(error.message);
     }
@@ -646,7 +725,19 @@ export function SettingsPanel({
                 setMcpDraft({ ...server });
               }}
               onToggle={(event) => toggleMcpServer(server, event.target.checked)}
-            />
+            >
+              {server.enabled !== false ? (
+                <IconButton
+                  disabled={mcpSaving || mcpDiscoveryByServer[server.id]?.loading}
+                  label={`发现 ${server.name} 工具`}
+                  onClick={() => discoverMcpServer(server)}
+                >
+                  {mcpDiscoveryByServer[server.id]?.loading
+                    ? <RefreshCw className="settings-spin" size={14} />
+                    : <Search size={14} />}
+                </IconButton>
+              ) : null}
+            </ManagerItem>
           ))}
         </div>
         <div className="settings-editor-panel settings-collection-editor">
@@ -705,6 +796,9 @@ export function SettingsPanel({
                   {mcpSaving ? '保存中' : mcpDraft.id ? '保存服务器' : '创建服务器'}
                 </Button>
               </div>
+              {mcpDraft.id ? (
+                <McpDiscoveryPanel state={mcpDiscoveryByServer[mcpDraft.id]} />
+              ) : null}
             </>
           ) : (
             <EmptyState title="选择服务器">从左侧选择服务器，或新建一个 MCP 配置。</EmptyState>

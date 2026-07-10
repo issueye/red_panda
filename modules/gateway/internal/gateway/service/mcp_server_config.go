@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -8,9 +9,11 @@ import (
 	"time"
 	"unicode"
 
+	"redpanda/gateway/internal/gateway/infra/runtimeclient"
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
 	protocolmcp "redpanda/protocol/mcp"
+	"redpanda/protocol/methods"
 )
 
 var ErrInvalidMCPServerConfig = errors.New("invalid MCP server config")
@@ -20,7 +23,8 @@ var mcpServerNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 const redactedMCPEnvValue = "****"
 
 type MCPServerConfigService struct {
-	repos repository.Set
+	repos   repository.Set
+	runtime *runtimeclient.Client
 }
 
 type MCPServerConfigUpdate struct {
@@ -35,8 +39,12 @@ type MCPServerConfigUpdate struct {
 	RiskOverrides *map[string]string
 }
 
-func NewMCPServerConfigService(repos repository.Set) MCPServerConfigService {
-	return MCPServerConfigService{repos: repos}
+func NewMCPServerConfigService(repos repository.Set, runtimes ...*runtimeclient.Client) MCPServerConfigService {
+	var runtime *runtimeclient.Client
+	if len(runtimes) > 0 {
+		runtime = runtimes[0]
+	}
+	return MCPServerConfigService{repos: repos, runtime: runtime}
 }
 
 func (s MCPServerConfigService) Create(input protocolmcp.MCPServerConfig) (protocolmcp.MCPServerResponse, error) {
@@ -129,6 +137,23 @@ func (s MCPServerConfigService) Update(id string, input MCPServerConfigUpdate) (
 
 func (s MCPServerConfigService) Delete(id string) error {
 	return s.repos.MCPServers.Delete(id)
+}
+
+func (s MCPServerConfigService) Discover(ctx context.Context, id string, workspaceRoot string) (protocolmcp.MCPDiscoveryResult, error) {
+	row, err := s.repos.MCPServers.Get(id)
+	if err != nil {
+		return protocolmcp.MCPDiscoveryResult{}, err
+	}
+	if !row.Enabled {
+		return protocolmcp.MCPDiscoveryResult{}, fmt.Errorf("%w: server must be enabled before discovery", ErrInvalidMCPServerConfig)
+	}
+	if s.runtime == nil {
+		return protocolmcp.MCPDiscoveryResult{}, fmt.Errorf("runtime client not configured")
+	}
+	return s.runtime.DiscoverMCP(ctx, methods.MCPDiscoverParams{
+		WorkspaceRoot: workspaceRoot,
+		Servers:       []protocolmcp.MCPServerConfig{mcpServerProtocolConfig(row, false)},
+	})
 }
 
 func validateAndNormalizeMCPServerConfig(input protocolmcp.MCPServerConfig) (protocolmcp.MCPServerConfig, error) {

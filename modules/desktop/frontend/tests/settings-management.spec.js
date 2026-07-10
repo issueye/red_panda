@@ -50,3 +50,55 @@ test('settings management layout remains usable on compact screens', async ({ pa
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   await expect(page.getByRole('button', { name: '保存技能' })).toBeVisible();
 });
+
+test('MCP discovery shows read-only server health and tools', async ({ page }) => {
+  await page.route('**/api/v1/mcp/servers', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          servers: [{
+            id: 'mcp_srv_fixture',
+            name: 'filesystem',
+            command: 'fixture-mcp',
+            args: [],
+            enabled: true,
+          }],
+        },
+      }),
+    });
+  });
+  await page.route('**/api/v1/mcp/servers/mcp_srv_fixture/discover', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          servers: [{
+            name: 'filesystem',
+            status: 'connected',
+            server_info: { name: 'Filesystem MCP', version: '1.2.0' },
+            tools: [{ name: 'read_file', description: '读取工作区文件' }],
+            duration_ms: 24,
+            env: { SECRET_TOKEN: 'must-not-render' },
+          }],
+        },
+      }),
+    });
+  });
+
+  await page.reload();
+  await page.getByRole('button', { name: '设置' }).click();
+  await page.getByRole('tab', { name: 'MCP' }).click();
+  const discover = page.getByRole('button', { name: '发现 filesystem 工具' });
+  await expect(discover).toHaveAttribute('title', '发现 filesystem 工具');
+  await discover.click();
+
+  const result = page.getByTestId('mcp-discovery-result');
+  await expect(result).toContainText('健康');
+  await expect(result).toContainText('Filesystem MCP 1.2.0');
+  await expect(result).toContainText('read_file');
+  await expect(result).toContainText('读取工作区文件');
+  await expect(result).not.toContainText('SECRET_TOKEN');
+});

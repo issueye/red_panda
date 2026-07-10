@@ -1880,9 +1880,91 @@ textarea:focus-visible {
   border-radius: var(--radius-control);
   display: grid;
   gap: 4px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) repeat(2, auto);
   min-width: 0;
   padding: 4px;
+}
+
+.settings-manager-item.has-extra-action {
+  grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+}
+
+.settings-spin {
+  animation: settings-spin 900ms linear infinite;
+}
+
+@keyframes settings-spin {
+  to { transform: rotate(360deg); }
+}
+
+.mcp-discovery {
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.mcp-discovery-heading {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mcp-discovery > small,
+.mcp-discovery-server > small,
+.mcp-tool-item small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.mcp-discovery-server {
+  display: grid;
+  gap: 7px;
+}
+
+.mcp-discovery-summary {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.mcp-discovery-summary strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-discovery-summary > small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.mcp-tool-list {
+  display: grid;
+  gap: 5px;
+}
+
+.mcp-tool-item {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+}
+
+.mcp-tool-item strong {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.mcp-discovery-stderr {
+  white-space: pre-wrap;
 }
 
 .settings-manager-item.active {

@@ -1,6 +1,6 @@
 # Current Development Status
 
-Updated: 2026-07-10
+Updated: 2026-07-11
 
 ## Overall Status
 
@@ -323,16 +323,16 @@ npm run test:ui -- --grep @gateway-backed
 The following should not be claimed as complete:
 
 1. Additional persisted event replay edge cases beyond the current reconnect/resume and timeline coverage.
-2. MCP stdio process lifecycle and initialization.
-3. MCP `tools/list` discovery, Runtime tool registration, permission integration, and `tools/call` execution.
+2. Long-lived MCP process reuse, crash restart policy, and call cancellation.
+3. MCP Runtime tool registration, permission integration, and `tools/call` execution. Read-only startup, initialization, and `tools/list` discovery are implemented.
 4. Context token budgeting and automatic truncation/compaction selection for long sessions.
 5. Automatic managed-skill discovery and `agent.skills` / `agent.skill.load` request handling. Explicit `skill.run` is implemented and isolated; automatic selection is not.
 
 ## Next Development Steps
 
 1. Treat v0.1.1 as the completed stabilization/design baseline once it is released or tagged.
-2. Treat the v0.1.2 MCP config CRUD and v0.1.4 Desktop MCP config UI slices as implemented configuration-only capabilities.
-3. Use `docs/26-v0.1.5-development-plan.md` for the next controlled MCP read-only startup/discovery slice.
+2. Treat the v0.1.2 MCP config CRUD, v0.1.4 Desktop MCP config UI, and v0.1.5 read-only discovery slices as implemented.
+3. Stabilize process-child terminal state and cancellation semantics before broadening executable integrations.
 4. Use `docs/12-current-execution-plan.md` as the short-cycle execution board to avoid unordered parallel development.
 5. Keep MCP `tools/call`, provider-facing execution, permission integration, and restart policy blocked beyond the read-only discovery slice.
 6. Do not describe MCP as executable until process lifecycle, discovery, tool registration, calls, cancellation, and cleanup are implemented and verified.

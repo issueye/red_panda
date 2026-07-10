@@ -78,6 +78,10 @@ func TestMCPServerConfigRoutesCRUDValidationAndRedaction(t *testing.T) {
 		t.Fatalf("partial update lost config: %#v", updated)
 	}
 	assertMCPAPIEnv(t, updated.Env)
+	discovery := performMCPRequest(t, router, http.MethodPost, "/api/v1/mcp/servers/"+created.ID+"/discover", map[string]any{}, http.StatusBadRequest)
+	if discovery.Error == nil || discovery.Error.Code != "invalid_mcp_server_config" {
+		t.Fatalf("unexpected disabled discovery error: %#v", discovery)
+	}
 
 	invalid := performMCPRequest(t, router, http.MethodPost, "/api/v1/mcp/servers", map[string]any{
 		"name": "Invalid Name", "command": "mcp-invalid",
