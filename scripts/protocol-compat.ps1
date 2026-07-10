@@ -340,6 +340,41 @@ try {
   Assert-True ($memoryPreview.context -like "*protocol compat updated project memory*" -and $memoryPreview.context -like "*protocol compat session memory*") "memory preview context missing selected memory"
   Assert-True ($memoryPreview.context -notlike "*must not be selected*") "memory preview context included unselected memory"
 
+  $mcpSecret = "compat-mcp-secret"
+  $mcpServer = Invoke-Api "POST" "/api/v1/mcp/servers" @{
+    name = "compat-filesystem"
+    command = "mcp-filesystem"
+    args = @("--root", ".")
+    env = @{
+      LOG_LEVEL = "warn"
+      API_TOKEN = $mcpSecret
+    }
+    cwd = "$Root"
+    enabled = $true
+    tool_allowlist = @("read_file", "list")
+    risk_overrides = @{ read_file = "low" }
+  }
+  Assert-True ($mcpServer.id -ne "") "MCP server create missing id"
+  Assert-True ($mcpServer.env.API_TOKEN -eq "****" -and $mcpServer.env.API_TOKEN -ne $mcpSecret) "MCP server exposed sensitive env"
+  Assert-True ($mcpServer.env.LOG_LEVEL -eq "warn") "MCP server redacted non-sensitive env"
+  Assert-True ($mcpServer.timeouts.start_ms -eq 10000 -and $mcpServer.timeouts.call_ms -eq 30000) "MCP server default timeouts mismatch"
+
+  $mcpServerGet = Invoke-Api "GET" "/api/v1/mcp/servers/$($mcpServer.id)"
+  Assert-True ($mcpServerGet.id -eq $mcpServer.id -and $mcpServerGet.env.API_TOKEN -eq "****") "MCP server get mismatch"
+  $mcpServers = Invoke-Api "GET" "/api/v1/mcp/servers"
+  Assert-True (@($mcpServers.servers | Where-Object { $_.id -eq $mcpServer.id }).Count -eq 1) "MCP server list missing created config"
+
+  $mcpServer = Invoke-Api "PUT" "/api/v1/mcp/servers/$($mcpServer.id)" @{
+    enabled = $false
+  }
+  Assert-True (-not $mcpServer.enabled) "MCP server update did not disable config"
+  Assert-True ($mcpServer.env.API_TOKEN -eq "****") "MCP server update leaked or lost sensitive env"
+
+  $mcpDeleted = Invoke-Api "DELETE" "/api/v1/mcp/servers/$($mcpServer.id)"
+  Assert-True ($mcpDeleted.deleted -and $mcpDeleted.id -eq $mcpServer.id) "MCP server delete mismatch"
+  $mcpServersAfterDelete = Invoke-Api "GET" "/api/v1/mcp/servers"
+  Assert-True (@($mcpServersAfterDelete.servers | Where-Object { $_.id -eq $mcpServer.id }).Count -eq 0) "deleted MCP server remained in list"
+
   $providerJob = Start-CompatProvider
   $profileKey = "compat-secret"
   $profile = Invoke-Api "POST" "/api/v1/provider-profiles" @{
@@ -963,6 +998,7 @@ try {
     memory_tool_run = $memoryToolRunID
     memory_tool_record = $memoryToolRecord.id
     memory_tool_denied = $memoryDenyRunID
+    mcp_server = $mcpServer.id
     provider_profile = $profile.id
     inactive_provider_profile = $inactiveProfile.id
   } | ConvertTo-Json -Compress

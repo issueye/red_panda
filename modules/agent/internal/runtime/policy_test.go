@@ -79,3 +79,18 @@ func TestEvaluateToolPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestAvailableToolsForOptionsHidesDeniedAndUnlistedTools(t *testing.T) {
+	definitions := []tools.Definition{
+		{Name: "workspace.read_file"},
+		{Name: "skill.run"},
+		{Name: "shell.exec"},
+	}
+	filtered := availableToolsForOptions(definitions, methods.ReplyOptions{
+		ToolAllowlist: []string{"workspace.read_file", "skill.run"},
+		ToolDenylist:  []string{"skill.run"},
+	})
+	if len(filtered) != 1 || filtered[0].Name != "workspace.read_file" {
+		t.Fatalf("filtered tools = %#v, want workspace.read_file only", filtered)
+	}
+}

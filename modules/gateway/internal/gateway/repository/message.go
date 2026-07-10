@@ -3,6 +3,7 @@ package repository
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -10,6 +11,8 @@ import (
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/protocol/methods"
 )
+
+var messageIDCounter atomic.Uint64
 
 type MessageRepository struct {
 	db *gorm.DB
@@ -30,7 +33,7 @@ func (r MessageRepository) Add(sessionID string, role string, text string, runID
 	}
 	now := time.Now().UTC()
 	message := model.Message{
-		ID:          fmt.Sprintf("msg_%d", now.UnixNano()),
+		ID:          newMessageID(now),
 		SessionID:   sessionID,
 		Role:        role,
 		ContentJSON: string(content),
@@ -52,7 +55,7 @@ func (r MessageRepository) AddWithMetadata(sessionID string, role string, conten
 	}
 	now := time.Now().UTC()
 	message := model.Message{
-		ID:           fmt.Sprintf("msg_%d", now.UnixNano()),
+		ID:           newMessageID(now),
 		SessionID:    sessionID,
 		Role:         role,
 		ContentJSON:  string(encoded),
@@ -114,6 +117,28 @@ func (r MessageRepository) List(sessionID string, limit int) ([]model.Message, e
 	return rows, err
 }
 
+func (r MessageRepository) ListLatest(sessionID string, limit int) ([]model.Message, error) {
+	return r.listLatestQuery(r.db.Where("session_id = ?", sessionID), limit)
+}
+
+func (r MessageRepository) ListLatestConversation(sessionID string, limit int) ([]model.Message, error) {
+	return r.listLatestQuery(r.db.Where("session_id = ? AND role IN ?", sessionID, []string{"user", "assistant"}), limit)
+}
+
+func (r MessageRepository) listLatestQuery(query *gorm.DB, limit int) ([]model.Message, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	var rows []model.Message
+	if err := query.Order("seq desc").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for left, right := 0, len(rows)-1; left < right; left, right = left+1, right-1 {
+		rows[left], rows[right] = rows[right], rows[left]
+	}
+	return rows, nil
+}
+
 func (r MessageRepository) ListThroughSeq(sessionID string, throughSeq uint64) ([]model.Message, error) {
 	var rows []model.Message
 	query := r.db.Where("session_id = ?", sessionID)
@@ -153,7 +178,7 @@ func (r MessageRepository) CopyToSession(source []model.Message, targetSessionID
 	now := time.Now().UTC()
 	for index, message := range source {
 		copied := message
-		copied.ID = fmt.Sprintf("msg_%d_%d", now.UnixNano(), index)
+		copied.ID = newMessageID(now)
 		copied.SessionID = targetSessionID
 		copied.Seq = startSeq + uint64(index)
 		copied.SourceMessageID = message.ID
@@ -163,6 +188,10 @@ func (r MessageRepository) CopyToSession(source []model.Message, targetSessionID
 		}
 	}
 	return len(source), nil
+}
+
+func newMessageID(now time.Time) string {
+	return fmt.Sprintf("msg_%d_%d", now.UnixNano(), messageIDCounter.Add(1))
 }
 
 func (r MessageRepository) nextSeq(sessionID string) (uint64, error) {

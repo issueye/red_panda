@@ -157,6 +157,48 @@ test('Gateway-backed desktop manages memory and shows injection event @gateway-b
   }
 });
 
+test('Gateway-backed desktop manages MCP server configs @gateway-backed', async ({ page }) => {
+  test.setTimeout(60000);
+  const gateway = await startGateway();
+  try {
+    await page.addInitScript(() => window.localStorage.clear());
+    await page.goto('/');
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
+
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.getByRole('dialog', { name: '设置' }).getByRole('tab', { name: 'MCP' }).click();
+    await page.getByRole('button', { name: '新建服务器' }).click();
+    await page.getByLabel('名称').fill('filesystem');
+    await page.getByLabel('启动命令').fill('npx');
+    await page.getByLabel('参数').fill('-y\n@modelcontextprotocol/server-filesystem\n.');
+    await page.getByRole('button', { name: '创建服务器' }).click();
+
+    const list = page.getByTestId('settings-mcp-list');
+    await expect(list).toContainText('filesystem', { timeout: 15000 });
+    const created = await apiJson(gateway.baseURL, '/api/v1/mcp/servers');
+    expect(created.servers).toHaveLength(1);
+    expect(created.servers[0].args).toEqual(['-y', '@modelcontextprotocol/server-filesystem', '.']);
+
+    const enabledToggle = page.getByLabel('停用 filesystem');
+    await expect(enabledToggle).toBeChecked();
+    await enabledToggle.locator('..').click();
+    await expect(page.getByLabel('启用 filesystem')).not.toBeChecked({ timeout: 15000 });
+    await expect.poll(async () => {
+      const current = await apiJson(gateway.baseURL, `/api/v1/mcp/servers/${encodeURIComponent(created.servers[0].id)}`);
+      return current.enabled;
+    }, { timeout: 15000 }).toBe(false);
+
+    await page.getByRole('button', { name: '删除 filesystem' }).click();
+    await expect(list).not.toContainText('filesystem');
+    const afterDelete = await apiJson(gateway.baseURL, '/api/v1/mcp/servers');
+    expect(afterDelete.servers).toHaveLength(0);
+  } finally {
+    await page.close().catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await gateway.stop();
+  }
+});
+
 test('Gateway-backed desktop keeps selected inactive provider profile after run.start failure @gateway-backed', async ({ page }) => {
   const gateway = await startGateway();
   try {

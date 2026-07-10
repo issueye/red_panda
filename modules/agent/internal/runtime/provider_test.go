@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"redpanda/protocol/methods"
+	"redpanda/protocol/tools"
 )
 
 func TestEchoProviderRequestsDiffAndPatchTools(t *testing.T) {
@@ -118,6 +119,25 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleChatCompletionsURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{name: "host root", baseURL: "https://api.example.com", want: "https://api.example.com/v1/chat/completions"},
+		{name: "versioned base", baseURL: "https://api.example.com/step_plan/v1/", want: "https://api.example.com/step_plan/v1/chat/completions"},
+		{name: "full endpoint", baseURL: "https://api.example.com/custom/chat/completions", want: "https://api.example.com/custom/chat/completions"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := openAICompatibleChatCompletionsURL(test.baseURL); got != test.want {
+				t.Fatalf("URL = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) {
 	var messages []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +193,133 @@ func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) 
 	}
 	if len(chunks) != 2 || chunks[0].Delta != "memory ok" || !chunks[1].Final {
 		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
+func TestOpenAICompatibleMessagesIncludeConversationInOrderAndCurrentInputOnce(t *testing.T) {
+	messages := openAICompatibleMessages(ProviderRequest{
+		Session: methods.ReplySession{
+			Conversation: []methods.Message{
+				{
+					Role: "user",
+					Content: []methods.ContentBlock{
+						{Type: "text", Text: "first question"},
+						{Type: "text", Text: "with more detail"},
+					},
+				},
+				{
+					Role:    "assistant",
+					Content: []methods.ContentBlock{{Type: "text", Text: "first answer"}},
+				},
+				{
+					Role:    "subagent",
+					Content: []methods.ContentBlock{{Type: "text", Text: "planner detail"}},
+				},
+			},
+		},
+		Input: methods.ReplyInput{Text: "current question"},
+		Options: methods.ReplyOptions{MemoryContext: &methods.MemoryContext{
+			Context: "remember this",
+		}},
+		ToolHistory: []ToolExchange{{
+			Call: tools.Call{
+				ID:        "call_1",
+				Name:      "workspace.read_file",
+				Arguments: map[string]any{"path": "README.md"},
+			},
+			Result: tools.Result{
+				ToolCallID: "call_1",
+				Name:       "workspace.read_file",
+				Status:     tools.CallStatusCompleted,
+				Output:     "project readme",
+			},
+		}},
+	})
+
+	want := []struct {
+		role    string
+		content string
+	}{
+		{role: "system", content: "remember this"},
+		{role: "user", content: "first question\nwith more detail"},
+		{role: "assistant", content: "first answer"},
+		{role: "user", content: "current question"},
+	}
+	if len(messages) != len(want)+2 {
+		t.Fatalf("messages = %#v, want %d messages", messages, len(want)+2)
+	}
+	currentInputCount := 0
+	for index, expected := range want {
+		if messages[index]["role"] != expected.role || messages[index]["content"] != expected.content {
+			t.Fatalf("messages[%d] = %#v, want role=%q content=%q", index, messages[index], expected.role, expected.content)
+		}
+		if messages[index]["role"] == "user" && messages[index]["content"] == "current question" {
+			currentInputCount++
+		}
+	}
+	if currentInputCount != 1 {
+		t.Fatalf("current input appeared %d times, want once: %#v", currentInputCount, messages)
+	}
+	if messages[4]["role"] != "assistant" {
+		t.Fatalf("tool call message = %#v, want assistant after current input", messages[4])
+	}
+	if messages[5]["role"] != "tool" || messages[5]["tool_call_id"] != "call_1" || messages[5]["content"] != "project readme" {
+		t.Fatalf("tool result message = %#v, want call_1 result after assistant tool call", messages[5])
+	}
+}
+
+func TestHTTPCompatibleProviderSendsToolsAfterToolHistory(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}]}`))
+	}))
+	defer server.Close()
+
+	provider := HTTPCompatibleProvider{
+		baseURL: server.URL,
+		model:   "test-model",
+		client:  server.Client(),
+	}
+	err := provider.Complete(context.Background(), ProviderRequest{
+		RunID: "run_tools_after_history",
+		Input: methods.ReplyInput{
+			Text: "inspect the project",
+		},
+		Tools: []tools.Definition{{
+			Name:        "workspace.read_file",
+			Description: "Read a workspace file",
+			Parameters:  map[string]any{"type": "object"},
+		}},
+		ToolHistory: []ToolExchange{{
+			Call: tools.Call{
+				ID:        "call_1",
+				Name:      "workspace.list",
+				Arguments: map[string]any{"path": "."},
+			},
+			Result: tools.Result{
+				ToolCallID: "call_1",
+				Name:       "workspace.list",
+				Status:     tools.CallStatusCompleted,
+				Output:     "README.md",
+			},
+		}},
+	}, func(ProviderChunk) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions, ok := body["tools"].([]any)
+	if !ok || len(definitions) != 1 {
+		t.Fatalf("tools = %#v, want one definition", body["tools"])
+	}
+	if body["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %#v, want auto", body["tool_choice"])
+	}
+	messages, ok := body["messages"].([]any)
+	if !ok || len(messages) != 3 {
+		t.Fatalf("messages = %#v, want user + assistant tool call + tool result", body["messages"])
 	}
 }
 

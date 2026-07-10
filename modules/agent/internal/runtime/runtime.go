@@ -73,6 +73,7 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 		tools:          ToolRunner{},
 	}
 	rt.tools.MemoryExecutor = rt.executeMemoryTool
+	rt.tools.SkillExecutor = rt.executeSkillRun
 	rt.newProcessSubAgent = newSubAgentProcess
 	rt.processPool = newSubAgentProcessPool(subAgentPoolSizeFromEnv(), rt.newProcessSubAgent)
 	return rt
@@ -387,7 +388,7 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 			Session:     params.Session,
 			Input:       providerParams.Input,
 			Options:     providerParams.Options,
-			Tools:       r.tools.AvailableTools(),
+			Tools:       availableToolsForOptions(r.tools.AvailableTools(), providerParams.Options),
 			ToolHistory: history,
 		}, func(chunk ProviderChunk) error {
 			if ctx.Err() != nil {
@@ -567,7 +568,7 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 	childParams.Options.SubAgentBackend = ""
 
 	err = child.Start(ctx, childParams, func(event events.Envelope) {
-		r.bridgeProcessSubAgentEvent(context.Background(), params, subAgentID, backend, event)
+		r.bridgeProcessSubAgentEvent(context.Background(), params, subAgentID, "planner", backend, event)
 	})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -613,7 +614,7 @@ func (r *Runtime) acquireProcessSubAgent(ctx context.Context, params methods.Rep
 	}, nil
 }
 
-func (r *Runtime) bridgeProcessSubAgentEvent(ctx context.Context, params methods.ReplyParams, subAgentID string, backend string, child events.Envelope) {
+func (r *Runtime) bridgeProcessSubAgentEvent(ctx context.Context, params methods.ReplyParams, subAgentID string, agentName string, backend string, child events.Envelope) {
 	if child.Type == events.EventFinish {
 		return
 	}
@@ -621,7 +622,7 @@ func (r *Runtime) bridgeProcessSubAgentEvent(ctx context.Context, params methods
 	payload["subagent_id"] = subAgentID
 	payload["backend"] = backend
 	if child.Type == events.EventSubAgentUpdate {
-		payload["name"] = firstPayloadString(payload, "name", "planner")
+		payload["name"] = firstPayloadString(payload, "name", agentName)
 	}
 	stream := child.Stream
 	if stream != nil {
@@ -629,7 +630,7 @@ func (r *Runtime) bridgeProcessSubAgentEvent(ctx context.Context, params methods
 		next.StreamID = "stream_" + subAgentID + "_" + stream.StreamID
 		stream = &next
 	}
-	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, "planner"), child.Type, stream, payload)
+	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, agentName), child.Type, stream, payload)
 }
 
 func (r *Runtime) registerSubAgent(params methods.ReplyParams, subAgentID string, name string, backend string, cancel context.CancelFunc) {
@@ -852,6 +853,7 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		WorkingDir: params.Session.WorkingDir,
 		RunID:      params.RunID,
 		SessionID:  params.Session.ID,
+		Reply:      &params,
 	}, invocation)
 	if output != "" {
 		streamKind := events.StreamToolStdout

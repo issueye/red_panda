@@ -73,3 +73,17 @@ func containsString(items []string, value string) bool {
 	}
 	return false
 }
+
+func availableToolsForOptions(definitions []tools.Definition, options methods.ReplyOptions) []tools.Definition {
+	filtered := make([]tools.Definition, 0, len(definitions))
+	for _, definition := range definitions {
+		if containsString(options.ToolDenylist, definition.Name) {
+			continue
+		}
+		if len(options.ToolAllowlist) > 0 && !containsString(options.ToolAllowlist, definition.Name) {
+			continue
+		}
+		filtered = append(filtered, definition)
+	}
+	return filtered
+}

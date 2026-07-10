@@ -167,3 +167,27 @@ type ProviderProfile struct {
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
 }
+
+type MCPTimeouts struct {
+	StartMS      int `json:"start_ms,omitempty"`
+	InitializeMS int `json:"initialize_ms,omitempty"`
+	ListMS       int `json:"list_ms,omitempty"`
+	CallMS       int `json:"call_ms,omitempty"`
+	ShutdownMS   int `json:"shutdown_ms,omitempty"`
+}
+
+type MCPServerConfig struct {
+	ID            string `gorm:"primaryKey"`
+	Name          string `gorm:"uniqueIndex:idx_mcp_server_configs_name,where:deleted_at IS NULL"`
+	Command       string
+	Args          []string          `gorm:"column:args_json;serializer:json;type:text"`
+	Env           map[string]string `gorm:"column:env_json;serializer:json;type:text"`
+	CWD           string            `gorm:"column:cwd"`
+	Enabled       bool              `gorm:"index"`
+	Timeouts      MCPTimeouts       `gorm:"column:timeouts_json;serializer:json;type:text"`
+	ToolAllowlist []string          `gorm:"column:tool_allowlist_json;serializer:json;type:text"`
+	RiskOverrides map[string]string `gorm:"column:risk_overrides_json;serializer:json;type:text"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time `gorm:"index"`
+}

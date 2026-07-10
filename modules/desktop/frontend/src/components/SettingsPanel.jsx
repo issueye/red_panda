@@ -1,8 +1,18 @@
-import { RefreshCw, Trash2, X } from 'lucide-react';
+import {
+  Blocks,
+  Building2,
+  Plus,
+  PlugZap,
+  RefreshCw,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { emptyProfileDraft, profileDraftFrom } from '../lib/providerProfiles.js';
+import { Badge } from './ui/badge.jsx';
 import { Button, IconButton } from './ui/button.jsx';
-import { ErrorMessage } from './ui/feedback.jsx';
+import { EmptyState, ErrorMessage } from './ui/feedback.jsx';
 import { Field } from './ui/field.jsx';
 import { SelectMenu } from './ui/select.jsx';
 
@@ -31,6 +41,30 @@ const SUB_AGENT_BACKENDS = [
   ['process_pool', '进程池'],
 ];
 
+const SETTINGS_TABS = [
+  { id: 'providers', label: '供应商管理', shortLabel: '供应商', icon: Building2 },
+  { id: 'skills', label: '技能管理', shortLabel: '技能', icon: Blocks },
+  { id: 'mcp', label: 'MCP 管理', shortLabel: 'MCP', icon: PlugZap },
+  { id: 'other', label: '其他设置', shortLabel: '其他', icon: SlidersHorizontal },
+];
+
+const emptySkillDraft = {
+  id: '',
+  name: '',
+  description: '',
+  path: '',
+  enabled: true,
+};
+
+const emptyMcpDraft = {
+  id: '',
+  name: '',
+  command: '',
+  args: '',
+  cwd: '',
+  enabled: true,
+};
+
 const focusableSelector = [
   'button:not([disabled])',
   'input:not([disabled])',
@@ -38,6 +72,13 @@ const focusableSelector = [
   '[href]',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
+
+function localID(prefix) {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
 
 function SettingRow({ children, label }) {
   return (
@@ -74,34 +115,89 @@ function SettingTextInput({ label, placeholder, settings, settingKey, onUpdate }
   );
 }
 
+function ModuleHeader({ badge, children, title }) {
+  return (
+    <div className="settings-module-header">
+      <div>
+        <h2>{title}</h2>
+        {badge ? <Badge>{badge}</Badge> : null}
+      </div>
+      <div className="settings-module-actions">{children}</div>
+    </div>
+  );
+}
+
+function ManagerItem({ active, disabled = false, enabled, icon: Icon, meta, name, onDelete, onSelect, onToggle }) {
+  return (
+    <div className={active ? 'settings-manager-item active' : 'settings-manager-item'}>
+      <button className="settings-manager-select" disabled={disabled} onClick={onSelect} type="button">
+        <Icon aria-hidden="true" size={16} />
+        <span>
+          <strong>{name}</strong>
+          <small>{meta}</small>
+        </span>
+      </button>
+      <label className="settings-switch" title={enabled ? '停用' : '启用'}>
+        <input
+          aria-label={`${enabled ? '停用' : '启用'} ${name}`}
+          checked={enabled}
+          disabled={disabled}
+          onChange={onToggle}
+          type="checkbox"
+        />
+        <span aria-hidden="true" />
+      </label>
+      <IconButton disabled={disabled} label={`删除 ${name}`} onClick={onDelete}>
+        <Trash2 size={14} />
+      </IconButton>
+    </div>
+  );
+}
+
 export function SettingsPanel({
   open,
   settings = {},
   providerProfiles = [],
   providerProfilesLoading = false,
   providerProfilesError = '',
+  mcpServers = [],
+  mcpServersLoading = false,
+  mcpServersError = '',
   onClose,
   onChange,
   onCreateProviderProfile,
   onUpdateProviderProfile,
   onDeleteProviderProfile,
   onRefreshProviderProfiles,
+  onCreateMcpServer,
+  onUpdateMcpServer,
+  onDeleteMcpServer,
+  onRefreshMcpServers,
 }) {
   const panelRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previousActiveElementRef = useRef(null);
+  const [activeTab, setActiveTab] = useState('providers');
+  const [profileDraft, setProfileDraft] = useState(emptyProfileDraft);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [skillDraft, setSkillDraft] = useState(null);
+  const [mcpDraft, setMcpDraft] = useState(null);
+  const [mcpSaving, setMcpSaving] = useState(false);
+  const [mcpError, setMcpError] = useState('');
+
+  const skills = Array.isArray(settings.skills) ? settings.skills : [];
+  const visibleMcpServers = Array.isArray(mcpServers) ? mcpServers : [];
   const selectedProfile = useMemo(
     () => providerProfiles.find((item) => item.id === settings.providerProfileId) || null,
     [providerProfiles, settings.providerProfileId],
   );
-  const [profileDraft, setProfileDraft] = useState(emptyProfileDraft);
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileError, setProfileError] = useState('');
 
   useEffect(() => {
     if (open) {
       setProfileDraft(profileDraftFrom(selectedProfile));
       setProfileError('');
+      setMcpError('');
     }
   }, [open, selectedProfile]);
 
@@ -179,6 +275,104 @@ export function SettingsPanel({
     }
   }
 
+  function saveSkill() {
+    const name = skillDraft?.name.trim();
+    const path = skillDraft?.path.trim();
+    if (!name || !path) return;
+    const nextSkill = {
+      ...skillDraft,
+      id: skillDraft.id || localID('skill'),
+      name,
+      path,
+      description: skillDraft.description.trim(),
+    };
+    updateSetting(
+      'skills',
+      skillDraft.id
+        ? skills.map((item) => (item.id === skillDraft.id ? nextSkill : item))
+        : [...skills, nextSkill],
+    );
+    setSkillDraft(nextSkill);
+  }
+
+  async function saveMcpServer() {
+    if (!mcpDraft?.name.trim() || !mcpDraft?.command.trim()) return;
+    setMcpSaving(true);
+    setMcpError('');
+    try {
+      const saved = mcpDraft.id
+        ? await onUpdateMcpServer(mcpDraft.id, {
+            name: mcpDraft.name,
+            command: mcpDraft.command,
+            args: mcpDraft.args,
+            cwd: mcpDraft.cwd,
+            enabled: mcpDraft.enabled,
+          })
+        : await onCreateMcpServer(mcpDraft);
+      setMcpDraft({ ...saved });
+    } catch (error) {
+      setMcpError(error.message);
+    } finally {
+      setMcpSaving(false);
+    }
+  }
+
+  async function deleteMcpServer(server) {
+    setMcpSaving(true);
+    setMcpError('');
+    try {
+      await onDeleteMcpServer(server.id);
+      if (mcpDraft?.id === server.id) {
+        setMcpDraft(null);
+      }
+    } catch (error) {
+      setMcpError(error.message);
+    } finally {
+      setMcpSaving(false);
+    }
+  }
+
+  async function toggleMcpServer(server, enabled) {
+    setMcpSaving(true);
+    setMcpError('');
+    try {
+      const updated = await onUpdateMcpServer(server.id, { enabled });
+      if (mcpDraft?.id === server.id) {
+        setMcpDraft({ ...updated });
+      }
+    } catch (error) {
+      setMcpError(error.message);
+    } finally {
+      setMcpSaving(false);
+    }
+  }
+
+  async function refreshMcpServers() {
+    setMcpError('');
+    try {
+      await onRefreshMcpServers();
+    } catch (error) {
+      setMcpError(error.message);
+    }
+  }
+
+  function handleTabsKeyDown(event) {
+    const currentIndex = SETTINGS_TABS.findIndex((tab) => tab.id === activeTab);
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = SETTINGS_TABS.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextTab = SETTINGS_TABS[nextIndex];
+    setActiveTab(nextTab.id);
+    window.requestAnimationFrame(() => {
+      panelRef.current?.querySelector(`[data-settings-tab="${nextTab.id}"]`)?.focus();
+    });
+  }
+
   function handleDialogKeyDown(event) {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -208,121 +402,324 @@ export function SettingsPanel({
     }
   }
 
-  return (
-    <div className="settings-overlay" role="presentation">
-      <aside
-        aria-label="设置"
-        className="settings-panel"
-        onKeyDown={handleDialogKeyDown}
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
+  const providerContent = (
+    <>
+      <ModuleHeader badge={`${providerProfiles.length} 个配置`} title="供应商管理">
+        <IconButton
+          disabled={providerProfilesLoading || profileSaving}
+          label="刷新供应商"
+          onClick={onRefreshProviderProfiles}
+        >
+          <RefreshCw size={15} />
+        </IconButton>
+        <Button
+          disabled={profileSaving}
+          icon={<Plus size={15} />}
+          onClick={() => {
+            updateSetting('providerProfileId', '');
+            setProfileDraft(emptyProfileDraft);
+          }}
+          variant="soft"
+        >
+          新建供应商
+        </Button>
+      </ModuleHeader>
+      <SettingSelect
+        label="当前供应商"
+        options={providerProfileOptions}
+        settings={settings}
+        settingKey="providerProfileId"
+        onUpdate={(key, value) => {
+          updateSetting(key, value);
+          const next = providerProfiles.find((item) => item.id === value);
+          setProfileDraft(profileDraftFrom(next));
+        }}
+      />
+      <div className="settings-editor-panel">
+        <div className="settings-editor-title">
+          <strong>{settings.providerProfileId ? '编辑供应商' : '新建供应商'}</strong>
+          {selectedProfile ? (
+            <Badge tone={selectedProfile.active === false ? 'neutral' : 'success'}>
+              {selectedProfile.active === false ? '已停用' : '已启用'}
+            </Badge>
+          ) : null}
+        </div>
+        <ErrorMessage className="settings-error">{providerProfilesError}</ErrorMessage>
+        <ErrorMessage className="settings-error">{profileError}</ErrorMessage>
+        <div className="settings-form-grid">
+          <Field className="settings-row" label="名称">
+            <input
+              onChange={(event) => updateProfileDraft('name', event.target.value)}
+              placeholder="工作 OpenAI"
+              type="text"
+              value={profileDraft.name}
+            />
+          </Field>
+          <Field className="settings-row" label="配置模型">
+            <input
+              onChange={(event) => updateProfileDraft('model', event.target.value)}
+              placeholder="gpt-4.1-mini"
+              type="text"
+              value={profileDraft.model}
+            />
+          </Field>
+          <Field className="settings-row settings-form-span" label="基础 URL">
+            <input
+              onChange={(event) => updateProfileDraft('baseUrl', event.target.value)}
+              placeholder="https://api.openai.com"
+              type="text"
+              value={profileDraft.baseUrl}
+            />
+          </Field>
+          <Field className="settings-row settings-form-span" label="API 密钥">
+            <input
+              onChange={(event) => updateProfileDraft('apiKey', event.target.value)}
+              placeholder={selectedProfile?.apiKeySet ? selectedProfile.apiKeyMasked || '已保存密钥' : '可选'}
+              type="password"
+              value={profileDraft.apiKey}
+            />
+          </Field>
+        </div>
+        <div className="settings-editor-footer">
+          <div className="settings-profile-flags">
+            <label className="settings-check">
+              <input
+                checked={Boolean(profileDraft.isDefault)}
+                onChange={(event) => updateProfileDraft('isDefault', event.target.checked)}
+                type="checkbox"
+              />
+              <span>默认</span>
+            </label>
+            <label className="settings-check">
+              <input
+                checked={profileDraft.active !== false}
+                onChange={(event) => updateProfileDraft('active', event.target.checked)}
+                type="checkbox"
+              />
+              <span>启用</span>
+            </label>
+          </div>
+          <div className="settings-profile-actions">
+            <IconButton
+              disabled={profileSaving || !settings.providerProfileId}
+              label="删除供应商"
+              onClick={deleteSelectedProfile}
+            >
+              <Trash2 size={15} />
+            </IconButton>
+            <Button disabled={profileSaving || !profileDraft.baseUrl} onClick={saveProviderProfile}>
+              {profileSaving ? '保存中' : settings.providerProfileId ? '保存供应商' : '创建供应商'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  const skillsContent = (
+    <>
+      <ModuleHeader badge={`${skills.filter((item) => item.enabled !== false).length}/${skills.length} 已启用`} title="技能管理">
+        <Button icon={<Plus size={15} />} onClick={() => setSkillDraft({ ...emptySkillDraft })} variant="soft">
+          新建技能
+        </Button>
+      </ModuleHeader>
+      <div className="settings-manager-grid">
+        <div className="settings-manager-list" data-testid="settings-skill-list">
+          {skills.length === 0 ? (
+            <EmptyState title="暂无技能">添加技能目录后可在这里统一管理。</EmptyState>
+          ) : skills.map((skill) => (
+            <ManagerItem
+              active={skillDraft?.id === skill.id}
+              enabled={skill.enabled !== false}
+              icon={Blocks}
+              key={skill.id}
+              meta={skill.path}
+              name={skill.name}
+              onDelete={() => {
+                updateSetting('skills', skills.filter((item) => item.id !== skill.id));
+                if (skillDraft?.id === skill.id) setSkillDraft(null);
+              }}
+              onSelect={() => setSkillDraft({ ...skill })}
+              onToggle={(event) => updateSetting('skills', skills.map((item) => (
+                item.id === skill.id ? { ...item, enabled: event.target.checked } : item
+              )))}
+            />
+          ))}
+        </div>
+        <div className="settings-editor-panel settings-collection-editor">
+          {skillDraft ? (
+            <>
+              <div className="settings-editor-title">
+                <strong>{skillDraft.id ? '编辑技能' : '新建技能'}</strong>
+                <Badge>本机</Badge>
+              </div>
+              <Field className="settings-row" label="名称">
+                <input
+                  onChange={(event) => setSkillDraft((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="代码审查"
+                  type="text"
+                  value={skillDraft.name}
+                />
+              </Field>
+              <Field className="settings-row" label="路径">
+                <input
+                  onChange={(event) => setSkillDraft((current) => ({ ...current, path: event.target.value }))}
+                  placeholder="C:\\Users\\name\\.codex\\skills\\review"
+                  type="text"
+                  value={skillDraft.path}
+                />
+              </Field>
+              <Field className="settings-row" label="描述">
+                <textarea
+                  onChange={(event) => setSkillDraft((current) => ({ ...current, description: event.target.value }))}
+                  placeholder="技能用途"
+                  rows={4}
+                  value={skillDraft.description}
+                />
+              </Field>
+              <label className="settings-check">
+                <input
+                  checked={skillDraft.enabled !== false}
+                  onChange={(event) => setSkillDraft((current) => ({ ...current, enabled: event.target.checked }))}
+                  type="checkbox"
+                />
+                <span>启用技能</span>
+              </label>
+              <div className="settings-editor-actions">
+                <Button onClick={() => setSkillDraft(null)} variant="ghost">取消</Button>
+                <Button disabled={!skillDraft.name.trim() || !skillDraft.path.trim()} onClick={saveSkill}>保存技能</Button>
+              </div>
+            </>
+          ) : (
+            <EmptyState title="选择技能">从左侧选择技能，或新建一个技能配置。</EmptyState>
+          )}
+        </div>
+      </div>
+    </>
+  );
+
+  const mcpContent = (
+    <>
+      <ModuleHeader
+        badge={`${visibleMcpServers.filter((item) => item.enabled !== false).length}/${visibleMcpServers.length} 已启用`}
+        title="MCP 管理"
       >
-        <header className="settings-header">
-          <div>
-            <strong>设置</strong>
-          </div>
-          <IconButton label="关闭设置" onClick={onClose} ref={closeButtonRef}>
-            <X size={17} />
-          </IconButton>
-        </header>
-
-        <div className="settings-content">
-          <SettingSelect
-            label="模型服务配置"
-            options={providerProfileOptions}
-            settings={settings}
-            settingKey="providerProfileId"
-            onUpdate={(key, value) => {
-              updateSetting(key, value);
-              const next = providerProfiles.find((item) => item.id === value);
-              setProfileDraft(profileDraftFrom(next));
-            }}
-          />
-          <div className="settings-profile-panel">
-            <div className="settings-profile-head">
-              <strong>模型服务配置</strong>
-              <IconButton
-                disabled={providerProfilesLoading || profileSaving}
-                label="刷新模型服务配置"
-                onClick={onRefreshProviderProfiles}
-              >
-                <RefreshCw size={15} />
-              </IconButton>
-            </div>
-            <ErrorMessage className="settings-error">{providerProfilesError}</ErrorMessage>
-            <ErrorMessage className="settings-error">{profileError}</ErrorMessage>
-            <Field className="settings-row" label="名称">
-              <input
-                onChange={(event) => updateProfileDraft('name', event.target.value)}
-                placeholder="工作 OpenAI"
-                type="text"
-                value={profileDraft.name}
-              />
-            </Field>
-            <Field className="settings-row" label="基础 URL">
-              <input
-                onChange={(event) => updateProfileDraft('baseUrl', event.target.value)}
-                placeholder="https://api.openai.com"
-                type="text"
-                value={profileDraft.baseUrl}
-              />
-            </Field>
-            <Field className="settings-row" label="配置模型">
-              <input
-                onChange={(event) => updateProfileDraft('model', event.target.value)}
-                placeholder="gpt-4.1-mini"
-                type="text"
-                value={profileDraft.model}
-              />
-            </Field>
-            <Field className="settings-row" label="API 密钥">
-              <input
-                onChange={(event) => updateProfileDraft('apiKey', event.target.value)}
-                placeholder={selectedProfile?.apiKeySet ? selectedProfile.apiKeyMasked || '已保存密钥' : '可选'}
-                type="password"
-                value={profileDraft.apiKey}
-              />
-            </Field>
-            <div className="settings-profile-flags">
+        <IconButton
+          disabled={mcpServersLoading || mcpSaving}
+          label="刷新 MCP 服务器"
+          onClick={refreshMcpServers}
+        >
+          <RefreshCw size={15} />
+        </IconButton>
+        <Button
+          disabled={mcpServersLoading || mcpSaving}
+          icon={<Plus size={15} />}
+          onClick={() => {
+            setMcpError('');
+            setMcpDraft({ ...emptyMcpDraft });
+          }}
+          variant="soft"
+        >
+          新建服务器
+        </Button>
+      </ModuleHeader>
+      <ErrorMessage className="settings-error">{mcpServersError}</ErrorMessage>
+      <ErrorMessage className="settings-error">{mcpError}</ErrorMessage>
+      <div className="settings-manager-grid">
+        <div className="settings-manager-list" data-testid="settings-mcp-list">
+          {visibleMcpServers.length === 0 ? (
+            <EmptyState title={mcpServersLoading ? '正在加载 MCP 服务器' : '暂无 MCP 服务器'}>
+              {mcpServersLoading ? '请稍候。' : '添加服务器配置后可在这里统一管理。'}
+            </EmptyState>
+          ) : visibleMcpServers.map((server) => (
+            <ManagerItem
+              active={mcpDraft?.id === server.id}
+              disabled={mcpSaving}
+              enabled={server.enabled !== false}
+              icon={PlugZap}
+              key={server.id}
+              meta={server.command}
+              name={server.name}
+              onDelete={() => deleteMcpServer(server)}
+              onSelect={() => {
+                setMcpError('');
+                setMcpDraft({ ...server });
+              }}
+              onToggle={(event) => toggleMcpServer(server, event.target.checked)}
+            />
+          ))}
+        </div>
+        <div className="settings-editor-panel settings-collection-editor">
+          {mcpDraft ? (
+            <>
+              <div className="settings-editor-title">
+                <strong>{mcpDraft.id ? '编辑 MCP 服务器' : '新建 MCP 服务器'}</strong>
+                <Badge>{mcpDraft.id ? '已同步' : '新配置'}</Badge>
+              </div>
+              <Field className="settings-row" label="名称">
+                <input
+                  onChange={(event) => setMcpDraft((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="filesystem"
+                  type="text"
+                  value={mcpDraft.name}
+                />
+              </Field>
+              <Field className="settings-row" label="启动命令">
+                <input
+                  onChange={(event) => setMcpDraft((current) => ({ ...current, command: event.target.value }))}
+                  placeholder="npx"
+                  type="text"
+                  value={mcpDraft.command}
+                />
+              </Field>
+              <Field className="settings-row" label="参数">
+                <textarea
+                  onChange={(event) => setMcpDraft((current) => ({ ...current, args: event.target.value }))}
+                  placeholder={'-y\n@modelcontextprotocol/server-filesystem\n.'}
+                  rows={4}
+                  value={mcpDraft.args}
+                />
+              </Field>
+              <Field className="settings-row" label="工作目录">
+                <input
+                  onChange={(event) => setMcpDraft((current) => ({ ...current, cwd: event.target.value }))}
+                  placeholder="可选"
+                  type="text"
+                  value={mcpDraft.cwd}
+                />
+              </Field>
               <label className="settings-check">
                 <input
-                  checked={Boolean(profileDraft.isDefault)}
-                  onChange={(event) => updateProfileDraft('isDefault', event.target.checked)}
+                  checked={mcpDraft.enabled !== false}
+                  onChange={(event) => setMcpDraft((current) => ({ ...current, enabled: event.target.checked }))}
                   type="checkbox"
                 />
-                <span>默认</span>
+                <span>启用服务器</span>
               </label>
-              <label className="settings-check">
-                <input
-                  checked={profileDraft.active !== false}
-                  onChange={(event) => updateProfileDraft('active', event.target.checked)}
-                  type="checkbox"
-                />
-                <span>启用</span>
-              </label>
-            </div>
-            <div className="settings-profile-actions">
-              <Button disabled={profileSaving} onClick={() => {
-                updateSetting('providerProfileId', '');
-                setProfileDraft(emptyProfileDraft);
-              }} variant="ghost">
-                新建
-              </Button>
-              <Button disabled={profileSaving || !profileDraft.baseUrl} onClick={saveProviderProfile} variant="soft">
-                {settings.providerProfileId ? '保存' : '创建'}
-              </Button>
-              <IconButton
-                disabled={profileSaving || !settings.providerProfileId}
-                label="删除模型服务配置"
-                onClick={deleteSelectedProfile}
-              >
-                <Trash2 size={15} />
-              </IconButton>
-            </div>
-          </div>
+              <div className="settings-editor-actions">
+                <Button disabled={mcpSaving} onClick={() => setMcpDraft(null)} variant="ghost">取消</Button>
+                <Button
+                  disabled={mcpSaving || !mcpDraft.name.trim() || !mcpDraft.command.trim()}
+                  onClick={saveMcpServer}
+                >
+                  {mcpSaving ? '保存中' : mcpDraft.id ? '保存服务器' : '创建服务器'}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <EmptyState title="选择服务器">从左侧选择服务器，或新建一个 MCP 配置。</EmptyState>
+          )}
+        </div>
+      </div>
+    </>
+  );
 
-          <h2 className="settings-section-title">运行与代理</h2>
+  const otherContent = (
+    <>
+      <ModuleHeader title="其他设置" />
+      <section className="settings-section">
+        <h3>运行与代理</h3>
+        <div className="settings-form-grid">
           <SettingSelect
             label="运行模式"
             options={RUNTIME_MODES}
@@ -330,15 +727,6 @@ export function SettingsPanel({
             settingKey="runtimeMode"
             onUpdate={updateSetting}
           />
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={Boolean(settings?.spawnSubAgents)}
-              onChange={(event) => updateSetting('spawnSubAgents', event.target.checked)}
-            />
-            <span>启用子代理</span>
-          </label>
-
           <SettingSelect
             label="子代理后端"
             options={SUB_AGENT_BACKENDS}
@@ -353,8 +741,19 @@ export function SettingsPanel({
             settingKey="model"
             onUpdate={updateSetting}
           />
-
-          <h2 className="settings-section-title">工具与授权</h2>
+        </div>
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={Boolean(settings?.spawnSubAgents)}
+            onChange={(event) => updateSetting('spawnSubAgents', event.target.checked)}
+          />
+          <span>启用子代理</span>
+        </label>
+      </section>
+      <section className="settings-section">
+        <h3>工具与授权</h3>
+        <div className="settings-form-grid">
           <SettingSelect
             label="工具策略"
             options={TOOL_POLICIES}
@@ -383,6 +782,69 @@ export function SettingsPanel({
             settingKey="toolDenylist"
             onUpdate={updateSetting}
           />
+        </div>
+      </section>
+    </>
+  );
+
+  const activeContent = activeTab === 'providers'
+    ? providerContent
+    : activeTab === 'skills'
+      ? skillsContent
+      : activeTab === 'mcp'
+        ? mcpContent
+        : otherContent;
+  const activeTabLabel = SETTINGS_TABS.find((tab) => tab.id === activeTab)?.label || '设置';
+
+  return (
+    <div className="settings-overlay" role="presentation">
+      <aside
+        aria-label="设置"
+        className="settings-panel"
+        onKeyDown={handleDialogKeyDown}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+      >
+        <header className="settings-header">
+          <div>
+            <strong>设置</strong>
+            <span>{activeTabLabel}</span>
+          </div>
+          <IconButton label="关闭设置" onClick={onClose} ref={closeButtonRef}>
+            <X size={17} />
+          </IconButton>
+        </header>
+
+        <div aria-label="设置分类" className="settings-tabs" onKeyDown={handleTabsKeyDown} role="tablist">
+          {SETTINGS_TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                aria-controls="settings-tab-panel"
+                aria-selected={activeTab === tab.id}
+                className={activeTab === tab.id ? 'settings-tab active' : 'settings-tab'}
+                data-settings-tab={tab.id}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                role="tab"
+                tabIndex={activeTab === tab.id ? 0 : -1}
+                type="button"
+              >
+                <Icon aria-hidden="true" size={16} />
+                <span>{tab.shortLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div
+          aria-label={activeTabLabel}
+          className="settings-content"
+          id="settings-tab-panel"
+          role="tabpanel"
+        >
+          {activeContent}
         </div>
 
         <footer className="settings-footer">

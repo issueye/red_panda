@@ -1,7 +1,10 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,11 +15,166 @@ import (
 
 	"redpanda/gateway/internal/gateway/infra/database"
 	"redpanda/gateway/internal/gateway/infra/eventhub"
+	"redpanda/gateway/internal/gateway/infra/runtimeclient"
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
 	"redpanda/protocol/events"
+	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
+	protows "redpanda/protocol/ws"
 )
+
+func TestRunServiceStartPassesExistingConversationToRuntime(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_context", "Context", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.Messages.Add(session.ID, "user", "first question", "run_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.Messages.Add(session.ID, "assistant", "first answer", "run_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.Messages.Add(session.ID, "subagent", "private planner detail", "run_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
+	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
+	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
+	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	service := NewRunService(repos, eventhub.New(), runtime)
+
+	result, err := service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "follow-up question"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Accepted {
+		t.Fatalf("run was not accepted: %#v", result)
+	}
+
+	raw, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var params methods.ReplyParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params.Input.Text != "follow-up question" {
+		t.Fatalf("input text = %q, want follow-up question", params.Input.Text)
+	}
+	if len(params.Session.Conversation) != 2 {
+		t.Fatalf("conversation len = %d, want 2: %#v", len(params.Session.Conversation), params.Session.Conversation)
+	}
+	assertConversationMessage(t, params.Session.Conversation[0], "user", "first question")
+	assertConversationMessage(t, params.Session.Conversation[1], "assistant", "first answer")
+
+	rows, err := repos.Messages.List(session.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("persisted messages len = %d, want 4", len(rows))
+	}
+	assertServiceMessage(t, rows[2], "subagent", "run_1", "private planner detail")
+	assertServiceMessage(t, rows[3], "user", result.RunID, "follow-up question")
+}
+
+func TestRunServiceStartPassesLatestConversationWindowToRuntime(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_long_context", "Long context", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index <= 205; index++ {
+		if _, err := repos.Messages.Add(session.ID, "user", fmt.Sprintf("message %03d", index), "run_history"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
+	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
+	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
+	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	service := NewRunService(repos, eventhub.New(), runtime)
+
+	if _, err := service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "latest follow-up"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var params methods.ReplyParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		t.Fatal(err)
+	}
+	if len(params.Session.Conversation) != 200 {
+		t.Fatalf("conversation len = %d, want 200", len(params.Session.Conversation))
+	}
+	assertConversationMessage(t, params.Session.Conversation[0], "user", "message 006")
+	assertConversationMessage(t, params.Session.Conversation[199], "user", "message 205")
+}
+
+func TestRunServiceRuntimeHelperProcess(t *testing.T) {
+	if os.Getenv("RED_PANDA_RUNTIME_HELPER") != "1" {
+		return
+	}
+
+	decoder := json.NewDecoder(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+	for {
+		var request jsonrpc.Request
+		if err := decoder.Decode(&request); err != nil {
+			return
+		}
+		switch request.Method {
+		case methods.CoreInitialize:
+			response, err := jsonrpc.NewResult(request.ID, methods.InitializeResult{
+				ProtocolVersion: events.ProtocolVersion,
+				Server:          methods.PeerInfo{Name: "test-runtime", Version: "test"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := encoder.Encode(response); err != nil {
+				t.Fatal(err)
+			}
+		case methods.AgentReply:
+			if err := os.WriteFile(os.Getenv("RED_PANDA_RUNTIME_CAPTURE"), request.Params, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var params methods.ReplyParams
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			response, err := jsonrpc.NewResult(request.ID, methods.ReplyAccepted{
+				Accepted: true,
+				RunID:    params.RunID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := encoder.Encode(response); err != nil {
+				t.Fatal(err)
+			}
+			return
+		default:
+			if err := encoder.Encode(jsonrpc.NewError(request.ID, -32601, "method not found")); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
 
 func TestRunServiceProjectsPermissionRequired(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "service.db")), &gorm.Config{})
@@ -333,5 +491,18 @@ func assertServiceMessage(t *testing.T, row model.Message, role string, runID st
 	}
 	if len(content) != 1 || content[0].Text != text {
 		t.Fatalf("message text = %#v, want %q", content, text)
+	}
+}
+
+func assertConversationMessage(t *testing.T, message methods.Message, role string, text string) {
+	t.Helper()
+	if message.Role != role {
+		t.Fatalf("conversation role = %q, want %q", message.Role, role)
+	}
+	if len(message.Content) != 1 || message.Content[0].Text != text {
+		t.Fatalf("conversation content = %#v, want %q", message.Content, text)
+	}
+	if message.ID == "" || message.CreatedAt == "" {
+		t.Fatalf("conversation metadata is incomplete: %#v", message)
 	}
 }

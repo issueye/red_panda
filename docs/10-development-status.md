@@ -1,6 +1,6 @@
 # Current Development Status
 
-Updated: 2026-07-09
+Updated: 2026-07-10
 
 ## Overall Status
 
@@ -18,8 +18,12 @@ Updated: 2026-07-09
 - Gateway provider profile backend is complete: CRUD APIs live under `/api/v1/provider-profiles`, profiles store OpenAI-compatible provider settings with masked API key state, and `run.start` can pass `provider_profile_id`.
 - Gateway exposes persisted run event timeline queries through `GET /api/v1/runs/:id/events` with `after_seq` and `limit`.
 - Agent Runtime supports per-run OpenAI-compatible provider override from Gateway while keeping environment-variable provider fallback.
+- Gateway now loads persisted session messages before each run and passes them to Runtime as `ReplySession.Conversation` without duplicating the current input.
+- OpenAI-compatible provider requests now include memory, ordered session conversation, the current input, and accumulated tool exchanges; tool definitions remain available after tool results so sequential tool rounds can continue.
+- MCP configuration management is implemented: protocol DTOs, default timeout normalization, Gateway persistence/validation, and CRUD APIs under `/api/v1/mcp/servers` are covered without starting configured commands. Sensitive environment values are masked in responses.
 - Desktop SettingsPanel exposes `runtime_mode`, `tool_policy`, `permission_mode`, `spawn_subagents`, `subagent_backend`, `model`, `tool_allowlist`, and `tool_denylist`, and sends those values as WebSocket `run.start` options to Gateway.
 - Desktop SettingsPanel manages Gateway provider profiles: it can list, select, create, update, and delete profiles, keeps only masked API key state, and sends the selected `provider_profile_id` as a WebSocket `run.start` option.
+- Desktop SettingsPanel manages Gateway-backed MCP server configs: it can list, create, edit, enable/disable, and delete records, uses one argument per line in the editor, preserves normalized timeout values, and does not attempt to recover masked environment secrets.
 - Desktop RunActivityPanel includes an Event Timeline backed by the run event query API, with event kind/agent filters, grouped summaries, and expandable payload inspection.
 - Desktop UI primitives are normalized for v0.1.1: shared buttons, status badges, panel headers, tabs, fields, feedback states, and `SelectMenu` custom dropdowns are used across Settings, Activity, Workspace, Subagents, chat, and Memory surfaces. Native Desktop `<select>` controls are intentionally not used.
 - Desktop clarity and localization stabilization is implemented for v0.1.3: user-facing status/risk/memory/event/runtime labels are Chinese, main panels avoid explanatory subtitles by default, and timeline UI tests tolerate valid Gateway event projection count variance.
@@ -178,15 +182,42 @@ Updated: 2026-07-09
     - concise panel headers and reduced explanatory subtitle/helper text,
     - Chinese visible labels while keeping protocol names, tool names, API fields, and backend error data unchanged,
     - Gateway-backed timeline assertions allow the valid 4-6 event projection range while still verifying tool timeline behavior.
+91. Added v0.1.2 MCP configuration contracts and Gateway CRUD:
+    - `MCPServerConfig`, `MCPTimeouts`, CRUD DTOs, and deterministic timeout defaults,
+    - SQLite persistence, uniqueness and shape validation, partial update behavior, and environment-value redaction,
+    - `GET/POST /api/v1/mcp/servers`, `GET/PUT/DELETE /api/v1/mcp/servers/:id`, focused Go tests, and protocol compatibility coverage.
+92. Added v0.1.4 Desktop MCP configuration management:
+    - Gateway-backed list/create/update/enable-disable/delete workflows in Settings,
+    - deterministic API `args` array to one-argument-per-line draft conversion,
+    - partial update payloads that do not resend omitted masked environment values,
+    - frontend unit and Gateway-backed browser coverage.
+93. Hardened Agent conversation and provider integration:
+    - long sessions pass the latest 200 persisted messages to Runtime in sequence order,
+    - message IDs combine time with a process-local atomic sequence to avoid high-frequency collisions,
+    - OpenAI-compatible provider URLs accept host roots, versioned `/v1` bases, and full chat-completions endpoints,
+    - a temporary Gateway provider profile completed a real StepFun `step-3.7-flash` run and was removed after verification.
+94. Added managed skill creation and update tools:
+    - `skill.create` creates a new `.codex/skills/<name>/SKILL.md` without overwriting existing definitions,
+    - `skill.update` atomically replaces an existing managed definition without upsert behavior,
+    - both tools are high risk and use the existing policy, permission, audit event, allowlist, and denylist paths,
+    - validation covers names, required content, size limits, duplicate/missing state, and symlink escape,
+    - deterministic HTTP Provider integration verifies the public `skill__create` function-call mapping and tool-result follow-up round.
+95. Added isolated managed skill execution:
+    - `skill.run` always starts a fresh `runtime_process` subagent and synchronously returns only its final message as tool output,
+    - child conversation and root memory are cleared; the managed `SKILL.md` is injected only into child system context,
+    - child tool visibility follows allowlist/denylist and is restricted to read-only workspace tools, preventing recursive `skill.run` and unresolved child permission requests,
+    - subagent reasoning/message events remain auditable, while Provider and Gateway root-conversation queries exclude `subagent` and unknown roles before applying the 200-message limit,
+    - automatic compaction summaries also exclude subagent content,
+    - real StepFun coverage completed `skill.create -> skill.run -> runtime_process child -> root result` without exposing the private skill description.
 
 ## Modules
 
 | Module | Status | Notes |
 | --- | --- | --- |
-| `modules/protocol` | Complete | JSON-RPC, WebSocket envelope, agent event, permission DTO, tool DTO, subagent lifecycle DTO |
-| `modules/agent` | MVP complete | stdio JSON-RPC Runtime, Provider abstraction, per-run OpenAI-compatible provider override with env fallback, ToolRunner MVP, low-risk `workspace.list`, `workspace.grep`, and `workspace.diff_file`, medium-risk `memory.list`, high-risk `workspace.edit_file`, `workspace.apply_patch`, and `memory.create/update/delete`, permission blocking, in-process subagent lifecycle/query/cancel, `runtime_process` child-process subagent backend, reusable `process_pool` child-process subagent backend |
-| `modules/gateway` | MVP complete | Gin/GORM/SQLite(no cgo), Runtime subprocess client, WebSocket channel, persistence replay, workspace/session/run/tool/permission/event APIs, provider profile CRUD APIs, `provider_profile_id` run resolution, subagent list/cancel routing, root-run `per_run_process` runtime mode, Gateway-mediated memory tool execution |
-| `modules/desktop` | MVP complete | Wails v3, React/Vite, chat, permissions, tool cards, subagent status/cancel, workspace panel, session restore, searchable RunActivityPanel with Event Timeline filters, grouped summaries, payload inspection, global pending approval entry, SettingsPanel runtime/policy options and provider profile management UI, and normalized shared UI primitives with custom dropdowns |
+| `modules/protocol` | Complete | JSON-RPC, WebSocket envelope, agent event, permission/tool/subagent DTOs, MCP server config/timeout/CRUD DTOs |
+| `modules/agent` | MVP complete | stdio JSON-RPC Runtime, Provider abstraction, per-run OpenAI-compatible provider override with env fallback, ToolRunner MVP, low-risk workspace tools, medium-risk `memory.list`, high-risk workspace writes, `memory.create/update/delete`, managed `skill.create/update`, and isolated process-only `skill.run`, permission blocking, in-process subagent lifecycle/query/cancel, `runtime_process` child-process subagent backend, reusable `process_pool` child-process subagent backend |
+| `modules/gateway` | MVP complete | Gin/GORM/SQLite(no cgo), Runtime subprocess client, WebSocket channel, persistence replay, workspace/session/run/tool/permission/event APIs, provider profile and MCP config CRUD APIs, `provider_profile_id` run resolution, subagent list/cancel routing, root-run `per_run_process` runtime mode, Gateway-mediated memory tool execution |
+| `modules/desktop` | MVP complete | Wails v3, React/Vite, chat, permissions, tool cards, subagents, workspace/session restore, searchable RunActivityPanel, SettingsPanel runtime/policy, provider profile and Gateway-backed MCP config management, and normalized shared UI primitives |
 | `modules/cli` | Placeholder | Future debugging entry |
 
 ## Current Triggers
@@ -218,7 +249,7 @@ Desktop or WebSocket client inputs:
 
 ## Verification
 
-Full v0.1.0 gate status: Pass on 2026-07-09. Agent/Gateway binaries were rebuilt with version `0.1.0`, Playwright `test-results` was cleaned, and no `red-panda-gateway` / `red-panda-agent` / `red_panda` processes remained after verification.
+Current combined M0 and MCP configuration gate status: Pass on 2026-07-10. Agent/Gateway binaries and the Wails Desktop were rebuilt, the real-provider smoke used only a temporary masked profile, and no test Gateway/Agent processes remained after verification.
 
 | Check | Result |
 | --- | --- |
@@ -229,13 +260,14 @@ Full v0.1.0 gate status: Pass on 2026-07-09. Agent/Gateway binaries were rebuilt
 | `go test ./modules/cli/...` | Pass |
 | `go test ./modules/gateway/internal/gateway/repository ./modules/gateway/internal/gateway/service` | Pass |
 | `npm test` in `modules/desktop/frontend` | Pass, includes reconnect resume cursor coverage |
-| `npm run test:ui` in `modules/desktop/frontend` | Pass, 13 tests, includes Activity, Workflow, Memory fixture, custom dropdown interactions, and Gateway-backed workflows |
-| `npm run test:ui -- --grep @gateway-backed` in `modules/desktop/frontend` | Pass, 10 tests, includes `/read README.md`, inactive provider profile UI failure, denied permission/tool rendering, pending permission cancel, `runtime_process` subagent failure visibility, running subagent cancel, session fork/compact, Desktop memory preview/injection visibility, reconnect/resume permission wait coverage, and process leak assertions during teardown |
+| `npm run test:ui` in `modules/desktop/frontend` | Pass, 24 tests, includes Activity, Workflow, Memory, Settings management, responsive/accessibility fixtures, and Gateway-backed workflows |
+| `npm run test:ui -- --grep @gateway-backed` in `modules/desktop/frontend` | Pass, 11 tests, includes `/read README.md`, MCP config CRUD/enable-disable, inactive provider profile UI failure, denied permission/tool rendering, cancellation, subagent failure/cancel, session fork/compact, Desktop memory preview/injection visibility, reconnect/resume coverage, and process leak assertions during teardown |
 | `npm run build` in `modules/desktop/frontend` | Pass |
 | `CGO_ENABLED=0 go build` agent | Pass |
 | `CGO_ENABLED=0 go build` gateway | Pass |
 | `powershell -ExecutionPolicy Bypass -File scripts/ws-smoke.ps1` | Pass |
-| `powershell -ExecutionPolicy Bypass -File scripts/protocol-compat.ps1` | Pass, includes failed tool/subagent, session fork/compact, memory CRUD/preview, Runtime memory tool create/list/deny external protocol paths, and a run timeline with `memory_injected` |
+| `powershell -ExecutionPolicy Bypass -File scripts/protocol-compat.ps1` | Pass, includes failed tool/subagent, session fork/compact, memory CRUD/preview, Runtime memory tool paths, provider profiles, MCP config CRUD/redaction, and a run timeline with `memory_injected` |
+| Temporary real-provider Gateway/Runtime smoke | Pass with StepFun `step-3.7-flash`; returned `REAL_CHAIN_OK`, finished `completed`, then removed the temporary profile/database |
 | `wails3 build` | Pass, with Windows template warnings for missing Unix tools |
 
 ## Provider Environment
@@ -250,6 +282,8 @@ $env:RED_PANDA_PROVIDER_BASE_URL='https://your-provider.example.com'
 $env:RED_PANDA_PROVIDER_API_KEY='...'
 $env:RED_PANDA_PROVIDER_MODEL='your-model'
 ```
+
+The base URL may be the provider host root, a base already ending in `/v1`, or the full `/chat/completions` endpoint. Runtime avoids duplicating the version segment.
 
 Streaming output is supported for OpenAI-compatible providers:
 
@@ -273,12 +307,12 @@ Desktop SettingsPanel uses these APIs to list, select, create, update, and delet
 
 `scripts/ws-smoke.ps1` includes `read_run_events` coverage for the persisted run event timeline query.
 
-`scripts/protocol-compat.ps1` is the lightweight HTTP/WebSocket compatibility script. It covers the client-facing protocol matrix for run lifecycle, replay ordering, malformed WebSocket payload recovery, permission approve/deny resolution, failed tool events/projections, failed subagent events/timeline, provider profile selection, inactive provider profile failure handling, and persisted timeline query shape without requiring a full desktop build.
-It also covers session fork, compact preview, compact apply, memory CRUD, memory soft delete, memory preview selection, and Runtime `memory.*` tool create/list/deny behavior.
+`scripts/protocol-compat.ps1` is the lightweight HTTP/WebSocket compatibility script. It covers the client-facing protocol matrix for run lifecycle, replay ordering, malformed WebSocket payload recovery, permission approve/deny resolution, failed tool/subagent projections, provider profiles, persisted timeline queries, and MCP config CRUD/default/redaction behavior without requiring a full desktop build or starting MCP processes.
+It also covers session fork, compact preview/apply, memory CRUD/soft delete/preview, and Runtime `memory.*` tool create/list/deny behavior.
 
-Frontend tests include Playwright UI fixture coverage for restore, permission approve/deny visible states, failed/completed tool cards, subagents, Activity timeline event kind and agent filtering, custom dropdown interactions, grouped summaries, and expandable payload inspection. The UI fixture suite continues to run through `npm run test:ui`.
+Frontend tests include Playwright UI fixture coverage for restore, permissions, tool cards, subagents, Activity timeline inspection, custom dropdowns, and Settings management. The UI fixture suite continues to run through `npm run test:ui`.
 
-Gateway-backed Playwright e2e coverage starts `bin\red-panda-gateway.exe` and `bin\red-panda-agent.exe` on an isolated test port, points the Vite frontend at Gateway through the built-in dev proxy, sends `/read README.md` from the browser over HTTP/WebSocket, verifies the rendered assistant message, tool card, and Activity timeline, verifies inactive provider profile UI failure handling, verifies denied permission/tool rendering, verifies pending permission run cancellation, verifies `runtime_process` subagent startup failure visibility, verifies running subagent cancellation, verifies session fork/compact restore, and verifies reconnect/resume while a permission-gated run finishes during browser disconnection. The test helper cleans up the Gateway process tree on teardown and fails if newly created Gateway/Agent processes remain. Run it from `modules\desktop\frontend` with:
+Gateway-backed Playwright e2e coverage starts `bin\red-panda-gateway.exe` and `bin\red-panda-agent.exe` on an isolated test port, points the Vite frontend at Gateway through the built-in dev proxy, and covers the real run loop plus Gateway-backed MCP config create/edit/enable-disable/delete management. Existing cases continue to cover provider failure, denied permission/tool rendering, cancellation, subagent failure/cancel, session fork/compact, memory, reconnect/resume, and process-leak cleanup. Run it from `modules\desktop\frontend` with:
 
 ```powershell
 npm run test:ui -- --grep @gateway-backed
@@ -289,14 +323,16 @@ npm run test:ui -- --grep @gateway-backed
 The following should not be claimed as complete:
 
 1. Additional persisted event replay edge cases beyond the current reconnect/resume and timeline coverage.
-2. MCP stdio Runtime execution, tool discovery, and tool calls.
-3. MCP config DTOs and Gateway config CRUD are designated for v0.1.2 but not implemented yet.
+2. MCP stdio process lifecycle and initialization.
+3. MCP `tools/list` discovery, Runtime tool registration, permission integration, and `tools/call` execution.
+4. Context token budgeting and automatic truncation/compaction selection for long sessions.
+5. Automatic managed-skill discovery and `agent.skills` / `agent.skill.load` request handling. Explicit `skill.run` is implemented and isolated; automatic selection is not.
 
 ## Next Development Steps
 
 1. Treat v0.1.1 as the completed stabilization/design baseline once it is released or tagged.
-2. Use `docs/22-v0.1.2-development-plan.md` as the v0.1.2 release scope.
-3. Use `docs/24-v0.1.3-development-plan.md`, `docs/25-v0.1.4-development-plan.md`, and `docs/26-v0.1.5-development-plan.md` for the next three ordered slices.
+2. Treat the v0.1.2 MCP config CRUD and v0.1.4 Desktop MCP config UI slices as implemented configuration-only capabilities.
+3. Use `docs/26-v0.1.5-development-plan.md` for the next controlled MCP read-only startup/discovery slice.
 4. Use `docs/12-current-execution-plan.md` as the short-cycle execution board to avoid unordered parallel development.
-5. Implement only MCP-1 in v0.1.2: protocol/config DTOs and Gateway config CRUD.
-6. Keep Runtime MCP stdio process execution blocked until the config and read-only discovery slices explicitly permit it.
+5. Keep MCP `tools/call`, provider-facing execution, permission integration, and restart policy blocked beyond the read-only discovery slice.
+6. Do not describe MCP as executable until process lifecycle, discovery, tool registration, calls, cancellation, and cleanup are implemented and verified.

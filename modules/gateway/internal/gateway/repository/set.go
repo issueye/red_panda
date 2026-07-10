@@ -15,6 +15,7 @@ type Set struct {
 	ToolCalls   ToolCallRepository
 	Permissions PermissionRequestRepository
 	Providers   ProviderProfileRepository
+	MCPServers  MCPServerConfigRepository
 }
 
 func NewSet(db *gorm.DB) Set {
@@ -31,5 +32,6 @@ func NewSet(db *gorm.DB) Set {
 		ToolCalls:   NewToolCallRepository(db),
 		Permissions: NewPermissionRequestRepository(db),
 		Providers:   NewProviderProfileRepository(db),
+		MCPServers:  NewMCPServerConfigRepository(db),
 	}
 }

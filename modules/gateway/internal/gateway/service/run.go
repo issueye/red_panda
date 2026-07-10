@@ -130,6 +130,23 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 	if err != nil {
 		return StartRunResult{}, err
 	}
+	history, err := r.repos.Messages.ListLatestConversation(session.ID, 200)
+	if err != nil {
+		return StartRunResult{}, err
+	}
+	conversation := make([]methods.Message, 0, len(history))
+	for _, row := range history {
+		message, err := messageDTO(row)
+		if err != nil {
+			return StartRunResult{}, err
+		}
+		conversation = append(conversation, methods.Message{
+			ID:        message.ID,
+			Role:      message.Role,
+			Content:   message.Content,
+			CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
+		})
+	}
 	if _, err := r.repos.Messages.Add(session.ID, "user", stringInput(payload.Input, "text"), runID); err != nil {
 		return StartRunResult{}, err
 	}
@@ -137,9 +154,10 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 	params := methods.ReplyParams{
 		RunID: runID,
 		Session: methods.ReplySession{
-			ID:         session.ID,
-			Name:       session.Name,
-			WorkingDir: session.WorkspaceRoot,
+			ID:           session.ID,
+			Name:         session.Name,
+			WorkingDir:   session.WorkspaceRoot,
+			Conversation: conversation,
 		},
 		Input: methods.ReplyInput{
 			Text: stringInput(payload.Input, "text"),

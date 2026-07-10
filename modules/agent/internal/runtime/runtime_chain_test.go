@@ -1,0 +1,117 @@
+package runtime
+
+import (
+	"context"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"redpanda/protocol/events"
+	"redpanda/protocol/methods"
+	"redpanda/protocol/tools"
+)
+
+type chainedToolProvider struct {
+	requests []ProviderRequest
+}
+
+func (*chainedToolProvider) Name() string {
+	return "chained-tool-test"
+}
+
+func (p *chainedToolProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	req.ToolHistory = append([]ToolExchange(nil), req.ToolHistory...)
+	p.requests = append(p.requests, req)
+
+	switch len(req.ToolHistory) {
+	case 0:
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:        "tool_chain_list",
+			Name:      "workspace.list",
+			Risk:      tools.RiskLow,
+			Arguments: map[string]any{"path": ".", "max_depth": 1},
+		}}})
+	case 1:
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:        "tool_chain_read",
+			Name:      "workspace.read_file",
+			Risk:      tools.RiskLow,
+			Arguments: map[string]any{"path": "note.txt"},
+		}}})
+	default:
+		if err := emit(ProviderChunk{Delta: "tool chain completed"}); err != nil {
+			return err
+		}
+		return emit(ProviderChunk{Final: true})
+	}
+}
+
+func TestRuntimeProviderExecutesChainedToolCalls(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "note.txt"), []byte("chain result"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	lines := make(chan []byte, 32)
+	go readJSONLines(t, reader, lines)
+
+	provider := &chainedToolProvider{}
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	rt.provider = provider
+
+	sendRequest(t, context.Background(), rt, "reply_chain", methods.AgentReply, methods.ReplyParams{
+		RunID: "run_chain_test",
+		Session: methods.ReplySession{
+			ID:         "session_chain_test",
+			WorkingDir: tempDir,
+		},
+		Input: methods.ReplyInput{Text: "inspect note.txt"},
+	})
+
+	waitForResponse(t, lines, "reply_chain")
+	runEvents := waitForEventsUntilFinish(t, lines)
+
+	var started, finished int
+	for _, event := range runEvents {
+		switch event.Type {
+		case events.EventToolStarted:
+			started++
+		case events.EventToolFinished:
+			finished++
+		}
+	}
+	if started != 2 || finished != 2 {
+		t.Fatalf("tool event counts: started=%d finished=%d, want 2 each", started, finished)
+	}
+
+	finish := runEvents[len(runEvents)-1]
+	if finish.Type != events.EventFinish || finish.Payload["status"] != "completed" {
+		t.Fatalf("finish event = %#v, want completed", finish)
+	}
+
+	if len(provider.requests) != 3 {
+		t.Fatalf("provider request count = %d, want 3", len(provider.requests))
+	}
+	for index, wantHistory := range []int{0, 1, 2} {
+		if got := len(provider.requests[index].ToolHistory); got != wantHistory {
+			t.Fatalf("provider request %d history length = %d, want %d", index+1, got, wantHistory)
+		}
+	}
+
+	history := provider.requests[2].ToolHistory
+	if history[0].Call.Name != "workspace.list" || history[0].Result.Status != tools.CallStatusCompleted {
+		t.Fatalf("first tool exchange = %#v, want completed workspace.list", history[0])
+	}
+	if history[1].Call.Name != "workspace.read_file" || history[1].Result.Status != tools.CallStatusCompleted {
+		t.Fatalf("second tool exchange = %#v, want completed workspace.read_file", history[1])
+	}
+	if !strings.Contains(history[1].Result.Output, "chain result") {
+		t.Fatalf("read tool output = %q, want file contents", history[1].Result.Output)
+	}
+}

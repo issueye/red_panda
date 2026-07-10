@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -13,6 +14,27 @@ import (
 	"redpanda/gateway/internal/gateway/repository"
 	"redpanda/protocol/methods"
 )
+
+func TestSummarizeMessagesExcludesSubagentContent(t *testing.T) {
+	encode := func(text string) string {
+		raw, err := json.Marshal([]methods.ContentBlock{{Type: "text", Text: text}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	summary := summarizeMessages([]model.Message{
+		{Role: "user", ContentJSON: encode("root question")},
+		{Role: "subagent", ContentJSON: encode("PRIVATE_SUBAGENT_SENTINEL")},
+		{Role: "assistant", ContentJSON: encode("root answer")},
+	}, 1, 3)
+	if !strings.Contains(summary.Summary, "root question") || !strings.Contains(summary.Summary, "root answer") {
+		t.Fatalf("summary missing root conversation: %q", summary.Summary)
+	}
+	if strings.Contains(summary.Summary, "PRIVATE_SUBAGENT_SENTINEL") {
+		t.Fatalf("summary leaked subagent content: %q", summary.Summary)
+	}
+}
 
 func TestSessionServiceForkCopiesMessagesAndLineage(t *testing.T) {
 	repos, service := newSessionServiceTestFixture(t)

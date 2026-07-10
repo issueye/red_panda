@@ -302,7 +302,7 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 		"messages": openAICompatibleMessages(req),
 		"stream":   p.stream,
 	}
-	if len(req.Tools) > 0 && len(req.ToolHistory) == 0 {
+	if len(req.Tools) > 0 {
 		body["tools"] = openAICompatibleTools(req.Tools)
 		body["tool_choice"] = "auto"
 	}
@@ -310,7 +310,7 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 	if err != nil {
 		return err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/v1/chat/completions", bytes.NewReader(rawBody))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, openAICompatibleChatCompletionsURL(p.baseURL), bytes.NewReader(rawBody))
 	if err != nil {
 		return err
 	}
@@ -335,6 +335,17 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 		return err
 	}
 	return completeHTTPResponse(rawResp, emit)
+}
+
+func openAICompatibleChatCompletionsURL(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(baseURL, "/chat/completions") {
+		return baseURL
+	}
+	if strings.HasSuffix(baseURL, "/v1") {
+		return baseURL + "/chat/completions"
+	}
+	return baseURL + "/v1/chat/completions"
 }
 
 func providerFromOptions(options methods.ReplyOptions, fallbackStream bool) (HTTPCompatibleProvider, bool) {
@@ -503,11 +514,25 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 }
 
 func openAICompatibleMessages(req ProviderRequest) []map[string]any {
-	messages := make([]map[string]any, 0, 1+len(req.ToolHistory)*2)
+	messages := make([]map[string]any, 0, 1+len(req.Session.Conversation)+1+len(req.ToolHistory)*2)
 	if req.Options.MemoryContext != nil && strings.TrimSpace(req.Options.MemoryContext.Context) != "" {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": strings.TrimSpace(req.Options.MemoryContext.Context),
+		})
+	}
+	for _, message := range req.Session.Conversation {
+		content := conversationMessageText(message)
+		if content == "" {
+			continue
+		}
+		role, ok := openAICompatibleConversationRole(message.Role)
+		if !ok {
+			continue
+		}
+		messages = append(messages, map[string]any{
+			"role":    role,
+			"content": content,
 		})
 	}
 	messages = append(messages, map[string]any{"role": "user", "content": req.Input.Text})
@@ -538,6 +563,26 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		})
 	}
 	return messages
+}
+
+func openAICompatibleConversationRole(role string) (string, bool) {
+	if role == "user" || role == "system" {
+		return role, true
+	}
+	if role == "assistant" {
+		return role, true
+	}
+	return "", false
+}
+
+func conversationMessageText(message methods.Message) string {
+	parts := make([]string, 0, len(message.Content))
+	for _, block := range message.Content {
+		if text := strings.TrimSpace(block.Text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func openAICompatibleTools(definitions []tools.Definition) []map[string]any {

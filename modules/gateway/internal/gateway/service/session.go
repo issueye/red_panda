@@ -431,6 +431,9 @@ func messageDTO(row model.Message) (MessageDTO, error) {
 func summarizeMessages(messages []model.Message, startSeq uint64, endSeq uint64) CompactSummary {
 	parts := make([]string, 0, len(messages))
 	for _, message := range messages {
+		if message.Role != "user" && message.Role != "assistant" {
+			continue
+		}
 		text := messageText(message)
 		if text != "" {
 			parts = append(parts, fmt.Sprintf("%s: %s", message.Role, text))

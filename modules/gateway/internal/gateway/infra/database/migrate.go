@@ -19,5 +19,6 @@ func Migrate(db *gorm.DB) error {
 		&model.Workspace{},
 		&model.PermissionRequest{},
 		&model.ProviderProfile{},
+		&model.MCPServerConfig{},
 	)
 }

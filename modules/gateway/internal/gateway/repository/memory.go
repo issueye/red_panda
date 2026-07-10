@@ -2,12 +2,15 @@ package repository
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
 
 	"redpanda/gateway/internal/gateway/model"
 )
+
+var memoryIDCounter atomic.Uint64
 
 type MemoryRepository struct {
 	db *gorm.DB
@@ -39,7 +42,7 @@ func NewMemoryRepository(db *gorm.DB) MemoryRepository {
 func (r MemoryRepository) Create(record model.MemoryRecord) (model.MemoryRecord, error) {
 	now := time.Now().UTC()
 	if record.ID == "" {
-		record.ID = fmt.Sprintf("mem_%d", now.UnixNano())
+		record.ID = fmt.Sprintf("mem_%d_%d", now.UnixNano(), memoryIDCounter.Add(1))
 	}
 	if record.Status == "" {
 		record.Status = "active"

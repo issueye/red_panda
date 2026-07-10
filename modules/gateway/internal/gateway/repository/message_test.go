@@ -94,6 +94,57 @@ func TestMessageRepositoryAddOrAppendDoesNotAppendUserMessages(t *testing.T) {
 	assertMessageText(t, rows[1], "second")
 }
 
+func TestMessageRepositoryListLatestReturnsNewestWindowInSequenceOrder(t *testing.T) {
+	repo := newMessageTestRepository(t)
+	for _, text := range []string{"one", "two", "three", "four", "five"} {
+		if _, err := repo.Add("session_1", "user", text, "run_1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := repo.ListLatest("session_1", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("len(rows) = %d, want 3", len(rows))
+	}
+	assertMessageText(t, rows[0], "three")
+	assertMessageText(t, rows[1], "four")
+	assertMessageText(t, rows[2], "five")
+}
+
+func TestMessageRepositoryListLatestConversationFiltersSubagentsBeforeLimit(t *testing.T) {
+	repo := newMessageTestRepository(t)
+	for _, item := range []struct {
+		role string
+		text string
+	}{
+		{role: "user", text: "root question one"},
+		{role: "assistant", text: "root answer one"},
+		{role: "user", text: "root question two"},
+	} {
+		if _, err := repo.Add("session_1", item.role, item.text, "run_root"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := 0; index < 5; index++ {
+		if _, err := repo.Add("session_1", "subagent", "private planner detail", "run_subagent"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := repo.ListLatestConversation("session_1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	assertMessageText(t, rows[0], "root answer one")
+	assertMessageText(t, rows[1], "root question two")
+}
+
 func newMessageTestRepository(t *testing.T) MessageRepository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "messages.db")), &gorm.Config{})

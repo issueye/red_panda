@@ -16,6 +16,11 @@ import { normalizeRunEvent } from './lib/activityEvents.js';
 import { gatewayBaseURL } from './lib/config.js';
 import { displayRuntimeMode, displaySessionKind, displayStatus } from './lib/displayLabels.js';
 import {
+  mcpServerCreatePayload,
+  mcpServerUpdatePayload,
+  normalizeMcpServer,
+} from './lib/mcpServers.js';
+import {
   normalizeProviderProfile,
   providerProfileCreatePayload,
   providerProfileUpdatePayload,
@@ -253,6 +258,9 @@ export function App() {
   const [providerProfiles, setProviderProfiles] = useState([]);
   const [providerProfilesLoading, setProviderProfilesLoading] = useState(false);
   const [providerProfilesError, setProviderProfilesError] = useState('');
+  const [mcpServers, setMcpServers] = useState([]);
+  const [mcpServersLoading, setMcpServersLoading] = useState(false);
+  const [mcpServersError, setMcpServersError] = useState('');
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
 
@@ -325,6 +333,24 @@ export function App() {
     }
   }
 
+  async function loadMcpServers() {
+    setMcpServersLoading(true);
+    setMcpServersError('');
+    try {
+      const data = await apiJson('/api/v1/mcp/servers');
+      const normalized = Array.isArray(data?.servers)
+        ? data.servers.map(normalizeMcpServer)
+        : [];
+      setMcpServers(normalized);
+      return normalized;
+    } catch (error) {
+      setMcpServersError(error.message);
+      return [];
+    } finally {
+      setMcpServersLoading(false);
+    }
+  }
+
   async function loadSessionState(sessionId) {
     try {
       const [history, runs, toolCalls, permissionItems] = await Promise.all([
@@ -375,6 +401,7 @@ export function App() {
           loadGlobalPendingPermissions();
         }
         loadProviderProfiles();
+        loadMcpServers();
       })
       .catch(() => {});
     return () => {
@@ -385,6 +412,7 @@ export function App() {
   useEffect(() => {
     if (settingsOpen) {
       loadProviderProfiles();
+      loadMcpServers();
     }
   }, [settingsOpen]);
 
@@ -847,6 +875,52 @@ export function App() {
     ));
   }
 
+  async function createMcpServer(input) {
+    setMcpServersError('');
+    try {
+      const created = await apiJson('/api/v1/mcp/servers', {
+        method: 'POST',
+        body: JSON.stringify(mcpServerCreatePayload(input)),
+      });
+      const normalized = normalizeMcpServer(created);
+      setMcpServers((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
+      return normalized;
+    } catch (error) {
+      setMcpServersError(error.message);
+      throw error;
+    }
+  }
+
+  async function updateMcpServer(id, input) {
+    setMcpServersError('');
+    try {
+      const updated = await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(mcpServerUpdatePayload(input)),
+      });
+      const normalized = normalizeMcpServer(updated);
+      setMcpServers((items) => [
+        normalized,
+        ...items.filter((item) => item.id !== normalized.id),
+      ]);
+      return normalized;
+    } catch (error) {
+      setMcpServersError(error.message);
+      throw error;
+    }
+  }
+
+  async function deleteMcpServer(id) {
+    setMcpServersError('');
+    try {
+      await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      setMcpServers((items) => items.filter((item) => item.id !== id));
+    } catch (error) {
+      setMcpServersError(error.message);
+      throw error;
+    }
+  }
+
   function selectRightPanelTab(tab) {
     setRightPanelTab(tab);
     if (compactLayout) {
@@ -928,11 +1002,18 @@ export function App() {
         status={status}
       />
       <SettingsPanel
+        mcpServers={mcpServers}
+        mcpServersError={mcpServersError}
+        mcpServersLoading={mcpServersLoading}
+        onCreateMcpServer={createMcpServer}
         onCreateProviderProfile={createProviderProfile}
+        onDeleteMcpServer={deleteMcpServer}
         onDeleteProviderProfile={deleteProviderProfile}
         onChange={setRunSettings}
         onClose={() => setSettingsOpen(false)}
+        onRefreshMcpServers={loadMcpServers}
         onRefreshProviderProfiles={loadProviderProfiles}
+        onUpdateMcpServer={updateMcpServer}
         onUpdateProviderProfile={updateProviderProfile}
         open={settingsOpen}
         providerProfiles={providerProfiles}

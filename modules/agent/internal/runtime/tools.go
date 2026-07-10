@@ -27,15 +27,18 @@ const defaultGrepMatches = 100
 const maxPatchBytes = 256 * 1024
 
 type MemoryToolExecutor func(context.Context, methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error)
+type SkillRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
 
 type ToolRunner struct {
 	MemoryExecutor MemoryToolExecutor
+	SkillExecutor  SkillRunExecutor
 }
 
 type ToolRunContext struct {
 	WorkingDir string
 	RunID      string
 	SessionID  string
+	Reply      *methods.ReplyParams
 }
 
 type ToolInvocation struct {
@@ -156,6 +159,50 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 					"command": map[string]any{"type": "string", "description": "Command to execute."},
 				},
 				"required": []string{"command"},
+			},
+		},
+		{
+			Name:        "skill.create",
+			DisplayName: "Create skill",
+			Description: "Create a managed SKILL.md under .codex/skills in the active workspace.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":         map[string]any{"type": "string", "description": "Lowercase skill name using letters, digits, and hyphens."},
+					"description":  map[string]any{"type": "string", "description": "Short description used to select the skill."},
+					"instructions": map[string]any{"type": "string", "description": "Complete Markdown instructions for the skill."},
+				},
+				"required": []string{"name", "description", "instructions"},
+			},
+		},
+		{
+			Name:        "skill.update",
+			DisplayName: "Update skill",
+			Description: "Replace an existing managed SKILL.md under .codex/skills in the active workspace.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":         map[string]any{"type": "string", "description": "Existing lowercase skill name."},
+					"description":  map[string]any{"type": "string", "description": "Replacement description used to select the skill."},
+					"instructions": map[string]any{"type": "string", "description": "Complete replacement Markdown instructions."},
+				},
+				"required": []string{"name", "description", "instructions"},
+			},
+		},
+		{
+			Name:        "skill.run",
+			DisplayName: "Run skill",
+			Description: "Run a managed workspace skill in an isolated runtime-process subagent and return only its final result.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "description": "Existing managed skill name."},
+					"task": map[string]any{"type": "string", "description": "Task for the isolated skill subagent."},
+				},
+				"required": []string{"name", "task"},
 			},
 		},
 		{
@@ -320,6 +367,16 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 		output, err = runApplyPatch(runCtx.WorkingDir, stringArg(call.Arguments, "patch"))
 	case "shell.exec":
 		output, err = runShell(ctx, runCtx.WorkingDir, stringArg(call.Arguments, "command"))
+	case "skill.create":
+		output, err = runCreateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
+	case "skill.update":
+		output, err = runUpdateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
+	case "skill.run":
+		if runner.SkillExecutor == nil {
+			err = fmt.Errorf("skill subagent executor is not available")
+		} else {
+			output, err = runner.SkillExecutor(ctx, runCtx, call)
+		}
 	case "memory.list", "memory.create", "memory.update", "memory.delete":
 		output, err = runner.runMemoryTool(ctx, runCtx, call)
 	default:

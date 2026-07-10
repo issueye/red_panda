@@ -18,10 +18,10 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 
 ## Go Workspace Modules
 
-- `modules/protocol`: JSON-RPC, WebSocket envelope, agent event, permission DTO, tool DTO.
+- `modules/protocol`: JSON-RPC, WebSocket envelope, agent event, permission/tool DTOs, and MCP server config/CRUD DTOs.
 - `modules/agent`: stdio JSON-RPC Agent Runtime with Provider abstraction, ToolRunner, permission blocking, cancellation, in-process `planner`, and `runtime_process` / `process_pool` subagent backends.
-- `modules/gateway`: Gin/GORM/SQLite(no cgo) MVC Gateway with Runtime subprocess client, WebSocket run/permission channel, event replay, workspace/session/run/tool/permission APIs.
-- `modules/desktop`: Wails v3 + React/Vite desktop with chat, permissions, tool cards, subagent status/cancel, workspace panel, session restore, and searchable RunActivityPanel with event filters, grouped summaries, and payload inspection.
+- `modules/gateway`: Gin/GORM/SQLite(no cgo) MVC Gateway with Runtime subprocess client, WebSocket run/permission channel, event replay, workspace/session/run/tool/permission APIs, and validated MCP config CRUD.
+- `modules/desktop`: Wails v3 + React/Vite desktop with chat, permissions, tool cards, subagents, workspace/session restore, activity inspection, and Gateway-backed MCP config management.
 - `modules/cli`: placeholder for future debugging tools.
 
 ## Design Docs
@@ -71,13 +71,19 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 
 - WebSocket methods: `run.start`, `run.subscribe`, `run.resume`, `run.cancel`, `permission.resolve`, `agent.status`, `subagents.list`, `subagent.cancel`.
 - Runtime JSON-RPC methods: `core.initialize`, `core.ping`, `agent.reply`, `agent.cancel`, `agent.subagents`, `agent.subagent.cancel`, `permission.resolve`.
-- Providers: default `echo`; optional OpenAI-compatible HTTP provider.
-- ToolRunner MVP: `workspace.read_file`, `workspace.list`, `workspace.grep`, `workspace.diff_file`, `workspace.write_file`, `workspace.edit_file`, `workspace.apply_patch`, `shell.exec`.
+- Providers: default `echo`; optional OpenAI-compatible HTTP provider. Base URLs may be a host root, an existing `/v1` base, or a full `/chat/completions` endpoint.
+- ToolRunner MVP: `workspace.read_file`, `workspace.list`, `workspace.grep`, `workspace.diff_file`, `workspace.write_file`, `workspace.edit_file`, `workspace.apply_patch`, `shell.exec`, `skill.create`, `skill.update`, and isolated `skill.run`.
 - `workspace.edit_file`: high-risk precise string replacement with `path`, `old_text`, `new_text`, and `replace_all`. By default `old_text` must match exactly once; `replace_all=true` allows multi-location replacement. It uses the existing permission and tool policy flow.
 - `workspace.diff_file`: low-risk read-only unified diff preview for one workspace file. It accepts `path` plus either full proposed `content`, or `old_text`/`new_text` with optional `replace_all` for exact replacement preview. It does not write files.
 - `workspace.apply_patch`: high-risk workspace-scoped unified patch application with `patch`. It uses the existing permission and tool policy flow before writing.
+- `skill.create` / `skill.update`: high-risk managed skill-definition writes under `<workspace>/.codex/skills/<name>/SKILL.md`. Create never overwrites an existing skill; update never creates a missing skill. Names, sizes, directory boundaries, and symlink escape are validated before writing.
+- `skill.run`: high-risk synchronous tool that always loads the named skill in a fresh `runtime_process` subagent. The child receives no root conversation or root memory, sees the skill as isolated system context, cannot recursively run/manage skills, and is limited to read-only workspace tools. Only its final message becomes the root tool result.
+- Skill context boundary: subagent messages remain persisted for Desktop/audit display but are excluded before the 200-message root conversation limit and ignored defensively by the Provider. Automatic skill discovery and `agent.skills` / `agent.skill.load` request handling are not implemented yet.
 - Tool policy: `tool_policy`, `tool_allowlist`, `tool_denylist`, `permission_mode`.
 - Desktop SettingsPanel: exposes runtime options for `runtime_mode`, `tool_policy`, `permission_mode`, `spawn_subagents`, `subagent_backend`, `model`, `tool_allowlist`, and `tool_denylist`, and can list, select, create, update, and delete Gateway provider profiles. It keeps only masked API key state in Desktop and sends the selected `provider_profile_id` as a WebSocket `run.start` option to Gateway.
+- MCP configuration backend: protocol DTOs and Gateway CRUD APIs persist and validate server name, command, args, env, cwd, enabled state, timeouts, raw tool allowlists, and risk overrides. Responses mask sensitive environment values, and config validation never executes commands.
+- Desktop MCP configuration management: Settings can list, create, edit, enable/disable, and delete Gateway MCP server records. Arguments use one line per argv entry, normalized timeouts are retained, and partial updates do not resend omitted masked environment fields.
+- MCP execution boundary: no MCP server process is started by the current running loop; MCP initialize, `tools/list`, Runtime tool registration, permission integration, `tools/call`, cancellation, and restart handling are not implemented.
 - Gateway projections: `run_records`, `tool_calls`, `permission_requests`, and persisted run event timeline.
 - HTTP queries: session history, workspace tree/file/diff, run status, run event timeline, tool audit, permission records, global pending permissions.
 - Desktop restore: messages, tool cards, pending permissions, active run, latest `root_seq`, RunActivityPanel timeline state, and global pending approval queue.
@@ -154,7 +160,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ws-smoke.ps1
 powershell -ExecutionPolicy Bypass -File scripts\protocol-compat.ps1
 ```
 
-`scripts\protocol-compat.ps1` is the lightweight protocol compatibility check for the public Gateway HTTP and WebSocket surface. It validates that core client-facing protocol behavior still matches the documented envelopes and projections, including malformed WebSocket payload recovery, permission approve/deny paths, failed tool events/projections, failed subagent events/timeline, session fork/compact, memory CRUD/preview, Runtime `memory.*` tool create/list/deny paths, provider profile selection, and inactive provider profile failures.
+`scripts\protocol-compat.ps1` is the lightweight protocol compatibility check for the public Gateway HTTP and WebSocket surface. It validates that core client-facing protocol behavior still matches the documented envelopes and projections, including malformed WebSocket payload recovery, permission approve/deny paths, failed tool/subagent projections, session fork/compact, memory behavior, provider profiles, and MCP config CRUD/default/redaction behavior without starting MCP processes.
 
 Frontend automation under `modules\desktop\frontend` includes focused Playwright UI fixture coverage for restore, permissions, tool cards, subagents, and Activity timeline event filters, grouped summaries, and payload inspection. It continues to run through `npm run test:ui`.
 
@@ -180,6 +186,11 @@ POST /api/v1/provider-profiles
 GET /api/v1/provider-profiles/:id
 PUT /api/v1/provider-profiles/:id
 DELETE /api/v1/provider-profiles/:id
+GET /api/v1/mcp/servers
+POST /api/v1/mcp/servers
+GET /api/v1/mcp/servers/:id
+PUT /api/v1/mcp/servers/:id
+DELETE /api/v1/mcp/servers/:id
 GET /api/v1/memory?scope=&workspace_root=&session_id=&status=&limit=
 POST /api/v1/memory
 PUT /api/v1/memory/:id
@@ -223,8 +234,14 @@ Provider profiles are managed by Gateway through `/api/v1/provider-profiles`. A 
 
 Desktop SettingsPanel manages these profiles through the Gateway APIs. It lists available profiles, lets the user select the active profile for a run, creates and updates profiles, deletes profiles, and stores only `api_key_set` plus the masked key value returned by Gateway. When a profile is selected, Desktop includes `provider_profile_id` in the WebSocket `run.start` options.
 
+## MCP Configuration
+
+Gateway manages MCP server configuration records through `/api/v1/mcp/servers`. The Desktop MCP Settings tab uses these APIs for list, create, edit, enable/disable, and delete operations. Configuration includes command argv, environment entries, working directory, normalized phase timeouts, raw tool allowlists, and risk overrides. Sensitive environment values are masked in API responses.
+
+This is configuration management only. Gateway does not execute configured commands, and Agent Runtime does not yet start MCP processes, initialize servers, discover tools with `tools/list`, register MCP tools, or call `tools/call`.
+
 ## Next Focus
 
-- Follow [v0.1.2 Development Plan](docs/22-v0.1.2-development-plan.md): implement MCP-1 only, covering protocol/config DTOs and Gateway config CRUD.
-- Use [v0.1.3 Development Plan](docs/24-v0.1.3-development-plan.md), [v0.1.4 Development Plan](docs/25-v0.1.4-development-plan.md), and [v0.1.5 Development Plan](docs/26-v0.1.5-development-plan.md) as the next ordered slices after the MCP config baseline.
-- MCP stdio Runtime process execution remains blocked until the v0.1.2 config slice and later read-only discovery gates explicitly allow it.
+- Treat the v0.1.2 Gateway MCP config CRUD and v0.1.4 Desktop MCP config management slices as implemented.
+- Follow [v0.1.5 Development Plan](docs/26-v0.1.5-development-plan.md) for the next controlled read-only startup, initialize, and `tools/list` discovery slice.
+- Keep MCP `tools/call`, provider-facing execution, permission integration, cancellation/restart policy, and production process lifecycle claims blocked until their later implementation and verification gates pass.

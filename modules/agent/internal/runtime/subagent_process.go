@@ -254,6 +254,13 @@ func (c *subAgentProcess) handleNotification(line []byte, method string) {
 	if err := json.Unmarshal(note.Params, &event); err != nil {
 		return
 	}
+	if event.Type == events.EventFinish {
+		select {
+		case c.events <- event:
+		case <-c.done:
+		}
+		return
+	}
 	select {
 	case c.events <- event:
 	default:

@@ -22,6 +22,7 @@ type Set struct {
 	Tool       ToolService
 	Permission PermissionService
 	Provider   ProviderProfileService
+	MCPServers MCPServerConfigService
 }
 
 type AppService struct {
@@ -38,5 +39,6 @@ func NewSet(opts Options) Set {
 		Tool:       NewToolService(opts.Repos),
 		Permission: NewPermissionService(opts.Repos),
 		Provider:   NewProviderProfileService(opts.Repos),
+		MCPServers: NewMCPServerConfigService(opts.Repos),
 	}
 }

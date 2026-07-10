@@ -1,6 +1,6 @@
 # Structured Development Roadmap
 
-Updated: 2026-07-09
+Updated: 2026-07-10
 
 This document controls the next development order for `red_panda`. It is meant to prevent scattered feature work by defining:
 
@@ -31,11 +31,11 @@ For the next planned slices, use:
 
 | Area | Current state | Evidence | Main remaining risk |
 | --- | --- | --- | --- |
-| Protocol | JSON-RPC, WebSocket envelopes, run lifecycle, permissions, tools, subagents, replay, and resume are implemented. | `modules/protocol`, `scripts/protocol-compat.ps1` | MCP config DTOs are next. |
-| Agent Runtime | Provider abstraction, tool loop, permission gating, cancellation, in-process subagent, `runtime_process`, `process_pool`, memory context injection, and Gateway-mediated `memory.*` tools are implemented. | `modules/agent/internal/runtime`, runtime unit tests | MCP capability is not started. |
-| Gateway | Gin/GORM/SQLite MVC, Runtime subprocess client, persistence, projections, provider profiles, and WebSocket routing are implemented. | `modules/gateway`, repository/service tests | Long-running process supervision and external access hardening remain shallow. |
-| Desktop | Wails v3 + React UI with chat, tools, permissions, subagents, settings, workspace, activity timeline, restore, reconnect/resume, Memory panel, and shared UI primitives including custom dropdowns. | `modules/desktop/frontend`, Playwright tests | MCP UI is not started. |
-| Persistence | Sessions, messages, run events, run records, tools, permissions, provider profiles, session lineage, compactions, and memory records are persisted. | Gateway repositories and APIs | MCP configuration persistence is the v0.1.2 target. |
+| Protocol | JSON-RPC, WebSocket envelopes, run lifecycle, permissions, tools, subagents, replay/resume, and MCP config CRUD DTOs are implemented. | `modules/protocol`, `scripts/protocol-compat.ps1` | MCP initialize/discovery/call contracts remain. |
+| Agent Runtime | Provider abstraction, sequential tool loop, permission gating, cancellation, subagents, memory context injection, and Gateway-mediated `memory.*` tools are implemented. | `modules/agent/internal/runtime`, runtime unit tests | MCP process lifecycle, discovery, and calls are not implemented. |
+| Gateway | Gin/GORM/SQLite MVC, Runtime subprocess client, persistence, projections, provider profiles, MCP config CRUD, and WebSocket routing are implemented. | `modules/gateway`, repository/service/controller tests | Gateway does not and must not execute MCP commands. |
+| Desktop | Wails v3 + React UI with chat, tools, permissions, subagents, settings, workspace, activity timeline, Memory, and Gateway-backed MCP config management. | `modules/desktop/frontend`, Playwright tests | No live MCP discovery, status, or callable tools exist yet. |
+| Persistence | Sessions, messages, run events, runs, tools, permissions, providers, lineage, compactions, memory, and MCP server configs are persisted. | Gateway repositories and APIs | MCP runtime state is intentionally not persisted yet. |
 | Verification | Unit tests, Playwright fixtures, Gateway-backed E2E, protocol compatibility, Wails build. | `npm test`, `npm run test:ui`, `go test`, scripts | Full smoke is slower; test matrix needs tiers to avoid wasting time. |
 
 ## 2. Development Priority Rules
@@ -165,12 +165,13 @@ Goal: support external MCP-style stdio tools without compromising the existing R
 Work items, in order:
 
 1. Define MCP tool process model separately from Agent Runtime process model. Status: complete in `docs/19-mcp-stdio-tools-design.md`.
-2. Add MCP config DTOs and Gateway config CRUD. Status: designated for v0.1.2.
-3. Add tool registry and capability discovery.
-4. Add permission and risk mapping.
-5. Add execution, timeout, and process cleanup.
-6. Add Desktop tool audit display.
-7. Add protocol and E2E tests.
+2. Add MCP config DTOs and Gateway config CRUD. Status: complete for v0.1.2.
+3. Add Gateway-backed Desktop MCP config management. Status: complete for v0.1.4.
+4. Add controlled process startup, initialize, and read-only `tools/list` discovery. Status: planned for v0.1.5.
+5. Add Runtime tool registry integration. Status: not started.
+6. Add permission/risk mapping and `tools/call` execution. Status: not started.
+7. Add call timeout, cancellation, crash/restart, and process cleanup coverage. Status: not started.
+8. Add Desktop MCP tool audit/status display after Runtime execution exists. Status: not started.
 
 Guardrails:
 
@@ -246,14 +247,18 @@ Next work should be picked from this queue, top first:
 8. Optional `memory.*` Runtime tools. Status: complete.
 9. MCP stdio tools design. Status: complete for v0.1.1.
 10. Desktop UI normalization. Status: complete for v0.1.1.
-11. MCP config DTOs and Gateway config CRUD. Status: designated for v0.1.2.
-12. Desktop clarity and localization stabilization. Status: implemented for v0.1.3.
-13. Desktop MCP config UI. Status: planned for v0.1.4 after v0.1.2 backend.
-14. MCP read-only discovery. Status: planned for v0.1.5.
+11. Agent correctness stabilization. Status: complete; full gate passed.
+   - Gateway passes ordered persisted conversation without duplicating the current input.
+   - Provider messages include conversation and accumulated tool exchanges.
+   - Tool definitions remain available across sequential provider/tool turns.
+12. MCP config DTOs and Gateway config CRUD. Status: complete for v0.1.2.
+13. Desktop clarity and localization stabilization. Status: implemented for v0.1.3.
+14. Desktop MCP config UI. Status: complete for v0.1.4; config management only.
+15. MCP read-only startup and discovery. Status: next planned slice for v0.1.5.
 
 Do not start MCP implementation before items 1-6 are complete or explicitly deferred in this document.
 
-For v0.1.2, item 11 is the active backend slice. Runtime MCP process execution remains blocked until v0.1.2 is complete and verified. v0.1.3 may ship Desktop clarity work without changing MCP backend behavior.
+Items 12 and 14 complete the configuration surface but do not make MCP tools executable. The next slice may implement controlled startup, initialize, and read-only `tools/list`; `tools/call`, provider-facing execution, permission integration, and restart policy remain blocked.
 
 The active owner/work-lane split and stop rules for this queue are tracked in `docs/12-current-execution-plan.md`.
 
