@@ -16,6 +16,7 @@ import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { gatewayBaseURL } from './lib/config.js';
+import { extractAgentScope } from './lib/conversationScope.js';
 import { selectDirectory } from './lib/desktopShell.js';
 import { displayRuntimeMode, displaySessionKind, displayStatus } from './lib/displayLabels.js';
 import {
@@ -182,7 +183,8 @@ function normalizePermission(item) {
 }
 
 function appendAgentText(items, payload, text) {
-  const agentName = payload.agent?.name || payload.agent?.role || payload.agent_name || payload.agent_role || 'agent';
+  const scope = extractAgentScope(payload);
+  const agentName = scope.agentName || 'agent';
   const runId = payload.run_id || payload.root_run_id || '';
   const eventSeq = Number(payload.root_seq) || 0;
   const previous = items[items.length - 1];
@@ -190,6 +192,7 @@ function appendAgentText(items, payload, text) {
     && previous?.role === 'assistant'
     && previous.agent === agentName
     && previous.runId === runId
+    && (previous.subagentId || '') === (scope.subagentId || '')
     && previous.eventSeq > 0
     && eventSeq === previous.eventSeq + 1;
 
@@ -211,6 +214,8 @@ function appendAgentText(items, payload, text) {
       id: payload.event_id || payload.id || `evt_${Date.now()}`,
       role: 'assistant',
       agent: agentName,
+      agentRole: scope.agentRole || '',
+      subagentId: scope.subagentId || '',
       runId,
       eventSeq,
       rootSeq: eventSeq,
@@ -218,6 +223,17 @@ function appendAgentText(items, payload, text) {
       text,
     },
   ];
+}
+
+const MAIN_CONVERSATION_TAB = {
+  id: 'main',
+  kind: 'main',
+  title: '主对话',
+  closable: false,
+};
+
+function subagentConversationTabId(subagentId) {
+  return `sub:${subagentId}`;
 }
 
 function latestActiveRun(runs) {
@@ -271,6 +287,8 @@ export function App() {
   const [currentRunId, setCurrentRunId] = useState('');
   const [rootSeq, setRootSeq] = useState(1);
   const [subAgents, setSubAgents] = useState([]);
+  const [conversationTabs, setConversationTabs] = useState([MAIN_CONVERSATION_TAB]);
+  const [activeConversationTab, setActiveConversationTab] = useState('main');
   const [runEventsByRun, setRunEventsByRun] = useState({});
   const [runEventsLoading, setRunEventsLoading] = useState({});
   const [runEventsError, setRunEventsError] = useState({});
@@ -518,6 +536,18 @@ export function App() {
               summary: payload.payload?.summary || current?.summary || '',
               seq: payload.agent_seq || current?.seq || 0,
             };
+            // Keep open conversation tab titles/status in sync.
+            setConversationTabs((tabs) => tabs.map((tab) => (
+              tab.subagentId === id
+                ? {
+                    ...tab,
+                    title: next.name || tab.title,
+                    status: next.status,
+                    statusLabel: displayStatus(next.status),
+                    runId: next.runId || tab.runId,
+                  }
+                : tab
+            )));
             return current
               ? items.map((item) => (item.id === id ? next : item))
               : [...items, next];
@@ -527,6 +557,7 @@ export function App() {
 
       if (payload.type === 'permission_required') {
         const permissionID = payload.payload?.permission_id || `perm_${Date.now()}`;
+        const scope = extractAgentScope(payload);
         const nextPermission = {
           id: permissionID,
           runId: payload.payload?.run_id || payload.root_run_id,
@@ -538,7 +569,9 @@ export function App() {
           toolName: payload.payload?.tool_name,
           arguments: payload.payload?.arguments || {},
           rootSeq: payload.root_seq,
-          agent: payload.agent?.name || payload.agent?.role || payload.agent_name || payload.agent_role || '',
+          agent: scope.agentName,
+          agentRole: scope.agentRole,
+          subagentId: scope.subagentId,
           createdAt: payload.created_at || new Date().toISOString(),
         };
         setPermissions((items) => upsertByID(items, nextPermission));
@@ -560,10 +593,12 @@ export function App() {
 
       if (payload.type === 'tool_started') {
         const toolID = payload.payload?.tool_call_id || payload.event_id;
+        const scope = extractAgentScope(payload);
         setTools((items) => {
           const nextTool = {
             id: toolID,
             rootRunId: payload.root_run_id,
+            runId: payload.run_id || payload.root_run_id || '',
             name: payload.payload?.tool_name || 'tool',
             displayName: payload.payload?.display_name || payload.payload?.tool_name || '工具',
             risk: payload.payload?.risk || 'low',
@@ -574,6 +609,9 @@ export function App() {
             startedSeq: payload.root_seq,
             rootSeq: payload.root_seq,
             startedAt: payload.created_at || new Date().toISOString(),
+            agent: scope.agentName,
+            agentRole: scope.agentRole,
+            subagentId: scope.subagentId,
           };
           const nextTools = [
             ...items.filter((item) => item.id !== toolID),
@@ -717,6 +755,8 @@ export function App() {
     setRunEventsLoading({});
     setRunEventsError({});
     setSubAgents([]);
+    setConversationTabs([MAIN_CONVERSATION_TAB]);
+    setActiveConversationTab('main');
     setRunning(false);
     setCurrentRunId('');
     setRootSeq(1);
@@ -874,6 +914,8 @@ export function App() {
     setRunEventsLoading({});
     setRunEventsError({});
     setSubAgents([]);
+    setConversationTabs([MAIN_CONVERSATION_TAB]);
+    setActiveConversationTab('main');
     setRunning(false);
     setCurrentRunId('');
     const target = sessions.find((item) => item.id === id);
@@ -944,6 +986,49 @@ export function App() {
     if (runId) {
       await request('run.cancel', { run_id: runId }).catch(() => {});
     }
+  }
+
+  function openSubagentConversation(agent) {
+    if (!agent?.id || agent.role !== 'subagent') return;
+    const tabId = subagentConversationTabId(agent.id);
+    setConversationTabs((tabs) => {
+      if (tabs.some((tab) => tab.id === tabId)) {
+        return tabs.map((tab) => (
+          tab.id === tabId
+            ? {
+                ...tab,
+                title: agent.name || tab.title,
+                status: agent.status,
+                statusLabel: displayStatus(agent.status),
+                runId: agent.runId || tab.runId,
+              }
+            : tab
+        ));
+      }
+      return [
+        ...tabs,
+        {
+          id: tabId,
+          kind: 'subagent',
+          subagentId: agent.id,
+          title: agent.name || agent.id,
+          status: agent.status,
+          statusLabel: displayStatus(agent.status),
+          runId: agent.runId || '',
+          closable: true,
+        },
+      ];
+    });
+    setActiveConversationTab(tabId);
+  }
+
+  function closeConversationTab(tabId) {
+    if (!tabId || tabId === 'main') return;
+    setConversationTabs((tabs) => {
+      const next = tabs.filter((tab) => tab.id !== tabId);
+      return next.length > 0 ? next : [MAIN_CONVERSATION_TAB];
+    });
+    setActiveConversationTab((current) => (current === tabId ? 'main' : current));
   }
 
   async function cancelSubAgent(agent) {
@@ -1230,7 +1315,11 @@ export function App() {
   const rightPanelContent = rightPanelTab === 'workspace' ? (
     <WorkspacePanel apiJson={apiJson} workspace={workspace} />
   ) : rightPanelTab === 'subagents' ? (
-    <SubAgentPanel agents={agents} onCancelSubAgent={cancelSubAgent} />
+    <SubAgentPanel
+      agents={agents}
+      onCancelSubAgent={cancelSubAgent}
+      onOpenSubagentConversation={openSubagentConversation}
+    />
   ) : rightPanelTab === 'memory' ? (
     <MemoryPanel
       apiJson={apiJson}
@@ -1315,17 +1404,22 @@ export function App() {
           workspaces={recentWorkspaces}
         />
         <ChatPanel
+          activeConversationTab={activeConversationTab}
+          conversationTabs={conversationTabs}
           draft={draft}
           messages={messages}
           onCancel={cancelRun}
+          onCloseConversationTab={closeConversationTab}
           onDraftChange={setDraft}
           onProviderProfileChange={(id) => setRunSettings((current) => ({ ...current, providerProfileId: id }))}
           onResolvePermission={resolvePermission}
+          onSelectConversationTab={setActiveConversationTab}
           onSend={sendTask}
           permissions={pendingPermissions}
           providerProfileId={runSettings.providerProfileId}
           providerProfiles={providerProfiles}
           running={running}
+          subAgents={subAgents}
           tools={tools}
         />
         <div

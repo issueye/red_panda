@@ -4,7 +4,7 @@ export const defaultRunSettings = {
   permissionMode: 'strict',
   providerProfileId: '',
   spawnSubAgents: false,
-  subAgentBackend: 'in_process',
+  subAgentBackend: 'process_pool',
   model: '',
   toolAllowlist: '',
   toolDenylist: '',

@@ -18,7 +18,13 @@ function displayMessageAgent(message) {
   return agent;
 }
 
-export function ChatConversation({ messages, permissions, tools, onResolvePermission }) {
+export function ChatConversation({
+  messages,
+  permissions,
+  tools,
+  onResolvePermission,
+  emptyTitle = '准备开始',
+}) {
   const viewportRef = useRef(null);
   const [followingLatest, setFollowingLatest] = useState(true);
   const timeline = useMemo(
@@ -57,7 +63,7 @@ export function ChatConversation({ messages, permissions, tools, onResolvePermis
         ref={viewportRef}
       >
         {timeline.length === 0 ? (
-          <EmptyState className="empty-conversation" title="准备开始" />
+          <EmptyState className="empty-conversation" title={emptyTitle} />
         ) : null}
 
         {timeline.map((item) => {

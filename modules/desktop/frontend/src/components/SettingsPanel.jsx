@@ -38,9 +38,9 @@ const PERMISSION_MODES = [
 ];
 
 const SUB_AGENT_BACKENDS = [
-  ['in_process', '进程内'],
-  ['runtime_process', '运行时进程'],
-  ['process_pool', '进程池'],
+  ['process_pool', '进程池（推荐）'],
+  ['runtime_process', '运行时进程（一次性）'],
+  ['in_process', '进程内（仅 planner）'],
 ];
 
 const SETTINGS_TABS = [
@@ -970,8 +970,14 @@ export function SettingsPanel({
             checked={Boolean(settings?.spawnSubAgents)}
             onChange={(event) => updateSetting('spawnSubAgents', event.target.checked)}
           />
-          <span>启用子代理</span>
+          <span>运行时自动启动 planner 子代理</span>
         </label>
+        <p className="settings-hint">
+          主代理可通过 <code>subagent.run</code> 从进程池派发专科子代理，并用
+          <code>subagent.list</code> / <code>subagent.cancel</code> / <code>subagent.reset</code> /
+          <code>subagent.pool_status</code> / <code>subagent.pool_resize</code> / <code>subagent.pool_reset</code>
+          管理子代理与进程池。默认使用进程池。
+        </p>
       </section>
       <section className="settings-section">
         <h3>工具与授权</h3>
@@ -1013,7 +1019,8 @@ export function SettingsPanel({
           />
         </div>
         <p className="settings-hint">
-          工具轮次上限控制单次回复中模型可连续调用工具的轮数。默认 4，最大 32。任务需要多步工具时可适当提高。
+          工具轮次上限主要约束主代理自身。分析类子代理的轮次由主代理先 <code>workspace.stats</code> 统计文件数后，按
+          <code>max_turns = file_count + 总结轮次</code> 指定（无固定上限），并传入 <code>path</code>/<code>file_count</code>。
         </p>
       </section>
       <section className="settings-section">
