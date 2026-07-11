@@ -20,6 +20,16 @@ export function Bootstrap() {
 }
 
 /**
+ * OpenInExplorer reveals a file or directory in the system file manager.
+ * Directories open in-place; files are selected/revealed when the platform supports it.
+ * @param {string} path
+ * @returns {$CancellablePromise<void>}
+ */
+export function OpenInExplorer(path) {
+    return $Call.ByID(2739626308, path);
+}
+
+/**
  * SelectDirectory opens a native folder picker and returns the selected path.
  * Empty string means the user cancelled.
  * @returns {$CancellablePromise<string>}

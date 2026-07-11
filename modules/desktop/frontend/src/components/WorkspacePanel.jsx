@@ -1,5 +1,6 @@
-import { FileText, Folder, GitCompare, RefreshCw } from 'lucide-react';
+import { ExternalLink, FileText, Folder, GitCompare, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { openInExplorer } from '../lib/desktopShell.js';
 import { Button } from './ui/button.jsx';
 import { ErrorMessage, InlineEmpty } from './ui/feedback.jsx';
 import { PanelHeader } from './ui/panel.jsx';
@@ -82,13 +83,43 @@ export function WorkspacePanel({ apiJson, workspace }) {
     loadTree();
   }, [workspace?.root_path, workspace?.root]);
 
+  const workspaceRoot = workspace?.root_path || workspace?.root || '';
+
+  function resolveAbsolutePath(relativeOrAbsolute) {
+    const target = String(relativeOrAbsolute || '').trim();
+    if (!target) return workspaceRoot;
+    if (/^[a-zA-Z]:[\\/]/.test(target) || target.startsWith('\\\\') || target.startsWith('/')) {
+      return target;
+    }
+    if (!workspaceRoot) return target;
+    const sep = workspaceRoot.includes('\\') ? '\\' : '/';
+    return `${workspaceRoot.replace(/[\\/]+$/, '')}${sep}${target.replace(/^[\\/]+/, '')}`;
+  }
+
+  async function revealInExplorer(pathHint) {
+    const absolute = resolveAbsolutePath(pathHint || workspaceRoot);
+    if (!absolute) return;
+    await openInExplorer(absolute);
+  }
+
   return (
     <section className="workspace-panel-content">
       <PanelHeader
         action={(
-          <Button icon={<RefreshCw size={14} />} onClick={loadTree} variant="ghost">
-            刷新
-          </Button>
+          <div className="workspace-panel-actions">
+            <Button
+              data-testid="workspace-panel-open-explorer"
+              disabled={!workspaceRoot}
+              icon={<ExternalLink size={14} />}
+              onClick={() => revealInExplorer(workspaceRoot)}
+              variant="ghost"
+            >
+              资源管理器
+            </Button>
+            <Button icon={<RefreshCw size={14} />} onClick={loadTree} variant="ghost">
+              刷新
+            </Button>
+          </div>
         )}
         title="工作区"
       />
@@ -119,9 +150,20 @@ export function WorkspacePanel({ apiJson, workspace }) {
         <div className="workspace-preview">
           <div className="workspace-preview-head">
             <span>{selectedPath || '预览'}</span>
-            <Button icon={<GitCompare size={14} />} onClick={loadDiff} variant="soft">
-              差异
-            </Button>
+            <div className="workspace-preview-actions">
+              <Button
+                data-testid="workspace-file-open-explorer"
+                disabled={!selectedPath && !workspaceRoot}
+                icon={<ExternalLink size={14} />}
+                onClick={() => revealInExplorer(selectedPath || workspaceRoot)}
+                variant="ghost"
+              >
+                打开位置
+              </Button>
+              <Button icon={<GitCompare size={14} />} onClick={loadDiff} variant="soft">
+                差异
+              </Button>
+            </div>
           </div>
           <ErrorMessage as="div" className="workspace-error">{error}</ErrorMessage>
           <pre>{loading ? '加载中...' : displayContent(file, diff)}</pre>

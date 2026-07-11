@@ -2,6 +2,11 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -44,4 +49,41 @@ func (a *App) SelectDirectory() (string, error) {
 		CanChooseFiles(false).
 		SetTitle("选择工作区").
 		PromptForSingleSelection()
+}
+
+// OpenInExplorer reveals a file or directory in the system file manager.
+// Directories open in-place; files are selected/revealed when the platform supports it.
+func (a *App) OpenInExplorer(path string) error {
+	cleaned := strings.TrimSpace(path)
+	if cleaned == "" {
+		return fmt.Errorf("path is required")
+	}
+	abs, err := filepath.Abs(cleaned)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return err
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		if info.IsDir() {
+			return exec.Command("explorer.exe", abs).Start()
+		}
+		// /select, must be a single combined argument for explorer.exe.
+		return exec.Command("explorer.exe", "/select,"+abs).Start()
+	case "darwin":
+		if info.IsDir() {
+			return exec.Command("open", abs).Start()
+		}
+		return exec.Command("open", "-R", abs).Start()
+	default:
+		target := abs
+		if !info.IsDir() {
+			target = filepath.Dir(abs)
+		}
+		return exec.Command("xdg-open", target).Start()
+	}
 }

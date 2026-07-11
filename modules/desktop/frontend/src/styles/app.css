@@ -554,13 +554,20 @@ textarea:focus-visible {
   align-items: center;
   display: grid;
   gap: 2px;
-  grid-template-columns: 20px minmax(0, 1fr) 24px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   min-width: 0;
 }
 
 .tree-session-row {
   grid-template-columns: minmax(0, 1fr) 24px;
   margin-left: 18px;
+}
+
+.tree-workspace-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0;
 }
 
 .tree-workspace-toggle,
@@ -664,6 +671,7 @@ textarea:focus-visible {
   padding: 4px 0;
 }
 
+.tree-action,
 .tree-delete {
   color: var(--color-text-soft);
   height: 24px;
@@ -673,10 +681,17 @@ textarea:focus-visible {
   width: 24px;
 }
 
+.tree-workspace-row:hover .tree-action,
+.tree-session-row:hover .tree-action,
 .tree-workspace-row:hover .tree-delete,
 .tree-session-row:hover .tree-delete,
+.tree-action:focus-visible,
 .tree-delete:focus-visible {
   opacity: 1;
+}
+
+.tree-action:hover {
+  color: var(--color-brand-text);
 }
 
 .tree-delete:hover {
@@ -2194,6 +2209,14 @@ textarea:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-panel-actions,
+.workspace-preview-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
 }
 
 .workspace-preview pre {

@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   FolderOpen,
   FolderPlus,
   GitFork,
@@ -10,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { openInExplorer } from '../lib/desktopShell.js';
 import { buildWorkspaceSessionTree } from '../lib/sessionTree.js';
 import { classNames } from '../lib/format.js';
 import { Button, IconButton } from './ui/button.jsx';
@@ -120,20 +122,36 @@ export function Sidebar({
                       <span className="tree-workspace-name">{node.name}</span>
                       <em>{node.sessions.length}</em>
                     </button>
-                    {canDeleteWorkspace ? (
-                      <IconButton
-                        className="tree-delete"
-                        data-testid="workspace-delete"
-                        label={`移除工作区 ${node.name}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onDeleteWorkspace?.(node);
-                        }}
-                        variant="ghost"
-                      >
-                        <Trash2 size={13} />
-                      </IconButton>
-                    ) : null}
+                    <div className="tree-workspace-actions">
+                      {node.root ? (
+                        <IconButton
+                          className="tree-action"
+                          data-testid="workspace-open-explorer"
+                          label={`在文件资源管理器中打开 ${node.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openInExplorer(node.root).catch(() => {});
+                          }}
+                          variant="ghost"
+                        >
+                          <ExternalLink size={13} />
+                        </IconButton>
+                      ) : null}
+                      {canDeleteWorkspace ? (
+                        <IconButton
+                          className="tree-action tree-delete"
+                          data-testid="workspace-delete"
+                          label={`移除工作区 ${node.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onDeleteWorkspace?.(node);
+                          }}
+                          variant="ghost"
+                        >
+                          <Trash2 size={13} />
+                        </IconButton>
+                      ) : null}
+                    </div>
                   </div>
                   {isOpen ? (
                     <div className="tree-session-list">
@@ -176,7 +194,7 @@ export function Sidebar({
                               ) : null}
                             </button>
                             <IconButton
-                              className="tree-delete"
+                              className="tree-action tree-delete"
                               data-testid="session-delete"
                               label={`删除会话 ${session.title}`}
                               onClick={(event) => {
