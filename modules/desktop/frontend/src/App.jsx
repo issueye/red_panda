@@ -1470,6 +1470,7 @@ export function App() {
   return (
     <div className="app-shell">
       <TopBar
+        busy={activeRunCount > 0}
         gatewayBase={gatewayBase}
         onReconnect={reconnect}
         onSettings={() => setSettingsOpen(true)}

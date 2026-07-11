@@ -19,7 +19,7 @@ function RestoreIcon() {
  * Global app header: brand, connection controls, and custom window chrome
  * (replaces the native Wails / OS title bar when the window is frameless).
  */
-export function TopBar({ status, gatewayBase, onReconnect, onSettings }) {
+export function TopBar({ status, gatewayBase, onReconnect, onSettings, busy = false }) {
   const [maximised, setMaximised] = useState(false);
 
   const refreshMaximised = useCallback(async () => {
@@ -45,8 +45,10 @@ export function TopBar({ status, gatewayBase, onReconnect, onSettings }) {
 
   return (
     <header className="topbar" onDoubleClick={handleTitleDoubleClick}>
-      <div className="topbar-drag brand">
-        <img alt="" draggable={false} src={mark} />
+      <div className={classNames('topbar-drag brand', busy && 'is-busy')}>
+        <span className="brand-mark-wrap" aria-hidden="true">
+          <img alt="" className="brand-mark" draggable={false} src={mark} />
+        </span>
         <div>
           <strong>red_panda</strong>
         </div>

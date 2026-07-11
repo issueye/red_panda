@@ -7,6 +7,7 @@ import { ToolCallCard } from '../ToolCallCard.jsx';
 import { Button } from '../ui/button.jsx';
 import { EmptyState } from '../ui/feedback.jsx';
 import { Markdown } from '../ui/Markdown.jsx';
+import { RunningPanda } from '../ui/RunningPanda.jsx';
 
 function displayMessageAgent(message) {
   const agent = message.agent || message.role;
@@ -22,6 +23,7 @@ export function ChatConversation({
   messages,
   permissions,
   tools,
+  running = false,
   onResolvePermission,
   emptyTitle = '准备开始',
 }) {
@@ -39,7 +41,7 @@ export function ChatConversation({
       if (viewport) viewport.scrollTop = viewport.scrollHeight;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [followingLatest, timeline]);
+  }, [followingLatest, timeline, running]);
 
   function handleScroll() {
     const viewport = viewportRef.current;
@@ -115,6 +117,12 @@ export function ChatConversation({
             </article>
           );
         })}
+
+        {running ? (
+          <div className="running-panda-row" data-testid="running-panda-row">
+            <RunningPanda label="小熊猫思考中" />
+          </div>
+        ) : null}
       </div>
       {!followingLatest && timeline.length > 0 ? (
         <Button

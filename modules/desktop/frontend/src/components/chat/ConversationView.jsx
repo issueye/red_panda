@@ -31,6 +31,7 @@ export function ConversationView({
         messages={messages}
         onResolvePermission={showComposer ? onResolvePermission : undefined}
         permissions={permissions}
+        running={running}
         tools={tools}
       />
       {showComposer ? (

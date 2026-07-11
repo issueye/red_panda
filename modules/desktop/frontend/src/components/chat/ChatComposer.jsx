@@ -2,6 +2,7 @@ import { Send, Square } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { classNames } from '../../lib/format.js';
 import { IconButton } from '../ui/button.jsx';
+import { RunningPanda } from '../ui/RunningPanda.jsx';
 import { SelectMenu } from '../ui/select.jsx';
 
 const MIN_COMPOSER_HEIGHT = 72;
@@ -111,16 +112,19 @@ export function ChatComposer({
           </div>
           <div className="composer-actions">
             {running ? (
-              <IconButton
-                className="composer-action composer-cancel"
-                data-testid="chat-composer-cancel"
-                label="取消运行"
-                onClick={onCancel}
-                type="button"
-                variant="soft"
-              >
-                <Square size={14} />
-              </IconButton>
+              <>
+                <RunningPanda className="composer-running-panda" label="运行中" size="sm" />
+                <IconButton
+                  className="composer-action composer-cancel"
+                  data-testid="chat-composer-cancel"
+                  label="取消运行"
+                  onClick={onCancel}
+                  type="button"
+                  variant="soft"
+                >
+                  <Square size={14} />
+                </IconButton>
+              </>
             ) : (
               <IconButton
                 className="composer-action composer-send"
