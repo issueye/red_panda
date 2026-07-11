@@ -43,6 +43,12 @@ const SUB_AGENT_BACKENDS = [
   ['in_process', '进程内（仅 planner）'],
 ];
 
+const WEB_SEARCH_PROVIDERS = [
+  ['auto', '自动（有 Tavily Key 优先用 Tavily）'],
+  ['tavily', 'Tavily（推荐，需 API Key）'],
+  ['duckduckgo', 'DuckDuckGo（免费，可能被墙）'],
+];
+
 const SETTINGS_TABS = [
   { id: 'providers', label: '供应商管理', shortLabel: '供应商', icon: Building2 },
   { id: 'skills', label: '技能管理', shortLabel: '技能', icon: Blocks },
@@ -998,7 +1004,7 @@ export function SettingsPanel({
           />
           <SettingTextInput
             label="工具轮次上限"
-            placeholder="4"
+            placeholder="12"
             settings={settings}
             settingKey="maxToolTurns"
             onUpdate={updateSetting}
@@ -1026,6 +1032,13 @@ export function SettingsPanel({
       <section className="settings-section">
         <h3>网络工具</h3>
         <div className="settings-form-grid">
+          <SettingSelect
+            label="搜索提供商"
+            options={WEB_SEARCH_PROVIDERS}
+            settings={settings}
+            settingKey="webSearchProvider"
+            onUpdate={updateSetting}
+          />
           <SettingTextInput
             label="搜索结果数量"
             placeholder="8"
@@ -1033,6 +1046,15 @@ export function SettingsPanel({
             settingKey="webSearchResults"
             onUpdate={updateSetting}
           />
+          <div className="settings-form-span">
+            <SettingTextInput
+              label="Tavily API Key"
+              placeholder="tvly-xxxxxxxx"
+              settings={settings}
+              settingKey="webTavilyApiKey"
+              onUpdate={updateSetting}
+            />
+          </div>
           <SettingTextInput
             label="抓取大小上限(字节)"
             placeholder="2097152"
@@ -1040,7 +1062,23 @@ export function SettingsPanel({
             settingKey="webFetchMaxBytes"
             onUpdate={updateSetting}
           />
+          <div className="settings-form-span">
+            <SettingTextInput
+              label="网络代理"
+              placeholder="http://127.0.0.1:7890"
+              settings={settings}
+              settingKey="webHttpProxy"
+              onUpdate={updateSetting}
+            />
+          </div>
         </div>
+        <p className="settings-hint">
+          <code>web.search</code> 支持 Tavily 与 DuckDuckGo。
+          Tavily 在国内网络更稳定，需在 <a href="https://app.tavily.com" target="_blank" rel="noreferrer">app.tavily.com</a> 申请 Key。
+          也可设置环境变量 <code>RED_PANDA_TAVILY_API_KEY</code>。
+          代理仅作用于 <code>web.search</code> / <code>web.fetch</code>，例如 <code>http://127.0.0.1:7890</code> 或 <code>socks5://127.0.0.1:7891</code>。
+          修改后重新发送任务即可生效。
+        </p>
       </section>
     </>
   );

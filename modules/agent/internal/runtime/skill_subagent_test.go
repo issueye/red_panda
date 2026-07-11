@@ -143,8 +143,12 @@ func TestRuntimeRunsSkillInIsolatedProcessSubAgent(t *testing.T) {
 			t.Fatalf("root request %d leaked private skill instructions", index+1)
 		}
 	}
-	if len(requests[1].ToolHistory) != 1 || requests[1].ToolHistory[0].Result.Output != "SKILL_PUBLIC_RESULT" {
+	if len(requests[1].ToolHistory) != 1 {
 		t.Fatalf("root tool history = %#v", requests[1].ToolHistory)
+	}
+	skillOut := requests[1].ToolHistory[0].Result.Output
+	if !strings.Contains(skillOut, "SKILL_PUBLIC_RESULT") {
+		t.Fatalf("root tool history output missing skill result: %q", skillOut)
 	}
 
 	process.mu.Lock()

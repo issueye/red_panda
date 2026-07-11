@@ -4,8 +4,8 @@ import { classNames } from '../../lib/format.js';
 import { IconButton } from '../ui/button.jsx';
 import { SelectMenu } from '../ui/select.jsx';
 
-const MIN_COMPOSER_HEIGHT = 24;
-const MAX_COMPOSER_HEIGHT = 168;
+const MIN_COMPOSER_HEIGHT = 72;
+const MAX_COMPOSER_HEIGHT = 220;
 
 /**
  * 自适应调整输入框高度，限制在最小与最大行高之间。

@@ -10,7 +10,10 @@ export const defaultRunSettings = {
   toolDenylist: '',
   webSearchResults: 8,
   webFetchMaxBytes: 2097152,
-  maxToolTurns: 4,
+  webSearchProvider: 'auto',
+  webTavilyApiKey: '',
+  webHttpProxy: '',
+  maxToolTurns: 12,
 };
 
 export function splitOptionList(value) {
@@ -40,6 +43,9 @@ export function buildRunStartOptions(settings, workspace, text) {
     web_fetch_max_bytes: Number.isFinite(Number(current.webFetchMaxBytes))
       ? Number(current.webFetchMaxBytes)
       : 0,
+    web_search_provider: String(current.webSearchProvider || 'auto').trim() || 'auto',
+    web_tavily_api_key: String(current.webTavilyApiKey || '').trim(),
+    web_http_proxy: String(current.webHttpProxy || '').trim(),
     max_tool_turns: Number.isFinite(Number(current.maxToolTurns))
       ? Number(current.maxToolTurns)
       : 0,

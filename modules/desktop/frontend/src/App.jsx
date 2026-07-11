@@ -37,6 +37,7 @@ import {
   skillCreatePayload,
   skillUpdatePayload,
 } from './lib/skills.js';
+import { resolveSubAgentLifecycleStatus } from './lib/subagentStatus.js';
 
 const gatewayBase = gatewayBaseURL();
 
@@ -524,16 +525,25 @@ export function App() {
         if (id) {
           setSubAgents((items) => {
             const current = items.find((item) => item.id === id);
+            const nextStatus = resolveSubAgentLifecycleStatus(
+              payload.type,
+              payload.payload,
+              current?.status,
+            );
+            // Only replace summary on lifecycle updates; tool events often carry unrelated text.
+            const nextSummary = payload.type === 'subagent_update'
+              ? (payload.payload?.summary || current?.summary || '')
+              : (current?.summary || payload.payload?.summary || '');
             const next = {
               id,
               role: 'subagent',
               name: payload.payload?.name || agent.name || current?.name || id,
-              status: payload.payload?.status || current?.status || 'running',
+              status: nextStatus,
               backend: payload.payload?.backend || current?.backend || 'in_process',
               rootRunId: payload.root_run_id || current?.rootRunId || '',
               runId: payload.run_id || current?.runId || '',
               parentRunId: payload.parent_run_id || current?.parentRunId || '',
-              summary: payload.payload?.summary || current?.summary || '',
+              summary: nextSummary,
               seq: payload.agent_seq || current?.seq || 0,
             };
             // Keep open conversation tab titles/status in sync.
@@ -935,6 +945,8 @@ export function App() {
       ...items,
       { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text },
     ]);
+    // Refresh settings skills list so the UI matches disk; runtime also reloads per conversation.
+    loadSkills().catch(() => {});
 
     try {
       const result = await request('run.start', {

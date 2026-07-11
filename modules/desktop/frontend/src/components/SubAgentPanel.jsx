@@ -1,9 +1,13 @@
-import { Bot, CircleStop, MessageSquare } from 'lucide-react';
+import { Bot, CircleStop, Loader2, MessageSquare } from 'lucide-react';
 import { displaySubAgentBackend } from '../lib/displayLabels.js';
-import { formatSeq } from '../lib/format.js';
-import { displayStatus } from './ui/badge.jsx';
+import { classNames, formatSeq } from '../lib/format.js';
+import { StatusBadge } from './ui/badge.jsx';
 import { IconButton } from './ui/button.jsx';
 import { PanelHeader } from './ui/panel.jsx';
+
+function isActiveStatus(status) {
+  return status === 'running' || status === 'cancelling' || status === 'waiting_permission';
+}
 
 export function SubAgentPanel({ agents, onCancelSubAgent, onOpenSubagentConversation }) {
   return (
@@ -12,10 +16,19 @@ export function SubAgentPanel({ agents, onCancelSubAgent, onOpenSubagentConversa
       <div className="subagent-list">
         {agents.map((agent) => {
           const isSubAgent = agent.role === 'subagent';
-          const canCancel = isSubAgent && agent.status === 'running' && agent.rootRunId;
+          const status = agent.status || (isSubAgent ? 'running' : 'idle');
+          const active = isActiveStatus(status);
+          const canCancel = isSubAgent && status === 'running' && agent.rootRunId;
           return (
-            <article className="subagent-item" data-testid="subagent-item" key={agent.id}>
-              <Bot size={16} />
+            <article
+              className={classNames('subagent-item', active && 'is-running', `status-${status}`)}
+              data-status={status}
+              data-testid="subagent-item"
+              key={agent.id}
+            >
+              <span className={classNames('subagent-icon', active && 'is-active')} aria-hidden="true">
+                {active ? <Loader2 className="subagent-spin" size={15} /> : <Bot size={16} />}
+              </span>
               <button
                 className="subagent-main"
                 data-testid={isSubAgent ? 'subagent-open' : undefined}
@@ -26,8 +39,11 @@ export function SubAgentPanel({ agents, onCancelSubAgent, onOpenSubagentConversa
                 title={isSubAgent ? '在对话标签中打开' : undefined}
                 type="button"
               >
-                <strong>{agent.name}</strong>
-                <span>{displayStatus(agent.status)} - 事件 {formatSeq(agent.seq)}</span>
+                <span className="subagent-heading">
+                  <strong>{agent.name}</strong>
+                  <StatusBadge status={status} />
+                </span>
+                <span className="subagent-meta">事件 {formatSeq(agent.seq)}</span>
                 {agent.backend ? <em>{displaySubAgentBackend(agent.backend)}</em> : null}
                 {agent.summary ? <small>{agent.summary}</small> : null}
               </button>

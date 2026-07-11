@@ -98,8 +98,19 @@ type ReplyOptions struct {
 	SpawnSubAgents    bool           `json:"spawn_subagents,omitempty"`
 	SubAgentBackend   string         `json:"subagent_backend,omitempty"`
 	MemoryContext       *MemoryContext `json:"memory_context,omitempty"`
+	// SkillsContext is refreshed on every conversation start so newly created
+	// managed skills are immediately visible to the model.
+	SkillsContext       *SkillsContext `json:"skills_context,omitempty"`
 	WebSearchMaxResults int            `json:"web_search_max_results,omitempty"`
 	WebFetchMaxBytes    int            `json:"web_fetch_max_bytes,omitempty"`
+	// WebSearchProvider selects the web.search backend: auto | tavily | duckduckgo.
+	// auto prefers Tavily when an API key is configured, otherwise DuckDuckGo.
+	WebSearchProvider string `json:"web_search_provider,omitempty"`
+	// WebTavilyAPIKey is the Tavily API key (tvly-...). Prefer settings over env.
+	WebTavilyAPIKey string `json:"web_tavily_api_key,omitempty"`
+	// WebHTTPProxy is an optional HTTP(S) proxy for web.search / web.fetch
+	// (e.g. http://127.0.0.1:7890). Empty means use environment proxy settings.
+	WebHTTPProxy string `json:"web_http_proxy,omitempty"`
 	// MaxToolTurns limits provider↔tool loops per root reply. Zero means runtime default.
 	MaxToolTurns int `json:"max_tool_turns,omitempty"`
 }
@@ -107,6 +118,12 @@ type ReplyOptions struct {
 type MemoryContext struct {
 	Items   []MemoryItem `json:"items,omitempty"`
 	Context string       `json:"context,omitempty"`
+}
+
+// SkillsContext is a catalog of managed workspace skills for one reply.
+type SkillsContext struct {
+	Items   []SkillSummary `json:"items,omitempty"`
+	Context string         `json:"context,omitempty"`
 }
 
 type MemoryItem struct {

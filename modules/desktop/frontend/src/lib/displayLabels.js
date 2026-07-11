@@ -16,6 +16,7 @@ const statusLabel = {
   failed: '失败',
   idle: '空闲',
   pending: '待处理',
+  reset: '已重置',
   resolved: '已处理',
   running: '运行中',
   unknown: '未知',

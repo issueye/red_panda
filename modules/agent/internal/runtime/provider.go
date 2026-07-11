@@ -27,7 +27,11 @@ type ProviderRequest struct {
 	Input       methods.ReplyInput
 	Options     methods.ReplyOptions
 	Tools       []tools.Definition
+	// ToolHistory is a flat list (used by EchoProvider and tests).
 	ToolHistory []ToolExchange
+	// ToolRounds groups tools that ran in the same model turn (OpenAI multi-tool format).
+	// When empty, each ToolHistory item is treated as its own round.
+	ToolRounds [][]ToolExchange
 }
 
 type ToolExchange struct {
@@ -532,7 +536,12 @@ Survey-then-split policy (mandatory for analysis when tools include subagent.run
 7. Trivial single-file Q&A or tiny edits may stay on the root agent without subagents.`
 
 func openAICompatibleMessages(req ProviderRequest) []map[string]any {
-	messages := make([]map[string]any, 0, 2+len(req.Session.Conversation)+1+len(req.ToolHistory)*2)
+	messages := make([]map[string]any, 0, 3+len(req.Session.Conversation)+1+len(req.ToolHistory)*2)
+	// Always inject fresh local time so the model does not rely on training-data dates.
+	messages = append(messages, map[string]any{
+		"role":    "system",
+		"content": currentTimeContextMessage(time.Now()),
+	})
 	if hasToolNamed(req.Tools, "subagent.run") {
 		messages = append(messages, map[string]any{
 			"role":    "system",
@@ -543,6 +552,12 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": strings.TrimSpace(req.Options.MemoryContext.Context),
+		})
+	}
+	if req.Options.SkillsContext != nil && strings.TrimSpace(req.Options.SkillsContext.Context) != "" {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": strings.TrimSpace(req.Options.SkillsContext.Context),
 		})
 	}
 	for _, message := range req.Session.Conversation {
@@ -560,30 +575,84 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		})
 	}
 	messages = append(messages, map[string]any{"role": "user", "content": req.Input.Text})
-	for _, exchange := range req.ToolHistory {
-		arguments, _ := json.Marshal(exchange.Call.Arguments)
-		messages = append(messages, map[string]any{
-			"role": "assistant",
-			"tool_calls": []map[string]any{
-				{
-					"id":   exchange.Call.ID,
-					"type": "function",
-					"function": map[string]any{
-						"name":      publicToolName(exchange.Call.Name),
-						"arguments": string(arguments),
-					},
+	for _, round := range toolRoundsForRequest(req) {
+		if len(round) == 0 {
+			continue
+		}
+		toolCalls := make([]map[string]any, 0, len(round))
+		for _, exchange := range round {
+			arguments, _ := json.Marshal(exchange.Call.Arguments)
+			toolCalls = append(toolCalls, map[string]any{
+				"id":   exchange.Call.ID,
+				"type": "function",
+				"function": map[string]any{
+					"name":      publicToolName(exchange.Call.Name),
+					"arguments": string(arguments),
 				},
-			},
-		})
-		content := toolExchangeContent(exchange.Result)
+			})
+		}
 		messages = append(messages, map[string]any{
-			"role":         "tool",
-			"tool_call_id": exchange.Call.ID,
-			"name":         publicToolName(exchange.Call.Name),
-			"content":      content,
+			"role":       "assistant",
+			"tool_calls": toolCalls,
 		})
+		for _, exchange := range round {
+			messages = append(messages, map[string]any{
+				"role":         "tool",
+				"tool_call_id": exchange.Call.ID,
+				"name":         publicToolName(exchange.Call.Name),
+				"content":      toolExchangeContent(exchange.Result),
+			})
+		}
 	}
 	return messages
+}
+
+func toolRoundsForRequest(req ProviderRequest) [][]ToolExchange {
+	if len(req.ToolRounds) > 0 {
+		return req.ToolRounds
+	}
+	if len(req.ToolHistory) == 0 {
+		return nil
+	}
+	rounds := make([][]ToolExchange, 0, len(req.ToolHistory))
+	for _, exchange := range req.ToolHistory {
+		rounds = append(rounds, []ToolExchange{exchange})
+	}
+	return rounds
+}
+
+// currentTimeContextMessage builds an authoritative local-time system note.
+// Injected on every provider turn so multi-step tool loops also stay accurate.
+func currentTimeContextMessage(now time.Time) string {
+	zoneName, offsetSec := now.Zone()
+	if zoneName == "" {
+		zoneName = "Local"
+	}
+	weekdayCN := [...]string{"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"}
+	weekday := weekdayCN[int(now.Weekday())]
+	return fmt.Sprintf(
+		"当前权威时间（本地时区）：%s %s（%s，UTC%s）。\n"+
+			"Current local time: %s (%s, UTC%s).\n"+
+			"请以此时间为准回答日期/时间相关问题，不要使用训练数据中的过时日期。",
+		now.Format("2006-01-02 15:04:05"),
+		weekday,
+		zoneName,
+		formatUTCOffset(offsetSec),
+		now.Format(time.RFC3339),
+		zoneName,
+		formatUTCOffset(offsetSec),
+	)
+}
+
+func formatUTCOffset(offsetSec int) string {
+	sign := "+"
+	if offsetSec < 0 {
+		sign = "-"
+		offsetSec = -offsetSec
+	}
+	hours := offsetSec / 3600
+	mins := (offsetSec % 3600) / 60
+	return fmt.Sprintf("%s%02d:%02d", sign, hours, mins)
 }
 
 func hasToolNamed(definitions []tools.Definition, name string) bool {
@@ -595,26 +664,14 @@ func hasToolNamed(definitions []tools.Definition, name string) bool {
 	return false
 }
 
+// maxToolResultForModel caps each tool result fed back into the next LLM turn.
+// Full standardized output remains available on the tool event / UI card.
+const maxToolResultForModel = 16 * 1024
+
 // toolExchangeContent formats a tool result for the next provider turn.
-// Failures must still produce non-empty content so the model can recover.
+// Always returns a standardized JSON envelope (never silently drops fields).
 func toolExchangeContent(result tools.Result) string {
-	output := strings.TrimSpace(result.Output)
-	errText := strings.TrimSpace(result.Error)
-	switch {
-	case errText != "" && output != "" && output != errText:
-		return output + "\nerror: " + errText
-	case errText != "":
-		if result.Status == tools.CallStatusDenied {
-			return "tool denied: " + errText
-		}
-		return "tool error: " + errText
-	case output != "":
-		return output
-	case result.Status != "" && result.Status != tools.CallStatusCompleted:
-		return "tool status: " + string(result.Status)
-	default:
-		return ""
-	}
+	return modelFacingToolContent(result)
 }
 
 func openAICompatibleConversationRole(role string) (string, bool) {

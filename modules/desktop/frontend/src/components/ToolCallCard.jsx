@@ -1,34 +1,27 @@
 import {
-  CheckCircle2,
-  ChevronDown,
+  Check,
+  ChevronRight,
   Copy,
   Loader2,
   ShieldAlert,
-  Wrench,
-  XCircle,
+  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { displayRisk, displayStatus } from '../lib/displayLabels.js';
 import { classNames } from '../lib/format.js';
 import { IconButton } from './ui/button.jsx';
-import { StatusBadge } from './ui/badge.jsx';
 
 /**
- * 根据工具状态返回对应图标。
- * @param {string} status 工具状态
- * @returns {JSX.Element} 状态图标
+ * @param {string} status
  */
 function statusIcon(status) {
-  if (status === 'completed') return <CheckCircle2 size={14} />;
-  if (status === 'failed' || status === 'denied') return <XCircle size={14} />;
-  if (status === 'waiting_permission' || status === 'pending') return <ShieldAlert size={14} />;
-  return <Loader2 className="tool-spin" size={14} />;
+  if (status === 'completed') return <Check size={13} strokeWidth={2.5} />;
+  if (status === 'failed' || status === 'denied') return <X size={13} strokeWidth={2.5} />;
+  if (status === 'waiting_permission' || status === 'pending') return <ShieldAlert size={13} />;
+  return <Loader2 className="tool-spin" size={13} />;
 }
 
 /**
- * 将任意值格式化为适合展示的文本。
- * @param {unknown} value 原始值
- * @returns {string} 展示文本
+ * @param {unknown} value
  */
 function formatValue(value) {
   if (value == null) return '';
@@ -41,24 +34,19 @@ function formatValue(value) {
 }
 
 /**
- * 格式化耗时展示。
- * @param {number | undefined} durationMs 毫秒耗时
- * @returns {string} 耗时文案
+ * @param {number | undefined} durationMs
  */
 function formatDuration(durationMs) {
   const value = Number(durationMs);
   if (!Number.isFinite(value) || value < 0) return '';
-  if (value < 1000) return `${Math.round(value)} ms`;
-  return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s`;
+  if (value < 1000) return `${Math.round(value)}ms`;
+  return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}s`;
 }
 
 /**
- * 从工具参数中提取一句话摘要，便于快速扫读。
- * @param {string} name 工具名
- * @param {Record<string, unknown> | string | undefined} args 参数
- * @returns {string} 摘要文本
+ * @param {Record<string, unknown> | string | undefined} args
  */
-function buildToolSummary(name, args) {
+function buildToolSummary(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) {
     if (typeof args === 'string' && args.trim()) return args.trim();
     return '';
@@ -66,7 +54,6 @@ function buildToolSummary(name, args) {
 
   const pathLike = args.path || args.file || args.filepath || args.target || args.uri || args.url;
   if (pathLike) return String(pathLike);
-
   if (args.command) return String(args.command);
   if (args.query) return String(args.query);
   if (args.pattern) return String(args.pattern);
@@ -82,46 +69,51 @@ function buildToolSummary(name, args) {
     const only = formatValue(args[keys[0]]).replace(/\s+/g, ' ').trim();
     return only.length > 96 ? `${only.slice(0, 96)}…` : only;
   }
-  return `${keys.length} 个参数`;
+  return `${keys.length} 项参数`;
 }
 
 /**
- * 统计输出行数，用于折叠摘要。
- * @param {string} text 输出文本
- * @returns {number} 行数
+ * Prefer standardized tool_result.v1 envelope for display text.
+ * @param {string} output
  */
+function displayToolOutput(output) {
+  if (!output || typeof output !== 'string') return output || '';
+  const trimmed = output.trim();
+  if (!trimmed.startsWith('{')) return output;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && parsed.schema === 'red_panda.tool_result.v1') {
+      return JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    // keep raw
+  }
+  return output;
+}
+
+/**
+ * @param {string} output
+ */
+function buildOutputSummary(output) {
+  if (!output || typeof output !== 'string') return '';
+  try {
+    const parsed = JSON.parse(output.trim());
+    if (parsed && parsed.schema === 'red_panda.tool_result.v1') {
+      const text = String(parsed.text || parsed.error || '').replace(/\s+/g, ' ').trim();
+      if (text) return text.length > 96 ? `${text.slice(0, 96)}…` : text;
+      if (parsed.meta?.truncated) return '结果已截断（完整内容见展开区）';
+    }
+  } catch {
+    // ignore
+  }
+  return '';
+}
+
 function countLines(text) {
   if (!text) return 0;
   return text.split(/\r?\n/).length;
 }
 
-/**
- * 判断文本是否较短，适合默认展开。
- * @param {string} text 文本
- * @returns {boolean} 是否短文本
- */
-function isShortText(text) {
-  if (!text) return true;
-  return text.length <= 480 && countLines(text) <= 8;
-}
-
-/**
- * 截取预览文本。
- * @param {string} text 原文
- * @param {number} max 最大长度
- * @returns {string} 预览
- */
-function previewText(text, max = 120) {
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return '';
-  return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized;
-}
-
-/**
- * 复制文本到剪贴板。
- * @param {string} text 待复制内容
- * @returns {Promise<boolean>} 是否成功
- */
 async function copyText(text) {
   if (!text) return false;
   try {
@@ -130,7 +122,7 @@ async function copyText(text) {
       return true;
     }
   } catch {
-    // fallback below
+    // fallback
   }
   try {
     const area = document.createElement('textarea');
@@ -149,75 +141,52 @@ async function copyText(text) {
 }
 
 /**
- * 可折叠内容区，支持复制与稳定高度的输出滚动。
+ * Compact collapsible block for args/output.
  */
-function ToolSection({
-  title,
-  text,
-  defaultOpen = false,
-  open: controlledOpen,
-  onOpenChange,
-  className,
-  testId,
-  showCollapsedPreview = false,
-}) {
-  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
-  const open = controlledOpen ?? uncontrolledOpen;
-  const collapsedPreview = !open && showCollapsedPreview ? previewText(text) : '';
-
-  function toggle() {
-    const next = !open;
-    if (controlledOpen === undefined) setUncontrolledOpen(next);
-    onOpenChange?.(next);
-  }
-
-  async function handleCopy(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    await copyText(text);
-  }
-
+function ToolDetail({ title, text, open, onToggle, testId }) {
   if (!text) return null;
 
   return (
-    <div className={classNames('tool-section', className, open && 'is-open')}>
-      <div className="tool-section-header">
+    <div className={classNames('tool-detail', open && 'is-open')}>
+      <div className="tool-detail-bar">
         <button
           aria-expanded={open}
-          className="tool-section-toggle"
-          onClick={toggle}
+          className="tool-detail-toggle"
+          onClick={onToggle}
           type="button"
         >
-          <ChevronDown className={classNames('tool-chevron', open && 'is-open')} size={14} />
+          <ChevronRight className={classNames('tool-detail-chevron', open && 'is-open')} size={12} />
           <span>{title}</span>
-          <small>{countLines(text)} 行</small>
+          <em>{countLines(text)} 行</em>
         </button>
         <IconButton
           className="tool-copy"
           data-testid={testId ? `${testId}-copy` : undefined}
           label={`复制${title}`}
-          onClick={handleCopy}
+          onClick={async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            await copyText(text);
+          }}
           type="button"
           variant="ghost"
         >
-          <Copy size={13} />
+          <Copy size={12} />
         </IconButton>
       </div>
-      {open ? (
-        <pre className="tool-pre" data-testid={testId}>{text}</pre>
-      ) : collapsedPreview ? (
-        <p className="tool-collapsed-preview" data-testid={testId}>{collapsedPreview}</p>
-      ) : null}
+      {open ? <pre className="tool-pre" data-testid={testId}>{text}</pre> : null}
     </div>
   );
 }
 
 /**
- * 对话时间线中的工具调用卡片，支持整卡收起。
+ * Compact but readable tool-call card for the conversation timeline.
  */
 export function ToolCallCard({ item }) {
   const status = item.status || 'running';
   const isRunning = status === 'running' || status === 'pending' || status === 'waiting_permission';
+  const isFailed = status === 'failed' || status === 'denied';
+
   const argsText = useMemo(() => {
     if (!item.arguments) return '';
     if (typeof item.arguments === 'string') return item.arguments;
@@ -225,20 +194,20 @@ export function ToolCallCard({ item }) {
     if (keys.length === 0) return '';
     return formatValue(item.arguments);
   }, [item.arguments]);
-  const outputText = item.output || '';
+
+  const outputText = useMemo(() => displayToolOutput(item.output || ''), [item.output]);
   const errorText = item.error || '';
-  const summary = useMemo(
-    () => buildToolSummary(item.name || '', item.arguments),
-    [item.arguments, item.name],
-  );
-  const duration = formatDuration(item.durationMs);
-  const shouldOpenOutput = isRunning || Boolean(errorText) || (Boolean(outputText) && isShortText(outputText));
+  const argSummary = useMemo(() => buildToolSummary(item.arguments), [item.arguments]);
+  const outputSummary = useMemo(() => buildOutputSummary(item.output || ''), [item.output]);
+  const summary = argSummary || outputSummary;
+  const title = item.displayName || item.name || '工具';
+  const toolName = item.name && item.name !== title ? item.name : '';
   const hasBody = Boolean(argsText || errorText || outputText);
 
-  // 运行中/有错误默认展开整卡；完成后自动收起，减少占用。
-  const [cardOpen, setCardOpen] = useState(isRunning || Boolean(errorText));
+  const [cardOpen, setCardOpen] = useState(isRunning || isFailed);
   const [argsOpen, setArgsOpen] = useState(false);
-  const [outputOpen, setOutputOpen] = useState(shouldOpenOutput);
+  const [outputOpen, setOutputOpen] = useState(isRunning || isFailed);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     if (isRunning) {
@@ -246,29 +215,40 @@ export function ToolCallCard({ item }) {
       setOutputOpen(true);
       return;
     }
-    if (errorText) {
+    if (isFailed || errorText) {
       setCardOpen(true);
       setOutputOpen(true);
       return;
     }
-    // 成功结束后收起整卡，仅保留标题摘要。
     setCardOpen(false);
-  }, [isRunning, errorText, status]);
+    setOutputOpen(false);
+  }, [isRunning, isFailed, errorText, status]);
 
+  // Live elapsed timer so stuck "进行中" tools are visible instead of a silent hang.
   useEffect(() => {
-    if (isRunning) {
-      setOutputOpen(true);
-    }
-  }, [isRunning]);
+    if (!isRunning) return undefined;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isRunning, item.startedAt, item.id]);
 
-  function toggleCard() {
-    if (!hasBody) return;
-    setCardOpen((current) => !current);
-  }
+  const elapsedMs = useMemo(() => {
+    if (!isRunning) return Number(item.durationMs) || 0;
+    const started = item.startedAt ? new Date(item.startedAt).getTime() : NaN;
+    if (!Number.isFinite(started)) return 0;
+    return Math.max(0, nowMs - started);
+  }, [isRunning, item.durationMs, item.startedAt, nowMs]);
+
+  const duration = formatDuration(isRunning ? elapsedMs : item.durationMs);
+  const isStale = isRunning && elapsedMs >= 25000;
 
   return (
     <article
-      className={classNames('tool-card', `tool-${status}`, cardOpen ? 'is-expanded' : 'is-collapsed')}
+      className={classNames(
+        'tool-card',
+        `tool-${status}`,
+        cardOpen ? 'is-expanded' : 'is-collapsed',
+      )}
       data-testid="tool-card"
       data-timeline-type="tool"
     >
@@ -277,75 +257,70 @@ export function ToolCallCard({ item }) {
         className="tool-card-header"
         data-testid="tool-card-toggle"
         disabled={!hasBody}
-        onClick={toggleCard}
+        onClick={() => {
+          if (!hasBody) return;
+          setCardOpen((current) => !current);
+        }}
         type="button"
       >
-        <div className="tool-title">
-          <div className="tool-icon" aria-hidden="true">
-            <Wrench size={15} />
-          </div>
-          <div className="tool-heading">
-            <div className="tool-heading-row">
-              <strong>{item.displayName || item.name || '工具'}</strong>
-              <div className="tool-heading-actions">
-                <StatusBadge
-                  className="tool-status"
-                  data-testid="tool-status"
-                  icon={statusIcon(status)}
-                  status={status}
-                />
-                {hasBody ? (
-                  <ChevronDown
-                    aria-hidden="true"
-                    className={classNames('tool-card-chevron', cardOpen && 'is-open')}
-                    size={15}
-                  />
-                ) : null}
-              </div>
-            </div>
-            <div className="tool-meta">
-              <span className="tool-name">{item.name || 'tool'}</span>
-              <span className={classNames('tool-risk', `risk-${item.risk || 'low'}`)}>
-                {displayRisk(item.risk || 'low')}风险
-              </span>
+        <span className={classNames('tool-status-dot', `is-${status}`)} aria-hidden="true">
+          {statusIcon(status)}
+        </span>
+
+        <span className="tool-card-content">
+          <span className="tool-card-top">
+            <span className="tool-card-title">
+              <strong>{title}</strong>
+              {toolName ? <code className="tool-card-name">{toolName}</code> : null}
+            </span>
+            <span className="tool-card-meta">
               {duration ? <span className="tool-duration">{duration}</span> : null}
-              {isRunning ? <span className="tool-live">{displayStatus(status)}</span> : null}
-            </div>
-            {summary ? (
-              <p className="tool-summary" title={summary}>{summary}</p>
-            ) : null}
-          </div>
-        </div>
+              {isRunning ? (
+                <span className={classNames('tool-live', isStale && 'is-stale')}>
+                  {isStale ? '可能卡住' : '进行中'}
+                </span>
+              ) : null}
+              {hasBody ? (
+                <ChevronRight
+                  aria-hidden="true"
+                  className={classNames('tool-card-chevron', cardOpen && 'is-open')}
+                  size={14}
+                />
+              ) : null}
+            </span>
+          </span>
+          {isStale ? (
+            <span className="tool-card-summary is-stale">
+              已运行 {duration || '较久'}，超过网络工具超时阈值时会自动失败
+            </span>
+          ) : summary ? (
+            <span className="tool-card-summary" title={summary}>{summary}</span>
+          ) : hasBody ? (
+            <span className="tool-card-summary is-empty">点击展开参数与输出</span>
+          ) : null}
+        </span>
       </button>
 
       {cardOpen && hasBody ? (
         <div className="tool-card-body" data-testid="tool-card-body">
-          <ToolSection
-            className="tool-args"
-            defaultOpen={false}
-            onOpenChange={setArgsOpen}
+          <ToolDetail
             open={argsOpen}
+            onToggle={() => setArgsOpen((current) => !current)}
             testId="tool-args"
             text={argsText}
             title="参数"
           />
-
           {errorText ? (
-            <div className="tool-error-box" data-testid="tool-error">
-              <strong>错误</strong>
-              <p className="tool-error">{errorText}</p>
+            <div className="tool-error-line" data-testid="tool-error">
+              {errorText}
             </div>
           ) : null}
-
-          <ToolSection
-            className="tool-output"
-            defaultOpen={shouldOpenOutput}
-            onOpenChange={setOutputOpen}
+          <ToolDetail
             open={outputOpen}
-            showCollapsedPreview
+            onToggle={() => setOutputOpen((current) => !current)}
             testId="tool-output"
             text={outputText}
-            title={isRunning ? '输出（实时）' : '输出'}
+            title="输出"
           />
         </div>
       ) : null}

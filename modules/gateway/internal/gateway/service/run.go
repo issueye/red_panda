@@ -175,6 +175,9 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			SubAgentBackend:     stringOption(payload.Options, "subagent_backend"),
 			WebSearchMaxResults: intOption(payload.Options, "web_search_max_results"),
 			WebFetchMaxBytes:    intOption(payload.Options, "web_fetch_max_bytes"),
+			WebSearchProvider:   stringOption(payload.Options, "web_search_provider"),
+			WebTavilyAPIKey:     stringOption(payload.Options, "web_tavily_api_key"),
+			WebHTTPProxy:        stringOption(payload.Options, "web_http_proxy"),
 			MaxToolTurns:        intOption(payload.Options, "max_tool_turns"),
 		},
 	}

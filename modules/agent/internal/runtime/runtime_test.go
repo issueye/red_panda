@@ -135,13 +135,14 @@ func TestRuntimeEmitsMemoryInjectedEvent(t *testing.T) {
 	waitForResponse(t, lines, "reply_memory")
 	runEvents := waitForEventsUntilFinish(t, lines)
 	assertEventSequence(t, runEvents, []events.EventType{
+		events.EventSkillsInjected,
 		events.EventMemoryInjected,
 		events.EventMessageDelta,
 		events.EventFinish,
 	})
-	memoryEvent := runEvents[0]
+	memoryEvent := runEvents[1]
 	if memoryEvent.Type != events.EventMemoryInjected {
-		t.Fatalf("first event = %s, want memory_injected: %#v", memoryEvent.Type, runEvents)
+		t.Fatalf("second event = %s, want memory_injected: %#v", memoryEvent.Type, runEvents)
 	}
 	if memoryEvent.Payload["count"] != float64(1) && memoryEvent.Payload["count"] != 1 {
 		t.Fatalf("memory count mismatch: %#v", memoryEvent.Payload)

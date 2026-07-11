@@ -26,6 +26,9 @@ const defaultListDepth = 3
 const maxListEntries = 500
 const defaultGrepMatches = 100
 const maxPatchBytes = 256 * 1024
+// defaultShellTimeout bounds shell.exec. Many CLI tools (e.g. Office automation)
+// print success then hang on child/COM processes; we must still return.
+const defaultShellTimeout = 60 * time.Second
 
 type MemoryToolExecutor func(context.Context, methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error)
 type SkillRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
@@ -191,7 +194,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "skill.list",
 			DisplayName: "List skills",
-			Description: "List managed workspace skills under .codex/skills with name and description only.",
+			Description: "List managed workspace skills under .codex/skills with name and description only. The catalog is also injected at conversation start; call this to re-check after skill.create/update/delete in the same run.",
 			Risk:        tools.RiskLow,
 			Parameters: map[string]any{
 				"type":       "object",
@@ -244,7 +247,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "skill.run",
 			DisplayName: "Run skill",
-			Description: "Run a managed workspace skill in an isolated runtime-process subagent and return only its final result.",
+			Description: "Run a managed workspace skill in an isolated runtime-process subagent and return only its final result. Prefer names from the skills catalog injected for this conversation.",
 			Risk:        tools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
@@ -420,7 +423,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "web.search",
 			DisplayName: "Web search",
-			Description: "Search the public web via DuckDuckGo and return titles, URLs, and snippets.",
+			Description: "Search the public web and return titles, URLs, and snippets. Uses Tavily when configured (recommended), otherwise DuckDuckGo. May include a short answer field when Tavily is used.",
 			Risk:        tools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
@@ -606,9 +609,24 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 	case "memory.list", "memory.create", "memory.update", "memory.delete":
 		output, err = runner.runMemoryTool(ctx, runCtx, call)
 	case "web.search":
-		output, err = runWebSearch(ctx, stringArg(call.Arguments, "query"), effectiveWebResultCount(runCtx, intArg(call.Arguments, "max_results", 0)))
+		searchOpts := effectiveWebSearchOptions(runCtx)
+		output, err = runWebOp(ctx, func(opCtx context.Context) (string, error) {
+			return runWebSearch(
+				opCtx,
+				stringArg(call.Arguments, "query"),
+				effectiveWebResultCount(runCtx, intArg(call.Arguments, "max_results", 0)),
+				searchOpts,
+			)
+		})
 	case "web.fetch":
-		output, err = runWebFetch(ctx, stringArg(call.Arguments, "url"), effectiveWebFetchBytes(runCtx, intArg(call.Arguments, "max_bytes", 0)))
+		output, err = runWebOp(ctx, func(opCtx context.Context) (string, error) {
+			return runWebFetch(
+				opCtx,
+				stringArg(call.Arguments, "url"),
+				effectiveWebFetchBytes(runCtx, intArg(call.Arguments, "max_bytes", 0)),
+				effectiveWebHTTPProxy(runCtx),
+			)
+		})
 	default:
 		err = fmt.Errorf("unknown tool %s", call.Name)
 	}
@@ -617,10 +635,12 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 	if err != nil {
 		result.Status = tools.CallStatusFailed
 		result.Error = err.Error()
-		return result, err.Error()
+		// Always emit a standardized envelope (even on failure) so UI/model share one schema.
+		result.Output = standardizeToolOutput(call.Name, output, err, result.DurationMS)
+		return result, result.Output
 	}
-	result.Output = output
-	return result, output
+	result.Output = standardizeToolOutput(call.Name, output, nil, result.DurationMS)
+	return result, result.Output
 }
 
 func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
@@ -1311,14 +1331,18 @@ func runShell(ctx context.Context, root string, command string) (string, error) 
 	if strings.TrimSpace(command) == "" {
 		return "", fmt.Errorf("empty shell command")
 	}
-	toolCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	toolCtx, cancel := context.WithTimeout(ctx, defaultShellTimeout)
 	defer cancel()
 
 	var cmd *exec.Cmd
 	if goruntime.GOOS == "windows" {
-		cmd = exec.CommandContext(toolCtx, "powershell", "-NoProfile", "-Command", command)
+		// -NonInteractive avoids prompts that hang the session after work is done.
+		cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", command)
 	} else {
-		cmd = exec.CommandContext(toolCtx, "sh", "-c", command)
+		cmd = exec.Command("sh", "-c", command)
 	}
 	if root != "" {
 		if resolved, err := filepath.Abs(root); err == nil {
@@ -1329,15 +1353,60 @@ func runShell(ctx context.Context, root string, command string) (string, error) 
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
-	output := truncateToolOutput(stdout.String() + stderr.String())
-	if toolCtx.Err() == context.DeadlineExceeded {
-		return output, fmt.Errorf("shell command timed out")
+	// Avoid inheriting a live stdin that some CLIs wait on forever.
+	cmd.Stdin = bytes.NewReader(nil)
+
+	if err := cmd.Start(); err != nil {
+		return "", err
 	}
-	if err != nil {
-		return output, err
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-toolCtx.Done():
+		// Kill the whole tree: PowerShell may exit while officecli/COM children linger,
+		// or the child may hang after printing success (exactly the OfficeCLI case).
+		killShellProcessTree(cmd)
+		// Give Wait a moment to observe the kill.
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+		output := truncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
+		if output != "" {
+			// Work often already finished (e.g. "Added slide at /slide[4]") but process
+			// did not exit — surface partial success clearly instead of a bare timeout.
+			return output, fmt.Errorf(
+				"shell command timed out after %s (process did not exit; partial output was captured — the command may have already succeeded)",
+				defaultShellTimeout,
+			)
+		}
+		return "", fmt.Errorf("shell command timed out after %s", defaultShellTimeout)
+	case err := <-done:
+		output := truncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
+		if err != nil {
+			return output, err
+		}
+		return output, nil
 	}
-	return output, nil
+}
+
+// killShellProcessTree terminates the shell and its descendants.
+// On Windows, Process.Kill only kills powershell.exe, not officecli.exe children.
+func killShellProcessTree(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	pid := cmd.Process.Pid
+	if goruntime.GOOS == "windows" && pid > 0 {
+		// /T = tree, /F = force
+		killer := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
+		_ = killer.Run()
+	}
+	_ = cmd.Process.Kill()
 }
 
 func resolveWorkspacePath(root string, relPath string) (string, error) {

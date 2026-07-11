@@ -40,17 +40,26 @@ test('buildRunStartOptions passes web tool tuning fields', () => {
   const options = buildRunStartOptions({
     webSearchResults: '5',
     webFetchMaxBytes: '1048576',
+    webSearchProvider: 'tavily',
+    webTavilyApiKey: ' tvly-test ',
+    webHttpProxy: ' http://127.0.0.1:7890 ',
   }, { root_path: 'D:/ws' }, 'search the web');
 
   assert.equal(options.web_search_max_results, 5);
   assert.equal(options.web_fetch_max_bytes, 1048576);
+  assert.equal(options.web_search_provider, 'tavily');
+  assert.equal(options.web_tavily_api_key, 'tvly-test');
+  assert.equal(options.web_http_proxy, 'http://127.0.0.1:7890');
 });
 
 test('buildRunStartOptions falls back to default web tuning', () => {
   const options = buildRunStartOptions({}, { root: 'D:/ws' }, 'plain text');
   assert.equal(options.web_search_max_results, 8);
   assert.equal(options.web_fetch_max_bytes, 2097152);
-  assert.equal(options.max_tool_turns, 4);
+  assert.equal(options.web_search_provider, 'auto');
+  assert.equal(options.web_tavily_api_key, '');
+  assert.equal(options.web_http_proxy, '');
+  assert.equal(options.max_tool_turns, 12);
 });
 
 test('buildRunStartOptions passes max tool turns', () => {

@@ -155,6 +155,80 @@ func (p *recoverAfterToolFailureProvider) Complete(_ context.Context, req Provid
 	}
 }
 
+type emptyAfterToolsProvider struct {
+	requests []ProviderRequest
+}
+
+func (*emptyAfterToolsProvider) Name() string { return "empty-after-tools" }
+
+func (p *emptyAfterToolsProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	req.ToolHistory = append([]ToolExchange(nil), req.ToolHistory...)
+	p.requests = append(p.requests, req)
+	if len(req.ToolHistory) == 0 {
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:        "tool_list_empty",
+			Name:      "workspace.list",
+			Risk:      tools.RiskLow,
+			Arguments: map[string]any{"path": ".", "max_depth": 1},
+		}}})
+	}
+	// Simulate a model that ends the tool loop with only empty finals.
+	if err := emit(ProviderChunk{Delta: ""}); err != nil {
+		return err
+	}
+	return emit(ProviderChunk{Final: true})
+}
+
+func TestRuntimeRecoversWhenProviderReturnsEmptyAfterTools(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "note.txt"), []byte("visible"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	lines := make(chan []byte, 32)
+	go readJSONLines(t, reader, lines)
+
+	provider := &emptyAfterToolsProvider{}
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	rt.provider = provider
+
+	sendRequest(t, context.Background(), rt, "reply_empty", methods.AgentReply, methods.ReplyParams{
+		RunID: "run_empty_after_tools",
+		Session: methods.ReplySession{
+			ID:         "session_empty_after_tools",
+			WorkingDir: tempDir,
+		},
+		Input: methods.ReplyInput{Text: "list then go silent"},
+	})
+
+	waitForResponse(t, lines, "reply_empty")
+	runEvents := waitForEventsUntilFinish(t, lines)
+
+	var recovered string
+	for _, event := range runEvents {
+		if event.Type != events.EventMessageDelta {
+			continue
+		}
+		if delta, _ := event.Payload["delta"].(string); event.Payload["recovered"] == true || strings.Contains(delta, "根据工具执行结果") || strings.Contains(delta, "模型未生成最终回复") {
+			recovered = delta
+		}
+	}
+	if recovered == "" {
+		t.Fatalf("expected recovered summary message, events=%#v", runEvents)
+	}
+	if !strings.Contains(recovered, "note.txt") && !strings.Contains(strings.ToLower(recovered), "list") {
+		t.Fatalf("recovered summary should mention tool result: %q", recovered)
+	}
+	finish := runEvents[len(runEvents)-1]
+	if finish.Type != events.EventFinish || finish.Payload["status"] != "completed" {
+		t.Fatalf("finish event = %#v, want completed", finish)
+	}
+}
+
 func TestRuntimeProviderContinuesAfterToolFailure(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "note.txt"), []byte("still here"), 0o644); err != nil {

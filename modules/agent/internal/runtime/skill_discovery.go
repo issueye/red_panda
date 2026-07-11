@@ -11,6 +11,55 @@ import (
 	"redpanda/protocol/methods"
 )
 
+// buildSkillsContext loads the latest managed skills from disk for one conversation.
+// It is intentionally re-read every time so newly created skills are usable immediately.
+func buildSkillsContext(workspaceRoot string) *methods.SkillsContext {
+	root := strings.TrimSpace(workspaceRoot)
+	if root == "" {
+		return &methods.SkillsContext{
+			Context: "Managed skills: no workspace selected. Skills live under .codex/skills after a workspace is opened.",
+		}
+	}
+	items, err := listManagedSkills(root)
+	if err != nil {
+		return &methods.SkillsContext{
+			Context: "Managed skills: failed to load .codex/skills (" + err.Error() + "). Use skill.list to retry.",
+		}
+	}
+	return &methods.SkillsContext{
+		Items:   items,
+		Context: formatSkillsCatalog(items),
+	}
+}
+
+func formatSkillsCatalog(items []methods.SkillSummary) string {
+	var b strings.Builder
+	b.WriteString("Managed skills catalog (refreshed for this conversation from .codex/skills).\n")
+	b.WriteString("When a skill matches the user task, call skill.run with {name, task}.\n")
+	b.WriteString("Use skill.list to re-check, skill.create/update/delete to manage skills.\n")
+	if len(items) == 0 {
+		b.WriteString("Currently available skills: none.\n")
+		return strings.TrimSpace(b.String())
+	}
+	b.WriteString("Currently available skills:\n")
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		desc := strings.TrimSpace(item.Description)
+		if desc == "" {
+			desc = "(no description)"
+		}
+		b.WriteString("- ")
+		b.WriteString(name)
+		b.WriteString(": ")
+		b.WriteString(desc)
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func listManagedSkills(workspaceRoot string) ([]methods.SkillSummary, error) {
 	root, err := cleanWorkspaceRoot(workspaceRoot)
 	if err != nil {
@@ -34,7 +83,8 @@ func listManagedSkills(workspaceRoot string) ([]methods.SkillSummary, error) {
 		if !managedSkillNamePattern.MatchString(name) {
 			continue
 		}
-		detail, err := loadManagedSkillDetail(root, name, true)
+		// Description-only is enough for catalogs and conversation injection.
+		detail, err := loadManagedSkillDetail(root, name, false)
 		if err != nil {
 			continue
 		}
@@ -42,7 +92,7 @@ func listManagedSkills(workspaceRoot string) ([]methods.SkillSummary, error) {
 			Name:            detail.Name,
 			Description:     detail.Description,
 			Path:            detail.Path,
-			HasInstructions: strings.TrimSpace(detail.Instructions) != "",
+			HasInstructions: true, // managed skills always have a SKILL.md body when listable
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {

@@ -42,6 +42,32 @@ func (skillCreateProvider) Complete(_ context.Context, req ProviderRequest, emit
 	return emit(ProviderChunk{Final: true})
 }
 
+func TestBuildSkillsContextReflectsLatestDiskSkills(t *testing.T) {
+	root := t.TempDir()
+	empty := buildSkillsContext(root)
+	if empty == nil || !strings.Contains(empty.Context, "none") {
+		t.Fatalf("expected empty catalog, got %#v", empty)
+	}
+	if _, err := runCreateSkill(root, "code-review", "Review code safely.", "# Workflow\n\n1. Inspect."); err != nil {
+		t.Fatal(err)
+	}
+	catalog := buildSkillsContext(root)
+	if catalog == nil || len(catalog.Items) != 1 || catalog.Items[0].Name != "code-review" {
+		t.Fatalf("expected code-review skill in catalog, got %#v", catalog)
+	}
+	if !strings.Contains(catalog.Context, "code-review") || !strings.Contains(catalog.Context, "Review code safely.") {
+		t.Fatalf("catalog context missing skill details: %q", catalog.Context)
+	}
+	// Creating another skill must appear on the next build (no cache).
+	if _, err := runCreateSkill(root, "release-notes", "Draft release notes.", "# Notes"); err != nil {
+		t.Fatal(err)
+	}
+	next := buildSkillsContext(root)
+	if next == nil || len(next.Items) != 2 {
+		t.Fatalf("expected 2 skills after create, got %#v", next)
+	}
+}
+
 func TestManagedSkillCreateAndUpdate(t *testing.T) {
 	root := t.TempDir()
 	createOutput, err := runCreateSkill(root, "code-review", "Review code safely.", "# Workflow\n\n1. Inspect the diff.\n2. Report findings.")

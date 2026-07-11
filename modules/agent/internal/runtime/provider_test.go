@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -140,6 +141,67 @@ func TestOpenAICompatibleChatCompletionsURL(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleMessagesInjectsCurrentTime(t *testing.T) {
+	now := time.Now()
+	messages := openAICompatibleMessages(ProviderRequest{
+		Input: methods.ReplyInput{Text: "现在几点"},
+	})
+	if len(messages) < 2 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	if messages[0]["role"] != "system" {
+		t.Fatalf("expected time system message first, got %#v", messages[0])
+	}
+	content := fmt.Sprint(messages[0]["content"])
+	if !strings.Contains(content, "当前权威时间") || !strings.Contains(content, now.Format("2006-01-02")) {
+		t.Fatalf("time system message missing date: %q", content)
+	}
+	if messages[1]["role"] != "user" {
+		t.Fatalf("expected user after time, got %#v", messages[1])
+	}
+}
+
+func TestCurrentTimeContextMessageIncludesZone(t *testing.T) {
+	// Fixed instant in Asia/Shanghai if available; otherwise local.
+	loc := time.FixedZone("CST", 8*3600)
+	now := time.Date(2026, 7, 11, 16, 30, 0, 0, loc)
+	msg := currentTimeContextMessage(now)
+	if !strings.Contains(msg, "2026-01-02") && !strings.Contains(msg, "2026-07-11") {
+		t.Fatalf("expected date in message: %q", msg)
+	}
+	if !strings.Contains(msg, "16:30:00") || !strings.Contains(msg, "UTC+08:00") {
+		t.Fatalf("expected time/offset in message: %q", msg)
+	}
+	if !strings.Contains(msg, "星期六") {
+		t.Fatalf("expected weekday: %q", msg)
+	}
+}
+
+func TestOpenAICompatibleMessagesInjectsSkillsCatalog(t *testing.T) {
+	messages := openAICompatibleMessages(ProviderRequest{
+		Input: methods.ReplyInput{Text: "run code review skill"},
+		Options: methods.ReplyOptions{
+			SkillsContext: &methods.SkillsContext{
+				Context: "Managed skills catalog\n- code-review: Review code safely.",
+				Items: []methods.SkillSummary{{
+					Name:        "code-review",
+					Description: "Review code safely.",
+				}},
+			},
+		},
+	})
+	if len(messages) < 3 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	// messages[0] is current time; skills catalog follows.
+	if messages[1]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[1]["content"]), "code-review") {
+		t.Fatalf("expected skills system catalog, got %#v", messages[1])
+	}
+	if messages[2]["role"] != "user" {
+		t.Fatalf("expected user after skills catalog, got %#v", messages[2])
+	}
+}
+
 func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) {
 	var messages []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -184,14 +246,17 @@ func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) < 2 {
-		t.Fatalf("messages = %#v, want system + user", messages)
+	if len(messages) < 3 {
+		t.Fatalf("messages = %#v, want time + memory + user", messages)
 	}
-	if messages[0]["role"] != "system" || messages[0]["content"] != "Memory:\n- [project/fact] Build: Use npm test." {
-		t.Fatalf("memory system message mismatch: %#v", messages[0])
+	if messages[0]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[0]["content"]), "当前权威时间") {
+		t.Fatalf("expected time system message first, got %#v", messages[0])
 	}
-	if messages[1]["role"] != "user" || messages[1]["content"] != "current user prompt" {
-		t.Fatalf("user message was not preserved: %#v", messages[1])
+	if messages[1]["role"] != "system" || messages[1]["content"] != "Memory:\n- [project/fact] Build: Use npm test." {
+		t.Fatalf("memory system message mismatch: %#v", messages[1])
+	}
+	if messages[2]["role"] != "user" || messages[2]["content"] != "current user prompt" {
+		t.Fatalf("user message was not preserved: %#v", messages[2])
 	}
 	if len(chunks) != 2 || chunks[0].Delta != "memory ok" || !chunks[1].Final {
 		t.Fatalf("unexpected chunks: %#v", chunks)
@@ -203,22 +268,28 @@ func TestOpenAICompatibleMessagesInjectOrchestrationPolicyWhenSubagentToolAvaila
 		Input: methods.ReplyInput{Text: "分析桌面端和服务端"},
 		Tools: []tools.Definition{{Name: "subagent.run", Description: "run"}},
 	})
-	if len(messages) < 2 {
+	if len(messages) < 3 {
 		t.Fatalf("messages = %#v", messages)
 	}
-	if messages[0]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[0]["content"]), "subagent.run") {
-		t.Fatalf("expected orchestration system policy, got %#v", messages[0])
+	if messages[0]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[0]["content"]), "当前权威时间") {
+		t.Fatalf("expected time system message first, got %#v", messages[0])
 	}
-	if messages[1]["role"] != "user" {
-		t.Fatalf("expected user after policy, got %#v", messages[1])
+	if messages[1]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[1]["content"]), "subagent.run") {
+		t.Fatalf("expected orchestration system policy, got %#v", messages[1])
+	}
+	if messages[2]["role"] != "user" {
+		t.Fatalf("expected user after policy, got %#v", messages[2])
 	}
 
 	without := openAICompatibleMessages(ProviderRequest{
 		Input: methods.ReplyInput{Text: "hello"},
 		Tools: []tools.Definition{{Name: "workspace.read_file"}},
 	})
-	if len(without) != 1 || without[0]["role"] != "user" {
-		t.Fatalf("child/specialist without subagent tool should not get policy: %#v", without)
+	if len(without) != 2 || without[0]["role"] != "system" || without[1]["role"] != "user" {
+		t.Fatalf("child/specialist without subagent tool should get time + user only: %#v", without)
+	}
+	if strings.Contains(fmt.Sprint(without[0]["content"]), "subagent.run") {
+		t.Fatalf("child/specialist without subagent tool should not get orchestration policy: %#v", without[0])
 	}
 }
 
@@ -262,6 +333,7 @@ func TestOpenAICompatibleMessagesIncludeConversationInOrderAndCurrentInputOnce(t
 		}},
 	})
 
+	// [0]=time system, [1]=memory system, then conversation + current input + tool exchange
 	want := []struct {
 		role    string
 		content string
@@ -271,26 +343,34 @@ func TestOpenAICompatibleMessagesIncludeConversationInOrderAndCurrentInputOnce(t
 		{role: "assistant", content: "first answer"},
 		{role: "user", content: "current question"},
 	}
-	if len(messages) != len(want)+2 {
-		t.Fatalf("messages = %#v, want %d messages", messages, len(want)+2)
+	if len(messages) != 1+len(want)+2 {
+		t.Fatalf("messages = %#v, want %d messages", messages, 1+len(want)+2)
+	}
+	if messages[0]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[0]["content"]), "当前权威时间") {
+		t.Fatalf("messages[0] should be time system message: %#v", messages[0])
 	}
 	currentInputCount := 0
 	for index, expected := range want {
-		if messages[index]["role"] != expected.role || messages[index]["content"] != expected.content {
-			t.Fatalf("messages[%d] = %#v, want role=%q content=%q", index, messages[index], expected.role, expected.content)
+		msg := messages[index+1]
+		if msg["role"] != expected.role || msg["content"] != expected.content {
+			t.Fatalf("messages[%d] = %#v, want role=%q content=%q", index+1, msg, expected.role, expected.content)
 		}
-		if messages[index]["role"] == "user" && messages[index]["content"] == "current question" {
+		if msg["role"] == "user" && msg["content"] == "current question" {
 			currentInputCount++
 		}
 	}
 	if currentInputCount != 1 {
 		t.Fatalf("current input appeared %d times, want once: %#v", currentInputCount, messages)
 	}
-	if messages[4]["role"] != "assistant" {
-		t.Fatalf("tool call message = %#v, want assistant after current input", messages[4])
+	if messages[5]["role"] != "assistant" {
+		t.Fatalf("tool call message = %#v, want assistant after current input", messages[5])
 	}
-	if messages[5]["role"] != "tool" || messages[5]["tool_call_id"] != "call_1" || messages[5]["content"] != "project readme" {
-		t.Fatalf("tool result message = %#v, want call_1 result after assistant tool call", messages[5])
+	if messages[6]["role"] != "tool" || messages[6]["tool_call_id"] != "call_1" {
+		t.Fatalf("tool result message = %#v, want call_1 result after assistant tool call", messages[6])
+	}
+	content := fmt.Sprint(messages[6]["content"])
+	if !strings.Contains(content, "project readme") || !strings.Contains(content, "red_panda.tool_result.v1") {
+		t.Fatalf("tool result should be standardized envelope containing project readme: %q", content)
 	}
 }
 
@@ -344,8 +424,12 @@ func TestHTTPCompatibleProviderSendsToolsAfterToolHistory(t *testing.T) {
 		t.Fatalf("tool_choice = %#v, want auto", body["tool_choice"])
 	}
 	messages, ok := body["messages"].([]any)
-	if !ok || len(messages) != 3 {
-		t.Fatalf("messages = %#v, want user + assistant tool call + tool result", body["messages"])
+	if !ok || len(messages) != 4 {
+		t.Fatalf("messages = %#v, want time + user + assistant tool call + tool result", body["messages"])
+	}
+	first, _ := messages[0].(map[string]any)
+	if first["role"] != "system" || !strings.Contains(fmt.Sprint(first["content"]), "当前权威时间") {
+		t.Fatalf("first message should be time system note: %#v", messages[0])
 	}
 }
 
