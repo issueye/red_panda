@@ -120,6 +120,37 @@ func (r RunRecordRepository) ListBySession(sessionID string, limit int) ([]model
 	return rows, err
 }
 
+// CountActive returns how many runs are currently running or waiting for permission.
+func (r RunRecordRepository) CountActive() (int64, error) {
+	var count int64
+	err := r.db.Model(&model.RunRecord{}).
+		Where("status IN ?", []string{"running", "waiting_permission"}).
+		Count(&count).Error
+	return count, err
+}
+
+// CountActiveBySession returns active runs for one session.
+func (r RunRecordRepository) CountActiveBySession(sessionID string) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.RunRecord{}).
+		Where("session_id = ? AND status IN ?", sessionID, []string{"running", "waiting_permission"}).
+		Count(&count).Error
+	return count, err
+}
+
+// ListActive returns active runs ordered by start time.
+func (r RunRecordRepository) ListActive(limit int) ([]model.RunRecord, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var rows []model.RunRecord
+	err := r.db.Where("status IN ?", []string{"running", "waiting_permission"}).
+		Order("started_at asc").
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
+}
+
 func (r RunRecordRepository) RefreshToolCount(rootRunID string) error {
 	if rootRunID == "" {
 		return nil

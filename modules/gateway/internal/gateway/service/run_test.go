@@ -125,6 +125,123 @@ func TestRunServiceStartPassesLatestConversationWindowToRuntime(t *testing.T) {
 	assertConversationMessage(t, params.Session.Conversation[199], "user", "message 205")
 }
 
+func TestResolveMaxConcurrentRuns(t *testing.T) {
+	t.Setenv("RED_PANDA_MAX_CONCURRENT_RUNS", "")
+	if got := resolveMaxConcurrentRuns(nil); got != defaultMaxConcurrentRuns {
+		t.Fatalf("default = %d, want %d", got, defaultMaxConcurrentRuns)
+	}
+	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 5}); got != 5 {
+		t.Fatalf("option = %d, want 5", got)
+	}
+	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 99}); got != maxConcurrentRunsCap {
+		t.Fatalf("capped option = %d, want %d", got, maxConcurrentRunsCap)
+	}
+
+	t.Setenv("RED_PANDA_MAX_CONCURRENT_RUNS", "7")
+	if got := resolveMaxConcurrentRuns(nil); got != 7 {
+		t.Fatalf("env = %d, want 7", got)
+	}
+	// Per-run option still wins over env.
+	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 2}); got != 2 {
+		t.Fatalf("option over env = %d, want 2", got)
+	}
+}
+
+func TestRunServiceStartRejectsSameSessionWhileActive(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_serial", "Serial", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Runs.Start(model.RunRecord{
+		ID:        "run_active",
+		SessionID: session.ID,
+		Status:    "running",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
+	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
+	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
+	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	service := NewRunService(repos, eventhub.New(), runtime)
+
+	_, err = service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "second message"},
+	})
+	if err == nil {
+		t.Fatal("expected same-session concurrent start to fail")
+	}
+	if !strings.Contains(err.Error(), "会话已有任务在运行中") {
+		t.Fatalf("error = %v, want session serial message", err)
+	}
+}
+
+func TestRunServiceStartRejectsWhenGlobalConcurrentLimitReached(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	now := time.Now().UTC()
+	for index := 1; index <= 3; index++ {
+		sessionID := fmt.Sprintf("session_global_%d", index)
+		if _, err := repos.Sessions.Ensure(sessionID, sessionID, "D:/workspace"); err != nil {
+			t.Fatal(err)
+		}
+		if err := repos.Runs.Start(model.RunRecord{
+			ID:        fmt.Sprintf("run_global_%d", index),
+			SessionID: sessionID,
+			Status:    "running",
+			StartedAt: now.Add(time.Duration(index) * time.Millisecond),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	session, err := repos.Sessions.Ensure("session_global_new", "New", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
+	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
+	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
+	t.Setenv("RED_PANDA_MAX_CONCURRENT_RUNS", "")
+	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	service := NewRunService(repos, eventhub.New(), runtime)
+
+	_, err = service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "should be rejected"},
+		Options:   map[string]any{"max_concurrent_runs": 3},
+	})
+	if err == nil {
+		t.Fatal("expected global concurrent limit rejection")
+	}
+	if !strings.Contains(err.Error(), "已达到最大并发运行数") {
+		t.Fatalf("error = %v, want concurrent limit message", err)
+	}
+}
+
+func TestRunServiceRuntimeStatusIncludesActiveRuns(t *testing.T) {
+	repos, service := newRunServiceTestFixture(t)
+	if err := repos.Runs.Start(model.RunRecord{
+		ID:        "run_status_1",
+		SessionID: "session_status",
+		Status:    "running",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status := service.RuntimeStatus()
+	if status["max_concurrent_runs"] != defaultMaxConcurrentRuns {
+		t.Fatalf("max_concurrent_runs = %#v, want %d", status["max_concurrent_runs"], defaultMaxConcurrentRuns)
+	}
+	if status["active_runs"] != int64(1) {
+		t.Fatalf("active_runs = %#v, want 1", status["active_runs"])
+	}
+}
+
 func TestRunServiceRuntimeHelperProcess(t *testing.T) {
 	if os.Getenv("RED_PANDA_RUNTIME_HELPER") != "1" {
 		return

@@ -68,3 +68,10 @@ test('buildRunStartOptions passes max tool turns', () => {
   }, { root: 'D:/ws' }, 'use many tools');
   assert.equal(options.max_tool_turns, 12);
 });
+
+test('buildRunStartOptions passes max concurrent runs', () => {
+  const options = buildRunStartOptions({
+    maxConcurrentRuns: '5',
+  }, { root: 'D:/ws' }, 'parallel sessions');
+  assert.equal(options.max_concurrent_runs, 5);
+});

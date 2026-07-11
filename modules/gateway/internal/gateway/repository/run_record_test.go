@@ -138,6 +138,58 @@ func TestRunRecordRefreshToolCountFromToolCalls(t *testing.T) {
 	}
 }
 
+func TestRunRecordCountActiveAndListActive(t *testing.T) {
+	repo := newRunRecordTestRepository(t)
+	now := time.Now().UTC()
+	records := []model.RunRecord{
+		{ID: "run_a", SessionID: "session_1", Status: "running", StartedAt: now},
+		{ID: "run_b", SessionID: "session_1", Status: "waiting_permission", StartedAt: now.Add(time.Millisecond)},
+		{ID: "run_c", SessionID: "session_2", Status: "running", StartedAt: now.Add(2 * time.Millisecond)},
+		{ID: "run_d", SessionID: "session_2", Status: "completed", StartedAt: now.Add(3 * time.Millisecond)},
+		{ID: "run_e", SessionID: "session_3", Status: "failed", StartedAt: now.Add(4 * time.Millisecond)},
+	}
+	for _, record := range records {
+		if err := repo.Start(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	active, err := repo.CountActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 3 {
+		t.Fatalf("CountActive = %d, want 3", active)
+	}
+
+	session1, err := repo.CountActiveBySession("session_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session1 != 2 {
+		t.Fatalf("CountActiveBySession(session_1) = %d, want 2", session1)
+	}
+
+	session2, err := repo.CountActiveBySession("session_2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session2 != 1 {
+		t.Fatalf("CountActiveBySession(session_2) = %d, want 1", session2)
+	}
+
+	listed, err := repo.ListActive(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 3 {
+		t.Fatalf("ListActive len = %d, want 3", len(listed))
+	}
+	if listed[0].ID != "run_a" || listed[1].ID != "run_b" || listed[2].ID != "run_c" {
+		t.Fatalf("ListActive order = %#v, want run_a, run_b, run_c", listed)
+	}
+}
+
 func newRunRecordTestRepository(t *testing.T) RunRecordRepository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "runs.db")), &gorm.Config{})

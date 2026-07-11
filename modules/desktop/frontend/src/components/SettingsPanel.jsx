@@ -1010,6 +1010,13 @@ export function SettingsPanel({
             onUpdate={updateSetting}
           />
           <SettingTextInput
+            label="最大并发会话运行数"
+            placeholder="3"
+            settings={settings}
+            settingKey="maxConcurrentRuns"
+            onUpdate={updateSetting}
+          />
+          <SettingTextInput
             label="工具允许列表"
             placeholder="workspace.read_file, workspace.list"
             settings={settings}
@@ -1027,6 +1034,7 @@ export function SettingsPanel({
         <p className="settings-hint">
           工具轮次上限主要约束主代理自身。分析类子代理的轮次由主代理先 <code>workspace.stats</code> 统计文件数后，按
           <code>max_turns = file_count + 总结轮次</code> 指定（无固定上限），并传入 <code>path</code>/<code>file_count</code>。
+          最大并发会话运行数限制同时进行的会话任务数量（默认 3，上限 16）；同一会话内仍串行。
         </p>
       </section>
       <section className="settings-section">

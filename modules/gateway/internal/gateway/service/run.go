@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"redpanda/gateway/internal/gateway/infra/eventhub"
@@ -14,6 +17,11 @@ import (
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
 	protows "redpanda/protocol/ws"
+)
+
+const (
+	defaultMaxConcurrentRuns = 3
+	maxConcurrentRunsCap     = 16
 )
 
 type RunService struct {
@@ -70,14 +78,42 @@ func NewRunService(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclie
 }
 
 func (r RunService) RuntimeStatus() map[string]any {
+	status := map[string]any{
+		"available":            false,
+		"mode":                 "single_core",
+		"max_concurrent_runs":  defaultMaxConcurrentRuns,
+		"active_runs":          int64(0),
+	}
+	if active, err := r.repos.Runs.CountActive(); err == nil {
+		status["active_runs"] = active
+	}
 	if r.runtime == nil {
-		return map[string]any{
-			"available": false,
-			"mode":      "single_core",
-			"reason":    "runtime client not configured",
+		status["reason"] = "runtime client not configured"
+		return status
+	}
+	for key, value := range r.runtime.Status() {
+		status[key] = value
+	}
+	return status
+}
+
+// resolveMaxConcurrentRuns prefers per-run option, then env, then default.
+func resolveMaxConcurrentRuns(options map[string]any) int {
+	if n := intOption(options, "max_concurrent_runs"); n > 0 {
+		if n > maxConcurrentRunsCap {
+			return maxConcurrentRunsCap
+		}
+		return n
+	}
+	if env := strings.TrimSpace(os.Getenv("RED_PANDA_MAX_CONCURRENT_RUNS")); env != "" {
+		if parsed, err := strconv.Atoi(env); err == nil && parsed > 0 {
+			if parsed > maxConcurrentRunsCap {
+				return maxConcurrentRunsCap
+			}
+			return parsed
 		}
 	}
-	return r.runtime.Status()
+	return defaultMaxConcurrentRuns
 }
 
 func (r RunService) Get(runID string) (RunRecordDTO, error) {
@@ -130,6 +166,29 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 	if err != nil {
 		return StartRunResult{}, err
 	}
+
+	// Same session stays serial: one active run at a time.
+	sessionActive, err := r.repos.Runs.CountActiveBySession(session.ID)
+	if err != nil {
+		return StartRunResult{}, err
+	}
+	if sessionActive > 0 {
+		return StartRunResult{}, fmt.Errorf("会话已有任务在运行中，请等待结束后再发送")
+	}
+
+	// Global concurrent run budget across sessions.
+	maxConcurrent := resolveMaxConcurrentRuns(payload.Options)
+	active, err := r.repos.Runs.CountActive()
+	if err != nil {
+		return StartRunResult{}, err
+	}
+	if int(active) >= maxConcurrent {
+		return StartRunResult{}, fmt.Errorf(
+			"已达到最大并发运行数 %d（当前活跃 %d），请等待其它会话完成或在设置中提高上限",
+			maxConcurrent, active,
+		)
+	}
+
 	history, err := r.repos.Messages.ListLatestConversation(session.ID, 200)
 	if err != nil {
 		return StartRunResult{}, err
