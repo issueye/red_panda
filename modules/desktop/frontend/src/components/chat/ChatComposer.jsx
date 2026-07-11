@@ -1,7 +1,8 @@
 import { Send, Square } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { classNames } from '../../lib/format.js';
 import { IconButton } from '../ui/button.jsx';
+import { SelectMenu } from '../ui/select.jsx';
 
 const MIN_COMPOSER_HEIGHT = 24;
 const MAX_COMPOSER_HEIGHT = 168;
@@ -19,34 +20,55 @@ function resizeComposer(element) {
 }
 
 /**
- * 聊天输入器：固定在对话区底部，发送/取消按钮内嵌在输入壳内。
- * @param {{ value: string, running: boolean, onChange: (value: string) => void, onSend: () => void, onCancel: () => void }} props 组件属性
+ * 聊天输入器：固定在对话区底部，内嵌供应商模型选择与发送/取消。
  */
-export function ChatComposer({ value, running, onChange, onSend, onCancel }) {
+export function ChatComposer({
+  value,
+  running,
+  onChange,
+  onSend,
+  onCancel,
+  providerProfiles = [],
+  providerProfileId = '',
+  onProviderProfileChange,
+}) {
   const textareaRef = useRef(null);
   const canSend = value.trim().length > 0 && !running;
   const shortcutHint = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')
     ? '⌘ + Enter 发送'
     : 'Ctrl + Enter 发送';
 
+  const providerOptions = useMemo(() => {
+    const active = providerProfiles.filter((item) => item.active !== false);
+    const options = [
+      { value: '', label: '默认模型' },
+      ...active.map((item) => ({
+        value: item.id,
+        label: item.model ? `${item.name} · ${item.model}` : item.name,
+      })),
+    ];
+    if (providerProfileId && !options.some((item) => item.value === providerProfileId)) {
+      const missing = providerProfiles.find((item) => item.id === providerProfileId);
+      if (missing) {
+        options.push({
+          value: missing.id,
+          label: missing.model ? `${missing.name} · ${missing.model}` : missing.name,
+        });
+      }
+    }
+    return options;
+  }, [providerProfiles, providerProfileId]);
+
   useEffect(() => {
     resizeComposer(textareaRef.current);
   }, [value]);
 
-  /**
-   * 提交当前草稿；空内容或运行中时忽略。
-   * @param {Event} [event] 表单提交事件
-   */
   function submit(event) {
     event?.preventDefault?.();
     if (!canSend) return;
     onSend();
   }
 
-  /**
-   * 处理快捷键：Ctrl/Cmd+Enter 发送，Enter 换行。
-   * @param {KeyboardEvent} event 键盘事件
-   */
   function handleKeyDown(event) {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
@@ -72,9 +94,21 @@ export function ChatComposer({ value, running, onChange, onSend, onCancel }) {
           value={value}
         />
         <div className="composer-toolbar">
-          <span className="composer-hint">
-            {running ? '运行中 · Enter 换行' : `Enter 换行 · ${shortcutHint}`}
-          </span>
+          <div className="composer-toolbar-left">
+            <SelectMenu
+              ariaLabel="选择供应商模型"
+              className="composer-provider-select"
+              disabled={running}
+              onChange={(next) => onProviderProfileChange?.(next)}
+              options={providerOptions}
+              placement="top"
+              testId="composer-provider-select"
+              value={providerProfileId || ''}
+            />
+            <span className="composer-hint">
+              {running ? '运行中 · Enter 换行' : `Enter 换行 · ${shortcutHint}`}
+            </span>
+          </div>
           <div className="composer-actions">
             {running ? (
               <IconButton

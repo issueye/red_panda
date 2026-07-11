@@ -1,5 +1,6 @@
 import { Check, ChevronDown } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { classNames } from '../../lib/format.js';
 
 function normalizeOptions(options) {
@@ -18,6 +19,10 @@ function normalizeOptions(options) {
   });
 }
 
+/**
+ * Compact custom select. Supports portal positioning to avoid overflow clipping.
+ * @param {{ placement?: 'auto' | 'top' | 'bottom' }} props
+ */
 export function SelectMenu({
   ariaLabel,
   className,
@@ -25,6 +30,7 @@ export function SelectMenu({
   id,
   onChange,
   options,
+  placement = 'auto',
   testId,
   value,
 }) {
@@ -32,21 +38,70 @@ export function SelectMenu({
   const listboxId = `${id || generatedId}-listbox`;
   const rootRef = useRef(null);
   const buttonRef = useRef(null);
+  const listboxRef = useRef(null);
   const itemRefs = useRef([]);
   const normalizedOptions = useMemo(() => normalizeOptions(options), [options]);
   const selectedIndex = Math.max(0, normalizedOptions.findIndex((option) => option.value === value));
   const selected = normalizedOptions.find((option) => option.value === value) || normalizedOptions[0];
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const [coords, setCoords] = useState(null);
+  const [resolvedPlacement, setResolvedPlacement] = useState(placement === 'top' ? 'top' : 'bottom');
+
+  function updatePosition() {
+    const trigger = buttonRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const viewportPadding = 8;
+    const maxHeight = 220;
+    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+    const spaceAbove = rect.top - viewportPadding;
+    let nextPlacement = placement;
+    if (placement === 'auto') {
+      nextPlacement = spaceBelow < Math.min(maxHeight, 160) && spaceAbove > spaceBelow ? 'top' : 'bottom';
+    }
+    const available = nextPlacement === 'top' ? spaceAbove : spaceBelow;
+    const height = Math.max(120, Math.min(maxHeight, available));
+    const width = Math.max(rect.width, 160);
+    let left = rect.left;
+    if (left + width > window.innerWidth - viewportPadding) {
+      left = Math.max(viewportPadding, window.innerWidth - width - viewportPadding);
+    }
+    setResolvedPlacement(nextPlacement);
+    setCoords({
+      left,
+      width,
+      maxHeight: height,
+      top: nextPlacement === 'top' ? undefined : rect.bottom + 4,
+      bottom: nextPlacement === 'top' ? window.innerHeight - rect.top + 4 : undefined,
+    });
+  }
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setCoords(null);
+      return undefined;
+    }
+    updatePosition();
+    const onReposition = () => updatePosition();
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [open, placement, normalizedOptions.length]);
 
   useEffect(() => {
     if (!open) {
       return undefined;
     }
     const onPointerDown = (event) => {
-      if (rootRef.current && !rootRef.current.contains(event.target)) {
-        setOpen(false);
+      const target = event.target;
+      if (rootRef.current?.contains(target) || listboxRef.current?.contains(target)) {
+        return;
       }
+      setOpen(false);
     };
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -62,7 +117,6 @@ export function SelectMenu({
     };
   }, [open]);
 
-  // 自定义下拉不用原生 select，这里手动维护选项焦点，确保键盘操作不会丢失焦点位置。
   useEffect(() => {
     if (open) {
       itemRefs.current[activeIndex]?.focus();
@@ -115,8 +169,47 @@ export function SelectMenu({
     }
   }
 
+  const listbox = open && coords ? createPortal(
+    <div
+      className={classNames('select-listbox', 'select-listbox-portal', `placement-${resolvedPlacement}`)}
+      id={listboxId}
+      ref={listboxRef}
+      role="listbox"
+      style={{
+        position: 'fixed',
+        left: `${coords.left}px`,
+        width: `${coords.width}px`,
+        maxHeight: `${coords.maxHeight}px`,
+        top: coords.top != null ? `${coords.top}px` : 'auto',
+        bottom: coords.bottom != null ? `${coords.bottom}px` : 'auto',
+        zIndex: 80,
+      }}
+    >
+      {normalizedOptions.map((option, index) => (
+        <button
+          aria-selected={option.value === value}
+          className={classNames('select-option', option.value === value && 'active')}
+          disabled={option.disabled}
+          key={option.value}
+          onClick={() => choose(option)}
+          onKeyDown={(event) => onOptionKeyDown(event, option)}
+          ref={(node) => {
+            itemRefs.current[index] = node;
+          }}
+          role="option"
+          tabIndex={index === activeIndex ? 0 : -1}
+          type="button"
+        >
+          <span>{option.label}</span>
+          {option.value === value ? <Check aria-hidden="true" size={13} /> : null}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  ) : null;
+
   return (
-    <div className={classNames('select-menu', className)} ref={rootRef}>
+    <div className={classNames('select-menu', open && 'is-open', className)} ref={rootRef}>
       <button
         aria-controls={open ? listboxId : undefined}
         aria-expanded={open}
@@ -136,29 +229,7 @@ export function SelectMenu({
         <span>{selected?.label || '请选择'}</span>
         <ChevronDown aria-hidden="true" size={14} />
       </button>
-      {open ? (
-        <div className="select-listbox" id={listboxId} role="listbox">
-          {normalizedOptions.map((option, index) => (
-            <button
-              aria-selected={option.value === value}
-              className={classNames('select-option', option.value === value && 'active')}
-              disabled={option.disabled}
-              key={option.value}
-              onClick={() => choose(option)}
-              onKeyDown={(event) => onOptionKeyDown(event, option)}
-              ref={(node) => {
-                itemRefs.current[index] = node;
-              }}
-              role="option"
-              tabIndex={index === activeIndex ? 0 : -1}
-              type="button"
-            >
-              <span>{option.label}</span>
-              {option.value === value ? <Check aria-hidden="true" size={13} /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {listbox}
     </div>
   );
 }

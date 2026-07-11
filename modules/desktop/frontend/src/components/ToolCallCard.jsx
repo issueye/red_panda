@@ -150,16 +150,6 @@ async function copyText(text) {
 
 /**
  * 可折叠内容区，支持复制与稳定高度的输出滚动。
- * @param {{
- *  title: string,
- *  text: string,
- *  defaultOpen?: boolean,
- *  open?: boolean,
- *  onOpenChange?: (open: boolean) => void,
- *  className?: string,
- *  testId?: string,
- *  showCollapsedPreview?: boolean,
- * }} props 组件属性
  */
 function ToolSection({
   title,
@@ -175,19 +165,12 @@ function ToolSection({
   const open = controlledOpen ?? uncontrolledOpen;
   const collapsedPreview = !open && showCollapsedPreview ? previewText(text) : '';
 
-  /**
-   * 切换折叠状态。
-   */
   function toggle() {
     const next = !open;
     if (controlledOpen === undefined) setUncontrolledOpen(next);
     onOpenChange?.(next);
   }
 
-  /**
-   * 复制当前区块内容。
-   * @param {MouseEvent} event 点击事件
-   */
   async function handleCopy(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -230,17 +213,7 @@ function ToolSection({
 }
 
 /**
- * 对话时间线中的工具调用卡片。
- * @param {{ item: {
- *  name?: string,
- *  displayName?: string,
- *  risk?: string,
- *  status?: string,
- *  arguments?: Record<string, unknown> | string,
- *  output?: string,
- *  error?: string,
- *  durationMs?: number,
- * }}} props 组件属性
+ * 对话时间线中的工具调用卡片，支持整卡收起。
  */
 export function ToolCallCard({ item }) {
   const status = item.status || 'running';
@@ -260,10 +233,27 @@ export function ToolCallCard({ item }) {
   );
   const duration = formatDuration(item.durationMs);
   const shouldOpenOutput = isRunning || Boolean(errorText) || (Boolean(outputText) && isShortText(outputText));
+  const hasBody = Boolean(argsText || errorText || outputText);
 
-  // 运行中/短输出/错误默认展开；长输出可折叠，折叠时仍显示预览行。
+  // 运行中/有错误默认展开整卡；完成后自动收起，减少占用。
+  const [cardOpen, setCardOpen] = useState(isRunning || Boolean(errorText));
   const [argsOpen, setArgsOpen] = useState(false);
   const [outputOpen, setOutputOpen] = useState(shouldOpenOutput);
+
+  useEffect(() => {
+    if (isRunning) {
+      setCardOpen(true);
+      setOutputOpen(true);
+      return;
+    }
+    if (errorText) {
+      setCardOpen(true);
+      setOutputOpen(true);
+      return;
+    }
+    // 成功结束后收起整卡，仅保留标题摘要。
+    setCardOpen(false);
+  }, [isRunning, errorText, status]);
 
   useEffect(() => {
     if (isRunning) {
@@ -271,73 +261,94 @@ export function ToolCallCard({ item }) {
     }
   }, [isRunning]);
 
-  useEffect(() => {
-    if (errorText && !isRunning) {
-      setOutputOpen(true);
-    }
-  }, [errorText, isRunning]);
+  function toggleCard() {
+    if (!hasBody) return;
+    setCardOpen((current) => !current);
+  }
 
   return (
     <article
-      className={classNames('tool-card', `tool-${status}`)}
+      className={classNames('tool-card', `tool-${status}`, cardOpen ? 'is-expanded' : 'is-collapsed')}
       data-testid="tool-card"
       data-timeline-type="tool"
     >
-      <div className="tool-title">
-        <div className="tool-icon" aria-hidden="true">
-          <Wrench size={15} />
+      <button
+        aria-expanded={cardOpen}
+        className="tool-card-header"
+        data-testid="tool-card-toggle"
+        disabled={!hasBody}
+        onClick={toggleCard}
+        type="button"
+      >
+        <div className="tool-title">
+          <div className="tool-icon" aria-hidden="true">
+            <Wrench size={15} />
+          </div>
+          <div className="tool-heading">
+            <div className="tool-heading-row">
+              <strong>{item.displayName || item.name || '工具'}</strong>
+              <div className="tool-heading-actions">
+                <StatusBadge
+                  className="tool-status"
+                  data-testid="tool-status"
+                  icon={statusIcon(status)}
+                  status={status}
+                />
+                {hasBody ? (
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={classNames('tool-card-chevron', cardOpen && 'is-open')}
+                    size={15}
+                  />
+                ) : null}
+              </div>
+            </div>
+            <div className="tool-meta">
+              <span className="tool-name">{item.name || 'tool'}</span>
+              <span className={classNames('tool-risk', `risk-${item.risk || 'low'}`)}>
+                {displayRisk(item.risk || 'low')}风险
+              </span>
+              {duration ? <span className="tool-duration">{duration}</span> : null}
+              {isRunning ? <span className="tool-live">{displayStatus(status)}</span> : null}
+            </div>
+            {summary ? (
+              <p className="tool-summary" title={summary}>{summary}</p>
+            ) : null}
+          </div>
         </div>
-        <div className="tool-heading">
-          <div className="tool-heading-row">
-            <strong>{item.displayName || item.name || '工具'}</strong>
-            <StatusBadge
-              className="tool-status"
-              data-testid="tool-status"
-              icon={statusIcon(status)}
-              status={status}
-            />
-          </div>
-          <div className="tool-meta">
-            <span className="tool-name">{item.name || 'tool'}</span>
-            <span className={classNames('tool-risk', `risk-${item.risk || 'low'}`)}>
-              {displayRisk(item.risk || 'low')}风险
-            </span>
-            {duration ? <span className="tool-duration">{duration}</span> : null}
-            {isRunning ? <span className="tool-live">{displayStatus(status)}</span> : null}
-          </div>
-          {summary ? (
-            <p className="tool-summary" title={summary}>{summary}</p>
+      </button>
+
+      {cardOpen && hasBody ? (
+        <div className="tool-card-body" data-testid="tool-card-body">
+          <ToolSection
+            className="tool-args"
+            defaultOpen={false}
+            onOpenChange={setArgsOpen}
+            open={argsOpen}
+            testId="tool-args"
+            text={argsText}
+            title="参数"
+          />
+
+          {errorText ? (
+            <div className="tool-error-box" data-testid="tool-error">
+              <strong>错误</strong>
+              <p className="tool-error">{errorText}</p>
+            </div>
           ) : null}
-        </div>
-      </div>
 
-      <ToolSection
-        className="tool-args"
-        defaultOpen={false}
-        onOpenChange={setArgsOpen}
-        open={argsOpen}
-        testId="tool-args"
-        text={argsText}
-        title="参数"
-      />
-
-      {errorText ? (
-        <div className="tool-error-box" data-testid="tool-error">
-          <strong>错误</strong>
-          <p className="tool-error">{errorText}</p>
+          <ToolSection
+            className="tool-output"
+            defaultOpen={shouldOpenOutput}
+            onOpenChange={setOutputOpen}
+            open={outputOpen}
+            showCollapsedPreview
+            testId="tool-output"
+            text={outputText}
+            title={isRunning ? '输出（实时）' : '输出'}
+          />
         </div>
       ) : null}
-
-      <ToolSection
-        className="tool-output"
-        defaultOpen={shouldOpenOutput}
-        onOpenChange={setOutputOpen}
-        open={outputOpen}
-        showCollapsedPreview
-        testId="tool-output"
-        text={outputText}
-        title={isRunning ? '输出（实时）' : '输出'}
-      />
     </article>
   );
 }

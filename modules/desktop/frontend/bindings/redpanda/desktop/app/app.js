@@ -19,5 +19,14 @@ export function Bootstrap() {
     }));
 }
 
+/**
+ * SelectDirectory opens a native folder picker and returns the selected path.
+ * Empty string means the user cancelled.
+ * @returns {$CancellablePromise<string>}
+ */
+export function SelectDirectory() {
+    return $Call.ByID(2824785567);
+}
+
 // Private type creation functions
 const $$createType0 = $models.BootstrapInfo.createFrom;

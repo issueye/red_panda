@@ -50,4 +50,12 @@ test('buildRunStartOptions falls back to default web tuning', () => {
   const options = buildRunStartOptions({}, { root: 'D:/ws' }, 'plain text');
   assert.equal(options.web_search_max_results, 8);
   assert.equal(options.web_fetch_max_bytes, 2097152);
+  assert.equal(options.max_tool_turns, 4);
+});
+
+test('buildRunStartOptions passes max tool turns', () => {
+  const options = buildRunStartOptions({
+    maxToolTurns: '12',
+  }, { root: 'D:/ws' }, 'use many tools');
+  assert.equal(options.max_tool_turns, 12);
 });

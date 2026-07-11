@@ -11,6 +11,9 @@ export function ChatPanel({
   onSend,
   onCancel,
   onResolvePermission,
+  providerProfiles = [],
+  providerProfileId = '',
+  onProviderProfileChange,
 }) {
   return (
     <section className="chat-panel">
@@ -23,7 +26,10 @@ export function ChatPanel({
       <ChatComposer
         onCancel={onCancel}
         onChange={onDraftChange}
+        onProviderProfileChange={onProviderProfileChange}
         onSend={onSend}
+        providerProfileId={providerProfileId}
+        providerProfiles={providerProfiles}
         running={running}
         value={draft}
       />

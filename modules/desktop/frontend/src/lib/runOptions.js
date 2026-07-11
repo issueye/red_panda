@@ -10,6 +10,7 @@ export const defaultRunSettings = {
   toolDenylist: '',
   webSearchResults: 8,
   webFetchMaxBytes: 2097152,
+  maxToolTurns: 4,
 };
 
 export function splitOptionList(value) {
@@ -38,6 +39,9 @@ export function buildRunStartOptions(settings, workspace, text) {
       : 0,
     web_fetch_max_bytes: Number.isFinite(Number(current.webFetchMaxBytes))
       ? Number(current.webFetchMaxBytes)
+      : 0,
+    max_tool_turns: Number.isFinite(Number(current.maxToolTurns))
+      ? Number(current.maxToolTurns)
       : 0,
     require_permission: text.includes('/permission'),
     spawn_subagents: current.spawnSubAgents || text.includes('/subagent'),

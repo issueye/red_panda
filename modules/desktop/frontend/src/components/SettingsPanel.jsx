@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { emptyProfileDraft, profileDraftFrom } from '../lib/providerProfiles.js';
 import { Badge } from './ui/badge.jsx';
 import { Button, IconButton } from './ui/button.jsx';
+import { useDialog } from './ui/dialog.jsx';
 import { EmptyState, ErrorMessage } from './ui/feedback.jsx';
 import { Field } from './ui/field.jsx';
 import { SelectMenu } from './ui/select.jsx';
@@ -252,6 +253,7 @@ export function SettingsPanel({
   onLoadSkillDetail,
   onRefreshSkills,
 }) {
+  const dialog = useDialog();
   const panelRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previousActiveElementRef = useRef(null);
@@ -343,6 +345,16 @@ export function SettingsPanel({
     if (!settings.providerProfileId) {
       return;
     }
+    const profileName = selectedProfile?.name || settings.providerProfileId;
+    const ok = await dialog.confirm({
+      title: '删除供应商',
+      message: `确定删除供应商「${profileName}」？`,
+      description: '此操作不可撤销，已保存的 API Key 配置将一并移除。',
+      confirmLabel: '删除',
+      tone: 'danger',
+      testId: 'confirm-delete-provider',
+    });
+    if (!ok) return;
     setProfileSaving(true);
     setProfileError('');
     try {
@@ -414,6 +426,15 @@ export function SettingsPanel({
   }
 
   async function deleteSkill(skill) {
+    const ok = await dialog.confirm({
+      title: '删除技能',
+      message: `确定删除技能「${skill.name}」？`,
+      description: '将删除工作区内对应的技能定义文件。',
+      confirmLabel: '删除',
+      tone: 'danger',
+      testId: 'confirm-delete-skill',
+    });
+    if (!ok) return;
     setSkillSaving(true);
     setSkillError('');
     try {
@@ -456,6 +477,15 @@ export function SettingsPanel({
   }
 
   async function deleteMcpServer(server) {
+    const ok = await dialog.confirm({
+      title: '删除 MCP 服务',
+      message: `确定删除 MCP 服务「${server.name || server.id}」？`,
+      description: '配置删除后不可恢复。',
+      confirmLabel: '删除',
+      tone: 'danger',
+      testId: 'confirm-delete-mcp',
+    });
+    if (!ok) return;
     setMcpSaving(true);
     setMcpError('');
     try {
@@ -961,6 +991,13 @@ export function SettingsPanel({
             onUpdate={updateSetting}
           />
           <SettingTextInput
+            label="工具轮次上限"
+            placeholder="4"
+            settings={settings}
+            settingKey="maxToolTurns"
+            onUpdate={updateSetting}
+          />
+          <SettingTextInput
             label="工具允许列表"
             placeholder="workspace.read_file, workspace.list"
             settings={settings}
@@ -975,6 +1012,9 @@ export function SettingsPanel({
             onUpdate={updateSetting}
           />
         </div>
+        <p className="settings-hint">
+          工具轮次上限控制单次回复中模型可连续调用工具的轮数。默认 4，最大 32。任务需要多步工具时可适当提高。
+        </p>
       </section>
       <section className="settings-section">
         <h3>网络工具</h3>

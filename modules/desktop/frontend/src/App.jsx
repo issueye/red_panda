@@ -9,11 +9,14 @@ import { StatusBar } from './components/StatusBar.jsx';
 import { SubAgentPanel } from './components/SubAgentPanel.jsx';
 import { TopBar } from './components/TopBar.jsx';
 import { IconButton } from './components/ui/button.jsx';
+import { useDialog } from './components/ui/dialog.jsx';
 import { TabButton } from './components/ui/tabs.jsx';
 import { WorkspacePanel } from './components/WorkspacePanel.jsx';
+import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { gatewayBaseURL } from './lib/config.js';
+import { selectDirectory } from './lib/desktopShell.js';
 import { displayRuntimeMode, displaySessionKind, displayStatus } from './lib/displayLabels.js';
 import {
   mcpServerCreatePayload,
@@ -86,7 +89,8 @@ async function apiJson(path, options = {}) {
 
 function normalizeSession(session) {
   const kind = session.kind && session.kind !== 'normal' ? session.kind : '';
-  const detail = session.working_dir || session.workspace_root || displayStatus(session.status || 'active');
+  const workspaceRoot = session.workspace_root || session.working_dir || '';
+  const detail = workspaceRoot || displayStatus(session.status || 'active');
   const kindLabel = displaySessionKind(kind);
   return {
     id: session.id,
@@ -94,6 +98,18 @@ function normalizeSession(session) {
     subtitle: kind ? `${kindLabel || kind} - ${detail}` : detail,
     kind,
     parentId: session.parent_id || '',
+    workspaceRoot,
+  };
+}
+
+function normalizeWorkspace(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    root: item.root || item.root_path || '',
+    root_path: item.root_path || item.root || '',
+    name: item.name || '',
+    lastOpenedAt: item.last_opened_at,
   };
 }
 
@@ -239,10 +255,13 @@ function upsertByID(items, nextItem) {
 }
 
 export function App() {
+  const dialog = useDialog();
   const [sessions, setSessions] = useState(initialSessions);
   const [currentSessionId, setCurrentSessionId] = useState('local-design');
   const [messages, setMessages] = useState(initialMessages);
   const [workspace, setWorkspace] = useState(null);
+  const [recentWorkspaces, setRecentWorkspaces] = useState([]);
+  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [permissions, setPermissions] = useState([]);
   const [globalPendingPermissions, setGlobalPendingPermissions] = useState([]);
   const [tools, setTools] = useState([]);
@@ -440,7 +459,12 @@ export function App() {
     apiJson('/api/v1/app/bootstrap')
       .then((data) => {
         if (!alive) return;
-        setWorkspace(data.workspace || null);
+        const nextWorkspace = normalizeWorkspace(data.workspace);
+        setWorkspace(nextWorkspace);
+        const recent = Array.isArray(data.recent_workspaces)
+          ? data.recent_workspaces.map(normalizeWorkspace).filter(Boolean)
+          : [];
+        setRecentWorkspaces(recent);
         const nextSessions = Array.isArray(data.sessions) ? data.sessions.map(normalizeSession) : [];
         if (nextSessions.length > 0) {
           setSessions(nextSessions);
@@ -451,7 +475,7 @@ export function App() {
         }
         loadProviderProfiles();
         loadMcpServers();
-        loadSkills(data.workspace?.root_path || data.workspace?.root || '');
+        loadSkills(nextWorkspace?.root_path || nextWorkspace?.root || '');
       })
       .catch(() => {});
     return () => {
@@ -698,6 +722,112 @@ export function App() {
     setRootSeq(1);
   }
 
+  async function openWorkspaceRoot(root) {
+    if (!root) return null;
+    const currentRoot = workspace?.root_path || workspace?.root || '';
+    if (currentRoot && currentRoot.replace(/\\/g, '/').toLowerCase() === root.replace(/\\/g, '/').toLowerCase()) {
+      return workspace;
+    }
+    const opened = await apiJson('/api/v1/workspaces/open', {
+      method: 'POST',
+      body: JSON.stringify({ root }),
+    });
+    const normalized = normalizeWorkspace(opened);
+    setWorkspace(normalized);
+    setRecentWorkspaces((items) => {
+      const next = [normalized, ...items.filter((item) => item.id !== normalized.id && item.root !== normalized.root)];
+      return next.slice(0, 20);
+    });
+    loadSkills(normalized?.root_path || normalized?.root || '');
+    return normalized;
+  }
+
+  async function selectWorkspaceNode(node) {
+    if (!node?.root) return;
+    await openWorkspaceRoot(node.root);
+  }
+
+  async function deleteSession(session) {
+    if (!session?.id) return;
+    const ok = await dialog.confirm({
+      title: '删除会话',
+      message: `确定删除会话「${session.title || session.id}」？`,
+      description: '删除后无法从侧栏恢复该会话记录。',
+      confirmLabel: '删除',
+      tone: 'danger',
+      testId: 'confirm-delete-session',
+    });
+    if (!ok) return;
+    await apiJson(`/api/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+    const remaining = sessions.filter((item) => item.id !== session.id);
+    setSessions(remaining);
+    if (currentSessionId === session.id) {
+      if (remaining.length > 0) {
+        selectSession(remaining[0].id);
+      } else {
+        setCurrentSessionId('');
+        setMessages([]);
+        setPermissions([]);
+        setTools([]);
+        setRuns([]);
+        setRunEventsByRun({});
+        setSubAgents([]);
+        setRunning(false);
+        setCurrentRunId('');
+      }
+    }
+  }
+
+  async function deleteWorkspaceNode(node) {
+    if (!node?.id || String(node.id).startsWith('path:')) return;
+    const ok = await dialog.confirm({
+      title: '移除工作区',
+      message: `确定移除工作区「${node.name}」？`,
+      description: '将从最近列表移除，并删除其下会话记录。磁盘文件不会被删除。',
+      confirmLabel: '移除',
+      tone: 'danger',
+      testId: 'confirm-delete-workspace',
+    });
+    if (!ok) return;
+    await apiJson(`/api/v1/workspaces/${encodeURIComponent(node.id)}?delete_sessions=1`, { method: 'DELETE' });
+    const rootKey = (node.root || '').replace(/\\/g, '/').toLowerCase();
+    const remaining = sessions.filter((item) => {
+      const itemRoot = (item.workspaceRoot || '').replace(/\\/g, '/').toLowerCase();
+      return itemRoot !== rootKey;
+    });
+    setSessions(remaining);
+    const nextRecent = recentWorkspaces.filter((item) => item.id !== node.id);
+    setRecentWorkspaces(nextRecent);
+    const currentRoot = (workspace?.root_path || workspace?.root || '').replace(/\\/g, '/').toLowerCase();
+    if (currentRoot === rootKey) {
+      const nextWorkspace = nextRecent[0] || null;
+      setWorkspace(nextWorkspace);
+      if (nextWorkspace?.root || nextWorkspace?.root_path) {
+        loadSkills(nextWorkspace.root_path || nextWorkspace.root);
+      } else {
+        setSkills([]);
+      }
+    }
+    if (currentSessionId && !remaining.some((item) => item.id === currentSessionId)) {
+      if (remaining.length > 0) {
+        selectSession(remaining[0].id);
+      } else {
+        setCurrentSessionId('');
+        setMessages([]);
+        setPermissions([]);
+        setTools([]);
+        setRuns([]);
+        setRunning(false);
+        setCurrentRunId('');
+      }
+    }
+  }
+
+  async function browseWorkspaceDirectory() {
+    const path = await selectDirectory();
+    return path || '';
+  }
+
   async function forkSession() {
     if (!currentSessionId) return;
     const current = sessions.find((item) => item.id === currentSessionId);
@@ -746,6 +876,10 @@ export function App() {
     setSubAgents([]);
     setRunning(false);
     setCurrentRunId('');
+    const target = sessions.find((item) => item.id === id);
+    if (target?.workspaceRoot) {
+      openWorkspaceRoot(target.workspaceRoot).catch(() => {});
+    }
     loadSessionState(id);
   }
 
@@ -1161,20 +1295,36 @@ export function App() {
         <Sidebar
           currentSessionId={currentSessionId}
           onCompactSession={compactSession}
+          onDeleteSession={deleteSession}
+          onDeleteWorkspace={deleteWorkspaceNode}
           onForkSession={forkSession}
           onNewSession={createSession}
+          onOpenWorkspace={() => setWorkspacePickerOpen(true)}
           onSelectSession={selectSession}
+          onSelectWorkspace={selectWorkspaceNode}
           sessions={sessions}
           workspace={workspace}
+          workspaces={recentWorkspaces}
+        />
+        <WorkspacePickerDialog
+          currentRoot={workspace?.root_path || workspace?.root || ''}
+          onBrowse={browseWorkspaceDirectory}
+          onClose={() => setWorkspacePickerOpen(false)}
+          onOpen={openWorkspaceRoot}
+          open={workspacePickerOpen}
+          workspaces={recentWorkspaces}
         />
         <ChatPanel
           draft={draft}
           messages={messages}
           onCancel={cancelRun}
           onDraftChange={setDraft}
+          onProviderProfileChange={(id) => setRunSettings((current) => ({ ...current, providerProfileId: id }))}
           onResolvePermission={resolvePermission}
           onSend={sendTask}
           permissions={pendingPermissions}
+          providerProfileId={runSettings.providerProfileId}
+          providerProfiles={providerProfiles}
           running={running}
           tools={tools}
         />

@@ -1,17 +1,68 @@
-import { Bot, FolderOpen, GitFork, MessageSquarePlus, Minimize2 } from 'lucide-react';
-import { Button } from './ui/button.jsx';
+import {
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
+  FolderPlus,
+  GitFork,
+  MessageSquare,
+  MessageSquarePlus,
+  Minimize2,
+  Trash2,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { buildWorkspaceSessionTree } from '../lib/sessionTree.js';
+import { classNames } from '../lib/format.js';
+import { Button, IconButton } from './ui/button.jsx';
 
+/**
+ * 侧栏：工作区 → 会话树，支持打开工作区、展开/收起与删除。
+ */
 export function Sidebar({
   sessions,
   currentSessionId,
   workspace,
+  workspaces = [],
   onCompactSession,
+  onDeleteSession,
+  onDeleteWorkspace,
   onForkSession,
   onNewSession,
+  onOpenWorkspace,
   onSelectSession,
+  onSelectWorkspace,
 }) {
-  const workspaceTitle = workspace?.name || workspace?.root_path || workspace?.root || '未打开工作区';
+  const tree = useMemo(
+    () => buildWorkspaceSessionTree(sessions, workspaces, workspace),
+    [sessions, workspaces, workspace],
+  );
+
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  useEffect(() => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      for (const node of tree) {
+        if (node.isCurrent || node.sessions.some((item) => item.id === currentSessionId)) {
+          next.add(node.key);
+        }
+        if (current.size === 0) {
+          next.add(node.key);
+        }
+      }
+      return next;
+    });
+  }, [tree, currentSessionId]);
+
   const hasCurrentSession = Boolean(currentSessionId);
+
+  function toggleNode(key) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   return (
     <aside className="sidebar">
@@ -26,35 +77,108 @@ export function Sidebar({
           压缩
         </Button>
       </div>
+      <Button
+        className="sidebar-workspace-open"
+        data-testid="workspace-open"
+        icon={<FolderPlus size={14} />}
+        onClick={onOpenWorkspace}
+        variant="soft"
+      >
+        选择工作区
+      </Button>
 
-      <section className="sidebar-section">
-        <div className="section-title">
-          <FolderOpen size={12} />
-          <span>工作区</span>
-        </div>
-        <div className="workspace-card" title={workspaceTitle}>
-          <strong>{workspaceTitle}</strong>
-        </div>
-      </section>
-
-      <section className="sidebar-section grow">
-        <div className="section-title">
-          <Bot size={12} />
-          <span>会话</span>
-        </div>
-        <div className="session-list">
-          {sessions.map((session) => (
-            <button
-              className={session.id === currentSessionId ? 'session-item active' : 'session-item'}
-              data-testid="session-item"
-              key={session.id}
-              onClick={() => onSelectSession(session.id)}
-              type="button"
-            >
-              <strong>{session.title}</strong>
-            </button>
-          ))}
-        </div>
+      <section className="sidebar-section grow" data-testid="workspace-session-tree">
+        {tree.length === 0 ? (
+          <p className="sidebar-empty">暂无会话。可先选择工作区，再新建会话。</p>
+        ) : (
+          <div className="session-tree">
+            {tree.map((node) => {
+              const isOpen = expanded.has(node.key);
+              const canDeleteWorkspace = Boolean(node.id) && !String(node.id).startsWith('path:') && node.root;
+              return (
+                <div className={classNames('tree-workspace', node.isCurrent && 'is-current')} key={node.key}>
+                  <div className="tree-workspace-row">
+                    <button
+                      aria-expanded={isOpen}
+                      className="tree-workspace-toggle"
+                      onClick={() => toggleNode(node.key)}
+                      type="button"
+                    >
+                      {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                    <button
+                      className="tree-workspace-main"
+                      onClick={() => {
+                        if (!isOpen) toggleNode(node.key);
+                        onSelectWorkspace?.(node);
+                      }}
+                      title={node.root || node.name}
+                      type="button"
+                    >
+                      <FolderOpen size={14} />
+                      <span className="tree-workspace-name">{node.name}</span>
+                      <em>{node.sessions.length}</em>
+                    </button>
+                    {canDeleteWorkspace ? (
+                      <IconButton
+                        className="tree-delete"
+                        data-testid="workspace-delete"
+                        label={`移除工作区 ${node.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDeleteWorkspace?.(node);
+                        }}
+                        variant="ghost"
+                      >
+                        <Trash2 size={13} />
+                      </IconButton>
+                    ) : null}
+                  </div>
+                  {isOpen ? (
+                    <div className="tree-session-list">
+                      {node.sessions.length === 0 ? (
+                        <p className="tree-session-empty">暂无会话</p>
+                      ) : (
+                        node.sessions.map((session) => (
+                          <div
+                            className={classNames(
+                              'tree-session-row',
+                              session.id === currentSessionId && 'active',
+                            )}
+                            key={session.id}
+                          >
+                            <button
+                              className="tree-session-main"
+                              data-testid="session-item"
+                              onClick={() => onSelectSession(session.id)}
+                              title={session.title}
+                              type="button"
+                            >
+                              <MessageSquare size={13} />
+                              <strong>{session.title}</strong>
+                            </button>
+                            <IconButton
+                              className="tree-delete"
+                              data-testid="session-delete"
+                              label={`删除会话 ${session.title}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onDeleteSession?.(session);
+                              }}
+                              variant="ghost"
+                            >
+                              <Trash2 size={12} />
+                            </IconButton>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </aside>
   );
