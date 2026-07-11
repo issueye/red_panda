@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -28,10 +29,23 @@ const maxPatchBytes = 256 * 1024
 
 type MemoryToolExecutor func(context.Context, methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error)
 type SkillRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
+type SubagentRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
+
+// SubagentManager exposes parent-agent control of specialists and the process pool.
+type SubagentManager interface {
+	List(runCtx ToolRunContext, call tools.Call) (string, error)
+	Cancel(runCtx ToolRunContext, call tools.Call) (string, error)
+	Reset(runCtx ToolRunContext, call tools.Call) (string, error)
+	PoolStatus() (string, error)
+	PoolResize(call tools.Call) (string, error)
+	PoolReset() (string, error)
+}
 
 type ToolRunner struct {
-	MemoryExecutor MemoryToolExecutor
-	SkillExecutor  SkillRunExecutor
+	MemoryExecutor   MemoryToolExecutor
+	SkillExecutor    SkillRunExecutor
+	SubagentExecutor SubagentRunExecutor
+	SubagentManager  SubagentManager
 }
 
 type ToolRunContext struct {
@@ -70,6 +84,19 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 				"properties": map[string]any{
 					"path":      map[string]any{"type": "string", "description": "Workspace-relative directory or file path."},
 					"max_depth": map[string]any{"type": "integer", "description": "Maximum directory depth to include."},
+				},
+			},
+		},
+		{
+			Name:        "workspace.stats",
+			DisplayName: "Workspace stats",
+			Description: "Summarize directory structure and file counts for split planning. Root agent MUST call this before multi-area analysis. Use total_files / top_level[].files to set each subagent.run file_count or max_turns using formula max_turns = file_count + summary_turns (summary_turns is included as suggested_max_turns).",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":      map[string]any{"type": "string", "description": "Workspace-relative directory path. Defaults to workspace root."},
+					"max_depth": map[string]any{"type": "integer", "description": "How deep to walk when counting (default 4, max 8)."},
 				},
 			},
 		},
@@ -226,6 +253,106 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 					"task": map[string]any{"type": "string", "description": "Task for the isolated skill subagent."},
 				},
 				"required": []string{"name", "task"},
+			},
+		},
+		{
+			Name:        "subagent.run",
+			DisplayName: "Run subagent",
+			Description: "REQUIRED for analysis/investigation/multi-area work. Spawn a process-pool specialist and return its final report. First call workspace.stats on the target directory, then set budget as max_turns = file_count + summary turns (use suggested_max_turns / top_level[].recommended_max_turns). Pass path and/or file_count so the runtime can apply the same formula. No artificial maximum: budget scales with file count.",
+			Risk:        tools.RiskMedium,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"task": map[string]any{"type": "string", "description": "Focused task for the subagent. Include scope, goals, and expected output."},
+					"name": map[string]any{"type": "string", "description": "Short subagent label, e.g. desktop-analyst or backend-analyst."},
+					"path": map[string]any{"type": "string", "description": "Workspace-relative directory this specialist owns. Used to count files when file_count/max_turns are omitted."},
+					"file_count": map[string]any{
+						"type":        "integer",
+						"description": "Number of files in the specialist scope from workspace.stats. When set (and max_turns omitted), max_turns becomes file_count + summary turns.",
+						"minimum":     0,
+					},
+					"max_turns": map[string]any{
+						"type":        "integer",
+						"description": "Optional explicit tool-turn budget. Prefer max_turns = file_count + summary turns from workspace.stats (suggested_max_turns). No fixed maximum.",
+						"minimum":     1,
+					},
+				},
+				"required": []string{"task"},
+			},
+		},
+		{
+			Name:        "subagent.list",
+			DisplayName: "List subagents",
+			Description: "List subagents for the current root run and show process-pool occupancy. Use this to manage specialists.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"run_id":      map[string]any{"type": "string", "description": "Optional root run id. Defaults to the current run."},
+					"subagent_id": map[string]any{"type": "string", "description": "Optional subagent id filter."},
+				},
+			},
+		},
+		{
+			Name:        "subagent.cancel",
+			DisplayName: "Cancel subagent",
+			Description: "Cancel a running subagent managed by the parent agent.",
+			Risk:        tools.RiskMedium,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"subagent_id": map[string]any{"type": "string", "description": "Subagent id to cancel."},
+					"run_id":      map[string]any{"type": "string", "description": "Optional root run id. Defaults to the current run."},
+				},
+				"required": []string{"subagent_id"},
+			},
+		},
+		{
+			Name:        "subagent.reset",
+			DisplayName: "Reset subagent",
+			Description: "Cancel a subagent if it is still running, mark it reset, and remove it from the active registry so a fresh specialist can be started. Optionally also reset idle process-pool workers.",
+			Risk:        tools.RiskMedium,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"subagent_id": map[string]any{"type": "string", "description": "Subagent id to reset."},
+					"run_id":      map[string]any{"type": "string", "description": "Optional root run id. Defaults to the current run."},
+					"reset_pool":  map[string]any{"type": "boolean", "description": "If true, also discard idle process-pool workers."},
+				},
+				"required": []string{"subagent_id"},
+			},
+		},
+		{
+			Name:        "subagent.pool_status",
+			DisplayName: "Subagent pool status",
+			Description: "Inspect the subagent process pool: limit, active workers, idle workers, and in-use count.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "subagent.pool_resize",
+			DisplayName: "Resize subagent pool",
+			Description: "Change the subagent process pool size (1-8). Excess idle workers are closed immediately.",
+			Risk:        tools.RiskMedium,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"size": map[string]any{"type": "integer", "description": "Desired pool size between 1 and 8."},
+				},
+				"required": []string{"size"},
+			},
+		},
+		{
+			Name:        "subagent.pool_reset",
+			DisplayName: "Reset subagent pool",
+			Description: "Discard all idle process-pool workers so the next subagent.run creates fresh processes. In-use workers are left running until completion.",
+			Risk:        tools.RiskMedium,
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{
@@ -405,6 +532,8 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 		output, err = runReadFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"))
 	case "workspace.list":
 		output, err = runListWorkspace(runCtx.WorkingDir, stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_depth", defaultListDepth))
+	case "workspace.stats":
+		output, err = runWorkspaceStats(runCtx.WorkingDir, stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_depth", 4))
 	case "workspace.grep":
 		output, err = runGrepWorkspace(runCtx.WorkingDir, stringArg(call.Arguments, "pattern"), stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_matches", defaultGrepMatches))
 	case "workspace.write_file":
@@ -431,6 +560,48 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 			err = fmt.Errorf("skill subagent executor is not available")
 		} else {
 			output, err = runner.SkillExecutor(ctx, runCtx, call)
+		}
+	case "subagent.run":
+		if runner.SubagentExecutor == nil {
+			err = fmt.Errorf("subagent executor is not available")
+		} else {
+			output, err = runner.SubagentExecutor(ctx, runCtx, call)
+		}
+	case "subagent.list":
+		if runner.SubagentManager == nil {
+			err = fmt.Errorf("subagent manager is not available")
+		} else {
+			output, err = runner.SubagentManager.List(runCtx, call)
+		}
+	case "subagent.cancel":
+		if runner.SubagentManager == nil {
+			err = fmt.Errorf("subagent manager is not available")
+		} else {
+			output, err = runner.SubagentManager.Cancel(runCtx, call)
+		}
+	case "subagent.reset":
+		if runner.SubagentManager == nil {
+			err = fmt.Errorf("subagent manager is not available")
+		} else {
+			output, err = runner.SubagentManager.Reset(runCtx, call)
+		}
+	case "subagent.pool_status":
+		if runner.SubagentManager == nil {
+			err = fmt.Errorf("subagent manager is not available")
+		} else {
+			output, err = runner.SubagentManager.PoolStatus()
+		}
+	case "subagent.pool_resize":
+		if runner.SubagentManager == nil {
+			err = fmt.Errorf("subagent manager is not available")
+		} else {
+			output, err = runner.SubagentManager.PoolResize(call)
+		}
+	case "subagent.pool_reset":
+		if runner.SubagentManager == nil {
+			err = fmt.Errorf("subagent manager is not available")
+		} else {
+			output, err = runner.SubagentManager.PoolReset()
 		}
 	case "memory.list", "memory.create", "memory.update", "memory.delete":
 		output, err = runner.runMemoryTool(ctx, runCtx, call)
@@ -607,6 +778,198 @@ func runReadFile(root string, relPath string) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+type workspaceDirStat struct {
+	Path                string `json:"path"`
+	Files               int    `json:"files"`
+	Dirs                int    `json:"dirs"`
+	RecommendedMaxTurns int    `json:"recommended_max_turns"`
+	IsSkipped           bool   `json:"skipped,omitempty"`
+}
+
+type workspaceStatsResult struct {
+	Root              string             `json:"root"`
+	Path              string             `json:"path"`
+	MaxDepth          int                `json:"max_depth"`
+	TotalFiles        int                `json:"total_files"`
+	TotalDirs         int                `json:"total_dirs"`
+	Truncated         bool               `json:"truncated"`
+	SuggestedSplits   int                `json:"suggested_splits"`
+	SplitGuidance     string             `json:"split_guidance"`
+	SummaryTurns      int                `json:"summary_turns"`
+	SuggestedMaxTurns int                `json:"suggested_max_turns"`
+	TurnsFormula      string             `json:"turns_formula"`
+	TopLevel          []workspaceDirStat `json:"top_level"`
+}
+
+// runWorkspaceStats walks a directory and returns counts for split planning.
+func runWorkspaceStats(root string, relPath string, maxDepth int) (string, error) {
+	result, err := computeWorkspaceStats(root, relPath, maxDepth)
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// computeWorkspaceStats returns structured counts used by workspace.stats and subagent.run budgeting.
+func computeWorkspaceStats(root string, relPath string, maxDepth int) (workspaceStatsResult, error) {
+	if strings.TrimSpace(relPath) == "" {
+		relPath = "."
+	}
+	maxDepth = clampInt(maxDepth, 1, 8)
+	target, err := resolveWorkspacePath(root, relPath)
+	if err != nil {
+		return workspaceStatsResult{}, err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return workspaceStatsResult{}, err
+	}
+	cleanRoot, err := cleanWorkspaceRoot(root)
+	if err != nil {
+		return workspaceStatsResult{}, err
+	}
+	displayRoot, err := workspaceRelativeDisplay(cleanRoot, target)
+	if err != nil {
+		displayRoot = relPath
+	}
+
+	result := workspaceStatsResult{
+		Root:         cleanRoot,
+		Path:         displayRoot,
+		MaxDepth:     maxDepth,
+		SummaryTurns: subagentSummaryTurns,
+		TurnsFormula: fmt.Sprintf("max_turns = file_count + %d (analysis summary)", subagentSummaryTurns),
+	}
+	if !info.IsDir() {
+		result.TotalFiles = 1
+		result.SuggestedSplits = 1
+		result.SplitGuidance = "single_file"
+		result.SuggestedMaxTurns = recommendedSubagentTurns(1)
+		return result, nil
+	}
+
+	const maxWalkFiles = 20000
+	topLevel := map[string]*workspaceDirStat{}
+	err = filepath.WalkDir(target, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		relToTarget, err := filepath.Rel(target, path)
+		if err != nil {
+			return nil
+		}
+		if relToTarget == "." {
+			return nil
+		}
+		depth := entryDepth(relToTarget)
+		if depth > maxDepth {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() && shouldSkipSearchDir(name) {
+			// Still count skipped top-level packages so the orchestrator can assign them.
+			if depth == 1 {
+				key := filepath.ToSlash(name)
+				stat := topLevel[key]
+				if stat == nil {
+					stat = &workspaceDirStat{Path: key + "/", IsSkipped: true}
+					topLevel[key] = stat
+				}
+			}
+			return filepath.SkipDir
+		}
+
+		topName := strings.Split(filepath.ToSlash(relToTarget), "/")[0]
+		stat := topLevel[topName]
+		if stat == nil {
+			display := topName
+			if d.IsDir() && depth == 1 {
+				display = topName + "/"
+			}
+			stat = &workspaceDirStat{Path: display}
+			topLevel[topName] = stat
+		}
+
+		if d.IsDir() {
+			result.TotalDirs++
+			if depth == 1 {
+				stat.Dirs++
+			}
+			return nil
+		}
+
+		result.TotalFiles++
+		stat.Files++
+		if result.TotalFiles >= maxWalkFiles {
+			result.Truncated = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return workspaceStatsResult{}, err
+	}
+
+	keys := make([]string, 0, len(topLevel))
+	for key := range topLevel {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		item := *topLevel[key]
+		item.RecommendedMaxTurns = recommendedSubagentTurns(item.Files)
+		result.TopLevel = append(result.TopLevel, item)
+	}
+
+	result.SuggestedMaxTurns = recommendedSubagentTurns(result.TotalFiles)
+	switch {
+	case result.TotalFiles <= 40:
+		result.SuggestedSplits = 1
+		result.SplitGuidance = "small_tree_use_root_or_one_subagent"
+	case result.TotalFiles <= 150:
+		result.SuggestedSplits = minInt(3, maxInt(2, len(result.TopLevel)))
+		result.SplitGuidance = "medium_tree_split_by_top_level_dirs_use_each_recommended_max_turns"
+	default:
+		result.SuggestedSplits = minInt(6, maxInt(3, countNonEmptyTopDirs(result.TopLevel)))
+		result.SplitGuidance = "large_tree_spawn_multiple_subagents_in_parallel_with_file_count_budgets"
+	}
+	return result, nil
+}
+
+func countNonEmptyTopDirs(items []workspaceDirStat) int {
+	count := 0
+	for _, item := range items {
+		if item.Files > 0 || item.Dirs > 0 {
+			count++
+		}
+	}
+	if count == 0 {
+		return 1
+	}
+	return count
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func runListWorkspace(root string, relPath string, maxDepth int) (string, error) {

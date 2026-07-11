@@ -3,9 +3,11 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"redpanda/protocol/methods"
@@ -193,6 +195,30 @@ func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) 
 	}
 	if len(chunks) != 2 || chunks[0].Delta != "memory ok" || !chunks[1].Final {
 		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
+func TestOpenAICompatibleMessagesInjectOrchestrationPolicyWhenSubagentToolAvailable(t *testing.T) {
+	messages := openAICompatibleMessages(ProviderRequest{
+		Input: methods.ReplyInput{Text: "分析桌面端和服务端"},
+		Tools: []tools.Definition{{Name: "subagent.run", Description: "run"}},
+	})
+	if len(messages) < 2 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	if messages[0]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[0]["content"]), "subagent.run") {
+		t.Fatalf("expected orchestration system policy, got %#v", messages[0])
+	}
+	if messages[1]["role"] != "user" {
+		t.Fatalf("expected user after policy, got %#v", messages[1])
+	}
+
+	without := openAICompatibleMessages(ProviderRequest{
+		Input: methods.ReplyInput{Text: "hello"},
+		Tools: []tools.Definition{{Name: "workspace.read_file"}},
+	})
+	if len(without) != 1 || without[0]["role"] != "user" {
+		t.Fatalf("child/specialist without subagent tool should not get policy: %#v", without)
 	}
 }
 

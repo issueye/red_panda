@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,37 @@ import (
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
+
+func TestRunWorkspaceStatsSuggestsSplitsForLargeTree(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 60; i++ {
+		mustWriteFile(t, filepath.Join(root, "modules", "a", fmt.Sprintf("f%d.go", i)), "package a\n")
+		mustWriteFile(t, filepath.Join(root, "modules", "b", fmt.Sprintf("f%d.go", i)), "package b\n")
+	}
+	raw, err := runWorkspaceStats(root, ".", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stats workspaceStatsResult
+	if err := json.Unmarshal([]byte(raw), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if stats.TotalFiles < 100 {
+		t.Fatalf("total_files = %d, want >= 100", stats.TotalFiles)
+	}
+	if stats.SuggestedSplits < 2 {
+		t.Fatalf("suggested_splits = %d, want >= 2", stats.SuggestedSplits)
+	}
+	if stats.SuggestedMaxTurns != stats.TotalFiles+subagentSummaryTurns {
+		t.Fatalf("suggested_max_turns = %d, want files+summary %d", stats.SuggestedMaxTurns, stats.TotalFiles+subagentSummaryTurns)
+	}
+	if len(stats.TopLevel) == 0 || stats.TopLevel[0].RecommendedMaxTurns != stats.TopLevel[0].Files+subagentSummaryTurns {
+		t.Fatalf("top_level recommended_max_turns missing/wrong: %#v", stats.TopLevel)
+	}
+	if !strings.Contains(stats.SplitGuidance, "split") && !strings.Contains(stats.SplitGuidance, "multiple") {
+		t.Fatalf("split_guidance = %q", stats.SplitGuidance)
+	}
+}
 
 func TestRunListWorkspace(t *testing.T) {
 	root := t.TempDir()

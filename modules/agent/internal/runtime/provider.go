@@ -513,8 +513,32 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 	return emit(ProviderChunk{Final: true})
 }
 
+// rootAgentOrchestrationPolicy is injected only for root runs that can call subagent tools.
+// Child specialists intentionally do not receive this (they cannot nest subagents).
+const rootAgentOrchestrationPolicy = `You are the red_panda root orchestrator.
+
+Survey-then-split policy (mandatory for analysis when tools include subagent.run):
+1. Before multi-file / multi-module analysis, call workspace.stats on the target roots to measure structure and file counts.
+2. Do NOT use a fixed small max_turns budget. After stats, set each specialist budget as:
+   max_turns = file_count + summary_turns
+   Use suggested_max_turns for a whole scope, or top_level[].recommended_max_turns / top_level[].files for each split.
+   Pass path and file_count into subagent.run (or max_turns = that formula). There is no artificial maximum.
+3. Use suggested_splits / top_level:
+   - small_tree: root or one subagent.run
+   - medium/large: split by major directories and spawn multiple subagent.run calls IN ONE TURN (parallel process pool). Resize pool first if needed.
+4. Never dump a large tree analysis onto yourself with serial greps when specialists are available.
+5. Manage workers with subagent.list / cancel / reset / pool_status / pool_resize / pool_reset.
+6. After specialists finish, synthesize their reports for the user. Never claim subagents are unavailable when subagent.run is in your tool list.
+7. Trivial single-file Q&A or tiny edits may stay on the root agent without subagents.`
+
 func openAICompatibleMessages(req ProviderRequest) []map[string]any {
-	messages := make([]map[string]any, 0, 1+len(req.Session.Conversation)+1+len(req.ToolHistory)*2)
+	messages := make([]map[string]any, 0, 2+len(req.Session.Conversation)+1+len(req.ToolHistory)*2)
+	if hasToolNamed(req.Tools, "subagent.run") {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": rootAgentOrchestrationPolicy,
+		})
+	}
 	if req.Options.MemoryContext != nil && strings.TrimSpace(req.Options.MemoryContext.Context) != "" {
 		messages = append(messages, map[string]any{
 			"role":    "system",
@@ -560,6 +584,15 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		})
 	}
 	return messages
+}
+
+func hasToolNamed(definitions []tools.Definition, name string) bool {
+	for _, definition := range definitions {
+		if definition.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // toolExchangeContent formats a tool result for the next provider turn.

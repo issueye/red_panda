@@ -98,9 +98,37 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 	}
 	rt.tools.MemoryExecutor = rt.executeMemoryTool
 	rt.tools.SkillExecutor = rt.executeSkillRun
+	rt.tools.SubagentExecutor = rt.executeSubagentRun
+	rt.tools.SubagentManager = rt
 	rt.newProcessSubAgent = newSubAgentProcess
 	rt.processPool = newSubAgentProcessPool(subAgentPoolSizeFromEnv(), rt.newProcessSubAgent)
 	return rt
+}
+
+// SubagentManager implementation (parent-agent tool control surface).
+
+func (r *Runtime) List(runCtx ToolRunContext, call tools.Call) (string, error) {
+	return r.executeSubagentList(runCtx, call)
+}
+
+func (r *Runtime) Cancel(runCtx ToolRunContext, call tools.Call) (string, error) {
+	return r.executeSubagentCancel(runCtx, call)
+}
+
+func (r *Runtime) Reset(runCtx ToolRunContext, call tools.Call) (string, error) {
+	return r.executeSubagentReset(runCtx, call)
+}
+
+func (r *Runtime) PoolStatus() (string, error) {
+	return r.executeSubagentPoolStatus()
+}
+
+func (r *Runtime) PoolResize(call tools.Call) (string, error) {
+	return r.executeSubagentPoolResize(call)
+}
+
+func (r *Runtime) PoolReset() (string, error) {
+	return r.executeSubagentPoolReset()
 }
 
 func durationFromEnvMillis(key string, fallback time.Duration) time.Duration {
@@ -472,33 +500,11 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 		if len(requestedCalls) == 0 {
 			return "completed"
 		}
-		for index, call := range requestedCalls {
-			if ctx.Err() != nil {
-				return "cancelled"
-			}
-			invocation, err := r.tools.InvocationFromCall(params.RunID, index, call)
-			if err != nil {
-				// Invalid tool request: feed a synthetic failure back so the model can recover.
-				failed := tools.Result{
-					ToolCallID: call.ID,
-					Name:       call.Name,
-					Status:     tools.CallStatusFailed,
-					Error:      err.Error(),
-				}
-				_ = r.emitEvent(ctx, params, events.EventToolFailed, nil, toolResultPayload(failed))
-				history = append(history, ToolExchange{Call: call, Result: failed})
-				continue
-			}
-			result, _, ok := r.executeTool(ctx, params, invocation)
-			history = append(history, ToolExchange{Call: invocation.Call, Result: result})
-			if ctx.Err() != nil {
-				return "cancelled"
-			}
-			// Tool execution/policy/permission failures stay in history and the loop continues.
-			// Aborting here previously ended the whole reply after a single missing file, etc.
-			if !ok {
-				continue
-			}
+		// Preserve call order in history; run multiple subagent.run workers concurrently.
+		exchanges, cancelled := r.executeToolBatch(ctx, params, requestedCalls)
+		history = append(history, exchanges...)
+		if cancelled {
+			return "cancelled"
 		}
 	}
 	_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
@@ -847,6 +853,106 @@ func sleepContext(ctx context.Context, d time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+type toolBatchItem struct {
+	index      int
+	call       tools.Call
+	invocation ToolInvocation
+	result     tools.Result
+	ok         bool
+}
+
+// executeToolBatch runs non-subagent tools sequentially, then runs all
+// subagent.run tools in parallel so multi-area analysis can proceed concurrently.
+func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyParams, calls []tools.Call) ([]ToolExchange, bool) {
+	items := make([]toolBatchItem, len(calls))
+	var serial []int
+	var parallel []int
+
+	for index, call := range calls {
+		items[index] = toolBatchItem{index: index, call: call}
+		if call.Name == "subagent.run" {
+			parallel = append(parallel, index)
+		} else {
+			serial = append(serial, index)
+		}
+	}
+
+	runOne := func(index int) {
+		call := items[index].call
+		invocation, err := r.tools.InvocationFromCall(params.RunID, index, call)
+		if err != nil {
+			failed := tools.Result{
+				ToolCallID: call.ID,
+				Name:       call.Name,
+				Status:     tools.CallStatusFailed,
+				Error:      err.Error(),
+			}
+			_ = r.emitEvent(ctx, params, events.EventToolFailed, nil, toolResultPayload(failed))
+			items[index].result = failed
+			items[index].ok = false
+			return
+		}
+		items[index].invocation = invocation
+		result, _, ok := r.executeTool(ctx, params, invocation)
+		items[index].result = result
+		items[index].ok = ok
+	}
+
+	for _, index := range serial {
+		if ctx.Err() != nil {
+			return batchToHistory(items), true
+		}
+		runOne(index)
+	}
+
+	if len(parallel) > 0 {
+		var wg sync.WaitGroup
+		for _, index := range parallel {
+			if ctx.Err() != nil {
+				break
+			}
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				if ctx.Err() != nil {
+					return
+				}
+				runOne(i)
+			}(index)
+		}
+		wg.Wait()
+	}
+
+	return batchToHistory(items), ctx.Err() != nil
+}
+
+func batchToHistory(items []toolBatchItem) []ToolExchange {
+	history := make([]ToolExchange, 0, len(items))
+	for _, item := range items {
+		call := item.call
+		if item.invocation.Call.ID != "" {
+			call = item.invocation.Call
+		}
+		// Skip slots never executed (e.g. cancelled before parallel start).
+		if item.result.ToolCallID == "" && item.result.Name == "" && item.result.Error == "" && item.result.Status == "" {
+			if item.call.ID == "" && item.call.Name == "" {
+				continue
+			}
+			// Still record cancelled/not-started calls as failed for model continuity.
+			if item.result.Status == "" {
+				item.result = tools.Result{
+					ToolCallID: item.call.ID,
+					Name:       item.call.Name,
+					Status:     tools.CallStatusFailed,
+					Error:      "tool was not executed",
+				}
+			}
+		}
+		history = append(history, ToolExchange{Call: call, Result: item.result})
+	}
+	return history
 }
 
 func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, invocation ToolInvocation) (tools.Result, string, bool) {
