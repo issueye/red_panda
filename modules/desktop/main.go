@@ -37,6 +37,18 @@ func main() {
 		MinHeight:        640,
 		BackgroundColour: application.NewRGB(247, 248, 251),
 		URL:              "/",
+		// Custom global header (TopBar) replaces the native title bar.
+		Frameless: true,
+		Windows: application.WindowsWindow{
+			// Keep Aero shadow / rounded corners while using a custom caption bar.
+			DisableFramelessWindowDecorations: false,
+			// Enable CSS --wails-draggable hit-testing for drag / caption regions.
+			NonClientRegionSupport: true,
+		},
+		Mac: application.MacWindow{
+			TitleBar:                application.MacTitleBarHidden,
+			InvisibleTitleBarHeight: 48,
+		},
 	})
 
 	if err := app.Run(); err != nil {

@@ -2,6 +2,73 @@
  * Desktop shell helpers that gracefully degrade outside the Wails runtime.
  */
 
+async function getCurrentWindow() {
+  try {
+    const runtime = await import('@wailsio/runtime');
+    return runtime.Window || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Minimise the current desktop window.
+ * @returns {Promise<boolean>}
+ */
+export async function windowMinimise() {
+  try {
+    const win = await getCurrentWindow();
+    if (!win?.Minimise) return false;
+    await win.Minimise();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Toggle maximised / restored state for the current desktop window.
+ * @returns {Promise<boolean>}
+ */
+export async function windowToggleMaximise() {
+  try {
+    const win = await getCurrentWindow();
+    if (!win?.ToggleMaximise) return false;
+    await win.ToggleMaximise();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Close the current desktop window.
+ * @returns {Promise<boolean>}
+ */
+export async function windowClose() {
+  try {
+    const win = await getCurrentWindow();
+    if (!win?.Close) return false;
+    await win.Close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @returns {Promise<boolean>} whether the current window is maximised
+ */
+export async function windowIsMaximised() {
+  try {
+    const win = await getCurrentWindow();
+    if (!win?.IsMaximised) return false;
+    return Boolean(await win.IsMaximised());
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Open a native directory picker when running inside Wails.
  * @returns {Promise<string>} selected absolute path, or empty string when cancelled/unavailable
