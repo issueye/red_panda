@@ -49,6 +49,18 @@ func (s SessionController) History(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, items))
 }
 
+func (s SessionController) Delete(c *gin.Context) {
+	if err := s.Services.Session.Delete(c.Param("id")); err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "session not found" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"ok": false, "error": gin.H{"code": "session_delete_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, gin.H{"deleted": true, "id": c.Param("id")}))
+}
+
 func (s SessionController) Fork(c *gin.Context) {
 	var req service.ForkSessionRequest
 	if err := c.BindJSON(&req); err != nil {

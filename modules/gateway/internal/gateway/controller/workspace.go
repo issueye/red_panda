@@ -48,6 +48,25 @@ func (w WorkspaceController) Recent(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, items))
 }
 
+func (w WorkspaceController) Delete(c *gin.Context) {
+	deleteSessions := c.Query("delete_sessions") != "0" && c.Query("delete_sessions") != "false"
+	workspace, deletedSessions, err := w.Services.Workspace.Remove(c.Param("id"), deleteSessions)
+	if err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "workspace not found" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"ok": false, "error": gin.H{"code": "workspace_delete_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, gin.H{
+		"deleted":          true,
+		"id":               workspace.ID,
+		"root":             workspace.Root,
+		"deleted_sessions": deletedSessions,
+	}))
+}
+
 func (w WorkspaceController) Tree(c *gin.Context) {
 	tree, err := w.Services.Workspace.Tree(service.TreeOptions{
 		Root:          c.Query("root"),

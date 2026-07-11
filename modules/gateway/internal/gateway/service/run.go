@@ -175,6 +175,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			SubAgentBackend:     stringOption(payload.Options, "subagent_backend"),
 			WebSearchMaxResults: intOption(payload.Options, "web_search_max_results"),
 			WebFetchMaxBytes:    intOption(payload.Options, "web_fetch_max_bytes"),
+			MaxToolTurns:        intOption(payload.Options, "max_tool_turns"),
 		},
 	}
 	if err := r.applyProviderProfile(&params); err != nil {

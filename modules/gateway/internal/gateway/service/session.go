@@ -153,6 +153,19 @@ func (s SessionService) List() ([]SessionDTO, error) {
 	return items, nil
 }
 
+func (s SessionService) Delete(sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if err := s.repos.Sessions.SoftDelete(sessionID); err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return fmt.Errorf("session not found")
+		}
+		return err
+	}
+	return nil
+}
+
 func (s SessionService) History(sessionID string) ([]MessageDTO, error) {
 	rows, err := s.repos.Messages.List(sessionID, 200)
 	if err != nil {

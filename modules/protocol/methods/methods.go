@@ -97,9 +97,11 @@ type ReplyOptions struct {
 	RequirePermission bool           `json:"require_permission,omitempty"`
 	SpawnSubAgents    bool           `json:"spawn_subagents,omitempty"`
 	SubAgentBackend   string         `json:"subagent_backend,omitempty"`
-	MemoryContext     *MemoryContext `json:"memory_context,omitempty"`
-	WebSearchMaxResults int           `json:"web_search_max_results,omitempty"`
-	WebFetchMaxBytes    int           `json:"web_fetch_max_bytes,omitempty"`
+	MemoryContext       *MemoryContext `json:"memory_context,omitempty"`
+	WebSearchMaxResults int            `json:"web_search_max_results,omitempty"`
+	WebFetchMaxBytes    int            `json:"web_fetch_max_bytes,omitempty"`
+	// MaxToolTurns limits provider↔tool loops per root reply. Zero means runtime default.
+	MaxToolTurns int `json:"max_tool_turns,omitempty"`
 }
 
 type MemoryContext struct {

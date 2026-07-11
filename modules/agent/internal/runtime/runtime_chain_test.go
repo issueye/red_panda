@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -113,5 +114,113 @@ func TestRuntimeProviderExecutesChainedToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(history[1].Result.Output, "chain result") {
 		t.Fatalf("read tool output = %q, want file contents", history[1].Result.Output)
+	}
+}
+
+type recoverAfterToolFailureProvider struct {
+	requests []ProviderRequest
+}
+
+func (*recoverAfterToolFailureProvider) Name() string {
+	return "recover-after-tool-failure"
+}
+
+func (p *recoverAfterToolFailureProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	req.ToolHistory = append([]ToolExchange(nil), req.ToolHistory...)
+	p.requests = append(p.requests, req)
+
+	switch len(req.ToolHistory) {
+	case 0:
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:        "tool_missing_file",
+			Name:      "workspace.read_file",
+			Risk:      tools.RiskLow,
+			Arguments: map[string]any{"path": "missing.json"},
+		}}})
+	case 1:
+		if req.ToolHistory[0].Result.Status != tools.CallStatusFailed {
+			return fmt.Errorf("expected first tool to fail, got %#v", req.ToolHistory[0].Result)
+		}
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:        "tool_fallback_list",
+			Name:      "workspace.list",
+			Risk:      tools.RiskLow,
+			Arguments: map[string]any{"path": ".", "max_depth": 1},
+		}}})
+	default:
+		if err := emit(ProviderChunk{Delta: "recovered after tool failure"}); err != nil {
+			return err
+		}
+		return emit(ProviderChunk{Final: true})
+	}
+}
+
+func TestRuntimeProviderContinuesAfterToolFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "note.txt"), []byte("still here"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	lines := make(chan []byte, 32)
+	go readJSONLines(t, reader, lines)
+
+	provider := &recoverAfterToolFailureProvider{}
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	rt.provider = provider
+
+	sendRequest(t, context.Background(), rt, "reply_recover", methods.AgentReply, methods.ReplyParams{
+		RunID: "run_recover_test",
+		Session: methods.ReplySession{
+			ID:         "session_recover_test",
+			WorkingDir: tempDir,
+		},
+		Input: methods.ReplyInput{Text: "read missing then recover"},
+	})
+
+	waitForResponse(t, lines, "reply_recover")
+	runEvents := waitForEventsUntilFinish(t, lines)
+
+	var toolFailed, toolFinished int
+	var sawRecovery bool
+	for _, event := range runEvents {
+		switch event.Type {
+		case events.EventToolFailed:
+			toolFailed++
+		case events.EventToolFinished:
+			toolFinished++
+		case events.EventMessageDelta:
+			if delta, _ := event.Payload["delta"].(string); strings.Contains(delta, "recovered after tool failure") {
+				sawRecovery = true
+			}
+		case events.EventError:
+			t.Fatalf("did not expect run-level error after recoverable tool failure: %#v", event.Payload)
+		}
+	}
+	if toolFailed != 1 {
+		t.Fatalf("tool failed count = %d, want 1", toolFailed)
+	}
+	if toolFinished != 1 {
+		t.Fatalf("tool finished count = %d, want 1 (fallback list)", toolFinished)
+	}
+	if !sawRecovery {
+		t.Fatal("expected provider to continue and emit recovery message")
+	}
+
+	finish := runEvents[len(runEvents)-1]
+	if finish.Type != events.EventFinish || finish.Payload["status"] != "completed" {
+		t.Fatalf("finish event = %#v, want completed", finish)
+	}
+	if len(provider.requests) != 3 {
+		t.Fatalf("provider request count = %d, want 3", len(provider.requests))
+	}
+	if got := provider.requests[1].ToolHistory[0].Result.Status; got != tools.CallStatusFailed {
+		t.Fatalf("history after first failure status = %s, want failed", got)
+	}
+	if got := provider.requests[2].ToolHistory[1].Result.Status; got != tools.CallStatusCompleted {
+		t.Fatalf("fallback tool status = %s, want completed", got)
 	}
 }

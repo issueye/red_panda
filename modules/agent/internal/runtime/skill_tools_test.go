@@ -394,8 +394,14 @@ func TestRuntimeManagedSkillCreateHonorsPermissionDenial(t *testing.T) {
 	}
 	eventsAfterDenial := waitForEventsUntilFinish(t, lines)
 	finish := eventsAfterDenial[len(eventsAfterDenial)-1]
-	if finish.Payload["status"] != string(tools.CallStatusDenied) {
-		t.Fatalf("finish = %#v, want denied", finish.Payload)
+	// Permission denial fails the tool but the provider loop continues so the model can recover.
+	if finish.Payload["status"] != "completed" {
+		t.Fatalf("finish = %#v, want completed after recoverable tool denial", finish.Payload)
+	}
+	for _, event := range eventsAfterDenial {
+		if event.Type == events.EventError {
+			t.Fatalf("did not expect run-level error after permission denial: %#v", event.Payload)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(root, ".codex", "skills", "permission-review", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("permission-denied skill was created: %v", err)

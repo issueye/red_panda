@@ -19,10 +19,32 @@ import (
 	"redpanda/protocol/tools"
 )
 
-const maxProviderToolTurns = 4
+const (
+	defaultProviderToolTurns = 4
+	maxProviderToolTurnsCap  = 32
+)
 
 var plannerStartDelay = durationFromEnvMillis("RED_PANDA_PLANNER_START_DELAY_MS", 10*time.Millisecond)
 var plannerDraftDelay = durationFromEnvMillis("RED_PANDA_PLANNER_DRAFT_DELAY_MS", 120*time.Millisecond)
+
+// effectiveProviderToolTurns returns the provider↔tool loop budget for one reply.
+func effectiveProviderToolTurns(options methods.ReplyOptions) int {
+	if options.MaxToolTurns > 0 {
+		if options.MaxToolTurns > maxProviderToolTurnsCap {
+			return maxProviderToolTurnsCap
+		}
+		return options.MaxToolTurns
+	}
+	if env := os.Getenv("RED_PANDA_MAX_TOOL_TURNS"); env != "" {
+		if parsed, err := strconv.Atoi(env); err == nil && parsed > 0 {
+			if parsed > maxProviderToolTurnsCap {
+				return maxProviderToolTurnsCap
+			}
+			return parsed
+		}
+	}
+	return defaultProviderToolTurns
+}
 
 type Runtime struct {
 	in      io.Reader
@@ -400,7 +422,8 @@ func (r *Runtime) emitMemoryInjected(ctx context.Context, params methods.ReplyPa
 }
 
 func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParams, input string, history []ToolExchange, messageID string, streamID string, streamSeq *uint64) string {
-	for turn := 0; turn < maxProviderToolTurns; turn++ {
+	maxTurns := effectiveProviderToolTurns(params.Options)
+	for turn := 0; turn < maxTurns; turn++ {
 		var requestedCalls []tools.Call
 		providerParams := params
 		providerParams.Input.Text = input
@@ -450,34 +473,38 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 			return "completed"
 		}
 		for index, call := range requestedCalls {
+			if ctx.Err() != nil {
+				return "cancelled"
+			}
 			invocation, err := r.tools.InvocationFromCall(params.RunID, index, call)
 			if err != nil {
-				_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
-					"message":   err.Error(),
-					"status":    "failed",
-					"tool_name": call.Name,
-				})
-				return "failed"
+				// Invalid tool request: feed a synthetic failure back so the model can recover.
+				failed := tools.Result{
+					ToolCallID: call.ID,
+					Name:       call.Name,
+					Status:     tools.CallStatusFailed,
+					Error:      err.Error(),
+				}
+				_ = r.emitEvent(ctx, params, events.EventToolFailed, nil, toolResultPayload(failed))
+				history = append(history, ToolExchange{Call: call, Result: failed})
+				continue
 			}
 			result, _, ok := r.executeTool(ctx, params, invocation)
 			history = append(history, ToolExchange{Call: invocation.Call, Result: result})
+			if ctx.Err() != nil {
+				return "cancelled"
+			}
+			// Tool execution/policy/permission failures stay in history and the loop continues.
+			// Aborting here previously ended the whole reply after a single missing file, etc.
 			if !ok {
-				if ctx.Err() != nil {
-					return "cancelled"
-				}
-				_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
-					"message":      result.Error,
-					"tool_call_id": result.ToolCallID,
-					"tool_name":    result.Name,
-					"status":       string(result.Status),
-				})
-				return string(result.Status)
+				continue
 			}
 		}
 	}
 	_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
-		"message": "provider exceeded tool turn limit",
-		"status":  "failed",
+		"message":   fmt.Sprintf("provider exceeded tool turn limit (%d)", maxTurns),
+		"status":    "failed",
+		"max_turns": maxTurns,
 	})
 	return "failed"
 }

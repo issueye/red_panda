@@ -1,8 +1,12 @@
 package service
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"gorm.io/gorm"
 
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
@@ -51,6 +55,32 @@ func (s WorkspaceService) Recent() ([]WorkspaceDTO, error) {
 		items = append(items, workspaceDTO(row))
 	}
 	return items, nil
+}
+
+// Remove deletes a workspace from the recent list and soft-deletes its sessions.
+func (s WorkspaceService) Remove(id string, deleteSessions bool) (WorkspaceDTO, int64, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return WorkspaceDTO{}, 0, fmt.Errorf("workspace id is required")
+	}
+	workspace, err := s.repos.Workspaces.Get(id)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return WorkspaceDTO{}, 0, fmt.Errorf("workspace not found")
+		}
+		return WorkspaceDTO{}, 0, err
+	}
+	var deletedSessions int64
+	if deleteSessions {
+		deletedSessions, err = s.repos.Sessions.SoftDeleteByWorkspace(workspace.Root)
+		if err != nil {
+			return WorkspaceDTO{}, 0, err
+		}
+	}
+	if err := s.repos.Workspaces.Delete(id); err != nil {
+		return WorkspaceDTO{}, 0, err
+	}
+	return workspaceDTO(workspace), deletedSessions, nil
 }
 
 func workspaceDTO(row model.Workspace) WorkspaceDTO {

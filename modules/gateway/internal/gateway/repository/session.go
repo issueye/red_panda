@@ -113,6 +113,41 @@ func (r SessionRepository) Touch(id string) error {
 	}).Error
 }
 
+// SoftDelete marks a session as deleted so it disappears from list/bootstrap.
+func (r SessionRepository) SoftDelete(id string) error {
+	now := time.Now().UTC()
+	result := r.db.Model(&model.Session{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Updates(map[string]any{
+			"status":     "deleted",
+			"deleted_at": now,
+			"updated_at": now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// SoftDeleteByWorkspace soft-deletes all active sessions under a workspace root.
+func (r SessionRepository) SoftDeleteByWorkspace(workspaceRoot string) (int64, error) {
+	if workspaceRoot == "" {
+		return 0, nil
+	}
+	now := time.Now().UTC()
+	result := r.db.Model(&model.Session{}).
+		Where("workspace_root = ? AND deleted_at IS NULL", workspaceRoot).
+		Updates(map[string]any{
+			"status":     "deleted",
+			"deleted_at": now,
+			"updated_at": now,
+		})
+	return result.RowsAffected, result.Error
+}
+
 func stableID(value string) string {
 	sum := sha1.Sum([]byte(value))
 	return hex.EncodeToString(sum[:8])

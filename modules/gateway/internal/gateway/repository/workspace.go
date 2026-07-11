@@ -51,3 +51,22 @@ func (r WorkspaceRepository) Recent(limit int) ([]model.Workspace, error) {
 	err := r.db.Order("last_opened_at desc").Limit(limit).Find(&rows).Error
 	return rows, err
 }
+
+// Get returns a workspace by id.
+func (r WorkspaceRepository) Get(id string) (model.Workspace, error) {
+	var workspace model.Workspace
+	err := r.db.Where("id = ?", id).First(&workspace).Error
+	return workspace, err
+}
+
+// Delete removes a workspace from the recent list.
+func (r WorkspaceRepository) Delete(id string) error {
+	result := r.db.Where("id = ?", id).Delete(&model.Workspace{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}

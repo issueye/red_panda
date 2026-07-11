@@ -551,10 +551,7 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 				},
 			},
 		})
-		content := exchange.Result.Output
-		if content == "" {
-			content = exchange.Result.Error
-		}
+		content := toolExchangeContent(exchange.Result)
 		messages = append(messages, map[string]any{
 			"role":         "tool",
 			"tool_call_id": exchange.Call.ID,
@@ -563,6 +560,28 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		})
 	}
 	return messages
+}
+
+// toolExchangeContent formats a tool result for the next provider turn.
+// Failures must still produce non-empty content so the model can recover.
+func toolExchangeContent(result tools.Result) string {
+	output := strings.TrimSpace(result.Output)
+	errText := strings.TrimSpace(result.Error)
+	switch {
+	case errText != "" && output != "" && output != errText:
+		return output + "\nerror: " + errText
+	case errText != "":
+		if result.Status == tools.CallStatusDenied {
+			return "tool denied: " + errText
+		}
+		return "tool error: " + errText
+	case output != "":
+		return output
+	case result.Status != "" && result.Status != tools.CallStatusCompleted:
+		return "tool status: " + string(result.Status)
+	default:
+		return ""
+	}
 }
 
 func openAICompatibleConversationRole(role string) (string, bool) {
