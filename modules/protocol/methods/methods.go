@@ -98,6 +98,8 @@ type ReplyOptions struct {
 	SpawnSubAgents    bool           `json:"spawn_subagents,omitempty"`
 	SubAgentBackend   string         `json:"subagent_backend,omitempty"`
 	MemoryContext     *MemoryContext `json:"memory_context,omitempty"`
+	WebSearchMaxResults int           `json:"web_search_max_results,omitempty"`
+	WebFetchMaxBytes    int           `json:"web_fetch_max_bytes,omitempty"`
 }
 
 type MemoryContext struct {

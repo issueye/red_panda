@@ -163,16 +163,18 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			Text: stringInput(payload.Input, "text"),
 		},
 		Options: methods.ReplyOptions{
-			ProviderProfileID: stringOption(payload.Options, "provider_profile_id"),
-			Model:             stringOption(payload.Options, "model"),
-			PermissionMode:    stringOption(payload.Options, "permission_mode"),
-			ToolPolicy:        stringOption(payload.Options, "tool_policy"),
-			ToolAllowlist:     stringSliceOption(payload.Options, "tool_allowlist"),
-			ToolDenylist:      stringSliceOption(payload.Options, "tool_denylist"),
-			EmitToolEvents:    true,
-			RequirePermission: boolOption(payload.Options, "require_permission"),
-			SpawnSubAgents:    boolOption(payload.Options, "spawn_subagents"),
-			SubAgentBackend:   stringOption(payload.Options, "subagent_backend"),
+			ProviderProfileID:   stringOption(payload.Options, "provider_profile_id"),
+			Model:               stringOption(payload.Options, "model"),
+			PermissionMode:      stringOption(payload.Options, "permission_mode"),
+			ToolPolicy:          stringOption(payload.Options, "tool_policy"),
+			ToolAllowlist:       stringSliceOption(payload.Options, "tool_allowlist"),
+			ToolDenylist:        stringSliceOption(payload.Options, "tool_denylist"),
+			EmitToolEvents:      true,
+			RequirePermission:   boolOption(payload.Options, "require_permission"),
+			SpawnSubAgents:      boolOption(payload.Options, "spawn_subagents"),
+			SubAgentBackend:     stringOption(payload.Options, "subagent_backend"),
+			WebSearchMaxResults: intOption(payload.Options, "web_search_max_results"),
+			WebFetchMaxBytes:    intOption(payload.Options, "web_fetch_max_bytes"),
 		},
 	}
 	if err := r.applyProviderProfile(&params); err != nil {
@@ -361,6 +363,25 @@ func boolOption(options map[string]any, key string) bool {
 	}
 	value, _ := options[key].(bool)
 	return value
+}
+
+func intOption(options map[string]any, key string) int {
+	if options == nil {
+		return 0
+	}
+	switch value := options[key].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		if parsed, err := value.Int64(); err == nil {
+			return int(parsed)
+		}
+	}
+	return 0
 }
 
 func stringSliceOption(options map[string]any, key string) []string {

@@ -35,3 +35,19 @@ test('buildRunStartOptions includes provider profile and tool policy fields', ()
   assert.equal(options.spawn_subagents, true);
   assert.equal(options.subagent_backend, 'process_pool');
 });
+
+test('buildRunStartOptions passes web tool tuning fields', () => {
+  const options = buildRunStartOptions({
+    webSearchResults: '5',
+    webFetchMaxBytes: '1048576',
+  }, { root_path: 'D:/ws' }, 'search the web');
+
+  assert.equal(options.web_search_max_results, 5);
+  assert.equal(options.web_fetch_max_bytes, 1048576);
+});
+
+test('buildRunStartOptions falls back to default web tuning', () => {
+  const options = buildRunStartOptions({}, { root: 'D:/ws' }, 'plain text');
+  assert.equal(options.web_search_max_results, 8);
+  assert.equal(options.web_fetch_max_bytes, 2097152);
+});

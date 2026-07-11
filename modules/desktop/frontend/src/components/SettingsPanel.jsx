@@ -976,6 +976,25 @@ export function SettingsPanel({
           />
         </div>
       </section>
+      <section className="settings-section">
+        <h3>网络工具</h3>
+        <div className="settings-form-grid">
+          <SettingTextInput
+            label="搜索结果数量"
+            placeholder="8"
+            settings={settings}
+            settingKey="webSearchResults"
+            onUpdate={updateSetting}
+          />
+          <SettingTextInput
+            label="抓取大小上限(字节)"
+            placeholder="2097152"
+            settings={settings}
+            settingKey="webFetchMaxBytes"
+            onUpdate={updateSetting}
+          />
+        </div>
+      </section>
     </>
   );
 

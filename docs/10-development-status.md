@@ -42,6 +42,8 @@ Updated: 2026-07-11
 - Agent Runtime unit coverage includes process subagent success, cancellation, process-pool reuse, and failed child creation/start paths while preserving root-run finish behavior and ordered `root_seq`.
 - Managed skill discovery and management is implemented end to end: Protocol DTOs and `agent.skills` / `agent.skill.load` / `agent.skill.create` / `agent.skill.update` / `agent.skill.delete` JSON-RPC methods, Runtime `listManagedSkills` / `loadManagedSkillDetail` / `runDeleteSkill` plus low-risk `skill.list` and high-risk `skill.delete` tools with frontmatter parsing and symlink/path-escape protection, Gateway service/controller `GET/POST/PUT/DELETE /api/v1/skills[/:name]` proxying Runtime, and Desktop SettingsPanel Skills tab backed by Gateway (list/create/edit/delete with read-only path meta). Skill run isolation and create/update semantics are unchanged.
 - Gateway Runtime subprocess is detached from the request context: `ensureStarted` spawns the long-lived single-core Runtime with `exec.Command` instead of `exec.CommandContext(reqCtx)`, so one-shot management requests (skills, MCP discovery) no longer kill the Runtime when their HTTP handler returns. A regression test locks this in.
+- Network access tools are implemented: high-risk `web.search` (DuckDuckGo HTML endpoint, no API key, structured title/url/snippet results with sponsored-result filtering and `uddg=` redirect decoding) and high-risk `web.fetch` (http/https GET with scheme validation, body-size cap, HTML-to-text extraction). Both honor `RiskHigh` permission policy and per-run tuning (`web_search_max_results`, `web_fetch_max_bytes`) transparently passed from Desktop settings through `run.start` options. No SSRF IP filtering by design (permission-gated); URL scheme is validated to http/https only.
+- Desktop SettingsPanel exposes a "网络工具" (Web Tools) section for search result count and fetch byte cap; `runOptions.js` forwards them as `run.start` options; Gateway extracts them via a new `intOption` helper into `ReplyOptions`.
 
 ## Completed
 
@@ -226,6 +228,12 @@ Updated: 2026-07-11
     - `App.jsx` loads skills on bootstrap and Settings open and wires create/update/delete/load-detail through Gateway,
     - removed the unused localStorage-only skills default from the product path.
 99. Fixed Gateway Runtime subprocess request-context coupling: spawning with `exec.CommandContext(reqCtx)` killed the single-core Runtime when an HTTP management request returned, so skills/MCP one-shot calls failed with `runtime process stopped`; now `ensureStarted` uses `exec.Command` and a regression test verifies the Runtime survives request-context cancellation.
+100. Added network access tools:
+    - high-risk `web.search` queries the DuckDuckGo HTML endpoint without an API key, parses organic results (title/url/snippet), filters sponsored `result--ad` blocks, and decodes `uddg=` redirect links back to real URLs,
+    - high-risk `web.fetch` validates the scheme is http/https, downloads with a body-size cap, strips script/style/comments, and extracts `<title>` plus readable text,
+    - both use `RiskHigh` permission gating, 20s request timeout, `truncateToolOutput` capping, and per-run tuning (`web_search_max_results`, `web_fetch_max_bytes`) merged from explicit tool args, Desktop-transmitted run options, and package defaults,
+    - `modules/protocol` `ReplyOptions` carries the tuning fields; Gateway `service/run.go` extracts them via a new `intOption` helper; Desktop `runOptions.js` + SettingsPanel "网络工具" section pass them through `run.start`,
+    - Runtime unit tests cover DDG parsing, redirect resolution, sponsored filtering, max-results capping, fetch scheme rejection, error-status handling, HTML-to-text extraction, risk level, and tuning precedence; real StepFun `step-3.7-flash` coverage confirmed the provider emits `web__search`/`web__fetch` calls and consumes results.
 
 ## Modules
 

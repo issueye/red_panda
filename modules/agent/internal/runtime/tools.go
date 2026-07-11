@@ -290,6 +290,34 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 				"required": []string{"id"},
 			},
 		},
+		{
+			Name:        "web.search",
+			DisplayName: "Web search",
+			Description: "Search the public web via DuckDuckGo and return titles, URLs, and snippets.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query":       map[string]any{"type": "string", "description": "Search query text."},
+					"max_results": map[string]any{"type": "integer", "description": "Maximum number of results to return."},
+				},
+				"required": []string{"query"},
+			},
+		},
+		{
+			Name:        "web.fetch",
+			DisplayName: "Web fetch",
+			Description: "Download a single http or https URL and return readable text from the page.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url":       map[string]any{"type": "string", "description": "Absolute http or https URL to fetch."},
+					"max_bytes": map[string]any{"type": "integer", "description": "Maximum response body size in bytes."},
+				},
+				"required": []string{"url"},
+			},
+		},
 	}
 }
 
@@ -406,6 +434,10 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 		}
 	case "memory.list", "memory.create", "memory.update", "memory.delete":
 		output, err = runner.runMemoryTool(ctx, runCtx, call)
+	case "web.search":
+		output, err = runWebSearch(ctx, stringArg(call.Arguments, "query"), effectiveWebResultCount(runCtx, intArg(call.Arguments, "max_results", 0)))
+	case "web.fetch":
+		output, err = runWebFetch(ctx, stringArg(call.Arguments, "url"), effectiveWebFetchBytes(runCtx, intArg(call.Arguments, "max_bytes", 0)))
 	default:
 		err = fmt.Errorf("unknown tool %s", call.Name)
 	}

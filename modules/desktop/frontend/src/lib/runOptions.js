@@ -8,6 +8,8 @@ export const defaultRunSettings = {
   model: '',
   toolAllowlist: '',
   toolDenylist: '',
+  webSearchResults: 8,
+  webFetchMaxBytes: 2097152,
 };
 
 export function splitOptionList(value) {
@@ -31,6 +33,12 @@ export function buildRunStartOptions(settings, workspace, text) {
     model: current.model.trim(),
     tool_allowlist: splitOptionList(current.toolAllowlist),
     tool_denylist: splitOptionList(current.toolDenylist),
+    web_search_max_results: Number.isFinite(Number(current.webSearchResults))
+      ? Number(current.webSearchResults)
+      : 0,
+    web_fetch_max_bytes: Number.isFinite(Number(current.webFetchMaxBytes))
+      ? Number(current.webFetchMaxBytes)
+      : 0,
     require_permission: text.includes('/permission'),
     spawn_subagents: current.spawnSubAgents || text.includes('/subagent'),
     subagent_backend: current.subAgentBackend,
