@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"redpanda/gateway/internal/gateway/infra/eventhub"
@@ -22,12 +23,16 @@ import (
 const (
 	defaultMaxConcurrentRuns = 3
 	maxConcurrentRunsCap     = 16
+	// defaultRuntimeMode isolates multi-session concurrent runs in dedicated agent processes.
+	defaultRuntimeMode = "per_run_process"
 )
 
 type RunService struct {
 	repos   repository.Set
 	hub     *eventhub.Hub
 	runtime *runtimeclient.Client
+	// startMu serializes admission so concurrent budget checks and slot reservation are atomic.
+	startMu *sync.Mutex
 }
 
 type StartRunResult struct {
@@ -74,15 +79,17 @@ type RunEventDTO struct {
 }
 
 func NewRunService(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclient.Client) RunService {
-	return RunService{repos: repos, hub: hub, runtime: runtime}
+	return RunService{repos: repos, hub: hub, runtime: runtime, startMu: &sync.Mutex{}}
 }
 
 func (r RunService) RuntimeStatus() map[string]any {
 	status := map[string]any{
-		"available":            false,
-		"mode":                 "single_core",
-		"max_concurrent_runs":  defaultMaxConcurrentRuns,
-		"active_runs":          int64(0),
+		"available":           false,
+		"mode":                defaultRuntimeMode,
+		"default_runtime_mode": defaultRuntimeMode,
+		"max_concurrent_runs": defaultMaxConcurrentRuns,
+		"active_runs":         int64(0),
+		"isolation":           "per_run_process",
 	}
 	if active, err := r.repos.Runs.CountActive(); err == nil {
 		status["active_runs"] = active
@@ -93,6 +100,10 @@ func (r RunService) RuntimeStatus() map[string]any {
 	}
 	for key, value := range r.runtime.Status() {
 		status[key] = value
+	}
+	// Prefer explicit default for clients that only look at mode when idle.
+	if _, ok := status["default_runtime_mode"]; !ok {
+		status["default_runtime_mode"] = defaultRuntimeMode
 	}
 	return status
 }
@@ -167,36 +178,73 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		return StartRunResult{}, err
 	}
 
-	// Same session stays serial: one active run at a time.
+	inputText := stringInput(payload.Input, "text")
+	runtimeMode := normalizedRuntimeMode(stringOption(payload.Options, "runtime_mode"))
+
+	// Atomic admission: session serial + global concurrent budget + reserve active slot.
+	if r.startMu != nil {
+		r.startMu.Lock()
+	}
 	sessionActive, err := r.repos.Runs.CountActiveBySession(session.ID)
 	if err != nil {
+		if r.startMu != nil {
+			r.startMu.Unlock()
+		}
 		return StartRunResult{}, err
 	}
 	if sessionActive > 0 {
+		if r.startMu != nil {
+			r.startMu.Unlock()
+		}
 		return StartRunResult{}, fmt.Errorf("会话已有任务在运行中，请等待结束后再发送")
 	}
 
-	// Global concurrent run budget across sessions.
 	maxConcurrent := resolveMaxConcurrentRuns(payload.Options)
 	active, err := r.repos.Runs.CountActive()
 	if err != nil {
+		if r.startMu != nil {
+			r.startMu.Unlock()
+		}
 		return StartRunResult{}, err
 	}
 	if int(active) >= maxConcurrent {
+		if r.startMu != nil {
+			r.startMu.Unlock()
+		}
 		return StartRunResult{}, fmt.Errorf(
 			"已达到最大并发运行数 %d（当前活跃 %d），请等待其它会话完成或在设置中提高上限",
 			maxConcurrent, active,
 		)
 	}
 
+	if err := r.repos.Runs.Start(model.RunRecord{
+		ID:            runID,
+		SessionID:     session.ID,
+		WorkspaceRoot: session.WorkspaceRoot,
+		RuntimeMode:   runtimeMode,
+		Status:        "running",
+		Input:         inputText,
+		StartedAt:     time.Now().UTC(),
+	}); err != nil {
+		if r.startMu != nil {
+			r.startMu.Unlock()
+		}
+		return StartRunResult{}, err
+	}
+	if r.startMu != nil {
+		r.startMu.Unlock()
+	}
+
 	history, err := r.repos.Messages.ListLatestConversation(session.ID, 200)
 	if err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
 	conversation := make([]methods.Message, 0, len(history))
 	for _, row := range history {
 		message, err := messageDTO(row)
 		if err != nil {
+			_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 			return StartRunResult{}, err
 		}
 		conversation = append(conversation, methods.Message{
@@ -206,7 +254,8 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
 		})
 	}
-	if _, err := r.repos.Messages.Add(session.ID, "user", stringInput(payload.Input, "text"), runID); err != nil {
+	if _, err := r.repos.Messages.Add(session.ID, "user", inputText, runID); err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
 
@@ -219,7 +268,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			Conversation: conversation,
 		},
 		Input: methods.ReplyInput{
-			Text: stringInput(payload.Input, "text"),
+			Text: inputText,
 		},
 		Options: methods.ReplyOptions{
 			ProviderProfileID:   stringOption(payload.Options, "provider_profile_id"),
@@ -241,29 +290,22 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		},
 	}
 	if err := r.applyProviderProfile(&params); err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
 	if err := r.applyMemoryContext(&params); err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
-	runtimeMode := normalizedRuntimeMode(stringOption(payload.Options, "runtime_mode"))
 
 	accepted, err := r.runtime.ReplyWithMode(ctx, runtimeMode, params)
 	if err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
-	_ = r.repos.Runs.Start(model.RunRecord{
-		ID:            accepted.RunID,
-		SessionID:     session.ID,
-		WorkspaceRoot: session.WorkspaceRoot,
-		RuntimeMode:   runtimeMode,
-		Status:        "running",
-		Input:         params.Input.Text,
-		StartedAt:     time.Now().UTC(),
-	})
 	_ = r.repos.Sessions.Touch(session.ID)
 	return StartRunResult{
-		RunID:       accepted.RunID,
+		RunID:       firstNonEmpty(accepted.RunID, runID),
 		SessionID:   session.ID,
 		Accepted:    accepted.Accepted,
 		Subscribed:  payload.Subscribe,
@@ -472,10 +514,25 @@ func stringSliceOption(options map[string]any, key string) []string {
 }
 
 func normalizedRuntimeMode(mode string) string {
-	if mode == "per_run_process" {
+	switch strings.TrimSpace(mode) {
+	case "", "default", "auto":
+		return defaultRuntimeMode
+	case "per_run_process":
 		return "per_run_process"
+	case "single_core":
+		return "single_core"
+	default:
+		return defaultRuntimeMode
 	}
-	return "single_core"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func runRecordDTO(row model.RunRecord) RunRecordDTO {

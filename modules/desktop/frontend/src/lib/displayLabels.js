@@ -54,6 +54,7 @@ const confidenceLabel = {
 const runtimeModeLabel = {
   per_run_process: '每次运行独立进程',
   single_core: '单核心',
+  mixed: '混合模式',
 };
 
 const sessionKindLabel = {

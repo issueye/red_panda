@@ -60,6 +60,8 @@ test('buildRunStartOptions falls back to default web tuning', () => {
   assert.equal(options.web_tavily_api_key, '');
   assert.equal(options.web_http_proxy, '');
   assert.equal(options.max_tool_turns, 12);
+  assert.equal(options.runtime_mode, 'per_run_process');
+  assert.equal(options.max_concurrent_runs, 3);
 });
 
 test('buildRunStartOptions passes max tool turns', () => {

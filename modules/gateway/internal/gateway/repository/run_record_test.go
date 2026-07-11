@@ -138,6 +138,43 @@ func TestRunRecordRefreshToolCountFromToolCalls(t *testing.T) {
 	}
 }
 
+func TestRunRecordFinishReleasesActiveSlot(t *testing.T) {
+	repo := newRunRecordTestRepository(t)
+	now := time.Now().UTC()
+	if err := repo.Start(model.RunRecord{
+		ID:        "run_finish",
+		SessionID: "session_finish",
+		Status:    "running",
+		StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	active, err := repo.CountActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 1 {
+		t.Fatalf("CountActive before finish = %d, want 1", active)
+	}
+	if err := repo.Finish("run_finish", "failed", "boom"); err != nil {
+		t.Fatal(err)
+	}
+	active, err = repo.CountActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatalf("CountActive after finish = %d, want 0", active)
+	}
+	row, err := repo.Get("run_finish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "failed" || row.Error != "boom" || row.FinishedAt == nil {
+		t.Fatalf("finish projection mismatch: %#v", row)
+	}
+}
+
 func TestRunRecordCountActiveAndListActive(t *testing.T) {
 	repo := newRunRecordTestRepository(t)
 	now := time.Now().UTC()

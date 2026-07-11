@@ -1,5 +1,6 @@
 export const defaultRunSettings = {
-  runtimeMode: 'single_core',
+  // Isolate concurrent multi-session runs in dedicated agent processes by default.
+  runtimeMode: 'per_run_process',
   toolPolicy: 'risk_based',
   permissionMode: 'strict',
   providerProfileId: '',

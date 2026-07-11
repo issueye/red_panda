@@ -55,11 +55,19 @@ func (c *Client) Status() map[string]any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	activePerRuns := len(c.perRuns)
+	mode := "single_core"
+	switch {
+	case activePerRuns > 0 && c.running:
+		mode = "mixed"
+	case activePerRuns > 0:
+		mode = "per_run_process"
+	}
 	return map[string]any{
 		"available":       c.running || activePerRuns > 0,
-		"mode":            "single_core",
+		"mode":            mode,
 		"command":         c.command,
 		"active_per_runs": activePerRuns,
+		"core_running":    c.running,
 	}
 }
 
@@ -302,7 +310,8 @@ func (c *Client) replyPerRun(ctx context.Context, params methods.ReplyParams) (m
 		if c.onEvent != nil {
 			c.onEvent(event)
 		}
-		if event.RootRunID == params.RunID && event.Type == events.EventFinish {
+		// Release dedicated process on terminal events so multi-session slots free promptly.
+		if event.RootRunID == params.RunID && (event.Type == events.EventFinish || event.Type == events.EventError) {
 			go c.releasePerRun(params.RunID, child)
 		}
 	}, c.onRequest)
@@ -349,10 +358,15 @@ func (c *Client) releasePerRun(runID string, child *Client) {
 }
 
 func normalizedRuntimeMode(mode string) string {
-	if strings.TrimSpace(mode) == "per_run_process" {
+	switch strings.TrimSpace(mode) {
+	case "per_run_process":
+		return "per_run_process"
+	case "single_core":
+		return "single_core"
+	default:
+		// Keep client-level default aligned with Gateway multi-session isolation default.
 		return "per_run_process"
 	}
-	return "single_core"
 }
 
 func (c *Client) ensureStarted(ctx context.Context) error {

@@ -125,6 +125,82 @@ func TestRunServiceStartPassesLatestConversationWindowToRuntime(t *testing.T) {
 	assertConversationMessage(t, params.Session.Conversation[199], "user", "message 205")
 }
 
+func TestNormalizedRuntimeModeDefaultsToPerRunProcess(t *testing.T) {
+	if got := normalizedRuntimeMode(""); got != "per_run_process" {
+		t.Fatalf("empty mode = %q, want per_run_process", got)
+	}
+	if got := normalizedRuntimeMode("auto"); got != "per_run_process" {
+		t.Fatalf("auto mode = %q, want per_run_process", got)
+	}
+	if got := normalizedRuntimeMode("single_core"); got != "single_core" {
+		t.Fatalf("single_core = %q", got)
+	}
+	if got := normalizedRuntimeMode("per_run_process"); got != "per_run_process" {
+		t.Fatalf("per_run_process = %q", got)
+	}
+}
+
+func TestRunServiceStartReservesSlotBeforeRuntimeAccept(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_reserve", "Reserve", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
+	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
+	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
+	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	service := NewRunService(repos, eventhub.New(), runtime)
+
+	result, err := service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "hello isolation"},
+		Options:   map[string]any{"runtime_mode": "single_core"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RuntimeMode != "single_core" {
+		t.Fatalf("runtime mode = %q, want single_core", result.RuntimeMode)
+	}
+	row, err := repos.Runs.Get(result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "running" {
+		t.Fatalf("status = %q, want running", row.Status)
+	}
+	if row.RuntimeMode != "single_core" {
+		t.Fatalf("stored runtime mode = %q, want single_core", row.RuntimeMode)
+	}
+}
+
+func TestRunServiceStartDefaultRuntimeModeIsPerRunProcess(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_default_mode", "Default mode", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
+	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
+	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
+	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	service := NewRunService(repos, eventhub.New(), runtime)
+
+	result, err := service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "default mode"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RuntimeMode != "per_run_process" {
+		t.Fatalf("runtime mode = %q, want per_run_process", result.RuntimeMode)
+	}
+}
+
 func TestResolveMaxConcurrentRuns(t *testing.T) {
 	t.Setenv("RED_PANDA_MAX_CONCURRENT_RUNS", "")
 	if got := resolveMaxConcurrentRuns(nil); got != defaultMaxConcurrentRuns {

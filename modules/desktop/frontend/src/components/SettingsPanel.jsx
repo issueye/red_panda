@@ -19,8 +19,8 @@ import { Field } from './ui/field.jsx';
 import { SelectMenu } from './ui/select.jsx';
 
 const RUNTIME_MODES = [
-  ['single_core', '单核心'],
-  ['per_run_process', '每次运行独立进程'],
+  ['per_run_process', '每次运行独立进程（推荐）'],
+  ['single_core', '单核心（共享进程）'],
 ];
 
 const TOOL_POLICIES = [
@@ -979,10 +979,12 @@ export function SettingsPanel({
           <span>运行时自动启动 planner 子代理</span>
         </label>
         <p className="settings-hint">
+          默认「每次运行独立进程」：多会话并发时每个任务使用独立 Agent 进程，隔离更强、结束后回收。
+          「单核心」共享一个常驻进程，开销更低但不适合高并发隔离场景。
           主代理可通过 <code>subagent.run</code> 从进程池派发专科子代理，并用
           <code>subagent.list</code> / <code>subagent.cancel</code> / <code>subagent.reset</code> /
           <code>subagent.pool_status</code> / <code>subagent.pool_resize</code> / <code>subagent.pool_reset</code>
-          管理子代理与进程池。默认使用进程池。
+          管理子代理与进程池。子代理后端默认使用进程池。
         </p>
       </section>
       <section className="settings-section">

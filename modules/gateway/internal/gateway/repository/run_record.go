@@ -151,6 +151,26 @@ func (r RunRecordRepository) ListActive(limit int) ([]model.RunRecord, error) {
 	return rows, err
 }
 
+// Finish marks a run as terminal so it no longer consumes the concurrent budget.
+func (r RunRecordRepository) Finish(runID string, status string, errText string) error {
+	if runID == "" {
+		return nil
+	}
+	if status == "" {
+		status = "completed"
+	}
+	now := time.Now().UTC()
+	updates := map[string]any{
+		"status":      status,
+		"finished_at": now,
+		"updated_at":  now,
+	}
+	if errText != "" {
+		updates["error"] = errText
+	}
+	return r.db.Model(&model.RunRecord{}).Where("id = ?", runID).Updates(updates).Error
+}
+
 func (r RunRecordRepository) RefreshToolCount(rootRunID string) error {
 	if rootRunID == "" {
 		return nil
