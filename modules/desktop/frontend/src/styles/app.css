@@ -1,14 +1,15 @@
 :root {
-  --color-bg: #f7f8fb;
+  /* Quiet neutral surfaces — content over chrome */
+  --color-bg: #f6f7f9;
   --color-surface: #ffffff;
-  --color-surface-subtle: #f8fafc;
-  --color-surface-muted: #f2f4f7;
-  --color-text: #18212f;
-  --color-text-strong: #344054;
-  --color-text-muted: #667085;
-  --color-text-soft: #98a2b3;
-  --color-border: #dfe4ec;
-  --color-border-strong: #d0d7e2;
+  --color-surface-subtle: #f9fafb;
+  --color-surface-muted: #f3f4f6;
+  --color-text: #111827;
+  --color-text-strong: #1f2937;
+  --color-text-muted: #6b7280;
+  --color-text-soft: #9ca3af;
+  --color-border: #e8eaee;
+  --color-border-strong: #d8dce3;
   --color-brand: #d95f24;
   --color-brand-hover: #e36d2f;
   --color-brand-action: #c45119;
@@ -27,16 +28,27 @@
   --color-danger-text: #b42318;
   --color-info-bg: #eef4ff;
   --color-info-text: #3538cd;
-  --color-code-bg: #111827;
-  --color-code-text: #f9fafb;
-  --shadow-focus: 0 0 0 3px rgba(227, 109, 47, 0.12);
-  --shadow-drawer: -18px 0 36px rgba(15, 23, 42, 0.14);
-  --radius-control: 8px;
-  --radius-compact: 6px;
+  --color-code-bg: #0f1419;
+  --color-code-text: #e5e7eb;
+  --shadow-focus: 0 0 0 2px rgba(196, 81, 25, 0.18);
+  --shadow-drawer: -8px 0 24px rgba(15, 23, 42, 0.08);
+  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --radius-control: 6px;
+  --radius-compact: 4px;
   --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --font-ui: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Code", Consolas, "SF Mono", ui-monospace, monospace;
   color: var(--color-text);
   background: var(--color-bg);
-  font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-ui);
+  font-feature-settings: "kern" 1, "liga" 1;
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
@@ -45,6 +57,26 @@
 
 body {
   margin: 0;
+}
+
+/* Quiet scrollbars for dense panels */
+* {
+  scrollbar-color: var(--color-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-pill);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 button,
@@ -68,15 +100,16 @@ textarea:focus-visible {
 .ui-badge {
   align-items: center;
   background: var(--color-surface-muted);
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   display: inline-flex;
   font-size: 11px;
-  gap: 5px;
+  font-weight: 500;
+  gap: 4px;
   line-height: 1;
-  min-height: 22px;
-  padding: 3px 7px;
+  min-height: 20px;
+  padding: 2px 7px;
   white-space: nowrap;
 }
 
@@ -114,17 +147,19 @@ textarea:focus-visible {
 }
 
 .ui-empty-state {
-  border: 1px dashed var(--color-border-strong);
+  border: 0;
   border-radius: var(--radius-control);
   color: var(--color-text-muted);
   display: grid;
   gap: 4px;
-  padding: 18px;
+  padding: 28px 16px;
   text-align: center;
 }
 
 .ui-empty-state strong {
-  color: var(--color-text);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .ui-empty-state span {
@@ -133,12 +168,13 @@ textarea:focus-visible {
 }
 
 .ui-inline-empty {
-  border: 1px dashed var(--color-border-strong);
+  border: 0;
   border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
   color: var(--color-text-muted);
   font-size: 12px;
   margin: 0;
-  padding: 9px;
+  padding: 10px 12px;
 }
 
 .ui-error-message {
@@ -158,9 +194,9 @@ textarea:focus-visible {
 }
 
 .ui-field > span {
-  color: var(--color-text-strong);
+  color: var(--color-text-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .select-menu {
@@ -172,7 +208,7 @@ textarea:focus-visible {
 .select-trigger {
   align-items: center;
   background: var(--color-surface);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   color: var(--color-text-strong);
   cursor: pointer;
@@ -183,8 +219,9 @@ textarea:focus-visible {
   justify-content: space-between;
   min-height: 32px;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 10px;
   text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
   width: 100%;
 }
 
@@ -210,9 +247,9 @@ textarea:focus-visible {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
   display: grid;
-  gap: 2px;
+  gap: 1px;
   left: 0;
   max-height: 220px;
   min-width: 100%;
@@ -263,7 +300,7 @@ textarea:focus-visible {
 
 .app-shell {
   display: grid;
-  grid-template-rows: 58px 1fr 28px;
+  grid-template-rows: 48px 1fr 24px;
   height: 100vh;
   min-width: 980px;
   overflow: hidden;
@@ -343,18 +380,20 @@ textarea:focus-visible {
 .brand {
   align-items: center;
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 
 .brand img {
-  height: 34px;
-  width: 34px;
+  height: 26px;
+  width: 26px;
 }
 
 .brand strong,
 .panel-header strong {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .brand span,
@@ -365,38 +404,40 @@ textarea:focus-visible {
   color: var(--color-text-muted);
   display: block;
   font-size: 12px;
+  font-weight: 400;
 }
 
 .topbar-actions {
   align-items: center;
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .connection-pill {
-  border: 1px solid var(--color-border-strong);
+  border: 0;
   border-radius: var(--radius-pill);
-  color: var(--color-text-strong);
-  font-size: 12px;
-  padding: 4px 9px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
 }
 
 .state-connected {
   background: var(--color-success-bg);
-  border-color: var(--color-success-border);
+  border-color: transparent;
   color: var(--color-success-text);
 }
 
 .state-error,
 .state-disconnected {
   background: var(--color-danger-bg);
-  border-color: var(--color-danger-border);
+  border-color: transparent;
   color: var(--color-danger-text);
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: 252px minmax(420px, 1fr) 320px;
+  grid-template-columns: 240px minmax(420px, 1fr) 300px;
   min-height: 0;
 }
 
@@ -407,7 +448,7 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 12px;
+  padding: 12px 10px;
 }
 
 .right-panel {
@@ -416,6 +457,7 @@ textarea:focus-visible {
   border-right: 0;
   gap: 0;
   overflow: hidden;
+  padding: 10px 12px 12px;
 }
 
 .right-panel-content {
@@ -431,50 +473,62 @@ textarea:focus-visible {
 }
 
 .sidebar-primary {
+  font-weight: 500;
   justify-content: center;
   width: 100%;
 }
 
+.sidebar-primary.button-default {
+  box-shadow: none;
+}
+
 .session-command-row {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   grid-template-columns: 1fr 1fr;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .session-command-row .button {
   justify-content: center;
+  min-height: 30px;
+  padding: 0 8px;
 }
 
 .sidebar-section {
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .sidebar-section.grow {
   flex: 1;
   min-height: 0;
+  overflow: auto;
 }
 
 .section-title {
   align-items: center;
-  color: var(--color-text-muted);
+  color: var(--color-text-soft);
   display: flex;
-  font-size: 12px;
-  font-weight: 700;
-  gap: 6px;
-  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+  text-transform: none;
 }
 
 .workspace-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: transparent;
+  border: 0;
   border-radius: var(--radius-control);
-  padding: 10px;
+  padding: 4px 6px;
 }
 
 .workspace-card strong {
+  color: var(--color-text-strong);
   display: block;
   font-size: 12px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -483,28 +537,33 @@ textarea:focus-visible {
 .session-list,
 .subagent-list {
   display: grid;
-  gap: 8px;
+  gap: 2px;
 }
 
 .session-item {
   background: transparent;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--radius-control);
   color: var(--color-text);
   cursor: pointer;
-  padding: 9px;
+  padding: 8px 10px;
   text-align: left;
+  transition: background 120ms ease;
 }
 
-.session-item.active,
 .session-item:hover {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.session-item.active {
   background: var(--color-surface);
-  border-color: var(--color-border);
+  box-shadow: inset 2px 0 0 var(--color-brand-action);
 }
 
 .session-item strong {
   display: block;
   font-size: 13px;
+  font-weight: 500;
 }
 
 .chat-panel {
@@ -524,16 +583,16 @@ textarea:focus-visible {
 .conversation {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   min-height: 0;
   overflow: auto;
-  padding: 24px 24px 18px;
+  padding: 20px 28px 16px;
   height: 100%;
 }
 
 .conversation-latest {
-  bottom: 14px;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  bottom: 12px;
+  box-shadow: var(--shadow-soft);
   position: absolute;
   right: 20px;
   z-index: 2;
@@ -541,67 +600,82 @@ textarea:focus-visible {
 
 .empty-conversation {
   align-self: center;
-  margin-top: 12vh;
-  max-width: 360px;
+  margin-top: 14vh;
+  max-width: 320px;
 }
 
 .message-row {
   display: grid;
   gap: 10px;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
+  max-width: 820px;
 }
 
 .message-row.role-user {
-  margin-left: 12%;
+  margin-left: auto;
+  max-width: min(640px, 88%);
+  width: 100%;
 }
 
 .message-avatar {
   align-items: center;
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border);
+  background: transparent;
+  border: 0;
   border-radius: var(--radius-control);
+  color: var(--color-text-soft);
   display: flex;
-  height: 28px;
+  height: 24px;
   justify-content: center;
-  width: 28px;
+  margin-top: 2px;
+  width: 24px;
+}
+
+.role-user .message-avatar {
+  color: var(--color-brand-text);
 }
 
 .message-bubble {
-  background: var(--color-surface-subtle);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .role-user .message-bubble {
-  background: var(--color-brand-soft);
-  border-color: var(--color-brand-border);
+  background: var(--color-surface-muted);
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
 .message-meta {
   align-items: center;
-  color: var(--color-text-muted);
+  color: var(--color-text-soft);
   display: flex;
-  font-size: 12px;
+  font-size: 11px;
   gap: 10px;
   justify-content: space-between;
 }
 
 .message-meta strong {
-  color: var(--color-text-strong);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .message-bubble p {
-  line-height: 1.6;
-  margin: 6px 0 0;
+  color: var(--color-text);
+  font-size: 13.5px;
+  line-height: 1.65;
+  margin: 4px 0 0;
   white-space: pre-wrap;
 }
 
 .chat-composer {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.92) 28%, var(--color-surface) 100%);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
   flex: 0 0 auto;
-  padding: 8px 16px 14px;
+  padding: 12px 20px 14px;
   position: relative;
   z-index: 3;
 }
@@ -609,17 +683,20 @@ textarea:focus-visible {
 .composer-shell {
   background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  border-radius: 10px;
+  box-shadow: none;
   display: grid;
-  gap: 8px;
-  padding: 12px 12px 10px;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  gap: 6px;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 10px 12px 8px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  width: 100%;
 }
 
 .composer-shell:focus-within {
-  border-color: var(--color-brand-hover);
-  box-shadow: var(--shadow-focus), 0 10px 28px rgba(15, 23, 42, 0.08);
+  border-color: var(--color-brand-action);
+  box-shadow: var(--shadow-focus);
 }
 
 .chat-composer.is-running .composer-shell {
@@ -631,12 +708,13 @@ textarea:focus-visible {
   border: 0;
   color: var(--color-text);
   display: block;
+  font-size: 13.5px;
   line-height: 1.55;
   max-height: 168px;
   min-height: 24px;
   outline: none;
   overflow-y: hidden;
-  padding: 2px 4px 0;
+  padding: 2px 2px 0;
   resize: none;
   width: 100%;
 }
@@ -656,7 +734,7 @@ textarea:focus-visible {
   gap: 10px;
   justify-content: space-between;
   min-width: 0;
-  padding: 0 2px;
+  padding: 0;
 }
 
 .composer-hint {
@@ -678,11 +756,11 @@ textarea:focus-visible {
 }
 
 .composer-action {
-  border-radius: 999px;
-  height: 32px;
-  min-height: 32px;
-  min-width: 32px;
-  width: 32px;
+  border-radius: var(--radius-control);
+  height: 30px;
+  min-height: 30px;
+  min-width: 30px;
+  width: 30px;
 }
 
 .composer-send {
@@ -717,14 +795,18 @@ textarea:focus-visible {
   border-radius: var(--radius-control);
   cursor: pointer;
   display: inline-flex;
-  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 6px;
   justify-content: center;
-  min-height: 32px;
-  padding: 0 11px;
+  min-height: 30px;
+  padding: 0 10px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .icon-button {
-  min-width: 32px;
+  color: var(--color-text-muted);
+  min-width: 30px;
   padding: 0;
 }
 
@@ -738,9 +820,13 @@ textarea:focus-visible {
 }
 
 .button-soft {
-  background: var(--color-brand-soft);
-  border-color: var(--color-brand-border);
-  color: var(--color-brand-text);
+  background: var(--color-surface-muted);
+  border-color: transparent;
+  color: var(--color-text-strong);
+}
+
+.button-soft:hover {
+  background: var(--color-border);
 }
 
 .button-ghost {
@@ -748,15 +834,21 @@ textarea:focus-visible {
   color: var(--color-text-muted);
 }
 
+.button-ghost:hover,
+.icon-button.button-ghost:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
 .button:hover,
 .icon-button:hover {
-  filter: brightness(0.98);
+  filter: none;
 }
 
 .button:disabled,
 .icon-button:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.4;
 }
 
 .composer-send.icon-button:disabled {
@@ -769,26 +861,36 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--color-border);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  padding: 0 0 10px;
+  gap: 0;
+  padding: 0;
 }
 
 .right-tab {
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: 12px;
-  min-height: 30px;
+  font-weight: 500;
+  min-height: 34px;
+  margin-bottom: -1px;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.right-tab:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text);
 }
 
 .right-tab.active,
-.right-tab:hover,
 .right-tab[aria-selected="true"] {
-  background: var(--color-surface-subtle);
-  border-color: var(--color-border);
+  background: transparent;
+  border-bottom-color: var(--color-brand-action);
   color: var(--color-text);
+  font-weight: 600;
 }
 
 .activity-panel-content,
@@ -798,7 +900,7 @@ textarea:focus-visible {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 0;
   padding-top: 12px;
 }
@@ -819,7 +921,8 @@ textarea:focus-visible {
 
 .subagent-item {
   align-items: center;
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 0;
   border-radius: var(--radius-control);
   display: grid;
   gap: 8px;
@@ -863,18 +966,19 @@ textarea:focus-visible {
 
 .activity-summary-card {
   align-items: center;
-  background: var(--color-surface-subtle);
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  border: 0;
   border-radius: var(--radius-control);
   display: flex;
   gap: 8px;
   min-width: 0;
-  padding: 9px;
+  padding: 8px 10px;
 }
 
 .activity-summary-card strong {
   display: block;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .activity-summary-card span,
@@ -893,10 +997,10 @@ textarea:focus-visible {
 
 .activity-section-title {
   align-items: center;
-  color: var(--color-text-muted);
+  color: var(--color-text-soft);
   display: flex;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
   gap: 6px;
 }
 
@@ -915,13 +1019,20 @@ textarea:focus-visible {
 
 .activity-search {
   align-items: center;
-  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-muted);
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
   color: var(--color-text-muted);
   display: flex;
   gap: 6px;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 8px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.activity-search:focus-within {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
 }
 
 .activity-search input {
@@ -941,26 +1052,27 @@ textarea:focus-visible {
 
 .activity-list {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .activity-list.compact {
-  gap: 6px;
+  gap: 3px;
 }
 
 .activity-run,
 .activity-line {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 0;
   border-radius: var(--radius-control);
   display: grid;
-  gap: 7px;
-  padding: 9px;
+  gap: 6px;
+  padding: 8px 10px;
 }
 
 .activity-run.active {
   background: var(--color-brand-soft);
-  border-color: var(--color-brand-border);
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 var(--color-brand-action);
 }
 
 .activity-run-toggle {
@@ -978,7 +1090,8 @@ textarea:focus-visible {
 
 .activity-line.urgent {
   background: var(--color-warning-bg);
-  border-color: var(--color-warning-border);
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 var(--color-warning-text);
 }
 
 .activity-run strong,
@@ -1023,10 +1136,11 @@ textarea:focus-visible {
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   display: inline-flex;
-  font-size: 11px;
-  gap: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  gap: 4px;
   max-width: 150px;
-  padding: 3px 7px;
+  padding: 2px 6px;
 }
 
 .activity-badge {
@@ -1186,8 +1300,8 @@ textarea:focus-visible {
 }
 
 .activity-event-meta span {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  border: 0;
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   font-size: 10px;
@@ -1196,10 +1310,11 @@ textarea:focus-visible {
 }
 
 .activity-event-kind {
-  border: 1px solid var(--color-border);
+  border: 0;
   border-radius: var(--radius-pill);
   display: inline-flex;
   font-size: 10px;
+  font-weight: 500;
   line-height: 1.4;
   padding: 1px 6px;
   text-transform: uppercase;
@@ -1207,9 +1322,9 @@ textarea:focus-visible {
 
 .activity-event-payload-toggle {
   align-items: center;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+  border: 0;
+  border-radius: var(--radius-compact);
   color: var(--color-text-muted);
   cursor: pointer;
   display: inline-flex;
@@ -1268,11 +1383,11 @@ textarea:focus-visible {
 }
 
 .activity-event-row pre {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+  border: 0;
+  border-radius: var(--radius-compact);
   color: var(--color-text-strong);
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.45;
   margin: 2px 0 0;
@@ -1292,16 +1407,23 @@ textarea:focus-visible {
 .memory-editor input,
 .memory-editor textarea {
   background: var(--color-surface);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   color: var(--color-text-strong);
   font: inherit;
   font-size: 12px;
-  min-height: 32px;
+  min-height: 30px;
   min-width: 0;
   outline: none;
   padding: 0 8px;
+  transition: border-color 120ms ease;
   width: 100%;
+}
+
+.memory-editor input:focus,
+.memory-editor textarea:focus {
+  border-color: var(--color-brand-action);
+  box-shadow: var(--shadow-focus);
 }
 
 .memory-toolbar .select-trigger,
@@ -1325,23 +1447,27 @@ textarea:focus-visible {
 
 .memory-item {
   align-items: center;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 0;
   border-radius: var(--radius-control);
   color: var(--color-text-strong);
   cursor: pointer;
   display: grid;
   gap: 8px;
   grid-template-columns: 16px minmax(0, 1fr) auto;
-  min-height: 52px;
-  padding: 8px;
+  min-height: 48px;
+  padding: 8px 10px;
   text-align: left;
+  transition: background 120ms ease;
 }
 
-.memory-item.active,
 .memory-item:hover {
+  background: var(--color-surface-muted);
+}
+
+.memory-item.active {
   background: var(--color-brand-soft);
-  border-color: var(--color-brand-border);
+  box-shadow: inset 2px 0 0 var(--color-brand-action);
 }
 
 .memory-item strong {
@@ -1386,11 +1512,12 @@ textarea:focus-visible {
 
 .memory-editor,
 .memory-preview {
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 0;
   border-radius: var(--radius-control);
   display: grid;
   gap: 9px;
-  padding: 9px;
+  padding: 10px;
 }
 
 .memory-editor-head,
@@ -1420,17 +1547,17 @@ textarea:focus-visible {
 }
 
 .memory-preview pre {
-  background: var(--color-surface-subtle);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  border: 0;
+  border-radius: var(--radius-compact);
   color: var(--color-text-strong);
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.45;
   margin: 0;
   max-height: 150px;
   overflow: auto;
-  padding: 7px;
+  padding: 8px;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1443,7 +1570,8 @@ textarea:focus-visible {
 }
 
 .workspace-tree {
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 0;
   border-radius: var(--radius-control);
   min-height: 0;
   overflow: auto;
@@ -1492,14 +1620,19 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.tree-row.active,
 .tree-row:not(:disabled):hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+.tree-row.active {
   background: var(--color-brand-soft);
   color: var(--color-brand-text);
 }
 
 .workspace-preview {
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 0;
   border-radius: var(--radius-control);
   display: flex;
   flex-direction: column;
@@ -1513,7 +1646,7 @@ textarea:focus-visible {
   display: flex;
   gap: 8px;
   justify-content: space-between;
-  padding: 8px;
+  padding: 8px 10px;
 }
 
 .workspace-preview-head span {
@@ -1525,10 +1658,10 @@ textarea:focus-visible {
 }
 
 .workspace-preview pre {
-  background: var(--color-surface-subtle);
+  background: transparent;
   color: var(--color-text);
   flex: 1;
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.55;
   margin: 0;
@@ -1541,85 +1674,87 @@ textarea:focus-visible {
 .permission-card {
   align-self: stretch;
   background: var(--color-warning-bg);
-  border: 1px solid var(--color-warning-border);
-  border-radius: var(--radius-control);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: inset 3px 0 0 var(--color-warning-text);
   display: grid;
   gap: 10px;
-  padding: 12px;
+  max-width: min(760px, 100%);
+  padding: 12px 14px;
 }
 
 .permission-risk-high,
 .permission-risk-critical {
   background: var(--color-danger-bg);
-  border-color: var(--color-danger-border);
+  border-color: transparent;
+  box-shadow: inset 3px 0 0 var(--color-danger-text);
 }
 
 .tool-card {
   align-self: stretch;
-  background: var(--color-surface-subtle);
-  border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-border-strong);
-  border-radius: 12px;
+  background: var(--color-surface-muted);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: inset 3px 0 0 var(--color-border-strong);
   display: grid;
-  gap: 10px;
+  gap: 8px;
   max-width: min(760px, 100%);
-  padding: 12px 12px 10px;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  padding: 10px 12px;
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
 
 .tool-running,
 .tool-pending,
 .tool-waiting_permission {
-  border-left-color: var(--color-brand-action);
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.06);
+  box-shadow: inset 3px 0 0 var(--color-brand-action);
 }
 
 .tool-completed {
-  border-color: var(--color-success-border);
-  border-left-color: var(--color-success-text);
+  border-color: transparent;
+  box-shadow: inset 3px 0 0 var(--color-success-text);
 }
 
 .tool-failed,
 .tool-denied {
   background: var(--color-danger-bg);
-  border-color: var(--color-danger-border);
-  border-left-color: var(--color-danger-text);
+  border-color: transparent;
+  box-shadow: inset 3px 0 0 var(--color-danger-text);
 }
 
 .tool-title {
   align-items: start;
   display: grid;
-  gap: 10px;
-  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  grid-template-columns: 24px minmax(0, 1fr);
 }
 
 .tool-icon {
   align-items: center;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
   color: var(--color-text-muted);
   display: flex;
-  height: 28px;
+  height: 24px;
   justify-content: center;
-  width: 28px;
+  width: 24px;
 }
 
 .tool-running .tool-icon,
 .tool-pending .tool-icon,
 .tool-waiting_permission .tool-icon {
-  border-color: var(--color-brand-border);
+  border-color: transparent;
   color: var(--color-brand-text);
 }
 
 .tool-completed .tool-icon {
-  border-color: var(--color-success-border);
+  border-color: transparent;
   color: var(--color-success-text);
 }
 
 .tool-failed .tool-icon,
 .tool-denied .tool-icon {
-  border-color: var(--color-danger-border);
+  border-color: transparent;
   color: var(--color-danger-text);
 }
 
@@ -1656,7 +1791,7 @@ textarea:focus-visible {
 }
 
 .tool-name {
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--font-mono);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1664,8 +1799,9 @@ textarea:focus-visible {
 }
 
 .tool-risk {
-  border: 1px solid var(--color-border);
+  border: 0;
   border-radius: 999px;
+  background: var(--color-surface);
   padding: 0 7px;
 }
 
@@ -1771,10 +1907,10 @@ textarea:focus-visible {
 .tool-args,
 .tool-output {
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: 0;
   border-radius: var(--radius-compact);
   color: var(--color-text-strong);
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.55;
   margin: 0;
@@ -1862,13 +1998,13 @@ textarea:focus-visible {
 }
 
 .permission-context {
-  background: rgba(255, 255, 255, 0.62);
-  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.55);
+  border: 0;
   border-radius: var(--radius-compact);
   display: grid;
   gap: 6px;
   margin: 0;
-  padding: 8px;
+  padding: 8px 10px;
 }
 
 .permission-context div {
@@ -1901,10 +2037,10 @@ textarea:focus-visible {
 }
 
 .permission-arguments pre {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.7);
+  border: 0;
   border-radius: var(--radius-compact);
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   margin: 6px 0 0;
@@ -1923,9 +2059,9 @@ textarea:focus-visible {
   border-radius: var(--radius-pill);
   background: var(--color-success-bg);
   color: var(--color-success-text);
-  font-size: 12px;
-  font-weight: 700;
-  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
 }
 
 .permission-deny .permission-state {
@@ -1937,26 +2073,28 @@ textarea:focus-visible {
   align-items: center;
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
-  color: var(--color-text-muted);
+  color: var(--color-text-soft);
   display: flex;
-  font-size: 12px;
-  gap: 18px;
-  padding: 0 12px;
+  font-size: 11px;
+  gap: 16px;
+  padding: 0 14px;
 }
 
 .toast {
-  background: var(--color-code-bg);
+  background: var(--color-text);
   border-radius: var(--radius-control);
-  bottom: 42px;
+  bottom: 36px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
   color: var(--color-surface);
-  max-width: 420px;
-  padding: 10px 12px;
+  font-size: 12px;
+  max-width: 400px;
+  padding: 10px 14px;
   position: fixed;
-  right: 18px;
+  right: 16px;
 }
 
 .settings-overlay {
-  background: rgba(15, 23, 42, 0.28);
+  background: rgba(15, 23, 42, 0.2);
   display: flex;
   inset: 0;
   justify-content: flex-end;
@@ -1972,9 +2110,9 @@ textarea:focus-visible {
   display: grid;
   grid-template-rows: auto auto 1fr auto;
   height: 100%;
-  max-width: min(720px, 100vw);
+  max-width: min(680px, 100vw);
   min-width: 0;
-  width: 680px;
+  width: 640px;
 }
 
 .settings-header,
@@ -2010,7 +2148,7 @@ textarea:focus-visible {
 }
 
 .settings-tabs {
-  background: var(--color-surface-subtle);
+  background: transparent;
   border-bottom: 1px solid var(--color-border);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2027,10 +2165,10 @@ textarea:focus-visible {
   cursor: pointer;
   display: flex;
   font-size: 12px;
-  font-weight: 700;
-  gap: 7px;
+  font-weight: 500;
+  gap: 6px;
   justify-content: center;
-  min-height: 44px;
+  min-height: 40px;
   min-width: 0;
   padding: 0 8px;
 }
@@ -2065,7 +2203,8 @@ textarea:focus-visible {
 
 .settings-module-header h2 {
   color: var(--color-text);
-  font-size: 16px;
+  font-size: 15px;
+  font-weight: 600;
   margin: 0;
 }
 
@@ -2076,7 +2215,8 @@ textarea:focus-visible {
 }
 
 .settings-editor-panel {
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 0;
   border-radius: var(--radius-control);
   display: grid;
   gap: 14px;
@@ -2105,7 +2245,7 @@ textarea:focus-visible {
 .settings-check span {
   color: var(--color-text-strong);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .settings-form-grid {
@@ -2122,14 +2262,15 @@ textarea:focus-visible {
 .settings-row input,
 .settings-row textarea {
   background: var(--color-surface);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   color: var(--color-text);
   font: inherit;
-  min-height: 34px;
+  min-height: 32px;
   min-width: 0;
   outline: none;
   padding: 0 10px;
+  transition: border-color 120ms ease;
   width: 100%;
 }
 
@@ -2184,7 +2325,8 @@ textarea:focus-visible {
 
 .settings-manager-item {
   align-items: center;
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 0;
   border-radius: var(--radius-control);
   display: grid;
   gap: 4px;
@@ -2258,8 +2400,8 @@ textarea:focus-visible {
 }
 
 .mcp-tool-item {
-  background: var(--color-surface-subtle);
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  border: 0;
   border-radius: var(--radius-control);
   display: grid;
   gap: 2px;
@@ -2277,7 +2419,8 @@ textarea:focus-visible {
 
 .settings-manager-item.active {
   background: var(--color-brand-soft);
-  border-color: var(--color-brand-border);
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 var(--color-brand-action);
 }
 
 .settings-manager-select {
@@ -2425,32 +2568,32 @@ textarea:focus-visible {
 
   .right-panel-rail {
     align-self: center;
-    background: rgba(255, 255, 255, 0.94);
+    background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-control);
-    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    box-shadow: var(--shadow-soft);
     display: grid;
-    gap: 4px;
+    gap: 0;
     grid-column: 2;
     grid-row: 1;
     grid-template-columns: repeat(4, minmax(56px, auto));
     justify-self: end;
-    margin: 6px 12px;
-    padding: 4px;
+    margin: 8px 12px;
+    padding: 2px;
     z-index: 8;
   }
 
   .right-panel {
-    bottom: 28px;
+    bottom: 24px;
     box-shadow: var(--shadow-drawer);
     display: flex;
     max-width: calc(100vw - 24px);
     position: fixed;
     right: 0;
-    top: 58px;
+    top: 48px;
     transform: translateX(100%);
     transition: transform 160ms ease;
-    width: 360px;
+    width: 340px;
     z-index: 12;
   }
 
@@ -2468,23 +2611,23 @@ textarea:focus-visible {
   }
 
   .right-panel-backdrop {
-    background: rgba(15, 23, 42, 0.22);
+    background: rgba(15, 23, 42, 0.16);
     border: 0;
-    bottom: 28px;
+    bottom: 24px;
     cursor: default;
     display: block;
     left: 0;
     padding: 0;
     position: fixed;
     right: 0;
-    top: 58px;
+    top: 48px;
     z-index: 11;
   }
 }
 
 @media (max-width: 760px) {
   .app-shell {
-    grid-template-rows: 58px minmax(0, 1fr) 28px;
+    grid-template-rows: 48px minmax(0, 1fr) 24px;
   }
 
   .workspace {

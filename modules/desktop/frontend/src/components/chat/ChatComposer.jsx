@@ -66,7 +66,7 @@ export function ChatComposer({ value, running, onChange, onSend, onCancel }) {
           data-testid="chat-composer-input"
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={running ? '运行中，可继续编辑下一条任务草稿…' : '描述任务，或输入 /read、/shell 等命令…'}
+          placeholder={running ? '运行中，可继续编辑下一条任务…' : '描述任务…'}
           ref={textareaRef}
           rows={1}
           value={value}

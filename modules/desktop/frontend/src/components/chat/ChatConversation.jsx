@@ -74,14 +74,14 @@ export function ChatConversation({ messages, permissions, tools, onResolvePermis
               data-timeline-type="message"
               key={item.key}
             >
-              <div className="message-avatar">
-                {message.role === 'user' ? <UserRound size={16} /> : <Bot size={16} />}
+              <div className="message-avatar" aria-hidden="true">
+                {message.role === 'user' ? <UserRound size={14} /> : <Bot size={14} />}
               </div>
               <div className="message-bubble">
                 <div className="message-meta">
                   <strong>{displayMessageAgent(message)}</strong>
-                  {message.rootSeq ? <span>事件 {formatSeq(message.rootSeq)}</span> : null}
-                  {!message.rootSeq && message.messageSeq ? <span>消息 {formatSeq(message.messageSeq)}</span> : null}
+                  {message.rootSeq ? <span title={`事件 ${formatSeq(message.rootSeq)}`}>{formatSeq(message.rootSeq)}</span> : null}
+                  {!message.rootSeq && message.messageSeq ? <span title={`消息 ${formatSeq(message.messageSeq)}`}>{formatSeq(message.messageSeq)}</span> : null}
                 </div>
                 <p>{message.text}</p>
               </div>

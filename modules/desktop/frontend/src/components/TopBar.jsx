@@ -1,7 +1,7 @@
 import { RefreshCw, Settings2 } from 'lucide-react';
 import mark from '../assets/red-panda-mark.svg';
 import { classNames } from '../lib/format.js';
-import { Button, IconButton } from './ui/button.jsx';
+import { IconButton } from './ui/button.jsx';
 import { StatusBadge } from './ui/badge.jsx';
 
 export function TopBar({ status, gatewayBase, onReconnect, onSettings }) {
@@ -21,11 +21,11 @@ export function TopBar({ status, gatewayBase, onReconnect, onSettings }) {
           status={status}
           title={`连接地址：${gatewayBase}`}
         />
-        <Button icon={<RefreshCw size={15} />} onClick={onReconnect} variant="soft">
-          重新连接
-        </Button>
+        <IconButton label="重新连接" onClick={onReconnect}>
+          <RefreshCw size={15} />
+        </IconButton>
         <IconButton label="设置" onClick={onSettings}>
-          <Settings2 size={17} />
+          <Settings2 size={16} />
         </IconButton>
       </div>
     </header>
