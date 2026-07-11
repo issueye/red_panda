@@ -375,6 +375,46 @@ try {
   $mcpServersAfterDelete = Invoke-Api "GET" "/api/v1/mcp/servers"
   Assert-True (@($mcpServersAfterDelete.servers | Where-Object { $_.id -eq $mcpServer.id }).Count -eq 0) "deleted MCP server remained in list"
 
+  $skillListBefore = @((Invoke-Api "GET" "/api/v1/skills?workspace_root=$([uri]::EscapeDataString($Root))").items)
+  Assert-True (@($skillListBefore | Where-Object { $_.name -eq "compat-skill" }).Count -eq 0) "compat skill existed before create"
+
+  $skillCreated = Invoke-Api "POST" "/api/v1/skills" @{
+    workspace_root = "$Root"
+    name = "compat-skill"
+    description = "Compat skill description"
+    instructions = "# Compat skill`n`nReview the protocol-compat flow."
+  }
+  Assert-True ($skillCreated.action -eq "skill.create" -and $skillCreated.name -eq "compat-skill") "skill create result mismatch"
+  Assert-True ($skillCreated.path -eq ".codex/skills/compat-skill/SKILL.md") "skill create path mismatch"
+
+  $skillListAfter = @((Invoke-Api "GET" "/api/v1/skills?workspace_root=$([uri]::EscapeDataString($Root))").items)
+  $skillSummary = @($skillListAfter | Where-Object { $_.name -eq "compat-skill" })[-1]
+  Assert-True ($null -ne $skillSummary) "skill list missing created skill"
+  Assert-True ($skillSummary.description -eq "Compat skill description") "skill list description mismatch"
+  Assert-True ($skillSummary.has_instructions -eq $true) "skill list has_instructions mismatch"
+  Assert-True ($null -eq $skillSummary.instructions) "skill list leaked instructions body"
+
+  $skillDetail = Invoke-Api "GET" "/api/v1/skills/compat-skill?workspace_root=$([uri]::EscapeDataString($Root))&include_instructions=1"
+  Assert-True ($skillDetail.skill.name -eq "compat-skill") "skill detail name mismatch"
+  Assert-True ($skillDetail.skill.description -eq "Compat skill description") "skill detail description mismatch"
+  Assert-True ($skillDetail.skill.instructions -like "*Review the protocol-compat flow*") "skill detail instructions mismatch"
+  Assert-True ($skillDetail.skill.size_bytes -gt 0) "skill detail size_bytes mismatch"
+
+  $skillUpdated = Invoke-Api "PUT" "/api/v1/skills/compat-skill" @{
+    workspace_root = "$Root"
+    description = "Compat skill updated"
+    instructions = "# Compat skill updated`n`nVerify update path."
+  }
+  Assert-True ($skillUpdated.action -eq "skill.update" -and $skillUpdated.name -eq "compat-skill") "skill update result mismatch"
+  $skillDetailUpdated = Invoke-Api "GET" "/api/v1/skills/compat-skill?workspace_root=$([uri]::EscapeDataString($Root))&include_instructions=1"
+  Assert-True ($skillDetailUpdated.skill.description -eq "Compat skill updated") "skill update description mismatch"
+  Assert-True ($skillDetailUpdated.skill.instructions -like "*Verify update path*") "skill update instructions mismatch"
+
+  $skillDeleted = Invoke-Api "DELETE" "/api/v1/skills/compat-skill?workspace_root=$([uri]::EscapeDataString($Root))"
+  Assert-True ($skillDeleted.deleted -and $skillDeleted.name -eq "compat-skill") "skill delete result mismatch"
+  $skillListFinal = @((Invoke-Api "GET" "/api/v1/skills?workspace_root=$([uri]::EscapeDataString($Root))").items)
+  Assert-True (@($skillListFinal | Where-Object { $_.name -eq "compat-skill" }).Count -eq 0) "deleted skill remained in list"
+
   $providerJob = Start-CompatProvider
   $profileKey = "compat-secret"
   $profile = Invoke-Api "POST" "/api/v1/provider-profiles" @{
@@ -999,6 +1039,7 @@ try {
     memory_tool_record = $memoryToolRecord.id
     memory_tool_denied = $memoryDenyRunID
     mcp_server = $mcpServer.id
+    skill_crud = "compat-skill"
     provider_profile = $profile.id
     inactive_provider_profile = $inactiveProfile.id
   } | ConvertTo-Json -Compress

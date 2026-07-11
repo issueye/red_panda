@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"runtime"
 	"testing"
+	"time"
 
 	"redpanda/protocol/jsonrpc"
 	protocolmcp "redpanda/protocol/mcp"
@@ -124,3 +126,53 @@ func (c *Client) handleGatewayLikeResponseForTest(raw []byte) error {
 	}
 	return nil
 }
+
+// stubSleepCommand returns a shell command that stays alive for the given
+// duration without responding, mimicking a runtime process that has not exited.
+func stubSleepCommand() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "powershell", []string{"-NoProfile", "-Command", "Start-Sleep -Seconds 10"}
+	}
+	return "sleep", []string{"10"}
+}
+
+// TestRuntimeProcessSurvivesRequestCancellation guards against regressing back
+// to exec.CommandContext(requestCtx): the managed runtime is a long-lived
+// single-core process and must not be killed when the HTTP request that started
+// it returns. Skills management (and other out-of-run calls) issue one-shot
+// requests whose context is cancelled as soon as the handler returns.
+func TestRuntimeProcessSurvivesRequestCancellation(t *testing.T) {
+	command, args := stubSleepCommand()
+	client := New(command, args, "test", nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := client.ensureStarted(ctx); err != nil {
+		t.Fatalf("ensureStarted: %v", err)
+	}
+
+	client.mu.Lock()
+	cmd := client.cmd
+	running := client.running
+	client.mu.Unlock()
+	if cmd == nil || cmd.Process == nil || !running {
+		t.Fatalf("runtime process not started: cmd=%v running=%v", cmd, running)
+	}
+
+	// Simulate the HTTP handler returning and cancelling its request context.
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+
+	client.mu.Lock()
+	stillRunning := client.running
+	process := client.cmd.Process
+	client.mu.Unlock()
+	if !stillRunning {
+		t.Fatal("runtime process was killed when the request context was cancelled; use exec.Command, not exec.CommandContext(reqCtx)")
+	}
+	if process != nil {
+		_ = process.Kill()
+	}
+	_ = client.Shutdown(context.Background())
+}
+

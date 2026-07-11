@@ -162,6 +162,16 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			},
 		},
 		{
+			Name:        "skill.list",
+			DisplayName: "List skills",
+			Description: "List managed workspace skills under .codex/skills with name and description only.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
 			Name:        "skill.create",
 			DisplayName: "Create skill",
 			Description: "Create a managed SKILL.md under .codex/skills in the active workspace.",
@@ -189,6 +199,19 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 					"instructions": map[string]any{"type": "string", "description": "Complete replacement Markdown instructions."},
 				},
 				"required": []string{"name", "description", "instructions"},
+			},
+		},
+		{
+			Name:        "skill.delete",
+			DisplayName: "Delete skill",
+			Description: "Delete a managed SKILL.md under .codex/skills in the active workspace.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "description": "Existing lowercase skill name."},
+				},
+				"required": []string{"name"},
 			},
 		},
 		{
@@ -367,10 +390,14 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 		output, err = runApplyPatch(runCtx.WorkingDir, stringArg(call.Arguments, "patch"))
 	case "shell.exec":
 		output, err = runShell(ctx, runCtx.WorkingDir, stringArg(call.Arguments, "command"))
+	case "skill.list":
+		output, err = runListSkills(runCtx.WorkingDir)
 	case "skill.create":
 		output, err = runCreateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
 	case "skill.update":
 		output, err = runUpdateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
+	case "skill.delete":
+		output, err = runDeleteSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"))
 	case "skill.run":
 		if runner.SkillExecutor == nil {
 			err = fmt.Errorf("skill subagent executor is not available")

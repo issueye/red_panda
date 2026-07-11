@@ -27,6 +27,12 @@ import {
   providerProfileUpdatePayload,
 } from './lib/providerProfiles.js';
 import { buildRunStartOptions, defaultRunSettings } from './lib/runOptions.js';
+import {
+  normalizeSkillDetail,
+  normalizeSkillsList,
+  skillCreatePayload,
+  skillUpdatePayload,
+} from './lib/skills.js';
 
 const gatewayBase = gatewayBaseURL();
 
@@ -263,6 +269,9 @@ export function App() {
   const [mcpServersLoading, setMcpServersLoading] = useState(false);
   const [mcpServersError, setMcpServersError] = useState('');
   const [mcpDiscoveryByServer, setMcpDiscoveryByServer] = useState({});
+  const [skills, setSkills] = useState([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsError, setSkillsError] = useState('');
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
 
@@ -353,6 +362,44 @@ export function App() {
     }
   }
 
+  function currentWorkspaceRoot() {
+    return workspace?.root_path || workspace?.root || '';
+  }
+
+  async function loadSkills(workspaceRootOverride) {
+    const root = workspaceRootOverride || currentWorkspaceRoot();
+    setSkillsLoading(true);
+    setSkillsError('');
+    if (!root) {
+      setSkills([]);
+      setSkillsLoading(false);
+      setSkillsError('打开工作区后可管理托管技能。');
+      return [];
+    }
+    try {
+      const data = await apiJson(`/api/v1/skills?workspace_root=${encodeURIComponent(root)}`);
+      const normalized = normalizeSkillsList(data);
+      setSkills(normalized);
+      return normalized;
+    } catch (error) {
+      setSkillsError(error.message);
+      return [];
+    } finally {
+      setSkillsLoading(false);
+    }
+  }
+
+  async function loadSkillDetail(name) {
+    const root = currentWorkspaceRoot();
+    if (!root || !name) {
+      throw new Error('workspace and skill name are required');
+    }
+    const data = await apiJson(
+      `/api/v1/skills/${encodeURIComponent(name)}?workspace_root=${encodeURIComponent(root)}&include_instructions=1`,
+    );
+    return normalizeSkillDetail(data);
+  }
+
   async function loadSessionState(sessionId) {
     try {
       const [history, runs, toolCalls, permissionItems] = await Promise.all([
@@ -404,6 +451,7 @@ export function App() {
         }
         loadProviderProfiles();
         loadMcpServers();
+        loadSkills(data.workspace?.root_path || data.workspace?.root || '');
       })
       .catch(() => {});
     return () => {
@@ -415,6 +463,7 @@ export function App() {
     if (settingsOpen) {
       loadProviderProfiles();
       loadMcpServers();
+      loadSkills();
     }
   }, [settingsOpen]);
 
@@ -952,6 +1001,51 @@ export function App() {
     }
   }
 
+  async function createSkill(input) {
+    setSkillsError('');
+    try {
+      const created = await apiJson('/api/v1/skills', {
+        method: 'POST',
+        body: JSON.stringify(skillCreatePayload(input, currentWorkspaceRoot())),
+      });
+      await loadSkills();
+      return created;
+    } catch (error) {
+      setSkillsError(error.message);
+      throw error;
+    }
+  }
+
+  async function updateSkill(name, input) {
+    setSkillsError('');
+    try {
+      const updated = await apiJson(`/api/v1/skills/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        body: JSON.stringify(skillUpdatePayload(input, currentWorkspaceRoot())),
+      });
+      await loadSkills();
+      return updated;
+    } catch (error) {
+      setSkillsError(error.message);
+      throw error;
+    }
+  }
+
+  async function deleteSkill(name) {
+    setSkillsError('');
+    const root = currentWorkspaceRoot();
+    try {
+      await apiJson(
+        `/api/v1/skills/${encodeURIComponent(name)}?workspace_root=${encodeURIComponent(root)}`,
+        { method: 'DELETE' },
+      );
+      setSkills((items) => items.filter((item) => item.name !== name));
+    } catch (error) {
+      setSkillsError(error.message);
+      throw error;
+    }
+  }
+
   function selectRightPanelTab(tab) {
     setRightPanelTab(tab);
     if (compactLayout) {
@@ -1039,20 +1133,29 @@ export function App() {
         mcpDiscoveryByServer={mcpDiscoveryByServer}
         onCreateMcpServer={createMcpServer}
         onCreateProviderProfile={createProviderProfile}
+        onCreateSkill={createSkill}
         onDeleteMcpServer={deleteMcpServer}
         onDeleteProviderProfile={deleteProviderProfile}
+        onDeleteSkill={deleteSkill}
         onDiscoverMcpServer={discoverMcpServer}
+        onLoadSkillDetail={loadSkillDetail}
         onChange={setRunSettings}
         onClose={() => setSettingsOpen(false)}
         onRefreshMcpServers={loadMcpServers}
         onRefreshProviderProfiles={loadProviderProfiles}
+        onRefreshSkills={loadSkills}
         onUpdateMcpServer={updateMcpServer}
         onUpdateProviderProfile={updateProviderProfile}
+        onUpdateSkill={updateSkill}
         open={settingsOpen}
         providerProfiles={providerProfiles}
         providerProfilesError={providerProfilesError}
         providerProfilesLoading={providerProfilesLoading}
         settings={runSettings}
+        skills={skills}
+        skillsError={skillsError}
+        skillsLoading={skillsLoading}
+        workspaceRoot={currentWorkspaceRoot()}
       />
       <main className="workspace">
         <Sidebar

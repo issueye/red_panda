@@ -13,6 +13,9 @@ const (
 	AgentSubAgentCancel = "agent.subagent.cancel"
 	AgentSkills         = "agent.skills"
 	AgentSkillLoad      = "agent.skill.load"
+	AgentSkillCreate    = "agent.skill.create"
+	AgentSkillUpdate    = "agent.skill.update"
+	AgentSkillDelete    = "agent.skill.delete"
 	MCPDiscover         = "mcp.discover"
 	PermissionResolve   = "permission.resolve"
 	AgentEvent          = "agent.event"
@@ -193,4 +196,63 @@ type SubAgentCancelResult struct {
 	RunID      string `json:"run_id"`
 	SubAgentID string `json:"subagent_id"`
 	Cancelled  bool   `json:"cancelled"`
+}
+
+// Managed skill discovery and management (workspace .codex/skills).
+
+type SkillSummary struct {
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	Path            string `json:"path"`
+	HasInstructions bool   `json:"has_instructions"`
+}
+
+type SkillDetail struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Instructions string `json:"instructions,omitempty"`
+	Path         string `json:"path"`
+	SizeBytes    int64  `json:"size_bytes"`
+}
+
+type SkillsListParams struct {
+	WorkspaceRoot string `json:"workspace_root"`
+}
+
+type SkillsListResult struct {
+	Items []SkillSummary `json:"items"`
+}
+
+type SkillLoadParams struct {
+	WorkspaceRoot        string `json:"workspace_root"`
+	Name                 string `json:"name"`
+	IncludeInstructions  bool   `json:"include_instructions,omitempty"`
+}
+
+type SkillLoadResult struct {
+	Skill SkillDetail `json:"skill"`
+}
+
+type SkillMutateParams struct {
+	WorkspaceRoot string `json:"workspace_root"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Instructions  string `json:"instructions"`
+}
+
+type SkillMutateResult struct {
+	Action string `json:"action"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+}
+
+type SkillDeleteParams struct {
+	WorkspaceRoot string `json:"workspace_root"`
+	Name          string `json:"name"`
+}
+
+type SkillDeleteResult struct {
+	Action  string `json:"action"`
+	Name    string `json:"name"`
+	Deleted bool   `json:"deleted"`
 }

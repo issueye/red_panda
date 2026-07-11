@@ -128,7 +128,7 @@ func TestManagedSkillCreateRejectsEscapingSymlinkWithoutOutsideWrites(t *testing
 
 func TestToolRunnerRegistersManagedSkillToolsAsHighRisk(t *testing.T) {
 	runner := ToolRunner{}
-	for index, name := range []string{"skill.create", "skill.update", "skill.run"} {
+	for index, name := range []string{"skill.create", "skill.update", "skill.delete", "skill.run"} {
 		arguments := map[string]any{
 			"name":         "review",
 			"description":  "Review changes.",
@@ -136,6 +136,9 @@ func TestToolRunnerRegistersManagedSkillToolsAsHighRisk(t *testing.T) {
 		}
 		if name == "skill.run" {
 			arguments = map[string]any{"name": "review", "task": "inspect the diff"}
+		}
+		if name == "skill.delete" {
+			arguments = map[string]any{"name": "review"}
 		}
 		invocation, err := runner.InvocationFromCall("run_skill", index, tools.Call{
 			Name:      name,
@@ -147,6 +150,125 @@ func TestToolRunnerRegistersManagedSkillToolsAsHighRisk(t *testing.T) {
 		if invocation.Call.ID == "" || invocation.Call.Risk != tools.RiskHigh || invocation.Call.DisplayName == "" {
 			t.Fatalf("unexpected %s invocation: %#v", name, invocation.Call)
 		}
+	}
+
+	listInvocation, err := runner.InvocationFromCall("run_skill_list", 0, tools.Call{Name: "skill.list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listInvocation.Call.Risk != tools.RiskLow {
+		t.Fatalf("skill.list risk = %s, want low", listInvocation.Call.Risk)
+	}
+}
+
+func TestManagedSkillListLoadDelete(t *testing.T) {
+	root := t.TempDir()
+	emptyList, err := runListSkills(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(emptyList, `"count":0`) {
+		t.Fatalf("empty list = %s", emptyList)
+	}
+
+	if _, err := runCreateSkill(root, "alpha", "Alpha skill.", "# Alpha\n\nDo alpha."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCreateSkill(root, "beta", "Beta skill.", "# Beta\n\nDo beta."); err != nil {
+		t.Fatal(err)
+	}
+
+	listOutput, err := runListSkills(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listOutput, `"count":2`) || !strings.Contains(listOutput, `"name":"alpha"`) || !strings.Contains(listOutput, `"name":"beta"`) {
+		t.Fatalf("list output = %s", listOutput)
+	}
+	if strings.Contains(listOutput, "Do alpha.") || strings.Contains(listOutput, "Do beta.") {
+		t.Fatalf("list output leaked instructions: %s", listOutput)
+	}
+
+	detail, err := loadManagedSkillDetail(root, "alpha", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Name != "alpha" || detail.Description != "Alpha skill." || !strings.Contains(detail.Instructions, "Do alpha.") {
+		t.Fatalf("unexpected detail: %#v", detail)
+	}
+	summaryOnly, err := loadManagedSkillDetail(root, "alpha", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summaryOnly.Instructions != "" {
+		t.Fatalf("summary load included instructions: %#v", summaryOnly)
+	}
+
+	deleteOutput, err := runDeleteSkill(root, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(deleteOutput, `"deleted":true`) {
+		t.Fatalf("delete output = %s", deleteOutput)
+	}
+	if _, err := loadManagedSkillDetail(root, "alpha", false); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("deleted skill still loadable: %v", err)
+	}
+	if _, err := runDeleteSkill(root, "missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing delete error = %v", err)
+	}
+}
+
+func TestAgentSkillsJSONRPCHandlers(t *testing.T) {
+	root := t.TempDir()
+	if _, err := runCreateSkill(root, "review", "Review code.", "# Steps\n\n1. Read."); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	lines := make(chan []byte, 16)
+	go readJSONLines(t, reader, lines)
+
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	sendRequest(t, context.Background(), rt, "skills_list", methods.AgentSkills, methods.SkillsListParams{
+		WorkspaceRoot: root,
+	})
+	listResp := waitForResponse(t, lines, "skills_list")
+	var listResult methods.SkillsListResult
+	if err := json.Unmarshal(listResp.Result, &listResult); err != nil {
+		t.Fatal(err)
+	}
+	if len(listResult.Items) != 1 || listResult.Items[0].Name != "review" {
+		t.Fatalf("list result = %#v", listResult)
+	}
+
+	sendRequest(t, context.Background(), rt, "skill_load", methods.AgentSkillLoad, methods.SkillLoadParams{
+		WorkspaceRoot:       root,
+		Name:                "review",
+		IncludeInstructions: true,
+	})
+	loadResp := waitForResponse(t, lines, "skill_load")
+	var loadResult methods.SkillLoadResult
+	if err := json.Unmarshal(loadResp.Result, &loadResult); err != nil {
+		t.Fatal(err)
+	}
+	if loadResult.Skill.Description != "Review code." || !strings.Contains(loadResult.Skill.Instructions, "1. Read.") {
+		t.Fatalf("load result = %#v", loadResult)
+	}
+
+	sendRequest(t, context.Background(), rt, "skill_delete", methods.AgentSkillDelete, methods.SkillDeleteParams{
+		WorkspaceRoot: root,
+		Name:          "review",
+	})
+	deleteResp := waitForResponse(t, lines, "skill_delete")
+	var deleteResult methods.SkillDeleteResult
+	if err := json.Unmarshal(deleteResp.Result, &deleteResult); err != nil {
+		t.Fatal(err)
+	}
+	if !deleteResult.Deleted {
+		t.Fatalf("delete result = %#v", deleteResult)
 	}
 }
 

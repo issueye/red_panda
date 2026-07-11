@@ -8,7 +8,6 @@ export const defaultRunSettings = {
   model: '',
   toolAllowlist: '',
   toolDenylist: '',
-  skills: [],
 };
 
 export function splitOptionList(value) {

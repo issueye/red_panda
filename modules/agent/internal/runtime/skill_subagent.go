@@ -22,6 +22,7 @@ var skillSubagentDenylist = []string{
 	"memory.delete",
 	"skill.create",
 	"skill.update",
+	"skill.delete",
 	"skill.run",
 }
 

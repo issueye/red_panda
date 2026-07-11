@@ -40,6 +40,8 @@ Updated: 2026-07-11
 - Desktop Memory UI is implemented: the right panel exposes a Memory tab for inspecting project/session memory, creating records, editing content/status, disabling/deleting records, and previewing injected context through the Gateway `preview-run` API.
 - Runtime memory tools are implemented: `memory.list`, `memory.create`, `memory.update`, and `memory.delete` use normal Runtime tool policy, permission, and `tool_*` events while Gateway executes persistence through internal `memory.tool.execute` JSON-RPC with current run/session/workspace scope validation.
 - Agent Runtime unit coverage includes process subagent success, cancellation, process-pool reuse, and failed child creation/start paths while preserving root-run finish behavior and ordered `root_seq`.
+- Managed skill discovery and management is implemented end to end: Protocol DTOs and `agent.skills` / `agent.skill.load` / `agent.skill.create` / `agent.skill.update` / `agent.skill.delete` JSON-RPC methods, Runtime `listManagedSkills` / `loadManagedSkillDetail` / `runDeleteSkill` plus low-risk `skill.list` and high-risk `skill.delete` tools with frontmatter parsing and symlink/path-escape protection, Gateway service/controller `GET/POST/PUT/DELETE /api/v1/skills[/:name]` proxying Runtime, and Desktop SettingsPanel Skills tab backed by Gateway (list/create/edit/delete with read-only path meta). Skill run isolation and create/update semantics are unchanged.
+- Gateway Runtime subprocess is detached from the request context: `ensureStarted` spawns the long-lived single-core Runtime with `exec.Command` instead of `exec.CommandContext(reqCtx)`, so one-shot management requests (skills, MCP discovery) no longer kill the Runtime when their HTTP handler returns. A regression test locks this in.
 
 ## Completed
 
@@ -209,15 +211,30 @@ Updated: 2026-07-11
     - subagent reasoning/message events remain auditable, while Provider and Gateway root-conversation queries exclude `subagent` and unknown roles before applying the 200-message limit,
     - automatic compaction summaries also exclude subagent content,
     - real StepFun coverage completed `skill.create -> skill.run -> runtime_process child -> root result` without exposing the private skill description.
+96. Added managed skill discovery and management:
+    - Protocol `SkillSummary` / `SkillDetail` DTOs and `agent.skills`, `agent.skill.load`, `agent.skill.create`, `agent.skill.update`, `agent.skill.delete` method constants,
+    - Runtime `listManagedSkills`, `loadManagedSkillDetail`, `parseManagedSkillMarkdown`, `runListSkills`, and `runDeleteSkill` with `.codex/skills` directory, frontmatter, symlink, path-escape, and size guardrails,
+    - low-risk `skill.list` tool returning summaries only (no instructions body) and high-risk `skill.delete` tool using the existing policy/permission/audit paths; skill subagent denylist keeps create/update/delete/run away from children,
+    - Runtime unit coverage for empty/single-skill list, summary-only load, delete success/missing, and JSON-RPC `agent.skills` / `agent.skill.load` / `agent.skill.delete` handlers.
+97. Added Gateway skill management APIs proxying Runtime JSON-RPC:
+    - runtimeclient `ListSkills` / `LoadSkill` / `CreateSkill` / `UpdateSkill` / `DeleteSkill`,
+    - `SkillService` workspace-root validation and `SkillController` `{ok, data}` envelopes for `GET/POST/PUT/DELETE /api/v1/skills[/:name]`,
+    - `scripts/protocol-compat.ps1` create→list→load→update→delete coverage with `skill_crud` in the result summary.
+98. Added Desktop Skills tab backed by Gateway:
+    - `lib/skills.js` normalize/payload helpers and unit tests,
+    - `SettingsPanel` Skills list/create/edit/delete with read-only path meta and empty-state when no workspace is open,
+    - `App.jsx` loads skills on bootstrap and Settings open and wires create/update/delete/load-detail through Gateway,
+    - removed the unused localStorage-only skills default from the product path.
+99. Fixed Gateway Runtime subprocess request-context coupling: spawning with `exec.CommandContext(reqCtx)` killed the single-core Runtime when an HTTP management request returned, so skills/MCP one-shot calls failed with `runtime process stopped`; now `ensureStarted` uses `exec.Command` and a regression test verifies the Runtime survives request-context cancellation.
 
 ## Modules
 
 | Module | Status | Notes |
 | --- | --- | --- |
-| `modules/protocol` | Complete | JSON-RPC, WebSocket envelope, agent event, permission/tool/subagent DTOs, MCP server config/timeout/CRUD DTOs |
-| `modules/agent` | MVP complete | stdio JSON-RPC Runtime, Provider abstraction, per-run OpenAI-compatible provider override with env fallback, ToolRunner MVP, low-risk workspace tools, medium-risk `memory.list`, high-risk workspace writes, `memory.create/update/delete`, managed `skill.create/update`, and isolated process-only `skill.run`, permission blocking, in-process subagent lifecycle/query/cancel, `runtime_process` child-process subagent backend, reusable `process_pool` child-process subagent backend |
-| `modules/gateway` | MVP complete | Gin/GORM/SQLite(no cgo), Runtime subprocess client, WebSocket channel, persistence replay, workspace/session/run/tool/permission/event APIs, provider profile and MCP config CRUD APIs, `provider_profile_id` run resolution, subagent list/cancel routing, root-run `per_run_process` runtime mode, Gateway-mediated memory tool execution |
-| `modules/desktop` | MVP complete | Wails v3, React/Vite, chat, permissions, tool cards, subagents, workspace/session restore, searchable RunActivityPanel, SettingsPanel runtime/policy, provider profile and Gateway-backed MCP config management, and normalized shared UI primitives |
+| `modules/protocol` | Complete | JSON-RPC, WebSocket envelope, agent event, permission/tool/subagent DTOs, MCP server config/timeout/CRUD DTOs, managed skill summary/detail/mutate/delete DTOs |
+| `modules/agent` | MVP complete | stdio JSON-RPC Runtime, Provider abstraction, per-run OpenAI-compatible provider override with env fallback, ToolRunner MVP, low-risk workspace tools, medium-risk `memory.list`, high-risk workspace writes, `memory.create/update/delete`, managed `skill.create/update`, low-risk `skill.list`, high-risk `skill.delete`, and isolated process-only `skill.run`, `agent.skills` / `agent.skill.load` / `agent.skill.create` / `agent.skill.update` / `agent.skill.delete` JSON-RPC handlers, permission blocking, in-process subagent lifecycle/query/cancel, `runtime_process` child-process subagent backend, reusable `process_pool` child-process subagent backend |
+| `modules/gateway` | MVP complete | Gin/GORM/SQLite(no cgo), Runtime subprocess client (detached from request context), WebSocket channel, persistence replay, workspace/session/run/tool/permission/event APIs, provider profile and MCP config CRUD APIs, `provider_profile_id` run resolution, subagent list/cancel routing, root-run `per_run_process` runtime mode, Gateway-mediated memory tool execution, skill management `GET/POST/PUT/DELETE /api/v1/skills[/:name]` proxying Runtime |
+| `modules/desktop` | MVP complete | Wails v3, React/Vite, chat, permissions, tool cards, subagents, workspace/session restore, searchable RunActivityPanel, SettingsPanel runtime/policy, provider profile, Gateway-backed MCP config management, Gateway-backed Skills tab, and normalized shared UI primitives |
 | `modules/cli` | Placeholder | Future debugging entry |
 
 ## Current Triggers
@@ -249,7 +266,7 @@ Desktop or WebSocket client inputs:
 
 ## Verification
 
-Current combined M0 and MCP configuration gate status: Pass on 2026-07-10. Agent/Gateway binaries and the Wails Desktop were rebuilt, the real-provider smoke used only a temporary masked profile, and no test Gateway/Agent processes remained after verification.
+Current combined M0 and MCP configuration gate status: Pass on 2026-07-11. Agent/Gateway binaries were rebuilt, the full protocol-compat suite (including skill CRUD) passes, and no test Gateway/Agent processes remained after verification.
 
 | Check | Result |
 | --- | --- |
@@ -266,7 +283,7 @@ Current combined M0 and MCP configuration gate status: Pass on 2026-07-10. Agent
 | `CGO_ENABLED=0 go build` agent | Pass |
 | `CGO_ENABLED=0 go build` gateway | Pass |
 | `powershell -ExecutionPolicy Bypass -File scripts/ws-smoke.ps1` | Pass |
-| `powershell -ExecutionPolicy Bypass -File scripts/protocol-compat.ps1` | Pass, includes failed tool/subagent, session fork/compact, memory CRUD/preview, Runtime memory tool paths, provider profiles, MCP config CRUD/redaction, and a run timeline with `memory_injected` |
+| `powershell -ExecutionPolicy Bypass -File scripts/protocol-compat.ps1` | Pass, includes failed tool/subagent, session fork/compact, memory CRUD/preview, Runtime memory tool paths, provider profiles, MCP config CRUD/redaction, skill create/list/load/update/delete CRUD, and a run timeline with `memory_injected` |
 | Temporary real-provider Gateway/Runtime smoke | Pass with StepFun `step-3.7-flash`; returned `REAL_CHAIN_OK`, finished `completed`, then removed the temporary profile/database |
 | `wails3 build` | Pass, with Windows template warnings for missing Unix tools |
 
@@ -308,7 +325,7 @@ Desktop SettingsPanel uses these APIs to list, select, create, update, and delet
 `scripts/ws-smoke.ps1` includes `read_run_events` coverage for the persisted run event timeline query.
 
 `scripts/protocol-compat.ps1` is the lightweight HTTP/WebSocket compatibility script. It covers the client-facing protocol matrix for run lifecycle, replay ordering, malformed WebSocket payload recovery, permission approve/deny resolution, failed tool/subagent projections, provider profiles, persisted timeline queries, and MCP config CRUD/default/redaction behavior without requiring a full desktop build or starting MCP processes.
-It also covers session fork, compact preview/apply, memory CRUD/soft delete/preview, and Runtime `memory.*` tool create/list/deny behavior.
+It also covers session fork, compact preview/apply, memory CRUD/soft delete/preview, Runtime `memory.*` tool create/list/deny behavior, and skill create/list/load/update/delete CRUD through the Gateway/Runtime chain.
 
 Frontend tests include Playwright UI fixture coverage for restore, permissions, tool cards, subagents, Activity timeline inspection, custom dropdowns, and Settings management. The UI fixture suite continues to run through `npm run test:ui`.
 
@@ -326,7 +343,7 @@ The following should not be claimed as complete:
 2. Long-lived MCP process reuse, crash restart policy, and call cancellation.
 3. MCP Runtime tool registration, permission integration, and `tools/call` execution. Read-only startup, initialization, and `tools/list` discovery are implemented.
 4. Context token budgeting and automatic truncation/compaction selection for long sessions.
-5. Automatic managed-skill discovery and `agent.skills` / `agent.skill.load` request handling. Explicit `skill.run` is implemented and isolated; automatic selection is not.
+5. Automatic managed-skill selection / silent prompt injection without an explicit tool call. Managed skill discovery (`agent.skills`, `agent.skill.load`), `skill.list`, `skill.delete`, Gateway `/api/v1/skills` CRUD, and the Desktop Skills tab are implemented; only automatic selection remains out of scope.
 
 ## Next Development Steps
 

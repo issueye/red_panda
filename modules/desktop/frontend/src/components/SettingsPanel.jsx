@@ -50,11 +50,11 @@ const SETTINGS_TABS = [
 ];
 
 const emptySkillDraft = {
-  id: '',
   name: '',
   description: '',
+  instructions: '',
   path: '',
-  enabled: true,
+  isNew: true,
 };
 
 const emptyMcpDraft = {
@@ -231,6 +231,10 @@ export function SettingsPanel({
   mcpServersLoading = false,
   mcpServersError = '',
   mcpDiscoveryByServer = {},
+  skills = [],
+  skillsLoading = false,
+  skillsError = '',
+  workspaceRoot = '',
   onClose,
   onChange,
   onCreateProviderProfile,
@@ -242,6 +246,11 @@ export function SettingsPanel({
   onDeleteMcpServer,
   onDiscoverMcpServer,
   onRefreshMcpServers,
+  onCreateSkill,
+  onUpdateSkill,
+  onDeleteSkill,
+  onLoadSkillDetail,
+  onRefreshSkills,
 }) {
   const panelRef = useRef(null);
   const closeButtonRef = useRef(null);
@@ -251,11 +260,13 @@ export function SettingsPanel({
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [skillDraft, setSkillDraft] = useState(null);
+  const [skillSaving, setSkillSaving] = useState(false);
+  const [skillError, setSkillError] = useState('');
   const [mcpDraft, setMcpDraft] = useState(null);
   const [mcpSaving, setMcpSaving] = useState(false);
   const [mcpError, setMcpError] = useState('');
 
-  const skills = Array.isArray(settings.skills) ? settings.skills : [];
+  const visibleSkills = Array.isArray(skills) ? skills : [];
   const visibleMcpServers = Array.isArray(mcpServers) ? mcpServers : [];
   const selectedProfile = useMemo(
     () => providerProfiles.find((item) => item.id === settings.providerProfileId) || null,
@@ -267,6 +278,7 @@ export function SettingsPanel({
       setProfileDraft(profileDraftFrom(selectedProfile));
       setProfileError('');
       setMcpError('');
+      setSkillError('');
     }
   }, [open, selectedProfile]);
 
@@ -344,24 +356,81 @@ export function SettingsPanel({
     }
   }
 
-  function saveSkill() {
-    const name = skillDraft?.name.trim();
-    const path = skillDraft?.path.trim();
-    if (!name || !path) return;
-    const nextSkill = {
-      ...skillDraft,
-      id: skillDraft.id || localID('skill'),
-      name,
-      path,
-      description: skillDraft.description.trim(),
-    };
-    updateSetting(
-      'skills',
-      skillDraft.id
-        ? skills.map((item) => (item.id === skillDraft.id ? nextSkill : item))
-        : [...skills, nextSkill],
-    );
-    setSkillDraft(nextSkill);
+  async function saveSkill() {
+    const name = skillDraft?.name?.trim();
+    const description = skillDraft?.description?.trim();
+    const instructions = skillDraft?.instructions?.trim();
+    if (!name || !description || !instructions) return;
+    if (!workspaceRoot) {
+      setSkillError('打开工作区后可管理托管技能。');
+      return;
+    }
+    setSkillSaving(true);
+    setSkillError('');
+    try {
+      if (skillDraft.isNew) {
+        await onCreateSkill?.({ name, description, instructions });
+      } else {
+        await onUpdateSkill?.(name, { description, instructions });
+      }
+      const detail = await onLoadSkillDetail?.(name);
+      setSkillDraft({
+        name: detail?.name || name,
+        description: detail?.description || description,
+        instructions: detail?.instructions || instructions,
+        path: detail?.path || skillDraft.path || `.codex/skills/${name}/SKILL.md`,
+        isNew: false,
+      });
+    } catch (error) {
+      setSkillError(error.message);
+    } finally {
+      setSkillSaving(false);
+    }
+  }
+
+  async function selectSkill(skill) {
+    setSkillError('');
+    setSkillDraft({
+      name: skill.name,
+      description: skill.description || '',
+      instructions: '',
+      path: skill.path || '',
+      isNew: false,
+    });
+    try {
+      const detail = await onLoadSkillDetail?.(skill.name);
+      if (detail) {
+        setSkillDraft({
+          name: detail.name,
+          description: detail.description,
+          instructions: detail.instructions,
+          path: detail.path,
+          isNew: false,
+        });
+      }
+    } catch (error) {
+      setSkillError(error.message);
+    }
+  }
+
+  async function deleteSkill(skill) {
+    setSkillSaving(true);
+    setSkillError('');
+    try {
+      await onDeleteSkill?.(skill.name);
+      if (skillDraft?.name === skill.name) {
+        setSkillDraft(null);
+      }
+    } catch (error) {
+      setSkillError(error.message);
+    } finally {
+      setSkillSaving(false);
+    }
+  }
+
+  async function refreshSkills() {
+    setSkillError('');
+    await onRefreshSkills?.();
   }
 
   async function saveMcpServer() {
@@ -597,31 +666,49 @@ export function SettingsPanel({
 
   const skillsContent = (
     <>
-      <ModuleHeader badge={`${skills.filter((item) => item.enabled !== false).length}/${skills.length} 已启用`} title="技能管理">
-        <Button icon={<Plus size={15} />} onClick={() => setSkillDraft({ ...emptySkillDraft })} variant="soft">
+      <ModuleHeader badge={`${visibleSkills.length} 个技能`} title="技能管理">
+        <IconButton
+          disabled={skillsLoading || skillSaving || !workspaceRoot}
+          label="刷新技能"
+          onClick={refreshSkills}
+        >
+          <RefreshCw size={15} />
+        </IconButton>
+        <Button
+          disabled={!workspaceRoot || skillSaving}
+          icon={<Plus size={15} />}
+          onClick={() => {
+            setSkillError('');
+            setSkillDraft({ ...emptySkillDraft });
+          }}
+          variant="soft"
+        >
           新建技能
         </Button>
       </ModuleHeader>
+      {skillsError || skillError ? (
+        <ErrorMessage className="settings-error">{skillError || skillsError}</ErrorMessage>
+      ) : null}
       <div className="settings-manager-grid">
         <div className="settings-manager-list" data-testid="settings-skill-list">
-          {skills.length === 0 ? (
-            <EmptyState title="暂无技能">添加技能目录后可在这里统一管理。</EmptyState>
-          ) : skills.map((skill) => (
+          {visibleSkills.length === 0 ? (
+            <EmptyState title={skillsLoading ? '正在加载技能' : '暂无托管技能'}>
+              {workspaceRoot
+                ? '创建 skill 后会写入当前工作区 .codex/skills。'
+                : '打开工作区后可管理托管技能。'}
+            </EmptyState>
+          ) : visibleSkills.map((skill) => (
             <ManagerItem
-              active={skillDraft?.id === skill.id}
-              enabled={skill.enabled !== false}
+              active={skillDraft?.name === skill.name && !skillDraft?.isNew}
+              disabled={skillSaving}
+              enabled
               icon={Blocks}
-              key={skill.id}
-              meta={skill.path}
+              key={skill.name}
+              meta={skill.path || skill.description}
               name={skill.name}
-              onDelete={() => {
-                updateSetting('skills', skills.filter((item) => item.id !== skill.id));
-                if (skillDraft?.id === skill.id) setSkillDraft(null);
-              }}
-              onSelect={() => setSkillDraft({ ...skill })}
-              onToggle={(event) => updateSetting('skills', skills.map((item) => (
-                item.id === skill.id ? { ...item, enabled: event.target.checked } : item
-              )))}
+              onDelete={() => deleteSkill(skill)}
+              onSelect={() => selectSkill(skill)}
+              onToggle={() => {}}
             />
           ))}
         </div>
@@ -629,48 +716,59 @@ export function SettingsPanel({
           {skillDraft ? (
             <>
               <div className="settings-editor-title">
-                <strong>{skillDraft.id ? '编辑技能' : '新建技能'}</strong>
-                <Badge>本机</Badge>
+                <strong>{skillDraft.isNew ? '新建技能' : '编辑技能'}</strong>
+                <Badge>工作区</Badge>
               </div>
               <Field className="settings-row" label="名称">
                 <input
+                  disabled={!skillDraft.isNew || skillSaving}
                   onChange={(event) => setSkillDraft((current) => ({ ...current, name: event.target.value }))}
-                  placeholder="代码审查"
+                  placeholder="code-review"
                   type="text"
                   value={skillDraft.name}
                 />
               </Field>
-              <Field className="settings-row" label="路径">
-                <input
-                  onChange={(event) => setSkillDraft((current) => ({ ...current, path: event.target.value }))}
-                  placeholder="C:\\Users\\name\\.codex\\skills\\review"
-                  type="text"
-                  value={skillDraft.path}
-                />
-              </Field>
+              {skillDraft.path ? (
+                <Field className="settings-row" label="路径">
+                  <input disabled readOnly type="text" value={skillDraft.path} />
+                </Field>
+              ) : null}
               <Field className="settings-row" label="描述">
                 <textarea
+                  disabled={skillSaving}
                   onChange={(event) => setSkillDraft((current) => ({ ...current, description: event.target.value }))}
-                  placeholder="技能用途"
-                  rows={4}
+                  placeholder="用于选择该技能的简短说明"
+                  rows={3}
                   value={skillDraft.description}
                 />
               </Field>
-              <label className="settings-check">
-                <input
-                  checked={skillDraft.enabled !== false}
-                  onChange={(event) => setSkillDraft((current) => ({ ...current, enabled: event.target.checked }))}
-                  type="checkbox"
+              <Field className="settings-row" label="指令">
+                <textarea
+                  disabled={skillSaving}
+                  onChange={(event) => setSkillDraft((current) => ({ ...current, instructions: event.target.value }))}
+                  placeholder="完整 Markdown 指令"
+                  rows={8}
+                  value={skillDraft.instructions}
                 />
-                <span>启用技能</span>
-              </label>
+              </Field>
               <div className="settings-editor-actions">
                 <Button onClick={() => setSkillDraft(null)} variant="ghost">取消</Button>
-                <Button disabled={!skillDraft.name.trim() || !skillDraft.path.trim()} onClick={saveSkill}>保存技能</Button>
+                <Button
+                  disabled={
+                    skillSaving
+                    || !skillDraft.name.trim()
+                    || !skillDraft.description.trim()
+                    || !skillDraft.instructions.trim()
+                    || !workspaceRoot
+                  }
+                  onClick={saveSkill}
+                >
+                  {skillSaving ? '保存中' : '保存技能'}
+                </Button>
               </div>
             </>
           ) : (
-            <EmptyState title="选择技能">从左侧选择技能，或新建一个技能配置。</EmptyState>
+            <EmptyState title="选择技能">从左侧选择技能，或新建一个托管技能。</EmptyState>
           )}
         </div>
       </div>

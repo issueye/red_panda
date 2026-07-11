@@ -17,6 +17,7 @@ type Set struct {
 	Permission PermissionController
 	Provider   ProviderProfileController
 	MCPServers MCPServerConfigController
+	Skills     SkillController
 	WebSocket  WebSocketController
 }
 
@@ -33,6 +34,7 @@ func NewSet(services service.Set, hub *eventhub.Hub) Set {
 		Permission: PermissionController{Services: services},
 		Provider:   ProviderProfileController{Services: services},
 		MCPServers: MCPServerConfigController{Services: services},
+		Skills:     SkillController{Services: services},
 		WebSocket: WebSocketController{
 			Services: services,
 			Hub:      hub,

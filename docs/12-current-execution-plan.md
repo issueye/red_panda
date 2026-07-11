@@ -27,21 +27,22 @@ Current state by layer:
 
 | Layer | Current state | Stability | Next concern |
 | --- | --- | --- | --- |
-| Protocol | Existing run/memory contracts plus MCP config and discovery DTOs. | Read-only discovery contract complete | MCP call contracts remain. |
-| Agent Runtime | Existing Agent features plus one-shot MCP stdio initialize and `tools/list` discovery. | v0.1.5 discovery gate passed | MCP tool registration and `tools/call` are not implemented. |
-| Gateway | Validated MCP config CRUD plus discovery proxy under `/api/v1/mcp/servers/:id/discover`. | Discovery proxy complete | Gateway never owns MCP processes or calls tools. |
-| Desktop | MCP configuration management plus health, server metadata, and read-only discovered tool visibility. | v0.1.5 UI complete | No callable MCP tools. |
-| Verification | Fake MCP process, timeout, IO isolation, cleanup, Gateway proxy, frontend, protocol compatibility, and race coverage pass. | Read-only discovery covered | Executable MCP gates remain future work. |
+| Protocol | Existing run/memory contracts plus MCP config/discovery DTOs and managed skill summary/detail/mutate/delete DTOs and method constants. | Read-only discovery + skill management contracts complete | MCP call contracts remain. |
+| Agent Runtime | Existing Agent features plus one-shot MCP stdio initialize/`tools/list` discovery, managed `skill.list`/`skill.delete` tools, and `agent.skills`/`agent.skill.load`/`create`/`update`/`delete` handlers. | v0.1.5 discovery + skill management gates passed | MCP tool registration and `tools/call` are not implemented. |
+| Gateway | Validated MCP config CRUD + discovery proxy, skill management `GET/POST/PUT/DELETE /api/v1/skills[/:name]` proxying Runtime, and a request-context-detached Runtime subprocess. | Discovery proxy + skill management complete | Gateway never owns MCP processes or calls tools. |
+| Desktop | MCP configuration management, read-only discovered tool visibility, and a Gateway-backed Skills tab (list/create/edit/delete). | v0.1.5 UI + Skills tab complete | No callable MCP tools. |
+| Verification | Fake MCP process, timeout, IO isolation, cleanup, Gateway proxy, frontend, protocol compatibility (including skill CRUD), Runtime lifecycle regression, and race coverage pass. | Read-only discovery + skill management covered | Executable MCP gates remain future work. |
 
 ## 2. Active Rule
 
-M0 stabilization through v0.1.5 read-only MCP discovery is implemented. The next controlled slice is stabilization before executable MCP integration.
+M0 stabilization through v0.1.5 read-only MCP discovery and the managed skills surface (Slices 1–4) are implemented. The next controlled slice is process-child terminal-state stabilization before executable MCP integration.
 
 Allowed now:
 
 1. Fix process-child failed, denied, and cancelled terminal-state projection.
 2. Expand skill subagent failure and cancellation coverage.
 3. Design the later MCP registry and permission integration without enabling `tools/call` yet.
+4. Polish managed skills UX (e.g. validation feedback) without adding automatic selection.
 
 Not allowed now:
 
@@ -68,7 +69,8 @@ Only the following tasks are active, in this order.
 | 7 | Desktop MCP config management | Desktop DTO/App/Settings/UI tests | Status: implemented against Gateway APIs. |
 | 8 | Configuration slice integration gate | Go/frontend/protocol compatibility | Status: passed, including Wails build and real-provider smoke. |
 | 9 | MCP read-only discovery | v0.1.5 scope | Status: implemented and verified. |
-| 10 | Process-child terminal-state stabilization | Agent Runtime | Status: next controlled slice. |
+| 10 | Managed skills discovery + management | Protocol/Runtime/Gateway/Desktop | Status: implemented and verified (Slices 1–4, `docs/29-skills-development-plan.md`). Includes Gateway Runtime request-context detachment fix with regression test. |
+| 11 | Process-child terminal-state stabilization | Agent Runtime | Status: next controlled slice. |
 
 ## 4. Parallel Worker Plan
 
@@ -117,11 +119,11 @@ Pause and reassess before coding if any of these happen:
 
 ## 7. Immediate Next Action
 
-The configuration surface and its integration gate are complete. The immediate action is to begin only the v0.1.5 read-only discovery scope.
+The managed skills surface (Slices 1–4) and its integration gate are complete and verified on 2026-07-11. The next controlled slice is process-child terminal-state stabilization.
 
 Next controlled work:
 
-1. Keep Gateway free of MCP process execution.
-2. Start v0.1.5 with controlled process startup, initialize, and read-only `tools/list` only.
-3. Add fake-server coverage for stdout/stderr isolation, timeout, cleanup, and process leaks.
-4. Keep `tools/call`, provider-facing execution, permission integration, and restart policy for later verified slices.
+1. Process-child failed/denied/cancelled terminal-state projection stabilization in Agent Runtime.
+2. Keep Gateway free of MCP process execution.
+3. Keep `tools/call`, provider-facing MCP execution, permission integration, and restart policy for later verified slices.
+4. Automatic managed-skill selection remains out of scope (explicit `skill.run` / management APIs only).

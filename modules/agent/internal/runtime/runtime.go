@@ -150,6 +150,16 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 		return r.handleReply(ctx, req)
 	case methods.MCPDiscover:
 		return r.handleMCPDiscover(ctx, req)
+	case methods.AgentSkills:
+		return r.handleAgentSkills(req)
+	case methods.AgentSkillLoad:
+		return r.handleAgentSkillLoad(req)
+	case methods.AgentSkillCreate:
+		return r.handleAgentSkillCreate(req)
+	case methods.AgentSkillUpdate:
+		return r.handleAgentSkillUpdate(req)
+	case methods.AgentSkillDelete:
+		return r.handleAgentSkillDelete(req)
 	case methods.AgentCancel:
 		return r.handleCancel(req)
 	case methods.AgentSubAgents:
@@ -197,6 +207,11 @@ func (r *Runtime) handleInitialize(req jsonrpc.Request) error {
 			{Name: methods.AgentCancel, Version: 1},
 			{Name: methods.AgentSubAgents, Version: 1},
 			{Name: methods.AgentSubAgentCancel, Version: 1},
+			{Name: methods.AgentSkills, Version: 1},
+			{Name: methods.AgentSkillLoad, Version: 1},
+			{Name: methods.AgentSkillCreate, Version: 1},
+			{Name: methods.AgentSkillUpdate, Version: 1},
+			{Name: methods.AgentSkillDelete, Version: 1},
 			{Name: methods.AgentEvent, Version: 1},
 			{Name: methods.MCPDiscover, Version: 1},
 			{Name: methods.PermissionResolve, Version: 1},

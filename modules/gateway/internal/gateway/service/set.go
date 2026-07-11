@@ -23,6 +23,7 @@ type Set struct {
 	Permission PermissionService
 	Provider   ProviderProfileService
 	MCPServers MCPServerConfigService
+	Skills     SkillService
 }
 
 type AppService struct {
@@ -40,5 +41,6 @@ func NewSet(opts Options) Set {
 		Permission: NewPermissionService(opts.Repos),
 		Provider:   NewProviderProfileService(opts.Repos),
 		MCPServers: NewMCPServerConfigService(opts.Repos, opts.RuntimeClient),
+		Skills:     NewSkillService(opts.RuntimeClient),
 	}
 }
