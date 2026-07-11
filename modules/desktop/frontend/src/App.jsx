@@ -32,6 +32,15 @@ import {
 } from './lib/providerProfiles.js';
 import { buildRunStartOptions, defaultRunSettings } from './lib/runOptions.js';
 import {
+  collectResumeCursors,
+  collectSessionRunStatus,
+  countActiveRuns,
+  createEmptySessionRuntime,
+  MAIN_CONVERSATION_TAB,
+  patchSessionRuntimeMap,
+  resolveEventSessionId,
+} from './lib/sessionRuntime.js';
+import {
   normalizeSkillDetail,
   normalizeSkillsList,
   skillCreatePayload,
@@ -226,13 +235,6 @@ function appendAgentText(items, payload, text) {
   ];
 }
 
-const MAIN_CONVERSATION_TAB = {
-  id: 'main',
-  kind: 'main',
-  title: '主对话',
-  closable: false,
-};
-
 function subagentConversationTabId(subagentId) {
   return `sub:${subagentId}`;
 }
@@ -275,24 +277,16 @@ export function App() {
   const dialog = useDialog();
   const [sessions, setSessions] = useState(initialSessions);
   const [currentSessionId, setCurrentSessionId] = useState('local-design');
-  const [messages, setMessages] = useState(initialMessages);
+  const [sessionRuntimes, setSessionRuntimes] = useState(() => ({
+    'local-design': createEmptySessionRuntime({
+      messages: initialMessages,
+      hydrated: true,
+    }),
+  }));
   const [workspace, setWorkspace] = useState(null);
   const [recentWorkspaces, setRecentWorkspaces] = useState([]);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
-  const [permissions, setPermissions] = useState([]);
   const [globalPendingPermissions, setGlobalPendingPermissions] = useState([]);
-  const [tools, setTools] = useState([]);
-  const [runs, setRuns] = useState([]);
-  const [draft, setDraft] = useState('');
-  const [running, setRunning] = useState(false);
-  const [currentRunId, setCurrentRunId] = useState('');
-  const [rootSeq, setRootSeq] = useState(1);
-  const [subAgents, setSubAgents] = useState([]);
-  const [conversationTabs, setConversationTabs] = useState([MAIN_CONVERSATION_TAB]);
-  const [activeConversationTab, setActiveConversationTab] = useState('main');
-  const [runEventsByRun, setRunEventsByRun] = useState({});
-  const [runEventsLoading, setRunEventsLoading] = useState({});
-  const [runEventsError, setRunEventsError] = useState({});
   const [rightPanelTab, setRightPanelTab] = useState('workspace');
   const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
   const [compactLayout, setCompactLayout] = useState(() => (
@@ -312,6 +306,95 @@ export function App() {
   const [skillsError, setSkillsError] = useState('');
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
+  const currentSessionIdRef = useRef(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
+  const runtime = sessionRuntimes[currentSessionId] || createEmptySessionRuntime({
+    messages: currentSessionId === 'local-design' ? initialMessages : [],
+  });
+  const {
+    messages,
+    tools,
+    permissions,
+    runs,
+    subAgents,
+    conversationTabs,
+    activeConversationTab,
+    running,
+    currentRunId,
+    rootSeq,
+    runEventsByRun,
+    runEventsLoading,
+    runEventsError,
+    draft,
+  } = runtime;
+
+  function patchRuntime(sessionId, updater) {
+    if (!sessionId) return;
+    setSessionRuntimes((map) => patchSessionRuntimeMap(map, sessionId, updater));
+  }
+
+  function patchCurrentRuntime(updater) {
+    patchRuntime(currentSessionIdRef.current, updater);
+  }
+
+  // UI interactions always target the focused session.
+  const setMessages = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    messages: typeof value === 'function' ? value(rt.messages) : value,
+  }));
+  const setTools = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    tools: typeof value === 'function' ? value(rt.tools) : value,
+  }));
+  const setPermissions = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    permissions: typeof value === 'function' ? value(rt.permissions) : value,
+  }));
+  const setRuns = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    runs: typeof value === 'function' ? value(rt.runs) : value,
+  }));
+  const setSubAgents = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    subAgents: typeof value === 'function' ? value(rt.subAgents) : value,
+  }));
+  const setConversationTabs = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    conversationTabs: typeof value === 'function' ? value(rt.conversationTabs) : value,
+  }));
+  const setActiveConversationTab = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    activeConversationTab: typeof value === 'function' ? value(rt.activeConversationTab) : value,
+  }));
+  const setRunning = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    running: typeof value === 'function' ? value(rt.running) : value,
+  }));
+  const setCurrentRunId = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    currentRunId: typeof value === 'function' ? value(rt.currentRunId) : value,
+  }));
+  const setRootSeq = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    rootSeq: typeof value === 'function' ? value(rt.rootSeq) : value,
+  }));
+  const setRunEventsByRun = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    runEventsByRun: typeof value === 'function' ? value(rt.runEventsByRun) : value,
+  }));
+  const setRunEventsLoading = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    runEventsLoading: typeof value === 'function' ? value(rt.runEventsLoading) : value,
+  }));
+  const setRunEventsError = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    runEventsError: typeof value === 'function' ? value(rt.runEventsError) : value,
+  }));
+  const setDraft = (value) => patchCurrentRuntime((rt) => ({
+    ...rt,
+    draft: typeof value === 'function' ? value(rt.draft) : value,
+  }));
 
   const agents = useMemo(() => [
     { id: 'root', name: 'root', role: 'root', status: running ? 'running' : 'idle', seq: rootSeq },
@@ -322,12 +405,16 @@ export function App() {
     [permissions],
   );
   const resumeCursors = useMemo(
-    () => Object.fromEntries(
-      runs
-        .filter((item) => item.status === 'running' || item.status === 'waiting_permission')
-        .map((item) => [item.id, item.lastRootSeq || 0]),
-    ),
-    [runs],
+    () => collectResumeCursors(sessionRuntimes),
+    [sessionRuntimes],
+  );
+  const sessionRunStatus = useMemo(
+    () => collectSessionRunStatus(sessionRuntimes),
+    [sessionRuntimes],
+  );
+  const activeRunCount = useMemo(
+    () => countActiveRuns(sessionRuntimes),
+    [sessionRuntimes],
   );
 
   useEffect(() => {
@@ -438,38 +525,44 @@ export function App() {
     return normalizeSkillDetail(data);
   }
 
-  async function loadSessionState(sessionId) {
+  async function loadSessionState(sessionId, { preserveLive = true } = {}) {
     try {
-      const [history, runs, toolCalls, permissionItems] = await Promise.all([
+      const [history, serverRuns, toolCalls, permissionItems] = await Promise.all([
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/history`),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/runs`).catch(() => []),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/tools`).catch(() => []),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/permissions`).catch(() => []),
       ]);
       const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
-      const normalizedRuns = Array.isArray(runs) ? runs.map(normalizeRun) : [];
-      setMessages(normalized.length > 0 ? normalized : []);
-      setTools(Array.isArray(toolCalls) ? toolCalls.map(normalizeToolCall) : []);
-      setPermissions(Array.isArray(permissionItems)
-        ? permissionItems.map(normalizePermission)
-        : []);
-      setRuns(normalizedRuns);
-      const activeRun = latestActiveRun(runs);
-      setRunning(Boolean(activeRun));
-      setCurrentRunId(activeRun?.id || '');
-      setRootSeq((current) => latestRootSeq(runs, current));
+      const normalizedRuns = Array.isArray(serverRuns) ? serverRuns.map(normalizeRun) : [];
+      const activeRun = latestActiveRun(serverRuns);
+      patchRuntime(sessionId, (prev) => {
+        // Keep in-memory live projection when switching back to a still-running session.
+        if (preserveLive && prev.hydrated && prev.running) {
+          return {
+            ...prev,
+            runs: normalizedRuns.length > 0 ? normalizedRuns : prev.runs,
+            hydrated: true,
+          };
+        }
+        return {
+          ...prev,
+          messages: normalized,
+          tools: Array.isArray(toolCalls) ? toolCalls.map(normalizeToolCall) : [],
+          permissions: Array.isArray(permissionItems)
+            ? permissionItems.map(normalizePermission)
+            : [],
+          runs: normalizedRuns,
+          running: Boolean(activeRun) || prev.running,
+          currentRunId: activeRun?.id || prev.currentRunId || '',
+          rootSeq: latestRootSeq(serverRuns, prev.rootSeq || 1),
+          hydrated: true,
+        };
+      });
       loadGlobalPendingPermissions();
     } catch {
-      setMessages([]);
-      setTools([]);
-      setPermissions([]);
+      patchRuntime(sessionId, () => createEmptySessionRuntime({ hydrated: true }));
       setGlobalPendingPermissions([]);
-      setRuns([]);
-      setRunEventsByRun({});
-      setRunEventsLoading({});
-      setRunEventsError({});
-      setRunning(false);
-      setCurrentRunId('');
     }
   }
 
@@ -513,28 +606,35 @@ export function App() {
   const { status, lastError, request, reconnect } = useGatewayConnection({
     baseUrl: gatewayBase,
     resumeCursors,
-    // 网关事件按类型增量合并到本地投影，避免流式输出时反复拉取整段会话。
+    // 网关事件按 session_id 写入对应会话投影，支持多会话并发 run。
     onEvent: (event) => {
       const payload = event.payload || {};
-      setRootSeq((current) => Math.max(current, payload.root_seq || current));
+      setSessionRuntimes((map) => {
+        const sessionId = resolveEventSessionId(payload, map, currentSessionIdRef.current);
+        if (!sessionId) return map;
+        const prev = map[sessionId] || createEmptySessionRuntime();
+        let next = {
+          ...prev,
+          rootSeq: Math.max(prev.rootSeq || 1, payload.root_seq || 0),
+          running: prev.running || Boolean(payload.root_run_id),
+          currentRunId: prev.currentRunId || payload.root_run_id || '',
+          hydrated: true,
+        };
 
-      const agent = payload.agent || {};
-      if (agent.role === 'subagent' || payload.type === 'subagent_update') {
-        setRightPanelTab('subagents');
-        const id = agent.subagent_id || payload.payload?.subagent_id || agent.agent_id;
-        if (id) {
-          setSubAgents((items) => {
-            const current = items.find((item) => item.id === id);
+        const agent = payload.agent || {};
+        if (agent.role === 'subagent' || payload.type === 'subagent_update') {
+          const id = agent.subagent_id || payload.payload?.subagent_id || agent.agent_id;
+          if (id) {
+            const current = next.subAgents.find((item) => item.id === id);
             const nextStatus = resolveSubAgentLifecycleStatus(
               payload.type,
               payload.payload,
               current?.status,
             );
-            // Only replace summary on lifecycle updates; tool events often carry unrelated text.
             const nextSummary = payload.type === 'subagent_update'
               ? (payload.payload?.summary || current?.summary || '')
               : (current?.summary || payload.payload?.summary || '');
-            const next = {
+            const sub = {
               id,
               role: 'subagent',
               name: payload.payload?.name || agent.name || current?.name || id,
@@ -546,65 +646,68 @@ export function App() {
               summary: nextSummary,
               seq: payload.agent_seq || current?.seq || 0,
             };
-            // Keep open conversation tab titles/status in sync.
-            setConversationTabs((tabs) => tabs.map((tab) => (
-              tab.subagentId === id
-                ? {
-                    ...tab,
-                    title: next.name || tab.title,
-                    status: next.status,
-                    statusLabel: displayStatus(next.status),
-                    runId: next.runId || tab.runId,
-                  }
-                : tab
-            )));
-            return current
-              ? items.map((item) => (item.id === id ? next : item))
-              : [...items, next];
-          });
+            next = {
+              ...next,
+              subAgents: current
+                ? next.subAgents.map((item) => (item.id === id ? sub : item))
+                : [...next.subAgents, sub],
+              conversationTabs: next.conversationTabs.map((tab) => (
+                tab.subagentId === id
+                  ? {
+                      ...tab,
+                      title: sub.name || tab.title,
+                      status: sub.status,
+                      statusLabel: displayStatus(sub.status),
+                      runId: sub.runId || tab.runId,
+                    }
+                  : tab
+              )),
+            };
+          }
         }
-      }
 
-      if (payload.type === 'permission_required') {
-        const permissionID = payload.payload?.permission_id || `perm_${Date.now()}`;
-        const scope = extractAgentScope(payload);
-        const nextPermission = {
-          id: permissionID,
-          runId: payload.payload?.run_id || payload.root_run_id,
-          sessionId: payload.session_id,
-          status: 'pending',
-          summary: payload.payload?.summary || '需要授权',
-          detail: payload.payload?.detail || payload.payload?.tool_name || '系统正在等待处理决定。',
-          risk: payload.payload?.risk,
-          toolName: payload.payload?.tool_name,
-          arguments: payload.payload?.arguments || {},
-          rootSeq: payload.root_seq,
-          agent: scope.agentName,
-          agentRole: scope.agentRole,
-          subagentId: scope.subagentId,
-          createdAt: payload.created_at || new Date().toISOString(),
-        };
-        setPermissions((items) => upsertByID(items, nextPermission));
-        setGlobalPendingPermissions((items) => upsertByID(items, nextPermission));
-        setRuns((items) => items.map((item) => (
-          item.id === (payload.payload?.run_id || payload.root_run_id)
-            ? {
-                ...item,
-                status: 'waiting_permission',
-                lastEventType: payload.type,
-                lastRootSeq: payload.root_seq,
-                updatedAt: new Date().toISOString(),
-              }
-            : item
-        )));
-        setRightPanelTab('activity');
-        return;
-      }
+        if (payload.type === 'permission_required') {
+          const permissionID = payload.payload?.permission_id || `perm_${Date.now()}`;
+          const scope = extractAgentScope(payload);
+          const nextPermission = {
+            id: permissionID,
+            runId: payload.payload?.run_id || payload.root_run_id,
+            sessionId: payload.session_id || sessionId,
+            status: 'pending',
+            summary: payload.payload?.summary || '需要授权',
+            detail: payload.payload?.detail || payload.payload?.tool_name || '系统正在等待处理决定。',
+            risk: payload.payload?.risk,
+            toolName: payload.payload?.tool_name,
+            arguments: payload.payload?.arguments || {},
+            rootSeq: payload.root_seq,
+            agent: scope.agentName,
+            agentRole: scope.agentRole,
+            subagentId: scope.subagentId,
+            createdAt: payload.created_at || new Date().toISOString(),
+          };
+          next = {
+            ...next,
+            permissions: upsertByID(next.permissions, nextPermission),
+            runs: next.runs.map((item) => (
+              item.id === (payload.payload?.run_id || payload.root_run_id)
+                ? {
+                    ...item,
+                    status: 'waiting_permission',
+                    lastEventType: payload.type,
+                    lastRootSeq: payload.root_seq,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item
+            )),
+          };
+          setGlobalPendingPermissions((items) => upsertByID(items, nextPermission));
+          setRightPanelTab('activity');
+          return { ...map, [sessionId]: next };
+        }
 
-      if (payload.type === 'tool_started') {
-        const toolID = payload.payload?.tool_call_id || payload.event_id;
-        const scope = extractAgentScope(payload);
-        setTools((items) => {
+        if (payload.type === 'tool_started') {
+          const toolID = payload.payload?.tool_call_id || payload.event_id;
+          const scope = extractAgentScope(payload);
           const nextTool = {
             id: toolID,
             rootRunId: payload.root_run_id,
@@ -623,125 +726,140 @@ export function App() {
             agentRole: scope.agentRole,
             subagentId: scope.subagentId,
           };
-          const nextTools = [
-            ...items.filter((item) => item.id !== toolID),
-            nextTool,
-          ];
-          setRuns((runItems) => updateRunByID(runItems, payload.root_run_id, {
-            lastEventType: payload.type,
-            lastRootSeq: payload.root_seq,
-            toolCount: countToolsForRun(nextTools, payload.root_run_id),
-            updatedAt: new Date().toISOString(),
-          }));
-          return nextTools;
-        });
-        return;
-      }
-
-      if (payload.type === 'tool_output') {
-        const toolID = payload.payload?.tool_call_id;
-        setTools((items) => items.map((item) => (
-          item.id === toolID
-            ? { ...item, output: `${item.output || ''}${payload.payload?.delta || ''}`, rootSeq: payload.root_seq }
-            : item
-        )));
-        return;
-      }
-
-      if (payload.type === 'tool_finished' || payload.type === 'tool_failed') {
-        const toolID = payload.payload?.tool_call_id;
-        setTools((items) => items.map((item) => (
-          item.id === toolID
-            ? {
-                ...item,
-                status: payload.payload?.status || (payload.type === 'tool_failed' ? 'failed' : 'completed'),
-                output: payload.payload?.output || item.output,
-                error: payload.payload?.error || item.error,
-                durationMs: payload.payload?.duration_ms,
-                rootSeq: payload.root_seq,
-              }
-            : item
-        )));
-        setRuns((items) => items.map((item) => (
-          item.id === payload.root_run_id
-            ? {
-                ...item,
-                lastEventType: payload.type,
-                lastRootSeq: payload.root_seq,
-                updatedAt: new Date().toISOString(),
-              }
-            : item
-        )));
-        return;
-      }
-
-      if (payload.type === 'subagent_update') {
-        return;
-      }
-
-      if (payload.type === 'finish' || payload.type === 'error') {
-        setRunning(false);
-        setCurrentRunId('');
-        setRunEventsByRun((items) => {
-          const next = { ...items };
-          delete next[payload.root_run_id];
-          return next;
-        });
-        setRunEventsError((items) => ({ ...items, [payload.root_run_id]: '' }));
-        setPermissions((items) => items.map((item) => (
-          item.runId === payload.root_run_id && (item.status === 'pending' || !item.status)
-            ? { ...item, status: 'closed', rootSeq: payload.root_seq }
-            : item
-        )));
-        setGlobalPendingPermissions((items) => items.filter((item) => item.runId !== payload.root_run_id));
-        setRuns((items) => items.map((item) => (
-          item.id === payload.root_run_id
-            ? {
-                ...item,
-                status: payload.payload?.status || (payload.type === 'error' ? 'failed' : 'completed'),
-                lastEventType: payload.type,
-                lastRootSeq: payload.root_seq,
-                error: payload.payload?.error || item.error,
-                finishedAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              }
-            : item
-        )));
-      }
-
-      if (payload.type === 'finish') {
-        if (payload.payload?.status === 'cancelled') {
-          setMessages((items) => [
-            ...items,
-            {
-              id: payload.event_id || `cancelled_${Date.now()}`,
-              role: 'assistant',
-              agent: payload.agent?.name || 'runtime',
-              rootSeq: payload.root_seq,
-              text: '运行已取消。',
-            },
-          ]);
-        }
-        return;
-      }
-
-      const text = payload.payload?.delta || payload.payload?.message || '';
-      if (!text) {
-        return;
-      }
-
-      setMessages((items) => appendAgentText(items, payload, text));
-      setRuns((items) => items.map((item) => (
-        item.id === payload.root_run_id
-          ? {
-              ...item,
+          const nextTools = [...next.tools.filter((item) => item.id !== toolID), nextTool];
+          next = {
+            ...next,
+            tools: nextTools,
+            runs: updateRunByID(next.runs, payload.root_run_id, {
               lastEventType: payload.type,
               lastRootSeq: payload.root_seq,
-              messageCount: (item.messageCount || 0) + 1,
+              toolCount: countToolsForRun(nextTools, payload.root_run_id),
               updatedAt: new Date().toISOString(),
-            }
-          : item
-      )));
+            }),
+          };
+          return { ...map, [sessionId]: next };
+        }
+
+        if (payload.type === 'tool_output') {
+          const toolID = payload.payload?.tool_call_id;
+          next = {
+            ...next,
+            tools: next.tools.map((item) => (
+              item.id === toolID
+                ? { ...item, output: `${item.output || ''}${payload.payload?.delta || ''}`, rootSeq: payload.root_seq }
+                : item
+            )),
+          };
+          return { ...map, [sessionId]: next };
+        }
+
+        if (payload.type === 'tool_finished' || payload.type === 'tool_failed') {
+          const toolID = payload.payload?.tool_call_id;
+          next = {
+            ...next,
+            tools: next.tools.map((item) => (
+              item.id === toolID
+                ? {
+                    ...item,
+                    status: payload.payload?.status || (payload.type === 'tool_failed' ? 'failed' : 'completed'),
+                    output: payload.payload?.output || item.output,
+                    error: payload.payload?.error || item.error,
+                    durationMs: payload.payload?.duration_ms,
+                    rootSeq: payload.root_seq,
+                  }
+                : item
+            )),
+            runs: next.runs.map((item) => (
+              item.id === payload.root_run_id
+                ? {
+                    ...item,
+                    lastEventType: payload.type,
+                    lastRootSeq: payload.root_seq,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item
+            )),
+          };
+          return { ...map, [sessionId]: next };
+        }
+
+        if (payload.type === 'subagent_update') {
+          return { ...map, [sessionId]: next };
+        }
+
+        if (payload.type === 'finish' || payload.type === 'error') {
+          const runEventsByRun = { ...next.runEventsByRun };
+          delete runEventsByRun[payload.root_run_id];
+          next = {
+            ...next,
+            running: false,
+            currentRunId: next.currentRunId === payload.root_run_id ? '' : next.currentRunId,
+            runEventsByRun,
+            runEventsError: { ...next.runEventsError, [payload.root_run_id]: '' },
+            permissions: next.permissions.map((item) => (
+              item.runId === payload.root_run_id && (item.status === 'pending' || !item.status)
+                ? { ...item, status: 'closed', rootSeq: payload.root_seq }
+                : item
+            )),
+            runs: next.runs.map((item) => (
+              item.id === payload.root_run_id
+                ? {
+                    ...item,
+                    status: payload.payload?.status || (payload.type === 'error' ? 'failed' : 'completed'),
+                    lastEventType: payload.type,
+                    lastRootSeq: payload.root_seq,
+                    error: payload.payload?.error || item.error,
+                    finishedAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item
+            )),
+          };
+          setGlobalPendingPermissions((items) => items.filter((item) => item.runId !== payload.root_run_id));
+          if (payload.type === 'finish' && payload.payload?.status === 'cancelled') {
+            next = {
+              ...next,
+              messages: [
+                ...next.messages,
+                {
+                  id: payload.event_id || `cancelled_${Date.now()}`,
+                  role: 'assistant',
+                  agent: payload.agent?.name || 'runtime',
+                  rootSeq: payload.root_seq,
+                  text: '运行已取消。',
+                },
+              ],
+            };
+          }
+          return { ...map, [sessionId]: next };
+        }
+
+        if (payload.type === 'skills_injected') {
+          return { ...map, [sessionId]: next };
+        }
+
+        const text = payload.payload?.delta || payload.payload?.message || '';
+        if (!text) {
+          return { ...map, [sessionId]: next };
+        }
+
+        next = {
+          ...next,
+          messages: appendAgentText(next.messages, payload, text),
+          runs: next.runs.map((item) => (
+            item.id === payload.root_run_id
+              ? {
+                  ...item,
+                  lastEventType: payload.type,
+                  lastRootSeq: payload.root_seq,
+                  messageCount: (item.messageCount || 0) + 1,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item
+          )),
+        };
+        return { ...map, [sessionId]: next };
+      });
     },
   });
 
@@ -755,21 +873,12 @@ export function App() {
     });
     const normalized = normalizeSession(session);
     setSessions((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
+    setSessionRuntimes((map) => ({
+      ...map,
+      [normalized.id]: createEmptySessionRuntime({ hydrated: true }),
+    }));
     setCurrentSessionId(normalized.id);
-    setMessages([]);
-    setPermissions([]);
     setGlobalPendingPermissions([]);
-    setTools([]);
-    setRuns([]);
-    setRunEventsByRun({});
-    setRunEventsLoading({});
-    setRunEventsError({});
-    setSubAgents([]);
-    setConversationTabs([MAIN_CONVERSATION_TAB]);
-    setActiveConversationTab('main');
-    setRunning(false);
-    setCurrentRunId('');
-    setRootSeq(1);
   }
 
   async function openWorkspaceRoot(root) {
@@ -811,19 +920,16 @@ export function App() {
     await apiJson(`/api/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
     const remaining = sessions.filter((item) => item.id !== session.id);
     setSessions(remaining);
+    setSessionRuntimes((map) => {
+      const next = { ...map };
+      delete next[session.id];
+      return next;
+    });
     if (currentSessionId === session.id) {
       if (remaining.length > 0) {
         selectSession(remaining[0].id);
       } else {
         setCurrentSessionId('');
-        setMessages([]);
-        setPermissions([]);
-        setTools([]);
-        setRuns([]);
-        setRunEventsByRun({});
-        setSubAgents([]);
-        setRunning(false);
-        setCurrentRunId('');
       }
     }
   }
@@ -863,14 +969,16 @@ export function App() {
         selectSession(remaining[0].id);
       } else {
         setCurrentSessionId('');
-        setMessages([]);
-        setPermissions([]);
-        setTools([]);
-        setRuns([]);
-        setRunning(false);
-        setCurrentRunId('');
       }
     }
+    setSessionRuntimes((map) => {
+      const keep = new Set(remaining.map((item) => item.id));
+      const next = {};
+      for (const [id, runtime] of Object.entries(map)) {
+        if (keep.has(id)) next[id] = runtime;
+      }
+      return next;
+    });
   }
 
   async function browseWorkspaceDirectory() {
@@ -916,78 +1024,84 @@ export function App() {
 
   function selectSession(id) {
     setCurrentSessionId(id);
-    setPermissions([]);
-    setGlobalPendingPermissions([]);
-    setTools([]);
-    setRuns([]);
-    setRunEventsByRun({});
-    setRunEventsLoading({});
-    setRunEventsError({});
-    setSubAgents([]);
-    setConversationTabs([MAIN_CONVERSATION_TAB]);
-    setActiveConversationTab('main');
-    setRunning(false);
-    setCurrentRunId('');
     const target = sessions.find((item) => item.id === id);
     if (target?.workspaceRoot) {
       openWorkspaceRoot(target.workspaceRoot).catch(() => {});
     }
-    loadSessionState(id);
+    // Do not wipe other sessions' live state — only hydrate if needed.
+    const existing = sessionRuntimes[id];
+    if (!existing?.hydrated || (!existing.running && (existing.messages || []).length === 0)) {
+      loadSessionState(id);
+    } else {
+      loadGlobalPendingPermissions();
+    }
   }
 
   async function sendTask() {
+    const sessionId = currentSessionIdRef.current;
     const text = draft.trim();
-    if (!text || running) return;
-    setDraft('');
-    setRunning(true);
-    setSubAgents([]);
-    setMessages((items) => [
-      ...items,
-      { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text },
-    ]);
+    const sessionRunning = sessionRuntimes[sessionId]?.running;
+    if (!text || !sessionId || sessionRunning) return;
+    patchRuntime(sessionId, (rt) => ({
+      ...rt,
+      draft: '',
+      running: true,
+      subAgents: [],
+      messages: [
+        ...rt.messages,
+        { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text },
+      ],
+    }));
     // Refresh settings skills list so the UI matches disk; runtime also reloads per conversation.
     loadSkills().catch(() => {});
 
     try {
       const result = await request('run.start', {
-        session_id: currentSessionId,
+        session_id: sessionId,
         input: { text },
         options: buildRunStartOptions(runSettings, workspace, text),
         subscribe: true,
       });
       const nextRunId = result?.run_id || '';
-      setCurrentRunId(nextRunId);
-      if (nextRunId) {
-        setRuns((items) => [
-          normalizeRun({
-            id: nextRunId,
-            session_id: currentSessionId,
-            workspace_root: workspace?.root_path || workspace?.root || '',
-            runtime_mode: result?.runtime_mode || runSettings.runtimeMode,
-            status: 'running',
-            input: text,
-            last_root_seq: result?.root_seq || rootSeq,
-            message_count: 1,
-            tool_count: 0,
-            started_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }),
-          ...items.filter((item) => item.id !== nextRunId),
-        ]);
-      }
+      patchRuntime(sessionId, (rt) => ({
+        ...rt,
+        running: true,
+        currentRunId: nextRunId || rt.currentRunId,
+        runs: nextRunId
+          ? [
+              normalizeRun({
+                id: nextRunId,
+                session_id: sessionId,
+                workspace_root: workspace?.root_path || workspace?.root || '',
+                runtime_mode: result?.runtime_mode || runSettings.runtimeMode,
+                status: 'running',
+                input: text,
+                last_root_seq: result?.root_seq || rt.rootSeq,
+                message_count: 1,
+                tool_count: 0,
+                started_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }),
+              ...rt.runs.filter((item) => item.id !== nextRunId),
+            ]
+          : rt.runs,
+      }));
       setRightPanelTab('activity');
     } catch (error) {
-      setMessages((items) => [
-        ...items,
-        {
-          id: `gateway_error_${Date.now()}`,
-          role: 'assistant',
-          agent: 'system',
-          text: `启动运行失败：${error.message}`,
-        },
-      ]);
-      setRunning(false);
-      setCurrentRunId('');
+      patchRuntime(sessionId, (rt) => ({
+        ...rt,
+        running: false,
+        currentRunId: '',
+        messages: [
+          ...rt.messages,
+          {
+            id: `gateway_error_${Date.now()}`,
+            role: 'assistant',
+            agent: 'system',
+            text: `启动运行失败：${error.message}`,
+          },
+        ],
+      }));
     }
   }
 
@@ -1403,6 +1517,7 @@ export function App() {
           onOpenWorkspace={() => setWorkspacePickerOpen(true)}
           onSelectSession={selectSession}
           onSelectWorkspace={selectWorkspaceNode}
+          sessionRunStatus={sessionRunStatus}
           sessions={sessions}
           workspace={workspace}
           workspaces={recentWorkspaces}
@@ -1504,7 +1619,11 @@ export function App() {
       {lastError ? <div className="toast" role="alert">{lastError}</div> : null}
       <StatusBar
         rootSeq={rootSeq}
-        runtimeStatus={running ? `运行中（${displayRuntimeMode(runSettings.runtimeMode)}）` : `${displayRuntimeMode(runSettings.runtimeMode)} 待命`}
+        runtimeStatus={
+          activeRunCount > 0
+            ? `${activeRunCount} 个会话运行中（${displayRuntimeMode(runSettings.runtimeMode)}）`
+            : `${displayRuntimeMode(runSettings.runtimeMode)} 待命`
+        }
         status={status}
       />
     </div>

@@ -606,6 +606,30 @@ textarea:focus-visible {
   box-shadow: inset 2px 0 0 var(--color-brand-action);
 }
 
+.session-run-dot {
+  border-radius: var(--radius-pill);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1;
+  margin-left: auto;
+  padding: 2px 6px;
+}
+
+.session-run-dot.is-running {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+}
+
+.session-run-dot.is-waiting_permission {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.tree-session-row.is-running .tree-session-main strong {
+  color: var(--color-info-text);
+}
+
 .tree-workspace-name,
 .tree-session-main strong {
   flex: 1;

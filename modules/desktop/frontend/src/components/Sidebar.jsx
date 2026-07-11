@@ -22,6 +22,7 @@ export function Sidebar({
   currentSessionId,
   workspace,
   workspaces = [],
+  sessionRunStatus = {},
   onCompactSession,
   onDeleteSession,
   onDeleteWorkspace,
@@ -139,11 +140,14 @@ export function Sidebar({
                       {node.sessions.length === 0 ? (
                         <p className="tree-session-empty">暂无会话</p>
                       ) : (
-                        node.sessions.map((session) => (
+                        node.sessions.map((session) => {
+                          const runStatus = sessionRunStatus[session.id] || 'idle';
+                          return (
                           <div
                             className={classNames(
                               'tree-session-row',
                               session.id === currentSessionId && 'active',
+                              runStatus !== 'idle' && `is-${runStatus}`,
                             )}
                             key={session.id}
                           >
@@ -151,11 +155,25 @@ export function Sidebar({
                               className="tree-session-main"
                               data-testid="session-item"
                               onClick={() => onSelectSession(session.id)}
-                              title={session.title}
+                              title={
+                                runStatus === 'running'
+                                  ? `${session.title}（运行中）`
+                                  : runStatus === 'waiting_permission'
+                                    ? `${session.title}（等待授权）`
+                                    : session.title
+                              }
                               type="button"
                             >
                               <MessageSquare size={13} />
                               <strong>{session.title}</strong>
+                              {runStatus !== 'idle' ? (
+                                <em
+                                  className={classNames('session-run-dot', `is-${runStatus}`)}
+                                  data-testid="session-run-status"
+                                >
+                                  {runStatus === 'waiting_permission' ? '授权' : '运行'}
+                                </em>
+                              ) : null}
                             </button>
                             <IconButton
                               className="tree-delete"
@@ -170,7 +188,8 @@ export function Sidebar({
                               <Trash2 size={12} />
                             </IconButton>
                           </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   ) : null}
