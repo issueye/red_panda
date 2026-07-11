@@ -120,7 +120,7 @@ export function ChatConversation({
 
         {running ? (
           <div className="running-panda-row" data-testid="running-panda-row">
-            <RunningPanda label="小熊猫思考中" />
+            <RunningPanda label="小熊猫思考中" variant="bubble" />
           </div>
         ) : null}
       </div>
