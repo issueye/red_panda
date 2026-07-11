@@ -1454,6 +1454,28 @@ textarea:focus-visible {
   margin-top: 4px;
 }
 
+.message-rich-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.message-rich-body .message-markdown {
+  margin-top: 0;
+}
+
+.message-inline-tool {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Inline tool cards stay full-width of the bubble column, not chat-wide. */
+.message-inline-tool .tool-card {
+  max-width: 100%;
+  width: 100%;
+}
+
 /* Compact markdown for assistant messages */
 .markdown-body {
   color: var(--color-text);

@@ -2,6 +2,11 @@ import { ArrowDown, Bot, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildConversationTimeline } from '../../lib/conversationTimeline.js';
 import { classNames, formatSeq } from '../../lib/format.js';
+import {
+  messageHasToolCallMarkup,
+  parseMessageContent,
+  toolItemFromMessageSegment,
+} from '../../lib/messageContent.js';
 import { PermissionCard } from '../PermissionCard.jsx';
 import { ToolCallCard } from '../ToolCallCard.jsx';
 import { Button } from '../ui/button.jsx';
@@ -17,6 +22,50 @@ function displayMessageAgent(message) {
   if (agent === 'assistant') return '助手';
   if (agent === 'subagent') return '子代理';
   return agent;
+}
+
+/**
+ * Render assistant/subagent message body, converting embedded <tool_call> markup
+ * into ToolCallCard entries so raw XML does not leak into the bubble.
+ */
+function AssistantMessageBody({ message }) {
+  const text = message.text || '';
+  const segments = useMemo(() => {
+    if (!messageHasToolCallMarkup(text)) {
+      return [{ type: 'text', text }];
+    }
+    return parseMessageContent(text);
+  }, [text]);
+
+  const hasTool = segments.some((segment) => segment.type === 'tool_call');
+  if (!hasTool) {
+    return <Markdown className="message-markdown">{text}</Markdown>;
+  }
+
+  let toolIndex = 0;
+  return (
+    <div className="message-rich-body" data-testid="message-rich-body">
+      {segments.map((segment, index) => {
+        if (segment.type === 'tool_call') {
+          const item = toolItemFromMessageSegment(segment, message, toolIndex);
+          toolIndex += 1;
+          return (
+            <div className="message-inline-tool" key={`${item.id}:${index}`}>
+              <ToolCallCard item={item} />
+            </div>
+          );
+        }
+        if (!String(segment.text || '').trim()) {
+          return null;
+        }
+        return (
+          <Markdown className="message-markdown" key={`text:${index}`}>
+            {segment.text}
+          </Markdown>
+        );
+      })}
+    </div>
+  );
 }
 
 export function ChatConversation({
@@ -92,7 +141,7 @@ export function ChatConversation({
               {isUser ? (
                 <p className="message-plain">{message.text}</p>
               ) : (
-                <Markdown className="message-markdown">{message.text || ''}</Markdown>
+                <AssistantMessageBody message={message} />
               )}
             </div>
           );
