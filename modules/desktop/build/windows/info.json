@@ -5,11 +5,11 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "My Company",
-			"FileDescription": "A red-panda-desktop application",
-			"LegalCopyright": "© 2026, My Company",
-			"ProductName": "My Product",
-			"Comments": "This is a comment"
+			"CompanyName": "red_panda",
+			"FileDescription": "red_panda - Local AI Agent desktop shell",
+			"LegalCopyright": "© 2026 red_panda",
+			"ProductName": "red_panda",
+			"Comments": "Local AI agent desktop for multi-session workspace runs"
 		}
 	}
 }

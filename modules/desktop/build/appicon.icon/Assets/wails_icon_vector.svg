@@ -1,9 +1,21 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg width="100%" height="100%" viewBox="0 0 583 533" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
-    <g transform="matrix(1,0,0,1,-246,-251)">
-        <g id="Ebene1">
-            <path d="M246,251L265,784L401,784L506,450L507,450L505,784L641,784L829,251L682,251L596,567L595,567L596,251L478,251L378,568L391,251L246,251Z"/>
-        </g>
-    </g>
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+  <rect width="256" height="256" rx="44" fill="#F8FAFC"/>
+  <rect x="16" y="16" width="224" height="224" rx="36" fill="#FFF7ED"/>
+  <rect x="16" y="16" width="224" height="224" rx="36" stroke="#E5E7EB" stroke-width="8"/>
+  <rect x="64" y="64" width="32" height="32" fill="#8A3412"/>
+  <rect x="160" y="64" width="32" height="32" fill="#8A3412"/>
+  <rect x="80" y="80" width="96" height="96" fill="#D95F24"/>
+  <rect x="96" y="64" width="64" height="32" fill="#F97316"/>
+  <rect x="64" y="96" width="32" height="64" fill="#D95F24"/>
+  <rect x="160" y="96" width="32" height="64" fill="#D95F24"/>
+  <rect x="88" y="128" width="80" height="56" fill="#FFF7ED"/>
+  <rect x="72" y="112" width="40" height="32" fill="#7C2D12"/>
+  <rect x="144" y="112" width="40" height="32" fill="#7C2D12"/>
+  <rect x="96" y="120" width="16" height="16" fill="#111827"/>
+  <rect x="144" y="120" width="16" height="16" fill="#111827"/>
+  <rect x="120" y="152" width="16" height="16" fill="#111827"/>
+  <rect x="104" y="176" width="48" height="8" fill="#8A3412"/>
+  <rect x="48" y="168" width="32" height="24" fill="#C2410C"/>
+  <rect x="176" y="168" width="32" height="24" fill="#C2410C"/>
+  <rect x="64" y="184" width="128" height="12" fill="#111827" opacity=".12"/>
 </svg>
