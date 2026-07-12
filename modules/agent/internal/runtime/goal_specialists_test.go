@@ -1,0 +1,186 @@
+package runtime
+
+import (
+	"strings"
+	"testing"
+
+	"redpanda/protocol/methods"
+	"redpanda/protocol/tools"
+)
+
+func TestLookupGoalSpecialists(t *testing.T) {
+	for _, key := range []string{
+		"goal-analyst", "goal-planner", "goal-implementer", "goal-verifier", "goal-evaluator",
+	} {
+		spec, ok := lookupGoalSpecialist(key)
+		if !ok || spec.Key != key {
+			t.Fatalf("missing specialist %s", key)
+		}
+		if strings.TrimSpace(spec.SystemPrompt) == "" {
+			t.Fatalf("empty prompt for %s", key)
+		}
+		if spec.DefaultMaxTurns <= 0 {
+			t.Fatalf("bad default turns for %s", key)
+		}
+	}
+	// Normalization
+	if _, ok := lookupGoalSpecialist("Goal_Analyst"); !ok {
+		t.Fatal("expected normalize Goal_Analyst -> goal-analyst")
+	}
+	if isGoalSpecialistName("random-worker") {
+		t.Fatal("random-worker should not be specialist")
+	}
+}
+
+func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
+	spec, ok := lookupGoalSpecialist("goal-analyst")
+	if !ok {
+		t.Fatal("analyst")
+	}
+	params := methods.ReplyParams{
+		Options: methods.ReplyOptions{
+			ToolDenylist: []string{"custom.denied"},
+		},
+		Input: methods.ReplyInput{Text: "analyze login"},
+	}
+	turns := applyGoalSpecialist(&params, spec, "analyze login", 0)
+	if turns != spec.DefaultMaxTurns {
+		t.Fatalf("turns = %d, want %d", turns, spec.DefaultMaxTurns)
+	}
+	if params.Options.GoalContext != nil || params.Options.TodoContext != nil {
+		t.Fatal("goal/todo context must be nil for specialists")
+	}
+	if params.Options.SpawnSubAgents {
+		t.Fatal("spawn subagents must be false")
+	}
+	// Allowlist must include reads and exclude writes via availableToolsForOptions.
+	defs := []tools.Definition{
+		{Name: "workspace.read_file"},
+		{Name: "workspace.write_file"},
+		{Name: "shell.exec"},
+		{Name: "goal.write"},
+		{Name: "todo.write"},
+		{Name: "subagent.run"},
+		{Name: "web.search"},
+	}
+	filtered := availableToolsForOptions(defs, params.Options)
+	names := map[string]bool{}
+	for _, d := range filtered {
+		names[d.Name] = true
+	}
+	if !names["workspace.read_file"] {
+		t.Fatalf("read should be allowed: %#v", filtered)
+	}
+	if !names["web.search"] {
+		t.Fatalf("web.search should be allowed for analyst: %#v", filtered)
+	}
+	for _, denied := range []string{"workspace.write_file", "shell.exec", "goal.write", "todo.write", "subagent.run"} {
+		if names[denied] {
+			t.Fatalf("%s should be denied for analyst: %#v", denied, filtered)
+		}
+	}
+	if !strings.Contains(params.Options.MemoryContext.Context, "goal-analyst") {
+		t.Fatalf("system prompt missing specialist key: %s", params.Options.MemoryContext.Context)
+	}
+}
+
+func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
+	spec, _ := lookupGoalSpecialist("goal-implementer")
+	params := methods.ReplyParams{Options: methods.ReplyOptions{}}
+	_ = applyGoalSpecialist(&params, spec, "implement step", 100)
+	// Cap to CapMaxTurns
+	if params.Options.MaxToolTurns != spec.CapMaxTurns {
+		t.Fatalf("max turns = %d, want cap %d", params.Options.MaxToolTurns, spec.CapMaxTurns)
+	}
+	defs := []tools.Definition{
+		{Name: "workspace.write_file"},
+		{Name: "shell.exec"},
+		{Name: "goal.write"},
+		{Name: "todo.write"},
+		{Name: "web.search"},
+		{Name: "subagent.run"},
+	}
+	filtered := availableToolsForOptions(defs, params.Options)
+	names := map[string]bool{}
+	for _, d := range filtered {
+		names[d.Name] = true
+	}
+	if !names["workspace.write_file"] || !names["shell.exec"] {
+		t.Fatalf("implementer should allow write/shell: %#v", filtered)
+	}
+	for _, denied := range []string{"goal.write", "todo.write", "web.search", "subagent.run"} {
+		if names[denied] {
+			t.Fatalf("%s should be denied: %#v", denied, filtered)
+		}
+	}
+}
+
+func TestApplyGoalSpecialistVerifierDeniesWrite(t *testing.T) {
+	spec, _ := lookupGoalSpecialist("goal-verifier")
+	params := methods.ReplyParams{Options: methods.ReplyOptions{}}
+	_ = applyGoalSpecialist(&params, spec, "verify", 0)
+	defs := []tools.Definition{
+		{Name: "workspace.read_file"},
+		{Name: "shell.exec"},
+		{Name: "workspace.write_file"},
+		{Name: "workspace.apply_patch"},
+	}
+	filtered := availableToolsForOptions(defs, params.Options)
+	names := map[string]bool{}
+	for _, d := range filtered {
+		names[d.Name] = true
+	}
+	if !names["workspace.read_file"] || !names["shell.exec"] {
+		t.Fatalf("verifier should allow read/shell: %#v", filtered)
+	}
+	if names["workspace.write_file"] || names["workspace.apply_patch"] {
+		t.Fatalf("verifier must deny writes: %#v", filtered)
+	}
+}
+
+func TestGoalSpecialistDisplayNameZH(t *testing.T) {
+	if got := goalSpecialistDisplayName("goal-verifier"); got != "目标验证者" {
+		t.Fatalf("display = %q", got)
+	}
+	if got := goalSpecialistDisplayName("other"); got != "other" {
+		t.Fatalf("fallback = %q", got)
+	}
+}
+
+func TestGoalSpecialistMustMatchCurrentPipelinePhase(t *testing.T) {
+	rt := &Runtime{}
+	rt.setRunGoal("run_goal_phase", &runGoalState{
+		Goal: methods.GoalDTO{
+			ID:            "goal_1",
+			Status:        "active",
+			PipelinePhase: "analyze",
+		},
+		BoundToThisRun: true,
+	})
+
+	analyst, _ := lookupGoalSpecialist("goal-analyst")
+	if err := rt.validateGoalSpecialistPhase("run_goal_phase", analyst); err != nil {
+		t.Fatalf("analyst should be valid in analyze: %v", err)
+	}
+	planner, _ := lookupGoalSpecialist("goal-planner")
+	if err := rt.validateGoalSpecialistPhase("run_goal_phase", planner); err == nil || !strings.Contains(err.Error(), "current phase") {
+		t.Fatalf("planner should be rejected in analyze, got %v", err)
+	}
+}
+
+func TestDisableGoalPipelineForChildClearsInheritedBinding(t *testing.T) {
+	enabled := true
+	options := methods.ReplyOptions{
+		GoalsEnabled: &enabled,
+		GoalID:       "goal_parent",
+		GoalContext:  &methods.GoalContext{GoalID: "goal_parent"},
+	}
+
+	disableGoalPipelineForChild(&options)
+	if options.GoalsEnabled == nil || *options.GoalsEnabled {
+		t.Fatalf("child goals enabled = %#v, want false", options.GoalsEnabled)
+	}
+	if options.GoalID != "" || options.GoalContext != nil {
+		t.Fatalf("child retained goal binding: id=%q context=%#v", options.GoalID, options.GoalContext)
+	}
+}

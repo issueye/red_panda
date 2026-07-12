@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { classNames } from '../lib/format.js';
+import { buildToolOutputSummary, displayToolOutput } from '../lib/toolResultDisplay.js';
 import { IconButton } from './ui/button.jsx';
 
 /**
@@ -70,43 +71,6 @@ function buildToolSummary(args) {
     return only.length > 96 ? `${only.slice(0, 96)}…` : only;
   }
   return `${keys.length} 项参数`;
-}
-
-/**
- * Prefer standardized tool_result.v1 envelope for display text.
- * @param {string} output
- */
-function displayToolOutput(output) {
-  if (!output || typeof output !== 'string') return output || '';
-  const trimmed = output.trim();
-  if (!trimmed.startsWith('{')) return output;
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (parsed && parsed.schema === 'red_panda.tool_result.v1') {
-      return JSON.stringify(parsed, null, 2);
-    }
-  } catch {
-    // keep raw
-  }
-  return output;
-}
-
-/**
- * @param {string} output
- */
-function buildOutputSummary(output) {
-  if (!output || typeof output !== 'string') return '';
-  try {
-    const parsed = JSON.parse(output.trim());
-    if (parsed && parsed.schema === 'red_panda.tool_result.v1') {
-      const text = String(parsed.text || parsed.error || '').replace(/\s+/g, ' ').trim();
-      if (text) return text.length > 96 ? `${text.slice(0, 96)}…` : text;
-      if (parsed.meta?.truncated) return '结果已截断（完整内容见展开区）';
-    }
-  } catch {
-    // ignore
-  }
-  return '';
 }
 
 function countLines(text) {
@@ -195,10 +159,13 @@ export function ToolCallCard({ item }) {
     return formatValue(item.arguments);
   }, [item.arguments]);
 
-  const outputText = useMemo(() => displayToolOutput(item.output || ''), [item.output]);
+  const outputText = useMemo(
+    () => displayToolOutput(item.output || '', item.error || ''),
+    [item.error, item.output],
+  );
   const errorText = item.error || '';
   const argSummary = useMemo(() => buildToolSummary(item.arguments), [item.arguments]);
-  const outputSummary = useMemo(() => buildOutputSummary(item.output || ''), [item.output]);
+  const outputSummary = useMemo(() => buildToolOutputSummary(item.output || ''), [item.output]);
   const summary = argSummary || outputSummary;
   const title = item.displayName || item.name || '工具';
   const toolName = item.name && item.name !== title ? item.name : '';

@@ -7,10 +7,12 @@ require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/gorilla/websocket v1.5.3
 	gorm.io/gorm v1.25.12
+	redpanda/ipc v0.0.0
 	redpanda/protocol v0.0.0
 )
 
 require (
+	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect
@@ -53,4 +55,7 @@ require (
 	modernc.org/sqlite v1.44.3 // indirect
 )
 
-replace redpanda/protocol => ../protocol
+replace (
+	redpanda/ipc => ../ipc
+	redpanda/protocol => ../protocol
+)

@@ -15,7 +15,14 @@ import { WorkspacePanel } from './components/WorkspacePanel.jsx';
 import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
+import { normalizeAgentList } from './lib/agents.js';
 import { gatewayBaseURL } from './lib/config.js';
+import {
+  goalFromUpdatedEvent,
+  goalShouldAutoContinue,
+  normalizeGoalList,
+  pickFocusGoal,
+} from './lib/goals.js';
 import { extractAgentScope } from './lib/conversationScope.js';
 import { selectDirectory } from './lib/desktopShell.js';
 import { displayRuntimeMode, displaySessionKind, displayStatus } from './lib/displayLabels.js';
@@ -30,7 +37,10 @@ import {
   providerProfileCreatePayload,
   providerProfileUpdatePayload,
 } from './lib/providerProfiles.js';
+import { appendDiagnosticLog } from './lib/diagnosticLog.js';
+import { parseCommand } from './lib/commands.js';
 import { buildRunStartOptions, defaultRunSettings } from './lib/runOptions.js';
+import { isRootTerminalRunEvent } from './lib/runEventLifecycle.js';
 import {
   collectResumeCursors,
   collectSessionRunStatus,
@@ -47,6 +57,16 @@ import {
   skillUpdatePayload,
 } from './lib/skills.js';
 import { resolveSubAgentLifecycleStatus } from './lib/subagentStatus.js';
+import {
+  countOpenTodos,
+  normalizeTodo,
+  todosFromToolFinishedPayload,
+  todosFromUpdatedEvent,
+} from './lib/todos.js';
+import {
+  estimateEffectiveSessionTokens,
+  tokenBudgetState,
+} from './lib/tokenBudget.js';
 
 const gatewayBase = gatewayBaseURL();
 
@@ -83,6 +103,28 @@ function loadRunSettings() {
     return { ...defaultRunSettings, ...JSON.parse(saved) };
   } catch {
     return defaultRunSettings;
+  }
+}
+
+const RIGHT_PANEL_WIDTH_KEY = 'red_panda_right_panel_width';
+const RIGHT_PANEL_WIDTH_DEFAULT = 300;
+const RIGHT_PANEL_WIDTH_MIN = 220;
+const RIGHT_PANEL_WIDTH_MAX = 560;
+
+function clampRightPanelWidth(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return RIGHT_PANEL_WIDTH_DEFAULT;
+  return Math.min(RIGHT_PANEL_WIDTH_MAX, Math.max(RIGHT_PANEL_WIDTH_MIN, Math.round(n)));
+}
+
+function loadRightPanelWidth() {
+  if (typeof window === 'undefined') {
+    return RIGHT_PANEL_WIDTH_DEFAULT;
+  }
+  try {
+    return clampRightPanelWidth(window.localStorage.getItem(RIGHT_PANEL_WIDTH_KEY));
+  } catch {
+    return RIGHT_PANEL_WIDTH_DEFAULT;
   }
 }
 
@@ -289,6 +331,8 @@ export function App() {
   const [globalPendingPermissions, setGlobalPendingPermissions] = useState([]);
   const [rightPanelTab, setRightPanelTab] = useState('workspace');
   const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
+  const [rightPanelWidth, setRightPanelWidth] = useState(loadRightPanelWidth);
+  const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [compactLayout, setCompactLayout] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 1100px)').matches
   ));
@@ -297,6 +341,9 @@ export function App() {
   const [providerProfiles, setProviderProfiles] = useState([]);
   const [providerProfilesLoading, setProviderProfilesLoading] = useState(false);
   const [providerProfilesError, setProviderProfilesError] = useState('');
+  const [managedAgents, setManagedAgents] = useState([]);
+  const [managedAgentsLoading, setManagedAgentsLoading] = useState(false);
+  const [managedAgentsError, setManagedAgentsError] = useState('');
   const [mcpServers, setMcpServers] = useState([]);
   const [mcpServersLoading, setMcpServersLoading] = useState(false);
   const [mcpServersError, setMcpServersError] = useState('');
@@ -306,8 +353,14 @@ export function App() {
   const [skillsError, setSkillsError] = useState('');
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
+  const rightPanelResizeRef = useRef(null);
+  const autoCompactBusyRef = useRef(false);
+  const autoCompactSessionRef = useRef('');
+  const autoContinuedGoalsRef = useRef(new Set());
   const currentSessionIdRef = useRef(currentSessionId);
   currentSessionIdRef.current = currentSessionId;
+  const sessionRuntimesRef = useRef(sessionRuntimes);
+  sessionRuntimesRef.current = sessionRuntimes;
 
   const runtime = sessionRuntimes[currentSessionId] || createEmptySessionRuntime({
     messages: currentSessionId === 'local-design' ? initialMessages : [],
@@ -327,6 +380,17 @@ export function App() {
     runEventsLoading,
     runEventsError,
     draft,
+    todos = [],
+    todoOpenCount = 0,
+    todosExpanded = false,
+    todosHydrated = false,
+    contextSummary = null,
+    contextSummaryEndSeq = 0,
+    compacting = false,
+    goal = null,
+    goalHydrated = false,
+    goalExpanded = false,
+    goalBusy = false,
   } = runtime;
 
   function patchRuntime(sessionId, updater) {
@@ -417,6 +481,24 @@ export function App() {
     [sessionRuntimes],
   );
 
+  const selectedProviderProfile = useMemo(() => {
+    if (!runSettings.providerProfileId) {
+      return providerProfiles.find((item) => item.isDefault && item.active !== false)
+        || providerProfiles.find((item) => item.active !== false)
+        || null;
+    }
+    return providerProfiles.find((item) => item.id === runSettings.providerProfileId) || null;
+  }, [providerProfiles, runSettings.providerProfileId]);
+
+  const contextTokenBudget = useMemo(() => {
+    const used = estimateEffectiveSessionTokens(messages, draft, tools, {
+      endSeq: contextSummaryEndSeq,
+      summary: contextSummary,
+    });
+    const maxTokens = Number(selectedProviderProfile?.maxTokens) || 0;
+    return tokenBudgetState(used, maxTokens);
+  }, [messages, draft, tools, selectedProviderProfile, contextSummary, contextSummaryEndSeq]);
+
   useEffect(() => {
     try {
       window.localStorage.setItem('red_panda_run_settings', JSON.stringify(runSettings));
@@ -424,6 +506,55 @@ export function App() {
       // Local storage is optional in embedded desktop previews.
     }
   }, [runSettings]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(RIGHT_PANEL_WIDTH_KEY, String(rightPanelWidth));
+    } catch {
+      // Local storage is optional in embedded desktop previews.
+    }
+  }, [rightPanelWidth]);
+
+  useEffect(() => {
+    if (!rightPanelResizing) return undefined;
+
+    function onPointerMove(event) {
+      const start = rightPanelResizeRef.current;
+      if (!start) return;
+      // Drag left = widen right panel.
+      const next = clampRightPanelWidth(start.startWidth + (start.startX - event.clientX));
+      setRightPanelWidth(next);
+    }
+
+    function onPointerUp() {
+      setRightPanelResizing(false);
+      rightPanelResizeRef.current = null;
+    }
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+  }, [rightPanelResizing]);
+
+  function startRightPanelResize(event) {
+    if (compactLayout) return;
+    event.preventDefault();
+    rightPanelResizeRef.current = {
+      startX: event.clientX,
+      startWidth: rightPanelWidth,
+    };
+    setRightPanelResizing(true);
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture is optional.
+    }
+  }
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1100px)');
@@ -467,6 +598,45 @@ export function App() {
     } finally {
       setProviderProfilesLoading(false);
     }
+  }
+
+  async function loadAgents() {
+    setManagedAgentsLoading(true);
+    setManagedAgentsError('');
+    try {
+      const data = await apiJson('/api/v1/agents');
+      const normalized = normalizeAgentList(data);
+      setManagedAgents(normalized);
+      return normalized;
+    } catch (error) {
+      setManagedAgentsError(error.message);
+      return [];
+    } finally {
+      setManagedAgentsLoading(false);
+    }
+  }
+
+  async function createAgent(payload) {
+    const created = await apiJson('/api/v1/agents', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    await loadAgents();
+    return created;
+  }
+
+  async function updateAgent(id, payload) {
+    const updated = await apiJson(`/api/v1/agents/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    await loadAgents();
+    return updated;
+  }
+
+  async function deleteAgent(id) {
+    await apiJson(`/api/v1/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await loadAgents();
   }
 
   async function loadMcpServers() {
@@ -525,23 +695,178 @@ export function App() {
     return normalizeSkillDetail(data);
   }
 
+  async function hydrateTodos(sessionId) {
+    if (!sessionId) return;
+    try {
+      const data = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/todos`);
+      const items = Array.isArray(data?.items)
+        ? data.items.map(normalizeTodo)
+        : Array.isArray(data)
+          ? data.map(normalizeTodo)
+          : [];
+      const openCount = Number(data?.open_count ?? countOpenTodos(items));
+      patchRuntime(sessionId, (prev) => ({
+        ...prev,
+        todos: items,
+        todoOpenCount: openCount,
+        todosHydrated: true,
+        todosVersion: (prev.todosVersion || 0) + 1,
+      }));
+    } catch {
+      patchRuntime(sessionId, (prev) => ({
+        ...prev,
+        todosHydrated: true,
+      }));
+    }
+  }
+
+  async function hydrateGoals(sessionId) {
+    if (!sessionId || sessionId === 'local-design') return;
+    try {
+      const data = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`);
+      const items = normalizeGoalList(data);
+      const focus = pickFocusGoal(items);
+      patchRuntime(sessionId, (prev) => ({
+        ...prev,
+        goals: items,
+        goal: focus,
+        goalHydrated: true,
+        goalExpanded: focus && (focus.status === 'active' || focus.status === 'paused')
+          ? (prev.goalExpanded || false)
+          : prev.goalExpanded,
+      }));
+    } catch {
+      patchRuntime(sessionId, (prev) => ({
+        ...prev,
+        goalHydrated: true,
+      }));
+    }
+  }
+
+  async function continueGoal(extraText = '', optionsOverrides = {}) {
+    const sessionId = currentSessionIdRef.current;
+    const current = sessionRuntimesRef.current[sessionId]?.goal;
+    if (!sessionId || !current?.id) {
+      throw new Error('当前没有可继续的目标');
+    }
+    patchRuntime(sessionId, (prev) => ({ ...prev, goalBusy: true }));
+    try {
+      const result = await apiJson(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/goals/${encodeURIComponent(current.id)}/continue`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            input: extraText || '',
+            options: buildRunStartOptions(runSettings, workspace, '', optionsOverrides),
+          }),
+        },
+      );
+      const nextRunId = result?.run_id || '';
+      appendDiagnosticLog('info', `已继续目标 ${current.id}`, {
+        source: 'goal',
+        detail: { sessionId, goalId: current.id, runId: nextRunId },
+      });
+      patchRuntime(sessionId, (rt) => ({
+        ...rt,
+        goalBusy: false,
+        running: true,
+        currentRunId: nextRunId || rt.currentRunId,
+        draft: '',
+      }));
+      await hydrateGoals(sessionId);
+      return result;
+    } catch (error) {
+      appendDiagnosticLog('error', `继续目标失败：${error.message}`, { source: 'goal' });
+      patchRuntime(sessionId, (prev) => ({ ...prev, goalBusy: false }));
+      throw error;
+    }
+  }
+
+  useEffect(() => {
+    if (!currentSessionId || currentSessionId === 'local-design') return;
+    if (!goalShouldAutoContinue(goal) || running || compacting || goalBusy) return;
+
+    const key = `${currentSessionId}:${goal.id}:${goal.updatedAt || goal.usedToolTurns}`;
+    if (autoContinuedGoalsRef.current.has(key)) return;
+    autoContinuedGoalsRef.current.add(key);
+    appendDiagnosticLog('info', `Goal 自动续跑 ${goal.id}`, {
+      source: 'goal',
+      detail: { sessionId: currentSessionId, goalId: goal.id, reason: goal.pauseReason },
+    });
+    continueGoal('', { goals_enabled: true }).catch(() => {
+      // The key prevents a render loop. A later server update gets a new key.
+    });
+  }, [compacting, currentSessionId, goal, goalBusy, running]);
+
+  async function cancelGoal() {
+    const sessionId = currentSessionIdRef.current;
+    const current = sessionRuntimesRef.current[sessionId]?.goal;
+    if (!sessionId || !current?.id) {
+      throw new Error('当前没有可取消的目标');
+    }
+    patchRuntime(sessionId, (prev) => ({ ...prev, goalBusy: true }));
+    try {
+      // If a run is active for this session, cancel it first (also pauses goal server-side).
+      const runId = sessionRuntimesRef.current[sessionId]?.currentRunId;
+      if (runId) {
+        await request('run.cancel', { run_id: runId, reason: 'goal cancelled' }).catch(() => null);
+      }
+      await apiJson(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/goals/${encodeURIComponent(current.id)}/cancel`,
+        { method: 'POST', body: '{}' },
+      );
+      await hydrateGoals(sessionId);
+      patchRuntime(sessionId, (prev) => ({
+        ...prev,
+        goalBusy: false,
+        running: false,
+        currentRunId: '',
+      }));
+    } catch (error) {
+      appendDiagnosticLog('error', `取消目标失败：${error.message}`, { source: 'goal' });
+      patchRuntime(sessionId, (prev) => ({ ...prev, goalBusy: false }));
+      throw error;
+    }
+  }
+
   async function loadSessionState(sessionId, { preserveLive = true } = {}) {
     try {
-      const [history, serverRuns, toolCalls, permissionItems] = await Promise.all([
+      const [history, serverRuns, toolCalls, permissionItems, todoData, compactionData, goalData] = await Promise.all([
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/history`),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/runs`).catch(() => []),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/tools`).catch(() => []),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/permissions`).catch(() => []),
+        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/todos`).catch(() => null),
+        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact`).catch(() => null),
+        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`).catch(() => null),
       ]);
       const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
       const normalizedRuns = Array.isArray(serverRuns) ? serverRuns.map(normalizeRun) : [];
       const activeRun = latestActiveRun(serverRuns);
+      const todoItems = Array.isArray(todoData?.items)
+        ? todoData.items.map(normalizeTodo)
+        : [];
+      const todoOpen = Number(todoData?.open_count ?? countOpenTodos(todoItems));
+      const compactSummary = compactionData?.active ? (compactionData.summary || null) : null;
+      const compactEndSeq = compactionData?.active
+        ? Number(compactionData.compaction?.source_end_seq) || 0
+        : 0;
+      const goalItems = goalData ? normalizeGoalList(goalData) : [];
+      const focusGoal = goalData ? pickFocusGoal(goalItems) : null;
       patchRuntime(sessionId, (prev) => {
         // Keep in-memory live projection when switching back to a still-running session.
         if (preserveLive && prev.hydrated && prev.running) {
           return {
             ...prev,
             runs: normalizedRuns.length > 0 ? normalizedRuns : prev.runs,
+            todos: todoData ? todoItems : prev.todos,
+            todoOpenCount: todoData ? todoOpen : prev.todoOpenCount,
+            todosHydrated: true,
+            goals: goalData ? goalItems : prev.goals,
+            goal: goalData ? focusGoal : prev.goal,
+            goalHydrated: true,
+            contextSummary: compactSummary,
+            contextSummaryEndSeq: compactEndSeq,
             hydrated: true,
           };
         }
@@ -556,6 +881,18 @@ export function App() {
           running: Boolean(activeRun) || prev.running,
           currentRunId: activeRun?.id || prev.currentRunId || '',
           rootSeq: latestRootSeq(serverRuns, prev.rootSeq || 1),
+          todos: todoItems,
+          todoOpenCount: todoOpen,
+          todosHydrated: true,
+          todosExpanded: false,
+          todosAutoExpandedOnce: false,
+          goals: goalItems,
+          goal: focusGoal,
+          goalHydrated: true,
+          goalExpanded: false,
+          goalBusy: false,
+          contextSummary: compactSummary,
+          contextSummaryEndSeq: compactEndSeq,
           hydrated: true,
         };
       });
@@ -586,6 +923,7 @@ export function App() {
           loadGlobalPendingPermissions();
         }
         loadProviderProfiles();
+        loadAgents();
         loadMcpServers();
         loadSkills(nextWorkspace?.root_path || nextWorkspace?.root || '');
       })
@@ -609,6 +947,12 @@ export function App() {
     // 网关事件按 session_id 写入对应会话投影，支持多会话并发 run。
     onEvent: (event) => {
       const payload = event.payload || {};
+      if (isRootTerminalRunEvent(payload) && payload.session_id) {
+        // Gateway applies Goal terminal/pause hooks before publishing the event.
+        // Rehydrate so Gateway-owned transitions (natural pause, compact, cancel)
+        // cannot leave the Goal strip showing stale active state.
+        void hydrateGoals(payload.session_id);
+      }
       setSessionRuntimes((map) => {
         const sessionId = resolveEventSessionId(payload, map, currentSessionIdRef.current);
         if (!sessionId) return map;
@@ -753,6 +1097,46 @@ export function App() {
           return { ...map, [sessionId]: next };
         }
 
+        if (payload.type === 'todo_updated') {
+          const body = payload.payload || {};
+          const parsed = todosFromUpdatedEvent(body);
+          const prevOpen = next.todoOpenCount || 0;
+          const shouldAutoExpand =
+            parsed.openCount > 0 && prevOpen === 0 && !next.todosAutoExpandedOnce;
+          next = {
+            ...next,
+            todos: parsed.items,
+            todoOpenCount: parsed.openCount,
+            todosVersion: (next.todosVersion || 0) + 1,
+            todosHydrated: true,
+            todosExpanded: shouldAutoExpand ? true : next.todosExpanded,
+            todosAutoExpandedOnce: shouldAutoExpand ? true : next.todosAutoExpandedOnce,
+          };
+          return { ...map, [sessionId]: next };
+        }
+
+        if (payload.type === 'goal_updated') {
+          const body = payload.payload || {};
+          const updated = goalFromUpdatedEvent(body);
+          if (updated) {
+            const goals = Array.isArray(next.goals) ? [...next.goals] : [];
+            const idx = goals.findIndex((g) => g.id === updated.id);
+            if (idx >= 0) goals[idx] = updated;
+            else goals.unshift(updated);
+            const focus = pickFocusGoal(goals);
+            next = {
+              ...next,
+              goals,
+              goal: focus,
+              goalHydrated: true,
+              goalExpanded: focus && (focus.status === 'active' || focus.status === 'paused')
+                ? true
+                : next.goalExpanded,
+            };
+          }
+          return { ...map, [sessionId]: next };
+        }
+
         if (payload.type === 'tool_finished' || payload.type === 'tool_failed') {
           const toolID = payload.payload?.tool_call_id;
           next = {
@@ -780,6 +1164,23 @@ export function App() {
                 : item
             )),
           };
+          if (payload.type === 'tool_finished') {
+            const parsed = todosFromToolFinishedPayload(payload.payload || {});
+            if (parsed) {
+              const prevOpen = next.todoOpenCount || 0;
+              const shouldAutoExpand =
+                parsed.openCount > 0 && prevOpen === 0 && !next.todosAutoExpandedOnce;
+              next = {
+                ...next,
+                todos: parsed.items,
+                todoOpenCount: parsed.openCount,
+                todosVersion: (next.todosVersion || 0) + 1,
+                todosHydrated: true,
+                todosExpanded: shouldAutoExpand ? true : next.todosExpanded,
+                todosAutoExpandedOnce: shouldAutoExpand ? true : next.todosAutoExpandedOnce,
+              };
+            }
+          }
           return { ...map, [sessionId]: next };
         }
 
@@ -787,7 +1188,7 @@ export function App() {
           return { ...map, [sessionId]: next };
         }
 
-        if (payload.type === 'finish' || payload.type === 'error') {
+        if (isRootTerminalRunEvent(payload)) {
           const runEventsByRun = { ...next.runEventsByRun };
           delete runEventsByRun[payload.root_run_id];
           next = {
@@ -1001,26 +1402,183 @@ export function App() {
     await loadSessionState(normalized.id);
   }
 
-  async function compactSession() {
-    if (!currentSessionId) return;
-    const current = sessions.find((item) => item.id === currentSessionId);
-    const preview = await apiJson(`/api/v1/sessions/${encodeURIComponent(currentSessionId)}/compact/preview`, {
-      method: 'POST',
-      body: JSON.stringify({ keep_tail_messages: 1 }),
+  /**
+   * Pause this session's root run and all subagents before context summary.
+   * Gateway also pauses server-side; Desktop updates local projection promptly.
+   */
+  async function pauseSessionForCompact(sessionId) {
+    const rt = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
+    const runId = rt.currentRunId || '';
+    const activeSubs = (rt.subAgents || []).filter((item) => (
+      item?.status === 'running' || item?.status === 'waiting_permission' || item?.status === 'cancelling'
+    ));
+
+    if (!runId && activeSubs.length === 0 && !rt.running) {
+      return { paused: false, runId: '', subAgents: 0 };
+    }
+
+    appendDiagnosticLog('info', '摘要前暂停会话主代理与子代理', {
+      source: 'compact',
+      detail: {
+        sessionId,
+        runId,
+        subAgentCount: activeSubs.length,
+        subAgentIds: activeSubs.map((item) => item.id),
+      },
     });
-    const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(currentSessionId)}/compact`, {
-      method: 'POST',
-      body: JSON.stringify({
-        name: `${current?.title || '会话'} 的压缩版`,
-        keep_tail_messages: 1,
-        summary: preview.preview?.summary,
-      }),
-    });
-    const normalized = normalizeSession(result.session);
-    setSessions((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
-    setCurrentSessionId(normalized.id);
-    await loadSessionState(normalized.id);
+
+    // Mark local state as paused so the UI stops accepting sends immediately.
+    patchRuntime(sessionId, (prev) => ({
+      ...prev,
+      compacting: true,
+      running: false,
+      subAgents: (prev.subAgents || []).map((item) => (
+        item.status === 'running' || item.status === 'waiting_permission'
+          ? { ...item, status: 'cancelling', summary: '摘要前暂停' }
+          : item
+      )),
+    }));
+
+    // Cancel subagents first, then the root run (mirrors gateway order).
+    await Promise.all(activeSubs.map((agent) => request('subagent.cancel', {
+      run_id: agent.rootRunId || runId,
+      subagent_id: agent.id,
+      reason: 'session compact pause',
+    }).catch(() => null)));
+
+    if (runId) {
+      await request('run.cancel', {
+        run_id: runId,
+        reason: 'session compact pause',
+      }).catch(() => null);
+    }
+
+    // Wait briefly for finish events to land so history is stable.
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline) {
+      const latest = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
+      const stillRunning = latest.running;
+      const stillActiveSubs = (latest.subAgents || []).some((item) => (
+        item?.status === 'running' || item?.status === 'waiting_permission' || item?.status === 'cancelling'
+      ));
+      if (!stillRunning && !stillActiveSubs) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+
+    patchRuntime(sessionId, (prev) => ({
+      ...prev,
+      running: false,
+      currentRunId: '',
+      compacting: true,
+      subAgents: (prev.subAgents || []).map((item) => (
+        item.status === 'running' || item.status === 'waiting_permission' || item.status === 'cancelling'
+          ? { ...item, status: 'cancelled', summary: '已为上下文摘要暂停' }
+          : item
+      )),
+    }));
+
+    return { paused: true, runId, subAgents: activeSubs.length };
   }
+
+  async function compactSession({ silent = false } = {}) {
+    const sessionId = currentSessionIdRef.current;
+    if (!sessionId || sessionId === 'local-design') return null;
+
+    patchRuntime(sessionId, (prev) => ({ ...prev, compacting: true }));
+    try {
+      const pauseInfo = await pauseSessionForCompact(sessionId);
+
+      // Keep recent conversation rounds verbatim for the model. Full UI history remains unchanged.
+      const compactBody = {
+        keep_tail_turns: 3,
+        mode: 'auto',
+        provider_profile_id: runSettings.providerProfileId || undefined,
+      };
+      appendDiagnosticLog('info', '开始更新会话上下文摘要（保留最近 3 轮原文）', {
+        source: 'compact',
+        detail: { ...compactBody, paused: pauseInfo },
+      });
+      const preview = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact/preview`, {
+        method: 'POST',
+        body: JSON.stringify(compactBody),
+      });
+      const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...compactBody,
+          summary: preview.preview?.summary,
+        }),
+      });
+      patchRuntime(sessionId, (prev) => ({
+        ...prev,
+        compacting: false,
+        running: false,
+        contextSummary: result.summary || preview.preview?.summary || null,
+        contextSummaryEndSeq: Number(result.compaction?.source_end_seq) || 0,
+        messages: pauseInfo.paused
+          ? [
+              ...prev.messages,
+              {
+                id: `compact_pause_${Date.now()}`,
+                role: 'assistant',
+                agent: 'system',
+                text: '已暂停当前会话与子代理并完成上下文摘要。可继续发送下一条消息。',
+              },
+            ]
+          : prev.messages,
+      }));
+      appendDiagnosticLog('info', `会话上下文摘要已更新（${preview.preview?.summary_method || 'unknown'}）`, {
+        source: 'compact',
+        detail: {
+          sessionId,
+          sourceEndSeq: result.compaction?.source_end_seq,
+          keepTailTurns: preview.preview?.keep_tail_turns,
+          summaryMethod: preview.preview?.summary_method,
+          pausedRuns: result.paused_runs ?? preview.paused_runs ?? 0,
+        },
+      });
+      if (!silent) {
+        // Manual compact stays quiet; auto path can toast via caller.
+      }
+      await hydrateGoals(sessionId);
+      return result.compaction || null;
+    } catch (error) {
+      patchRuntime(sessionId, (prev) => ({ ...prev, compacting: false }));
+      throw error;
+    }
+  }
+
+  // Auto-compact when estimated context usage hits 90% of provider max_tokens.
+  // May fire mid-run: compactSession pauses the session + subagents first.
+  useEffect(() => {
+    if (!contextTokenBudget.autoCompact) return;
+    if (!currentSessionId || currentSessionId === 'local-design') return;
+    if (autoCompactBusyRef.current) return;
+    if (compacting) return;
+    // Avoid re-firing on the same session until compact succeeds and usage drops.
+    if (autoCompactSessionRef.current === currentSessionId) return;
+
+    autoCompactBusyRef.current = true;
+    autoCompactSessionRef.current = currentSessionId;
+    compactSession({ silent: true })
+      .catch(() => {
+        // Allow retry after a short cool-down if compact failed.
+        window.setTimeout(() => {
+          if (autoCompactSessionRef.current === currentSessionId) {
+            autoCompactSessionRef.current = '';
+          }
+        }, 8000);
+      })
+      .finally(() => {
+        autoCompactBusyRef.current = false;
+      });
+  }, [contextTokenBudget.autoCompact, currentSessionId, compacting]);
+
+  useEffect(() => {
+    if (!contextTokenBudget.autoCompact) {
+      autoCompactSessionRef.current = '';
+    }
+  }, [contextTokenBudget.autoCompact]);
 
   function selectSession(id) {
     setCurrentSessionId(id);
@@ -1040,8 +1598,133 @@ export function App() {
   async function sendTask() {
     const sessionId = currentSessionIdRef.current;
     const text = draft.trim();
-    const sessionRunning = sessionRuntimes[sessionId]?.running;
-    if (!text || !sessionId || sessionRunning) return;
+    const sessionRt = sessionRuntimes[sessionId];
+    const sessionRunning = sessionRt?.running;
+    const sessionCompacting = sessionRt?.compacting;
+    if (!text || !sessionId || sessionRunning || sessionCompacting) return;
+
+    const cmd = parseCommand(text);
+
+    // Local-only commands: help / parse errors — no Gateway run.
+    if (cmd.action === 'help' || cmd.action === 'error') {
+      patchRuntime(sessionId, (rt) => ({
+        ...rt,
+        draft: '',
+        messages: [
+          ...rt.messages,
+          { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: cmd.displayText || text },
+          {
+            id: `cmd_${Date.now()}`,
+            role: 'assistant',
+            agent: 'system',
+            createdAt: new Date().toISOString(),
+            text: cmd.message || '指令已处理',
+          },
+        ],
+      }));
+      return;
+    }
+
+    // /goal cancel — stop goal without starting a run.
+    if (cmd.action === 'cancel_goal') {
+      patchRuntime(sessionId, (rt) => ({
+        ...rt,
+        draft: '',
+        messages: [
+          ...rt.messages,
+          { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: cmd.displayText || text },
+        ],
+      }));
+      try {
+        await cancelGoal();
+        patchRuntime(sessionId, (rt) => ({
+          ...rt,
+          messages: [
+            ...rt.messages,
+            {
+              id: `cmd_${Date.now()}`,
+              role: 'assistant',
+              agent: 'system',
+              createdAt: new Date().toISOString(),
+              text: '已取消当前目标。',
+            },
+          ],
+        }));
+      } catch (error) {
+        patchRuntime(sessionId, (rt) => ({
+          ...rt,
+          messages: [
+            ...rt.messages,
+            {
+              id: `cmd_err_${Date.now()}`,
+              role: 'assistant',
+              agent: 'system',
+              text: `取消目标失败：${error.message}`,
+            },
+          ],
+        }));
+      }
+      return;
+    }
+
+    // /goal continue — reuse continue endpoint.
+    if (cmd.action === 'continue_goal') {
+      const display = cmd.displayText || text;
+      patchRuntime(sessionId, (rt) => ({
+        ...rt,
+        draft: '',
+        running: true,
+        messages: [
+          ...rt.messages,
+          { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: display },
+        ],
+      }));
+      try {
+        const result = await continueGoal(cmd.extraText || '', {
+          require_permission: cmd.requirePermission,
+          spawn_subagents: cmd.spawnSubAgents,
+        });
+        const nextRunId = result?.run_id || '';
+        patchRuntime(sessionId, (rt) => ({
+          ...rt,
+          running: true,
+          currentRunId: nextRunId || rt.currentRunId,
+        }));
+        setRightPanelTab('activity');
+        await hydrateGoals(sessionId);
+      } catch (error) {
+        patchRuntime(sessionId, (rt) => ({
+          ...rt,
+          running: false,
+          messages: [
+            ...rt.messages,
+            {
+              id: `cmd_err_${Date.now()}`,
+              role: 'assistant',
+              agent: 'system',
+              text: `继续目标失败：${error.message}`,
+            },
+          ],
+        }));
+      }
+      return;
+    }
+
+    // Normal run or /goal <objective> (start_goal via create_goal options).
+    const displayText = cmd.displayText || text;
+    const inputText = cmd.inputText || text;
+    const optionOverrides = {
+      require_permission: cmd.requirePermission,
+      spawn_subagents: cmd.spawnSubAgents,
+    };
+    if (cmd.action === 'start_goal') {
+      optionOverrides.create_goal = true;
+      optionOverrides.goal_objective = cmd.objective;
+      optionOverrides.goal_title = cmd.title;
+      optionOverrides.goal_success_criteria = cmd.successCriteria;
+      optionOverrides.goals_enabled = true;
+    }
+
     patchRuntime(sessionId, (rt) => ({
       ...rt,
       draft: '',
@@ -1049,20 +1732,43 @@ export function App() {
       subAgents: [],
       messages: [
         ...rt.messages,
-        { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text },
+        { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: displayText },
       ],
     }));
     // Refresh settings skills list so the UI matches disk; runtime also reloads per conversation.
     loadSkills().catch(() => {});
 
     try {
+      const runOptions = buildRunStartOptions(runSettings, workspace, text, optionOverrides);
+      if (runOptions.log_llm_requests) {
+        appendDiagnosticLog('info', '已开启 LLM 请求记录；本次运行将写入本机诊断目录', {
+          source: 'run',
+          detail: { sessionId, log_llm_requests: true },
+        });
+      }
       const result = await request('run.start', {
         session_id: sessionId,
-        input: { text },
-        options: buildRunStartOptions(runSettings, workspace, text),
+        input: { text: inputText },
+        options: runOptions,
         subscribe: true,
       });
       const nextRunId = result?.run_id || '';
+      appendDiagnosticLog(
+        'info',
+        cmd.action === 'start_goal'
+          ? `Goal 已通过指令启动 ${nextRunId || '(无 run_id)'}`
+          : `运行已启动 ${nextRunId || '(无 run_id)'}`,
+        {
+          source: cmd.action === 'start_goal' ? 'goal' : 'run',
+          detail: {
+            sessionId,
+            runId: nextRunId,
+            runtimeMode: result?.runtime_mode,
+            command: cmd.name,
+            objective: cmd.objective,
+          },
+        },
+      );
       patchRuntime(sessionId, (rt) => ({
         ...rt,
         running: true,
@@ -1075,7 +1781,7 @@ export function App() {
                 workspace_root: workspace?.root_path || workspace?.root || '',
                 runtime_mode: result?.runtime_mode || runSettings.runtimeMode,
                 status: 'running',
-                input: text,
+                input: displayText,
                 last_root_seq: result?.root_seq || rt.rootSeq,
                 message_count: 1,
                 tool_count: 0,
@@ -1086,8 +1792,15 @@ export function App() {
             ]
           : rt.runs,
       }));
+      if (cmd.action === 'start_goal') {
+        await hydrateGoals(sessionId);
+      }
       setRightPanelTab('activity');
     } catch (error) {
+      appendDiagnosticLog('error', `启动运行失败：${error.message}`, {
+        source: 'run',
+        detail: { sessionId },
+      });
       patchRuntime(sessionId, (rt) => ({
         ...rt,
         running: false,
@@ -1477,13 +2190,18 @@ export function App() {
         status={status}
       />
       <SettingsPanel
+        agents={managedAgents}
+        agentsError={managedAgentsError}
+        agentsLoading={managedAgentsLoading}
         mcpServers={mcpServers}
         mcpServersError={mcpServersError}
         mcpServersLoading={mcpServersLoading}
         mcpDiscoveryByServer={mcpDiscoveryByServer}
+        onCreateAgent={createAgent}
         onCreateMcpServer={createMcpServer}
         onCreateProviderProfile={createProviderProfile}
         onCreateSkill={createSkill}
+        onDeleteAgent={deleteAgent}
         onDeleteMcpServer={deleteMcpServer}
         onDeleteProviderProfile={deleteProviderProfile}
         onDeleteSkill={deleteSkill}
@@ -1491,9 +2209,11 @@ export function App() {
         onLoadSkillDetail={loadSkillDetail}
         onChange={setRunSettings}
         onClose={() => setSettingsOpen(false)}
+        onRefreshAgents={loadAgents}
         onRefreshMcpServers={loadMcpServers}
         onRefreshProviderProfiles={loadProviderProfiles}
         onRefreshSkills={loadSkills}
+        onUpdateAgent={updateAgent}
         onUpdateMcpServer={updateMcpServer}
         onUpdateProviderProfile={updateProviderProfile}
         onUpdateSkill={updateSkill}
@@ -1507,7 +2227,10 @@ export function App() {
         skillsLoading={skillsLoading}
         workspaceRoot={currentWorkspaceRoot()}
       />
-      <main className="workspace">
+      <main
+        className={rightPanelResizing ? 'workspace is-resizing-right' : 'workspace'}
+        style={compactLayout ? undefined : { '--right-panel-width': `${rightPanelWidth}px` }}
+      >
         <Sidebar
           currentSessionId={currentSessionId}
           onCompactSession={compactSession}
@@ -1543,11 +2266,36 @@ export function App() {
           onResolvePermission={resolvePermission}
           onSelectConversationTab={setActiveConversationTab}
           onSend={sendTask}
+          onTodosExpandToggle={() => patchCurrentRuntime((rt) => ({
+            ...rt,
+            todosExpanded: !rt.todosExpanded,
+          }))}
+          onTodosRefresh={() => hydrateTodos(currentSessionId)}
+          goal={goal}
+          goalBusy={goalBusy}
+          goalExpanded={goalExpanded}
+          goalLoading={!goalHydrated && !goal}
+          onGoalCancel={() => { cancelGoal().catch(() => {}); }}
+          onGoalContinue={() => { continueGoal().catch(() => {}); }}
+          onGoalExpandToggle={() => patchCurrentRuntime((rt) => ({
+            ...rt,
+            goalExpanded: !rt.goalExpanded,
+          }))}
           permissions={pendingPermissions}
           providerProfileId={runSettings.providerProfileId}
           providerProfiles={providerProfiles}
           running={running}
           subAgents={subAgents}
+          todoOpenCount={todoOpenCount}
+          todos={todos}
+          todosExpanded={todosExpanded}
+          todosLoading={!todosHydrated && todos.length === 0}
+          tokenBudgetEnabled={contextTokenBudget.enabled}
+          tokenDisplayRatio={contextTokenBudget.displayRatio}
+          tokenMax={contextTokenBudget.maxTokens}
+          tokenRatio={contextTokenBudget.ratio}
+          tokenSoftBudget={contextTokenBudget.softBudget}
+          tokenUsed={contextTokenBudget.used}
           tools={tools}
         />
         <div
@@ -1587,6 +2335,36 @@ export function App() {
             if (compactLayout && event.key === 'Escape') closeRightPanelDrawer();
           }}
         >
+          {!compactLayout ? (
+            <button
+              aria-label="拖拽调整右侧面板宽度"
+              aria-orientation="vertical"
+              aria-valuemax={RIGHT_PANEL_WIDTH_MAX}
+              aria-valuemin={RIGHT_PANEL_WIDTH_MIN}
+              aria-valuenow={rightPanelWidth}
+              className="right-panel-resizer"
+              data-testid="right-panel-resizer"
+              onDoubleClick={() => setRightPanelWidth(RIGHT_PANEL_WIDTH_DEFAULT)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowLeft') {
+                  event.preventDefault();
+                  setRightPanelWidth((w) => clampRightPanelWidth(w + 16));
+                } else if (event.key === 'ArrowRight') {
+                  event.preventDefault();
+                  setRightPanelWidth((w) => clampRightPanelWidth(w - 16));
+                } else if (event.key === 'Home') {
+                  event.preventDefault();
+                  setRightPanelWidth(RIGHT_PANEL_WIDTH_MAX);
+                } else if (event.key === 'End') {
+                  event.preventDefault();
+                  setRightPanelWidth(RIGHT_PANEL_WIDTH_MIN);
+                }
+              }}
+              onPointerDown={startRightPanelResize}
+              role="separator"
+              type="button"
+            />
+          ) : null}
           <div className="right-panel-mobile-header">
             <strong>{rightPanelTabs.find((tab) => tab.id === rightPanelTab)?.label || '辅助面板'}</strong>
             <IconButton label="关闭辅助面板" onClick={closeRightPanelDrawer} ref={rightPanelCloseRef}>

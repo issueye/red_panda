@@ -1,6 +1,6 @@
-# Session Fork and Compact Design
+# Session Fork and Context Summary Design
 
-Updated: 2026-07-09
+Updated: 2026-07-12
 
 This is the M2 design document for session fork and compaction. Backend implementation must not start until this document is accepted as the working contract.
 
@@ -11,16 +11,16 @@ Session fork and compact must prepare `red_panda` for longer histories and futur
 Required outcomes:
 
 1. A user can fork a session from a known point and continue in the new branch.
-2. A compacted session can replace long history with an auditable summary.
-3. The original session remains intact unless the user explicitly deletes it.
-4. Every fork or compaction keeps traceable source metadata.
+2. A session can keep its full visible history while older model context is represented by an auditable summary snapshot.
+3. Summary updates never create a new session and never replace or delete original messages.
+4. Every fork or summary snapshot keeps traceable source metadata.
 5. Desktop restore continues to use the existing history/runs/tools/permissions/event APIs with minimal branching logic.
 
 Non-goals for M2:
 
 - Long-term memory storage.
 - MCP tool support.
-- Automatic background compaction.
+- Cross-session summary merging.
 - Cross-workspace session merging.
 - Semantic vector retrieval.
 
@@ -44,35 +44,33 @@ Existing Desktop restore reads:
 - `GET /api/v1/sessions/:id/permissions`
 - `GET /api/v1/runs/:id/events`
 
-Design constraint: forked/compacted sessions should remain compatible with this restore flow.
+Design constraint: forked sessions use the restore flow above; context summaries are loaded separately and do not alter restored history.
 
 ## 3. Domain Terms
 
 | Term | Meaning |
 | --- | --- |
-| Source session | The existing session being forked or compacted. |
+| Source session | The existing session being forked or summarized. |
 | Fork session | A new session created from part of a source session. |
 | Fork point | The last message/run boundary included in the fork. |
-| Compact session | A new session that starts from a generated summary of a source session. |
-| Compaction record | Persistent audit record describing summary input range, output summary, and target session. |
-| Lineage | Parent-child relationship between source, fork, and compact sessions. |
+| Context summary | A model-facing summary snapshot stored separately from the session messages. |
+| Compaction record | Persistent audit record describing the summarized input range and structured summary. |
+| Lineage | Parent-child relationship created by forks. Context summaries do not create lineage. |
 
 ## 4. Design Choice
 
-Use physical-copy sessions for M2.
+Use physical-copy sessions only for forks. Apply context summaries in place.
 
-For a fork, copy messages up to the fork point into a new session. For compaction, create a new session with one synthetic summary message plus optional recent tail messages.
+For a fork, copy messages up to the fork point into a new session. For a summary, keep every original message in the same session and store the structured summary in `session_compactions`. A new run receives the latest summary as system context plus original messages after the summary range.
 
 Why:
 
-- Existing Desktop restore can load forked/compacted sessions without special history overlays.
-- The source session stays immutable and auditable.
+- Existing Desktop restore keeps showing the complete original history.
+- Summary updates do not create sidebar entries or synthetic chat messages.
 - Queries remain simple SQLite/GORM queries by `session_id`.
-- Future optimized storage can deduplicate with `source_message_id` without changing Desktop behavior.
+- Repeated summaries supersede the previous active snapshot without deleting its audit record.
 
-Tradeoff:
-
-- Messages are duplicated. This is acceptable for M2 because local SQLite history is still small, and correctness is more important than storage optimization.
+Tradeoff: model context and visible history are now intentionally different projections, so the Gateway must assemble model context explicitly.
 
 ## 5. Persistence Model
 
@@ -290,30 +288,29 @@ Response:
 ```json
 {
   "session": {
-    "id": "session_...",
-    "name": "Compacted session name",
+    "id": "session_source",
+    "name": "Original session name",
     "workspace_root": "D:\\codes\\issueye\\ai_agents",
-    "parent_id": "session_source",
-    "kind": "compact"
+    "kind": "normal"
   },
   "compaction": {
     "id": "compact_...",
     "source_session_id": "session_source",
-    "target_session_id": "session_...",
+    "target_session_id": "session_source",
     "status": "applied",
     "source_start_seq": 1,
     "source_end_seq": 120
   },
-  "copied_tail_messages": 8
+  "keep_tail_turns": 3
 }
 ```
 
 Rules:
 
-- The target compact session starts with one synthetic assistant summary message.
-- Tail messages are copied after the summary, preserving user-visible recent context.
-- Source session remains unchanged.
-- The summary message must be clearly restorable as a message in `GET /sessions/:id/history`.
+- No target session or synthetic chat message is created.
+- `GET /sessions/:id/history` continues returning the original messages.
+- `GET /sessions/:id/compact` returns the active context-summary snapshot.
+- New runs receive the summary as system context followed by original messages after `source_end_seq`.
 
 ### 6.4 Lineage Query
 
@@ -365,12 +362,12 @@ Later UX:
 Minimum UX:
 
 1. User opens a compact preview for the current session.
-2. Desktop shows source range, summary, and kept tail count.
-3. User applies.
-4. Desktop selects the compacted session.
-5. Existing restore flow loads the synthetic summary plus tail.
+2. Desktop generates and applies a structured summary snapshot.
+3. The current session remains selected and its complete history remains visible.
+4. The token estimate switches to summary plus uncovered recent messages.
+5. Future runs use that model-facing context projection.
 
-The UI must not silently replace the active session.
+The UI must not create or select a derived session for summary updates.
 
 ## 8. Runtime Contract
 
@@ -437,8 +434,8 @@ Add to `scripts/protocol-compat.ps1` after backend exists:
 
 1. Should M2 copy run records/tools/permissions into forked sessions, or keep only message history?
    - Recommendation: do not copy them in M2. Keep lineage to source for audit.
-2. Should compact apply create a new session or mutate the current one?
-   - Recommendation: always create a new session in M2.
+2. Should summary apply create a new session or mutate message history?
+   - Resolved: neither. Store an in-place context snapshot linked to the same session; do not mutate messages.
 3. Should compaction use provider summaries immediately?
    - Recommendation: start deterministic; add provider-backed summaries later with audit events.
 4. Should fork point be message seq or run id?

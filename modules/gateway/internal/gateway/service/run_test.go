@@ -41,9 +41,7 @@ func TestRunServiceStartPassesExistingConversationToRuntime(t *testing.T) {
 	}
 
 	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
-	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
-	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
-	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	runtime := useStdioRuntimeHelper(t, capturePath)
 	service := NewRunService(repos, eventhub.New(), runtime)
 
 	result, err := service.Start(context.Background(), protows.RunStartPayload{
@@ -68,6 +66,9 @@ func TestRunServiceStartPassesExistingConversationToRuntime(t *testing.T) {
 	if params.Input.Text != "follow-up question" {
 		t.Fatalf("input text = %q, want follow-up question", params.Input.Text)
 	}
+	if params.Options.GoalsEnabled == nil || *params.Options.GoalsEnabled {
+		t.Fatalf("regular run goals enabled = %#v, want false", params.Options.GoalsEnabled)
+	}
 	if len(params.Session.Conversation) != 2 {
 		t.Fatalf("conversation len = %d, want 2: %#v", len(params.Session.Conversation), params.Session.Conversation)
 	}
@@ -85,6 +86,38 @@ func TestRunServiceStartPassesExistingConversationToRuntime(t *testing.T) {
 	assertServiceMessage(t, rows[3], "user", result.RunID, "follow-up question")
 }
 
+func TestRunServiceStartEnablesGoalsOnlyWhenExplicitlyRequested(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_goal_opt_in", "Goal opt-in", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
+	runtime := useStdioRuntimeHelper(t, capturePath)
+	service := NewRunService(repos, eventhub.New(), runtime)
+
+	if _, err := service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "explicit goal run"},
+		Options:   map[string]any{"goals_enabled": true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var params methods.ReplyParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params.Options.GoalsEnabled == nil || !*params.Options.GoalsEnabled {
+		t.Fatalf("explicit goal run goals enabled = %#v, want true", params.Options.GoalsEnabled)
+	}
+}
+
 func TestRunServiceStartPassesLatestConversationWindowToRuntime(t *testing.T) {
 	repos, _ := newRunServiceTestFixture(t)
 	session, err := repos.Sessions.Ensure("session_long_context", "Long context", "D:/workspace")
@@ -98,9 +131,7 @@ func TestRunServiceStartPassesLatestConversationWindowToRuntime(t *testing.T) {
 	}
 
 	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
-	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
-	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
-	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	runtime := useStdioRuntimeHelper(t, capturePath)
 	service := NewRunService(repos, eventhub.New(), runtime)
 
 	if _, err := service.Start(context.Background(), protows.RunStartPayload{
@@ -148,9 +179,7 @@ func TestRunServiceStartReservesSlotBeforeRuntimeAccept(t *testing.T) {
 	}
 
 	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
-	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
-	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
-	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	runtime := useStdioRuntimeHelper(t, capturePath)
 	service := NewRunService(repos, eventhub.New(), runtime)
 
 	result, err := service.Start(context.Background(), protows.RunStartPayload{
@@ -184,9 +213,7 @@ func TestRunServiceStartDefaultRuntimeModeIsPerRunProcess(t *testing.T) {
 	}
 
 	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
-	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
-	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
-	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	runtime := useStdioRuntimeHelper(t, capturePath)
 	service := NewRunService(repos, eventhub.New(), runtime)
 
 	result, err := service.Start(context.Background(), protows.RunStartPayload{
@@ -239,9 +266,7 @@ func TestRunServiceStartRejectsSameSessionWhileActive(t *testing.T) {
 	}
 
 	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
-	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
-	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
-	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	runtime := useStdioRuntimeHelper(t, capturePath)
 	service := NewRunService(repos, eventhub.New(), runtime)
 
 	_, err = service.Start(context.Background(), protows.RunStartPayload{
@@ -280,10 +305,8 @@ func TestRunServiceStartRejectsWhenGlobalConcurrentLimitReached(t *testing.T) {
 	}
 
 	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
-	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
-	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
 	t.Setenv("RED_PANDA_MAX_CONCURRENT_RUNS", "")
-	runtime := runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
+	runtime := useStdioRuntimeHelper(t, capturePath)
 	service := NewRunService(repos, eventhub.New(), runtime)
 
 	_, err = service.Start(context.Background(), protows.RunStartPayload{
@@ -646,6 +669,16 @@ func newRunServiceTestFixture(t *testing.T) (repository.Set, RunService) {
 
 	repos := repository.NewSet(db)
 	return repos, NewRunService(repos, eventhub.New(), nil)
+}
+
+// useStdioRuntimeHelper forces stdio transport for TestRunServiceRuntimeHelperProcess.
+// Production defaults to IPC; the helper only speaks NDJSON over stdio.
+func useStdioRuntimeHelper(t *testing.T, capturePath string) *runtimeclient.Client {
+	t.Helper()
+	t.Setenv("RED_PANDA_RUNTIME_IPC", "stdio")
+	t.Setenv("RED_PANDA_RUNTIME_HELPER", "1")
+	t.Setenv("RED_PANDA_RUNTIME_CAPTURE", capturePath)
+	return runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
 }
 
 func messageDeltaEvent(eventID string, runID string, sessionID string, rootSeq uint64, role events.AgentRole, delta string) events.Envelope {

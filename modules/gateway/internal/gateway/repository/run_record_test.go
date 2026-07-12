@@ -104,6 +104,42 @@ func TestRunRecordProjectionDoesNotOverwriteEventCounts(t *testing.T) {
 	}
 }
 
+func TestRunRecordProjectionIgnoresSubagentErrorForRootLifecycle(t *testing.T) {
+	repo := newRunRecordTestRepository(t)
+	now := time.Now().UTC()
+	if err := repo.Start(model.RunRecord{
+		ID:        "run_subagent_error",
+		SessionID: "session_1",
+		Status:    "running",
+		StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ProjectEvent(events.Envelope{
+		EventID:   "evt_subagent_error",
+		RootRunID: "run_subagent_error",
+		RunID:     "run_subagent_error:subagent:worker_1",
+		SessionID: "session_1",
+		RootSeq:   1,
+		Type:      events.EventError,
+		Agent: events.AgentRef{
+			Role:       events.AgentRoleSubAgent,
+			SubAgentID: "worker_1",
+		},
+		Payload:   map[string]any{"status": "failed", "message": "provider timeout"},
+		CreatedAt: now.Add(time.Millisecond),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	row, err := repo.Get("run_subagent_error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "running" || row.FinishedAt != nil || row.Error != "" {
+		t.Fatalf("subagent error changed root lifecycle: %#v", row)
+	}
+}
+
 func TestRunRecordRefreshToolCountFromToolCalls(t *testing.T) {
 	repo := newRunRecordTestRepository(t)
 	now := time.Now().UTC()
@@ -224,6 +260,14 @@ func TestRunRecordCountActiveAndListActive(t *testing.T) {
 	}
 	if listed[0].ID != "run_a" || listed[1].ID != "run_b" || listed[2].ID != "run_c" {
 		t.Fatalf("ListActive order = %#v, want run_a, run_b, run_c", listed)
+	}
+
+	bySession, err := repo.ListActiveBySession("session_1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bySession) != 2 || bySession[0].ID != "run_a" || bySession[1].ID != "run_b" {
+		t.Fatalf("ListActiveBySession(session_1) = %#v, want run_a, run_b", bySession)
 	}
 }
 

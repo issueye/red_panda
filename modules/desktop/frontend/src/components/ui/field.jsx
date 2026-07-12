@@ -1,10 +1,20 @@
 import { classNames } from '../../lib/format.js';
+import { HelpTooltip } from './tooltip.jsx';
 
-export function Field({ children, className, label }) {
+/**
+ * Form field with optional label help tooltip.
+ * Structure avoids nesting interactive help inside a <label> control target.
+ */
+export function Field({ children, className, label, tooltip }) {
   return (
-    <label className={classNames('ui-field', className)}>
-      <span>{label}</span>
+    <div className={classNames('ui-field', className)}>
+      {label ? (
+        <div className="ui-field-label-row">
+          <span className="ui-field-label">{label}</span>
+          {tooltip ? <HelpTooltip content={tooltip} /> : null}
+        </div>
+      ) : null}
       {children}
-    </label>
+    </div>
   );
 }

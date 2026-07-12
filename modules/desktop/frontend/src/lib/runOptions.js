@@ -16,6 +16,8 @@ export const defaultRunSettings = {
   webHttpProxy: '',
   maxToolTurns: 12,
   maxConcurrentRuns: 3,
+  // When true, Agent Runtime writes each LLM request payload to local diagnostic logs.
+  logLlmRequests: false,
 };
 
 export function splitOptionList(value) {
@@ -28,9 +30,24 @@ export function splitOptionList(value) {
     .filter(Boolean);
 }
 
-export function buildRunStartOptions(settings, workspace, text) {
+/**
+ * Build run.start options.
+ * @param {object} settings
+ * @param {object} workspace
+ * @param {string} text raw or cleaned composer text (used for /permission /subagent flags)
+ * @param {object} [overrides] extra options (create_goal, goal_objective, flags from parseCommand, …)
+ */
+export function buildRunStartOptions(settings, workspace, text, overrides = {}) {
   const current = { ...defaultRunSettings, ...(settings || {}) };
-  return {
+  const textStr = String(text || '');
+  const requirePermission = overrides.require_permission != null
+    ? Boolean(overrides.require_permission)
+    : textStr.includes('/permission');
+  const spawnSubAgents = overrides.spawn_subagents != null
+    ? Boolean(overrides.spawn_subagents)
+    : (current.spawnSubAgents || textStr.includes('/subagent'));
+
+  const options = {
     working_dir: workspace?.root_path || workspace?.root || '',
     runtime_mode: current.runtimeMode,
     tool_policy: current.toolPolicy,
@@ -54,8 +71,37 @@ export function buildRunStartOptions(settings, workspace, text) {
     max_concurrent_runs: Number.isFinite(Number(current.maxConcurrentRuns))
       ? Number(current.maxConcurrentRuns)
       : 0,
-    require_permission: text.includes('/permission'),
-    spawn_subagents: current.spawnSubAgents || text.includes('/subagent'),
+    log_llm_requests: Boolean(current.logLlmRequests),
+    require_permission: requirePermission,
+    spawn_subagents: spawnSubAgents,
     subagent_backend: current.subAgentBackend,
+    // Regular conversations must not enter the Goal pipeline implicitly.
+    goals_enabled: false,
   };
+
+  // Goal command overrides (user-initiated create/bind).
+  if (overrides.create_goal) {
+    options.create_goal = true;
+    if (overrides.goal_objective) {
+      options.goal_objective = String(overrides.goal_objective);
+    }
+    if (overrides.goal_title) {
+      options.goal_title = String(overrides.goal_title);
+    }
+    if (overrides.goal_success_criteria) {
+      options.goal_success_criteria = String(overrides.goal_success_criteria);
+    }
+    options.goals_enabled = true;
+  }
+  if (overrides.goal_id) {
+    options.goal_id = String(overrides.goal_id);
+  }
+  if (overrides.continue_goal) {
+    options.continue_goal = true;
+  }
+  if (overrides.goals_enabled != null) {
+    options.goals_enabled = Boolean(overrides.goals_enabled);
+  }
+
+  return options;
 }

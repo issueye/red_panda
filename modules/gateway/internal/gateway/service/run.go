@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
+
 	"redpanda/gateway/internal/gateway/infra/eventhub"
 	"redpanda/gateway/internal/gateway/infra/runtimeclient"
 	"redpanda/gateway/internal/gateway/model"
@@ -84,12 +86,12 @@ func NewRunService(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclie
 
 func (r RunService) RuntimeStatus() map[string]any {
 	status := map[string]any{
-		"available":           false,
-		"mode":                defaultRuntimeMode,
+		"available":            false,
+		"mode":                 defaultRuntimeMode,
 		"default_runtime_mode": defaultRuntimeMode,
-		"max_concurrent_runs": defaultMaxConcurrentRuns,
-		"active_runs":         int64(0),
-		"isolation":           "per_run_process",
+		"max_concurrent_runs":  defaultMaxConcurrentRuns,
+		"active_runs":          int64(0),
+		"isolation":            "per_run_process",
 	}
 	if active, err := r.repos.Runs.CountActive(); err == nil {
 		status["active_runs"] = active
@@ -235,24 +237,10 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		r.startMu.Unlock()
 	}
 
-	history, err := r.repos.Messages.ListLatestConversation(session.ID, 200)
+	conversation, err := r.buildRunConversation(session.ID)
 	if err != nil {
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
-	}
-	conversation := make([]methods.Message, 0, len(history))
-	for _, row := range history {
-		message, err := messageDTO(row)
-		if err != nil {
-			_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-			return StartRunResult{}, err
-		}
-		conversation = append(conversation, methods.Message{
-			ID:        message.ID,
-			Role:      message.Role,
-			Content:   message.Content,
-			CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
-		})
 	}
 	if _, err := r.repos.Messages.Add(session.ID, "user", inputText, runID); err != nil {
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
@@ -287,8 +275,13 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			WebTavilyAPIKey:     stringOption(payload.Options, "web_tavily_api_key"),
 			WebHTTPProxy:        stringOption(payload.Options, "web_http_proxy"),
 			MaxToolTurns:        intOption(payload.Options, "max_tool_turns"),
+			LogLLMRequests:      boolOption(payload.Options, "log_llm_requests"),
 		},
 	}
+	// Goal execution is opt-in. A missing option represents a regular
+	// conversation and must not expose Goal tools or pipeline instructions.
+	goalsEnabled := boolOption(payload.Options, "goals_enabled")
+	params.Options.GoalsEnabled = &goalsEnabled
 	if err := r.applyProviderProfile(&params); err != nil {
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
@@ -297,9 +290,18 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
+	if err := r.applyTodoContext(&params); err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
+		return StartRunResult{}, err
+	}
+	if err := r.applyGoalBindingAndContext(&params, payload.Options); err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
+		return StartRunResult{}, err
+	}
 
 	accepted, err := r.runtime.ReplyWithMode(ctx, runtimeMode, params)
 	if err != nil {
+		_ = NewGoalService(r.repos).PauseByRun(runID, "run_failed")
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
@@ -311,6 +313,57 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		Subscribed:  payload.Subscribe,
 		RuntimeMode: runtimeMode,
 	}, nil
+}
+
+func (r RunService) buildRunConversation(sessionID string) ([]methods.Message, error) {
+	history, err := r.repos.Messages.ListLatestConversation(sessionID, 200)
+	if err != nil {
+		return nil, err
+	}
+	conversation := make([]methods.Message, 0, len(history)+1)
+
+	compaction, compactErr := r.repos.Compactions.LatestAppliedInPlace(sessionID)
+	if compactErr == nil {
+		var summary CompactSummary
+		if err := json.Unmarshal([]byte(compaction.SummaryJSON), &summary); err != nil {
+			return nil, fmt.Errorf("decode active compaction summary: %w", err)
+		}
+		tail, err := r.repos.Messages.ListConversationAfterSeq(sessionID, compaction.SourceEndSeq, 200)
+		if err != nil {
+			return nil, err
+		}
+		history = tail
+		conversation = append(conversation, methods.Message{
+			ID:   compaction.ID,
+			Role: "system",
+			Content: []methods.ContentBlock{{
+				Type: "text",
+				Text: fmt.Sprintf(
+					"Conversation summary covering original messages %d-%d. Use it as prior context; the full original history remains stored in the session.\n\n%s",
+					compaction.SourceStartSeq,
+					compaction.SourceEndSeq,
+					formatCompactSummaryMessage(summary),
+				),
+			}},
+			CreatedAt: compaction.UpdatedAt.Format(time.RFC3339Nano),
+		})
+	} else if compactErr != gorm.ErrRecordNotFound {
+		return nil, compactErr
+	}
+
+	for _, row := range history {
+		message, err := messageDTO(row)
+		if err != nil {
+			return nil, err
+		}
+		conversation = append(conversation, methods.Message{
+			ID:        message.ID,
+			Role:      message.Role,
+			Content:   message.Content,
+			CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
+		})
+	}
+	return conversation, nil
 }
 
 func (r RunService) applyMemoryContext(params *methods.ReplyParams) error {
@@ -342,6 +395,18 @@ func (r RunService) applyMemoryContext(params *methods.ReplyParams) error {
 	return nil
 }
 
+func (r RunService) applyTodoContext(params *methods.ReplyParams) error {
+	ctx, err := NewTodoService(r.repos).FormatTodoContext(params.Session.ID)
+	if err != nil {
+		return err
+	}
+	if ctx == nil || strings.TrimSpace(ctx.Context) == "" {
+		return nil
+	}
+	params.Options.TodoContext = ctx
+	return nil
+}
+
 func (r RunService) applyProviderProfile(params *methods.ReplyParams) error {
 	profileID := params.Options.ProviderProfileID
 	if profileID == "" {
@@ -367,7 +432,191 @@ func (r RunService) Cancel(ctx context.Context, runID string, reason string) err
 	if r.runtime == nil {
 		return fmt.Errorf("runtime client not configured")
 	}
+	// Pause bound Goal before killing the process so force-finish still leaves a clean pause.
+	pauseReason := "user_cancel"
+	if strings.Contains(strings.ToLower(reason), "compact") {
+		pauseReason = "session_compact"
+	}
+	_ = NewGoalService(r.repos).PauseByRun(runID, pauseReason)
 	return r.runtime.Cancel(ctx, methods.CancelParams{RunID: runID, Reason: reason})
+}
+
+// StartGoal creates a user-initiated Goal and starts a bound run (slash /goal …).
+func (r RunService) StartGoal(ctx context.Context, sessionID, objective, title, successCriteria string, options map[string]any) (StartRunResult, error) {
+	if r.runtime == nil {
+		return StartRunResult{}, fmt.Errorf("runtime client not configured")
+	}
+	objective = strings.TrimSpace(objective)
+	if objective == "" {
+		return StartRunResult{}, fmt.Errorf("objective is required")
+	}
+	goalSvc := NewGoalService(r.repos)
+	goal, err := goalSvc.CreateUserInitiated(sessionID, objective, title, successCriteria)
+	if err != nil {
+		return StartRunResult{}, err
+	}
+
+	displayTitle := goal.Title
+	if displayTitle == "" {
+		displayTitle = truncateRunes(goal.Objective, 40)
+	}
+	criteria := goal.SuccessCriteria
+	if criteria == "" {
+		criteria = "完成用户所述目标，并通过合理验证（测试/检查/可演示结果）。"
+	}
+	var b strings.Builder
+	b.WriteString("[启动目标] ")
+	b.WriteString(displayTitle)
+	b.WriteString("\n目标：")
+	b.WriteString(goal.Objective)
+	b.WriteString("\n成功标准：")
+	b.WriteString(criteria)
+	b.WriteString("\n阶段：analyze\n\n")
+	b.WriteString("本 Goal 已由用户指令创建并绑定到本次 run。请按 Goal 流水线执行：\n")
+	b.WriteString("1. 用 goal-analyst 做范围分析（若 trivial 可直接说明后 goal.complete）\n")
+	b.WriteString("2. 用 goal.update 补充 analysis_summary / success_criteria / pipeline_phase，并用 todo.write 写出步骤\n")
+	b.WriteString("3. 逐步 execute → verify，goal.checkpoint 记录进度\n")
+	b.WriteString("4. evaluate 后 goal.complete，并给用户完整报告\n")
+	b.WriteString("不要重新 goal.write 新建目标；当前会话已绑定本 Goal。\n")
+
+	opts := map[string]any{}
+	for k, v := range options {
+		opts[k] = v
+	}
+	opts["goal_id"] = goal.ID
+	opts["goals_enabled"] = true
+	// Avoid double-create if caller also set create_goal.
+	delete(opts, "create_goal")
+
+	return r.Start(ctx, protows.RunStartPayload{
+		SessionID: sessionID,
+		Input:     map[string]any{"text": b.String()},
+		Options:   opts,
+		Subscribe: true,
+	})
+}
+
+// ContinueGoal starts a new run bound to an existing paused/pending goal.
+func (r RunService) ContinueGoal(ctx context.Context, sessionID, goalID, extraText string, options map[string]any) (StartRunResult, error) {
+	if r.runtime == nil {
+		return StartRunResult{}, fmt.Errorf("runtime client not configured")
+	}
+	goalSvc := NewGoalService(r.repos)
+	if err := goalSvc.RepairStaleActive(sessionID); err != nil {
+		return StartRunResult{}, err
+	}
+	goal, err := goalSvc.Get(sessionID, goalID)
+	if err != nil {
+		return StartRunResult{}, err
+	}
+	switch goal.Status {
+	case "paused", "pending":
+		// ok
+	case "active":
+		return StartRunResult{}, fmt.Errorf("goal is already active; wait for the current run or cancel it")
+	default:
+		return StartRunResult{}, fmt.Errorf("goal status %q cannot continue", goal.Status)
+	}
+
+	title := goal.Title
+	if title == "" {
+		title = truncateRunes(goal.Objective, 40)
+	}
+	var b strings.Builder
+	b.WriteString("[继续目标] ")
+	b.WriteString(title)
+	b.WriteString("\n")
+	if goal.CheckpointSummary != "" {
+		b.WriteString("检查点：")
+		b.WriteString(goal.CheckpointSummary)
+		b.WriteString("\n")
+	}
+	if goal.SuccessCriteria != "" {
+		b.WriteString("成功标准：")
+		b.WriteString(goal.SuccessCriteria)
+		b.WriteString("\n")
+	}
+	if goal.PipelinePhase != "" {
+		b.WriteString("阶段：")
+		b.WriteString(goal.PipelinePhase)
+		b.WriteString("\n")
+	}
+	b.WriteString("请从检查点继续，不要无故整单重做分析，除非范围已变化。\n")
+	if strings.TrimSpace(extraText) != "" {
+		b.WriteString("用户补充：")
+		b.WriteString(strings.TrimSpace(extraText))
+		b.WriteString("\n")
+	}
+
+	opts := map[string]any{}
+	for k, v := range options {
+		opts[k] = v
+	}
+	opts["goal_id"] = goal.ID
+	opts["continue_goal"] = true
+	opts["goals_enabled"] = true
+
+	return r.Start(ctx, protows.RunStartPayload{
+		SessionID: sessionID,
+		Input:     map[string]any{"text": b.String()},
+		Options:   opts,
+		Subscribe: true,
+	})
+}
+
+func (r RunService) applyGoalBindingAndContext(params *methods.ReplyParams, options map[string]any) error {
+	goalSvc := NewGoalService(r.repos)
+	_ = goalSvc.RepairStaleActive(params.Session.ID)
+
+	goalID := stringOption(options, "goal_id")
+	continueGoal := boolOption(options, "continue_goal")
+	createGoal := boolOption(options, "create_goal")
+	if params.Options.GoalsEnabled != nil && !*params.Options.GoalsEnabled {
+		if goalID != "" || continueGoal || createGoal {
+			return fmt.Errorf("goals are disabled")
+		}
+		return nil
+	}
+
+	// User-initiated Goal from slash command / run.start create_goal.
+	if createGoal && goalID == "" {
+		objective := strings.TrimSpace(stringOption(options, "goal_objective"))
+		if objective == "" {
+			objective = strings.TrimSpace(params.Input.Text)
+		}
+		if objective == "" {
+			return fmt.Errorf("create_goal requires goal_objective or input text")
+		}
+		created, err := goalSvc.CreateUserInitiated(
+			params.Session.ID,
+			objective,
+			stringOption(options, "goal_title"),
+			stringOption(options, "goal_success_criteria"),
+		)
+		if err != nil {
+			return err
+		}
+		goalID = created.ID
+	}
+
+	if goalID != "" || continueGoal {
+		bound, err := goalSvc.BindToRun(params.Session.ID, params.RunID, goalID, continueGoal)
+		if err != nil {
+			return err
+		}
+		params.Options.GoalID = bound.ID
+		ctx, err := goalSvc.FormatGoalContext(params.Session.ID, bound.ID)
+		if err != nil {
+			return err
+		}
+		params.Options.GoalContext = ctx
+		if bound.MaxToolTurnsSeg > 0 && (params.Options.MaxToolTurns <= 0 || params.Options.MaxToolTurns > bound.MaxToolTurnsSeg) {
+			params.Options.MaxToolTurns = bound.MaxToolTurnsSeg
+		}
+		return nil
+	}
+	// No default bind: only inject context if options already carried a goal_id from client.
+	return nil
 }
 
 func (r RunService) SubAgents(ctx context.Context, params methods.SubAgentsParams) (methods.SubAgentsResult, error) {
@@ -416,8 +665,18 @@ func (r RunService) HandleRuntimeEvent(event events.Envelope) {
 		_ = r.repos.ToolCalls.Project(event)
 		_ = r.repos.Runs.RefreshToolCount(event.RootRunID)
 	}
-	if event.Type == events.EventFinish {
+	if event.Type == events.EventFinish || event.Type == events.EventError {
 		_ = r.repos.Permissions.ClosePendingByRun(event.RootRunID, "closed", "run finished")
+		status := "completed"
+		if event.Type == events.EventError {
+			status = "failed"
+		} else if s, ok := event.Payload["status"].(string); ok && s != "" {
+			status = s
+		}
+		if reason, _ := event.Payload["loop_end_reason"].(string); reason == "budget_exhausted" {
+			status = "budget_exhausted"
+		}
+		_ = NewGoalService(r.repos).OnRootRunTerminal(event.RootRunID, event.SessionID, status)
 	}
 	_ = r.repos.RunEvents.Save(event)
 	if event.Type == events.EventMessageDelta || event.Type == events.EventReasoningDelta {

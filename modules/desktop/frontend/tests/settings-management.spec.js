@@ -7,16 +7,20 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole('button', { name: '设置' }).click();
 });
 
-test('settings exposes four keyboard-accessible management modules', async ({ page }) => {
+test('settings exposes five keyboard-accessible management modules', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: '设置' });
   const tabs = dialog.getByRole('tab');
-  await expect(tabs).toHaveCount(4);
+  await expect(tabs).toHaveCount(5);
   await expect(dialog.getByRole('tab', { name: '供应商' })).toHaveAttribute('aria-selected', 'true');
 
   await dialog.getByRole('tab', { name: '供应商' }).focus();
   await page.keyboard.press('ArrowRight');
   await expect(dialog.getByRole('tab', { name: '技能' })).toBeFocused();
   await expect(dialog.getByRole('tabpanel', { name: '技能管理' })).toBeVisible();
+
+  await dialog.getByRole('tab', { name: '日志' }).click();
+  await expect(dialog.getByRole('tabpanel', { name: '日志审计' })).toContainText('LLM 请求记录');
+  await expect(dialog.getByTestId('settings-diagnostics')).toBeVisible();
 
   await page.keyboard.press('End');
   await expect(dialog.getByRole('tab', { name: '其他' })).toBeFocused();

@@ -1,5 +1,5 @@
 import { Bot, CircleStop, Loader2, MessageSquare } from 'lucide-react';
-import { displaySubAgentBackend } from '../lib/displayLabels.js';
+import { displayAgentName, displaySubAgentBackend } from '../lib/displayLabels.js';
 import { classNames, formatSeq } from '../lib/format.js';
 import { StatusBadge } from './ui/badge.jsx';
 import { IconButton } from './ui/button.jsx';
@@ -40,7 +40,7 @@ export function SubAgentPanel({ agents, onCancelSubAgent, onOpenSubagentConversa
                 type="button"
               >
                 <span className="subagent-heading">
-                  <strong>{agent.name}</strong>
+                  <strong>{displayAgentName(agent.name || agent.id)}</strong>
                   <StatusBadge status={status} />
                 </span>
                 <span className="subagent-meta">事件 {formatSeq(agent.seq)}</span>

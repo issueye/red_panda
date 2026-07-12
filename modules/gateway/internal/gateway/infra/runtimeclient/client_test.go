@@ -3,15 +3,75 @@ package runtimeclient
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"redpanda/protocol/events"
 	"redpanda/protocol/jsonrpc"
 	protocolmcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 )
+
+func TestClientReadStdoutAcceptsLargeToolEvent(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+
+	received := make(chan events.Envelope, 1)
+	client := New("", nil, "test", func(event events.Envelope) {
+		received <- event
+	}, nil)
+	go client.readStdout(reader)
+
+	env := events.Envelope{
+		ProtocolVersion: events.ProtocolVersion,
+		EventID:         "evt_large_tool_output",
+		RootRunID:       "run_large",
+		RunID:           "run_large",
+		SessionID:       "session_large",
+		RootSeq:         1,
+		AgentSeq:        1,
+		Agent: events.AgentRef{
+			AgentID: "root",
+			Role:    events.AgentRoleRoot,
+			Path:    []string{"root"},
+		},
+		Type: events.EventToolFinished,
+		Payload: map[string]any{
+			"tool_call_id": "tool_large",
+			"tool_name":    "workspace.read_file",
+			"status":       "completed",
+			"output":       strings.Repeat("x", 160*1024),
+		},
+	}
+	note, err := jsonrpc.NewNotification(methods.AgentEvent, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(note)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) <= 64*1024 {
+		t.Fatalf("test event is not large enough: %d bytes", len(raw))
+	}
+	go func() {
+		_, _ = fmt.Fprintln(writer, string(raw))
+		_ = writer.Close()
+	}()
+
+	select {
+	case got := <-received:
+		if got.EventID != env.EventID || got.Type != events.EventToolFinished {
+			t.Fatalf("unexpected event: %#v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("large runtime event was not delivered")
+	}
+}
 
 func TestClientHandlesRuntimeOriginatedRequest(t *testing.T) {
 	reader, writer := io.Pipe()
@@ -142,6 +202,10 @@ func stubSleepCommand() (string, []string) {
 // it returns. Skills management (and other out-of-run calls) issue one-shot
 // requests whose context is cancelled as soon as the handler returns.
 func TestRuntimeProcessSurvivesRequestCancellation(t *testing.T) {
+	// Use stdio transport: the sleep stub never dials IPC. The invariant under
+	// test is process lifetime vs request context, independent of transport.
+	t.Setenv("RED_PANDA_RUNTIME_IPC", "stdio")
+
 	command, args := stubSleepCommand()
 	client := New(command, args, "test", nil, nil)
 
@@ -175,4 +239,3 @@ func TestRuntimeProcessSurvivesRequestCancellation(t *testing.T) {
 	}
 	_ = client.Shutdown(context.Background())
 }
-

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -8,13 +9,17 @@ import (
 
 	"gorm.io/gorm"
 
+	"redpanda/gateway/internal/gateway/infra/runtimeclient"
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
 	"redpanda/protocol/methods"
 )
 
+const compactPauseTimeout = 20 * time.Second
+
 type SessionService struct {
-	repos repository.Set
+	repos   repository.Set
+	runtime *runtimeclient.Client
 }
 
 type SessionDTO struct {
@@ -88,7 +93,11 @@ type CompactSummary struct {
 type CompactPreviewRequest struct {
 	SourceRange      SourceRange `json:"source_range"`
 	KeepTailMessages int         `json:"keep_tail_messages"`
-	Mode             string      `json:"mode"`
+	// KeepTailTurns keeps the last N user-led conversation rounds verbatim
+	// (user message + following assistant replies). Preferred over raw message count.
+	KeepTailTurns     int    `json:"keep_tail_turns"`
+	Mode              string `json:"mode"` // auto | llm | local
+	ProviderProfileID string `json:"provider_profile_id,omitempty"`
 }
 
 type CompactPreview struct {
@@ -96,18 +105,19 @@ type CompactPreview struct {
 	SourceStartSeq   uint64         `json:"source_start_seq"`
 	SourceEndSeq     uint64         `json:"source_end_seq"`
 	KeepTailMessages int            `json:"keep_tail_messages"`
+	KeepTailTurns    int            `json:"keep_tail_turns,omitempty"`
+	SummaryMethod    string         `json:"summary_method,omitempty"` // llm | local
 	Summary          CompactSummary `json:"summary"`
-}
-
-type CompactPreviewResult struct {
-	Preview CompactPreview `json:"preview"`
 }
 
 type CompactSessionRequest struct {
-	Name             string         `json:"name"`
-	SourceRange      SourceRange    `json:"source_range"`
-	KeepTailMessages int            `json:"keep_tail_messages"`
-	Summary          CompactSummary `json:"summary"`
+	Name              string         `json:"name"`
+	SourceRange       SourceRange    `json:"source_range"`
+	KeepTailMessages  int            `json:"keep_tail_messages"`
+	KeepTailTurns     int            `json:"keep_tail_turns"`
+	Mode              string         `json:"mode"`
+	ProviderProfileID string         `json:"provider_profile_id,omitempty"`
+	Summary           CompactSummary `json:"summary"`
 }
 
 type CompactionDTO struct {
@@ -123,14 +133,104 @@ type CompactionDTO struct {
 }
 
 type CompactSessionResult struct {
-	Session            SessionDTO    `json:"session"`
-	Lineage            LineageDTO    `json:"lineage"`
-	Compaction         CompactionDTO `json:"compaction"`
-	CopiedTailMessages int           `json:"copied_tail_messages"`
+	Session          SessionDTO     `json:"session"`
+	Compaction       CompactionDTO  `json:"compaction"`
+	Summary          CompactSummary `json:"summary"`
+	KeepTailMessages int            `json:"keep_tail_messages"`
+	KeepTailTurns    int            `json:"keep_tail_turns"`
+	// PausedRuns is how many active root runs were paused before summary.
+	PausedRuns int `json:"paused_runs,omitempty"`
 }
 
-func NewSessionService(repos repository.Set) SessionService {
-	return SessionService{repos: repos}
+type CompactPreviewResult struct {
+	Preview    CompactPreview `json:"preview"`
+	PausedRuns int            `json:"paused_runs,omitempty"`
+}
+
+type CompactionStateResult struct {
+	Active     bool           `json:"active"`
+	Compaction *CompactionDTO `json:"compaction,omitempty"`
+	Summary    CompactSummary `json:"summary"`
+}
+
+func NewSessionService(repos repository.Set, runtime *runtimeclient.Client) SessionService {
+	return SessionService{repos: repos, runtime: runtime}
+}
+
+// pauseSessionForCompact stops the session's active root run and all subagents,
+// then waits until the session is idle so history can be summarized consistently.
+// When the runtime client is unavailable, active run records are force-finished.
+func (s SessionService) pauseSessionForCompact(sessionID string) (int, error) {
+	// Authoritative goal pause even when force-finish has no Runtime event.
+	_ = NewGoalService(s.repos).PauseBySession(sessionID, "session_compact")
+
+	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
+	if err != nil {
+		return 0, err
+	}
+	if len(active) == 0 {
+		return 0, nil
+	}
+
+	// Without a runtime client we cannot stop live workers; mark records cancelled
+	// immediately so summary can proceed against a stable session snapshot.
+	if s.runtime == nil {
+		for _, run := range active {
+			_ = s.repos.Runs.Finish(run.ID, "cancelled", "paused for session compact")
+		}
+		return len(active), nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), compactPauseTimeout)
+	defer cancel()
+
+	for _, run := range active {
+		if res, listErr := s.runtime.SubAgents(ctx, methods.SubAgentsParams{RunID: run.ID}); listErr == nil {
+			for _, item := range res.Items {
+				status := strings.ToLower(strings.TrimSpace(item.Status))
+				if status != "running" && status != "waiting_permission" && status != "cancelling" {
+					continue
+				}
+				_, _ = s.runtime.CancelSubAgent(ctx, methods.SubAgentCancelParams{
+					RunID:      run.ID,
+					SubAgentID: item.SubAgentID,
+					Reason:     "session compact pause",
+				})
+			}
+		}
+		_ = s.runtime.Cancel(ctx, methods.CancelParams{
+			RunID:  run.ID,
+			Reason: "session compact pause",
+		})
+	}
+
+	deadline := time.Now().Add(compactPauseTimeout)
+	for time.Now().Before(deadline) {
+		count, countErr := s.repos.Runs.CountActiveBySession(sessionID)
+		if countErr != nil {
+			return len(active), countErr
+		}
+		if count == 0 {
+			return len(active), nil
+		}
+		select {
+		case <-ctx.Done():
+			// fall through to force-finish below
+		case <-time.After(100 * time.Millisecond):
+			continue
+		}
+		break
+	}
+
+	// Ensure compact is never blocked forever if finish events are delayed.
+	remaining, listErr := s.repos.Runs.ListActiveBySession(sessionID, 50)
+	if listErr != nil {
+		return len(active), listErr
+	}
+	for _, run := range remaining {
+		_ = s.repos.Runs.Finish(run.ID, "cancelled", "paused for session compact")
+	}
+	return len(active), nil
 }
 
 func (s SessionService) Create(name string, workspaceRoot string) (SessionDTO, error) {
@@ -163,6 +263,7 @@ func (s SessionService) Delete(sessionID string) error {
 		}
 		return err
 	}
+	_ = s.repos.Todos.DeleteBySession(sessionID)
 	return nil
 }
 
@@ -214,6 +315,9 @@ func (s SessionService) Fork(sessionID string, req ForkSessionRequest) (ForkSess
 		if err != nil {
 			return err
 		}
+		if _, err := txRepos.Todos.CopySessionTodos(source.ID, target.ID, false); err != nil {
+			return err
+		}
 		lineage, err := txRepos.Lineage.Create(model.SessionLineage{
 			SourceSessionID: source.ID,
 			TargetSessionID: target.ID,
@@ -240,22 +344,34 @@ func (s SessionService) CompactPreview(sessionID string, req CompactPreviewReque
 	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
 		return CompactPreviewResult{}, err
 	}
-	startSeq, endSeq, keepTail, err := s.compactionRange(sessionID, req.SourceRange, req.KeepTailMessages)
+	// Pause only once per compact flow: preview may run alone; apply pauses again if needed.
+	// Prefer pausing before reading history so mid-run writes do not race the transcript.
+	paused, err := s.pauseSessionForCompact(sessionID)
+	if err != nil {
+		return CompactPreviewResult{}, fmt.Errorf("pause session for compact: %w", err)
+	}
+	plan, err := s.planCompaction(sessionID, req.SourceRange, req.KeepTailMessages, req.KeepTailTurns)
 	if err != nil {
 		return CompactPreviewResult{}, err
 	}
-	messages, err := s.repos.Messages.ListRange(sessionID, startSeq, endSeq)
+	summary, method, err := s.buildCompactSummary(sessionID, plan.SummarizeMessages, plan.StartSeq, plan.EndSeq, compactSummaryOptions{
+		Mode:              req.Mode,
+		ProviderProfileID: req.ProviderProfileID,
+	})
 	if err != nil {
 		return CompactPreviewResult{}, err
 	}
 	return CompactPreviewResult{
 		Preview: CompactPreview{
 			SourceSessionID:  sessionID,
-			SourceStartSeq:   startSeq,
-			SourceEndSeq:     endSeq,
-			KeepTailMessages: keepTail,
-			Summary:          summarizeMessages(messages, startSeq, endSeq),
+			SourceStartSeq:   plan.StartSeq,
+			SourceEndSeq:     plan.EndSeq,
+			KeepTailMessages: plan.KeepTailMessages,
+			KeepTailTurns:    plan.KeepTailTurns,
+			SummaryMethod:    method,
+			Summary:          summary,
 		},
+		PausedRuns: paused,
 	}, nil
 }
 
@@ -264,117 +380,92 @@ func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (Co
 	if err != nil {
 		return CompactSessionResult{}, err
 	}
-	startSeq, endSeq, keepTail, err := s.compactionRange(sessionID, req.SourceRange, req.KeepTailMessages)
+	// Always pause again before apply: preview may have been skipped, or a new
+	// run may have started between preview and apply.
+	paused, err := s.pauseSessionForCompact(sessionID)
+	if err != nil {
+		return CompactSessionResult{}, fmt.Errorf("pause session for compact: %w", err)
+	}
+	plan, err := s.planCompaction(sessionID, req.SourceRange, req.KeepTailMessages, req.KeepTailTurns)
 	if err != nil {
 		return CompactSessionResult{}, err
 	}
 	summary := req.Summary
 	if strings.TrimSpace(summary.Summary) == "" {
-		messages, err := s.repos.Messages.ListRange(sessionID, startSeq, endSeq)
-		if err != nil {
-			return CompactSessionResult{}, err
+		built, _, buildErr := s.buildCompactSummary(sessionID, plan.SummarizeMessages, plan.StartSeq, plan.EndSeq, compactSummaryOptions{
+			Mode:              req.Mode,
+			ProviderProfileID: req.ProviderProfileID,
+		})
+		if buildErr != nil {
+			return CompactSessionResult{}, buildErr
 		}
-		summary = summarizeMessages(messages, startSeq, endSeq)
-	}
-	tailMessages, err := s.compactionTailMessages(sessionID, endSeq, keepTail)
-	if err != nil {
-		return CompactSessionResult{}, err
+		summary = built
+	} else {
+		summary = s.ensureOpenTasks(sessionID, summary)
 	}
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {
 		return CompactSessionResult{}, err
 	}
-	metadataJSON := `{"synthetic":true,"kind":"compaction_summary"}`
 
 	var result CompactSessionResult
 	err = s.repos.DB.Transaction(func(tx *gorm.DB) error {
 		txRepos := repository.NewSet(tx)
-		target, err := txRepos.Sessions.CreateDerived(req.Name, source, "compact", endSeq, "")
-		if err != nil {
-			return err
-		}
-		summaryMessage, err := txRepos.Messages.AddWithMetadata(target.ID, "assistant", []methods.ContentBlock{{
-			Type: "text",
-			Text: summary.Summary,
-		}}, "", metadataJSON)
-		if err != nil {
-			return err
-		}
-		copiedTail, err := txRepos.Messages.CopyToSession(tailMessages, target.ID, 2)
-		if err != nil {
-			return err
-		}
-		lineage, err := txRepos.Lineage.Create(model.SessionLineage{
-			SourceSessionID: source.ID,
-			TargetSessionID: target.ID,
-			Operation:       "compact",
-			SourceStartSeq:  startSeq,
-			SourceEndSeq:    endSeq,
-		})
-		if err != nil {
+		if err := txRepos.Compactions.SupersedeAppliedInPlace(source.ID); err != nil {
 			return err
 		}
 		compaction, err := txRepos.Compactions.Create(model.SessionCompaction{
-			SourceSessionID:  source.ID,
-			TargetSessionID:  target.ID,
-			Status:           "applied",
-			SourceStartSeq:   startSeq,
-			SourceEndSeq:     endSeq,
-			SummaryMessageID: summaryMessage.ID,
-			SummaryJSON:      string(summaryJSON),
+			SourceSessionID: source.ID,
+			TargetSessionID: source.ID,
+			Status:          "applied",
+			SourceStartSeq:  plan.StartSeq,
+			SourceEndSeq:    plan.EndSeq,
+			SummaryJSON:     string(summaryJSON),
 		})
+		if err != nil {
+			return err
+		}
+		if err := txRepos.Sessions.Touch(source.ID); err != nil {
+			return err
+		}
+		updated, err := txRepos.Sessions.Get(source.ID)
 		if err != nil {
 			return err
 		}
 		result = CompactSessionResult{
-			Session:            sessionDTO(target),
-			Lineage:            lineageDTO(lineage),
-			Compaction:         compactionDTO(compaction),
-			CopiedTailMessages: copiedTail,
+			Session:          sessionDTO(updated),
+			Compaction:       compactionDTO(compaction),
+			Summary:          summary,
+			KeepTailMessages: plan.KeepTailMessages,
+			KeepTailTurns:    plan.KeepTailTurns,
+			PausedRuns:       paused,
 		}
 		return nil
 	})
 	return result, err
 }
 
-func (s SessionService) compactionRange(sessionID string, requested SourceRange, keepTailMessages int) (uint64, uint64, int, error) {
-	latestSeq, err := s.repos.Messages.LatestSeq(sessionID)
+func (s SessionService) CompactionState(sessionID string) (CompactionStateResult, error) {
+	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
+		return CompactionStateResult{}, err
+	}
+	row, err := s.repos.Compactions.LatestAppliedInPlace(sessionID)
+	if err == gorm.ErrRecordNotFound {
+		return CompactionStateResult{Active: false}, nil
+	}
 	if err != nil {
-		return 0, 0, 0, err
+		return CompactionStateResult{}, err
 	}
-	startSeq := requested.StartSeq
-	if startSeq == 0 {
-		startSeq = 1
+	var summary CompactSummary
+	if err := json.Unmarshal([]byte(row.SummaryJSON), &summary); err != nil {
+		return CompactionStateResult{}, fmt.Errorf("decode compaction summary: %w", err)
 	}
-	keepTail := keepTailMessages
-	if keepTail < 0 {
-		keepTail = 0
-	}
-	endSeq := requested.EndSeq
-	if endSeq == 0 {
-		endSeq = latestSeq
-		if keepTail > 0 && uint64(keepTail) < latestSeq {
-			endSeq = latestSeq - uint64(keepTail)
-		}
-	}
-	if endSeq < startSeq {
-		endSeq = startSeq
-	}
-	return startSeq, endSeq, keepTail, nil
-}
-
-func (s SessionService) compactionTailMessages(sessionID string, summarizedEndSeq uint64, keepTailMessages int) ([]model.Message, error) {
-	if keepTailMessages <= 0 {
-		return nil, nil
-	}
-	messages, err := s.repos.Messages.ListRange(sessionID, summarizedEndSeq+1, 0)
-	if err != nil {
-		return nil, err
-	}
-	if len(messages) <= keepTailMessages {
-		return messages, nil
-	}
-	return messages[len(messages)-keepTailMessages:], nil
+	dto := compactionDTO(row)
+	return CompactionStateResult{
+		Active:     true,
+		Compaction: &dto,
+		Summary:    summary,
+	}, nil
 }
 
 func sessionDTO(row model.Session) SessionDTO {
@@ -441,27 +532,47 @@ func messageDTO(row model.Message) (MessageDTO, error) {
 	}, nil
 }
 
-func summarizeMessages(messages []model.Message, startSeq uint64, endSeq uint64) CompactSummary {
-	parts := make([]string, 0, len(messages))
-	for _, message := range messages {
-		if message.Role != "user" && message.Role != "assistant" {
-			continue
+func (s SessionService) ensureOpenTasks(sessionID string, summary CompactSummary) CompactSummary {
+	if len(summary.OpenTasks) > 0 {
+		return summary
+	}
+	rows, err := s.repos.Todos.ListOpenBySession(sessionID)
+	if err != nil || len(rows) == 0 {
+		return summary
+	}
+	tasks := make([]string, 0, len(rows))
+	for _, row := range rows {
+		tasks = append(tasks, row.Content)
+	}
+	summary.OpenTasks = tasks
+	return summary
+}
+
+func formatCompactSummaryMessage(summary CompactSummary) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(summary.Summary))
+	writeSection := func(title string, items []string) {
+		if len(items) == 0 {
+			return
 		}
-		text := messageText(message)
-		if text != "" {
-			parts = append(parts, fmt.Sprintf("%s: %s", message.Role, text))
+		b.WriteString("\n\n")
+		b.WriteString(title)
+		b.WriteString(":\n")
+		for _, item := range items {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(item)
+			b.WriteByte('\n')
 		}
 	}
-	body := strings.Join(parts, " ")
-	if len(body) > 320 {
-		body = body[:317] + "..."
-	}
-	if body == "" {
-		body = "No message content in selected range."
-	}
-	return CompactSummary{
-		Summary: fmt.Sprintf("Compacted session messages %d-%d. %s", startSeq, endSeq, body),
-	}
+	writeSection("Decisions", summary.Decisions)
+	writeSection("Open tasks", summary.OpenTasks)
+	writeSection("Workspace context", summary.WorkspaceContext)
+	writeSection("Risks", summary.Risks)
+	return strings.TrimSpace(b.String())
 }
 
 func messageText(row model.Message) string {

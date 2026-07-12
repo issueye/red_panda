@@ -20,6 +20,17 @@ func TestStandardizeToolOutputWrapsPlainText(t *testing.T) {
 	if env.Meta.DurationMS != 12 {
 		t.Fatalf("duration = %d", env.Meta.DurationMS)
 	}
+	if env.Data != nil {
+		t.Fatalf("plain text must not be duplicated in data: %#v", env.Data)
+	}
+}
+
+func TestStandardizeLargePlainTextDoesNotDoubleTransportSize(t *testing.T) {
+	raw := strings.Repeat("x", maxToolOutputBytes)
+	out := standardizeToolOutput("workspace.read_file", raw, nil, 1)
+	if len(out) > len(raw)+2048 {
+		t.Fatalf("standard envelope duplicated large plain text: raw=%d output=%d", len(raw), len(out))
+	}
 }
 
 func TestStandardizeToolOutputWrapsJSONData(t *testing.T) {

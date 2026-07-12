@@ -68,14 +68,32 @@ const subAgentBackendLabel = {
   runtime_process: '运行时进程',
 };
 
+/** Goal pipeline phase specialists (subagent.run name). */
+const goalSpecialistLabel = {
+  'goal-analyst': '目标分析师',
+  'goal-planner': '目标规划师',
+  'goal-implementer': '目标实施者',
+  'goal-verifier': '目标验证者',
+  'goal-evaluator': '目标终评官',
+};
+
 const eventKindLabel = {
   done: '完成',
   error: '错误',
   event: '事件',
+  goal: '目标',
   memory: '记忆',
   message: '消息',
   permission: '授权',
+  todo: '任务',
   tool: '工具',
+};
+
+const todoStatusDisplayLabel = {
+  cancelled: '已取消',
+  completed: '已完成',
+  in_progress: '进行中',
+  pending: '待办',
 };
 
 function displayFrom(map, value, fallback = '未知') {
@@ -112,6 +130,13 @@ export function displaySessionKind(value) {
 
 export function displaySubAgentBackend(value) {
   return displayFrom(subAgentBackendLabel, value);
+}
+
+/** Prefer Chinese label for Goal phase specialists. */
+export function displayAgentName(value) {
+  if (value == null || value === '') return '';
+  const key = String(value).trim().toLowerCase().replaceAll('_', '-');
+  return goalSpecialistLabel[key] || String(value);
 }
 
 export function displayEventKind(value) {

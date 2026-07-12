@@ -73,7 +73,9 @@ func standardizeToolOutput(toolName string, raw string, runErr error, durationMS
 	if raw != "" && json.Unmarshal([]byte(raw), &data) == nil {
 		text = preferReadableText(data, raw)
 	} else if raw != "" {
-		data = map[string]any{"content": raw}
+		// Plain text already lives in Text. Duplicating it in Data can double a
+		// JSON-RPC event beyond scanner/transport limits for large file reads.
+		data = nil
 	} else {
 		data = map[string]any{}
 		text = ""
@@ -275,11 +277,11 @@ func modelFacingToolContent(result tools.Result) string {
 		// replace with a pointer note so the model knows UI has the full payload.
 		if env.Data != nil {
 			env.Data = map[string]any{
-				"omitted":         true,
-				"reason":          "size_limit_for_model_context",
-				"original_bytes":  original,
-				"full_output_in":  "tool_finished.event / UI tool card",
-				"preview":         text,
+				"omitted":        true,
+				"reason":         "size_limit_for_model_context",
+				"original_bytes": original,
+				"full_output_in": "tool_finished.event / UI tool card",
+				"preview":        text,
 			}
 		}
 	}

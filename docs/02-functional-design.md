@@ -272,7 +272,7 @@ Agent Runtime 必须从第一版设计时考虑多进程和子代理：
 | `grep` | read | 正则搜索 |
 | `shell` | write | 执行命令，默认需要权限 |
 | `web_fetch` | read | 获取网页/接口文本 |
-| `todo_write` | read | 维护任务列表 |
+| `todo.write` / `todo.list` | read | 维护任务列表（历史名 `todo_write` 为可选别名，详见 `docs/30-todo-feature-design.md`） |
 | `memory_read` | read | 查询记忆 |
 | `memory_write` | write | 写入记忆 |
 | `subagent_spawn` | write | 创建子 agent |

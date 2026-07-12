@@ -89,6 +89,15 @@ func (s SessionController) CompactPreview(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, result))
 }
 
+func (s SessionController) CompactionState(c *gin.Context) {
+	result, err := s.Services.Session.CompactionState(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "session_compaction_state_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, result))
+}
+
 func (s SessionController) Compact(c *gin.Context) {
 	var req service.CompactSessionRequest
 	if err := c.BindJSON(&req); err != nil {

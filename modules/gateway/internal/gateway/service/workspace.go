@@ -72,6 +72,8 @@ func (s WorkspaceService) Remove(id string, deleteSessions bool) (WorkspaceDTO, 
 	}
 	var deletedSessions int64
 	if deleteSessions {
+		// Drop todos before soft-deleting sessions so workspace_root lookup still works.
+		_ = s.repos.Todos.DeleteByWorkspaceRoot(workspace.Root)
 		deletedSessions, err = s.repos.Sessions.SoftDeleteByWorkspace(workspace.Root)
 		if err != nil {
 			return WorkspaceDTO{}, 0, err

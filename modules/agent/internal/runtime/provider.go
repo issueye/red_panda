@@ -22,11 +22,11 @@ type Provider interface {
 }
 
 type ProviderRequest struct {
-	RunID       string
-	Session     methods.ReplySession
-	Input       methods.ReplyInput
-	Options     methods.ReplyOptions
-	Tools       []tools.Definition
+	RunID   string
+	Session methods.ReplySession
+	Input   methods.ReplyInput
+	Options methods.ReplyOptions
+	Tools   []tools.Definition
 	// ToolHistory is a flat list (used by EchoProvider and tests).
 	ToolHistory []ToolExchange
 	// ToolRounds groups tools that ran in the same model turn (OpenAI multi-tool format).
@@ -205,6 +205,49 @@ func echoToolCalls(req ProviderRequest) []tools.Call {
 			Risk:        tools.RiskHigh,
 			Arguments:   map[string]any{"id": id},
 		}}
+	case lower == "list todos" || lower == "list todo" || lower == "/todo list":
+		return []tools.Call{{
+			ID:          "tool_" + req.RunID + "_model_todo_list",
+			Name:        "todo.list",
+			DisplayName: "List todos",
+			Risk:        tools.RiskLow,
+			Arguments:   map[string]any{"status": "all"},
+		}}
+	case strings.HasPrefix(lower, "todo ") || lower == "/todo":
+		// Simple smoke helper: "todo plan a; plan b"
+		rest := strings.TrimSpace(text)
+		if strings.HasPrefix(lower, "todo ") {
+			rest = strings.TrimSpace(text[len("todo "):])
+		} else if lower == "/todo" {
+			rest = "task"
+		}
+		parts := strings.Split(rest, ";")
+		todos := make([]any, 0, len(parts))
+		for i, part := range parts {
+			content := strings.TrimSpace(part)
+			if content == "" {
+				continue
+			}
+			status := "pending"
+			if i == 0 {
+				status = "in_progress"
+			}
+			todos = append(todos, map[string]any{
+				"id":      fmt.Sprintf("%d", i+1),
+				"content": content,
+				"status":  status,
+			})
+		}
+		if len(todos) == 0 {
+			return nil
+		}
+		return []tools.Call{{
+			ID:          "tool_" + req.RunID + "_model_todo_write",
+			Name:        "todo.write",
+			DisplayName: "Update todos",
+			Risk:        tools.RiskLow,
+			Arguments:   map[string]any{"todos": todos, "merge": false},
+		}}
 	default:
 		return nil
 	}
@@ -314,7 +357,14 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 	if err != nil {
 		return err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, openAICompatibleChatCompletionsURL(p.baseURL), bytes.NewReader(rawBody))
+	endpoint := openAICompatibleChatCompletionsURL(p.baseURL)
+	if path, logErr := logLLMRequest(req.Options.LogLLMRequests, req.RunID, req.Session.ID, model, endpoint, rawBody); logErr != nil {
+		// Never fail the user-facing request because diagnostics failed.
+		fmt.Fprintf(os.Stderr, "red-panda-agent: llm request log failed: %v\n", logErr)
+	} else if path != "" {
+		fmt.Fprintf(os.Stderr, "red-panda-agent: llm request logged to %s\n", path)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(rawBody))
 	if err != nil {
 		return err
 	}
@@ -530,28 +580,144 @@ Survey-then-split policy (mandatory for analysis when tools include subagent.run
 3. Use suggested_splits / top_level:
    - small_tree: root or one subagent.run
    - medium/large: split by major directories and spawn multiple subagent.run calls IN ONE TURN (parallel process pool). Resize pool first if needed.
-4. Never dump a large tree analysis onto yourself with serial greps when specialists are available.
-5. Manage workers with subagent.list / cancel / reset / pool_status / pool_resize / pool_reset.
-6. After specialists finish, synthesize their reports for the user. Never claim subagents are unavailable when subagent.run is in your tool list.
-7. Trivial single-file Q&A or tiny edits may stay on the root agent without subagents.`
+4. Make coverage explicit and non-overlapping before dispatch:
+   - Assign root-level entrypoints, build manifests, dependency files, and project configuration (for example main.go, go.mod, package.json, wails.json) to one foundation specialist, or include them explicitly in one module specialist's task.
+   - Give every specialist a path boundary, concrete questions, and an expected evidence-based final report.
+   - Do not leave shared/root files unowned and then read them serially on the root agent after specialists finish.
+5. Never dump a large tree analysis onto yourself with serial greps or workspace.read_file calls when specialists are available. The root agent coordinates, resolves conflicts, and synthesizes.
+6. After specialists finish, treat successful reports as the evidence for their assigned scopes. Do not re-read files already covered merely to reconstruct their work. If a report has a specific missing fact, launch one narrow follow-up subagent for that gap; do not restart a broad scan.
+7. Manage workers with subagent.list / cancel / reset / pool_status / pool_resize / pool_reset. A failed or unusable specialist must be reset/reassigned or explicitly reported; it must never block unrelated completed work.
+8. After all required coverage is complete, synthesize the reports into the user-facing answer. Never claim subagents are unavailable when subagent.run is in your tool list.
+9. Trivial single-file Q&A or tiny edits may stay on the root agent without subagents.
+10. For multi-step work, maintain a session checklist with todo.write (see the dedicated todo policy when available). Do not track plans only in free-text.`
+
+// rootAgentPostDelegationPolicy is added once a specialist has returned a usable
+// result. It keeps the next model turn focused on synthesis instead of silently
+// repeating the specialist's file reads on the root agent.
+const rootAgentPostDelegationPolicy = `Delegation results are now available.
+
+Post-delegation rule:
+1. Use successful subagent.run reports as the authoritative evidence for their assigned scopes.
+2. Synthesize completed reports before requesting any more workspace tools.
+3. Do not call workspace.read_file, workspace.list, or broad search tools just to repeat or verify work already covered by a successful specialist.
+4. If an exact fact is missing, identify that gap and issue one narrowly scoped follow-up subagent.run. Direct root-agent file reads are reserved for genuinely unassigned trivial scope or an explicit user request.
+5. Failed specialists do not invalidate successful reports from other specialists; reassign only the failed/missing scope and continue.`
+
+// rootAgentGoalPipelinePolicy guides long-horizon Goal work (docs/32 §2 / §2.10).
+const rootAgentGoalPipelinePolicy = `Goal pipeline (goal.* + todo.*) — mandatory for multi-step user goals.
+
+For multi-step work you MUST use phase specialists via subagent.run with these exact names
+(unless the request is trivial one-shot Q&A with no Goal):
+
+| Phase | subagent.run name | Who writes goal/todo |
+| analyze | goal-analyst | root only |
+| plan | goal-planner (draft) then root goal.update + todo.write | root only |
+| execute | goal-implementer | root updates todos after |
+| verify | goal-verifier | root on pass/fail |
+| evaluate | goal-evaluator (report draft) | root goal.complete |
+
+Mandatory order:
+1. analyze — subagent.run name="goal-analyst". If trivial=true, answer without Goal.
+2. plan — optional goal-planner draft; then goal.update(success_criteria, pipeline_phase="execute") + todo.write (one in_progress).
+3. For EACH todo step:
+   a. execute — subagent.run name="goal-implementer" with current step in task
+   b. verify — subagent.run name="goal-verifier"; require evidence
+   c. on pass: todo.write complete step + next in_progress + goal.checkpoint
+   d. on fail: retry implementer or replan
+4. evaluate — subagent.run name="goal-evaluator"
+5. Publish completion report to the user, then goal.complete(status, summary, report_markdown).
+
+Hard rules:
+- Do NOT skip analyze/plan before large edits.
+- Do NOT put analyze+implement+verify into one generic worker.
+- Call exactly ONE specialist for the current pipeline_phase. Never dispatch later-phase specialists in the same tool batch.
+- After a specialist returns, update pipeline_phase before calling the next specialist; out-of-phase specialists are rejected by Runtime.
+- Do NOT goal.complete without a completion report summary.
+- Specialists cannot call goal.* / todo.* / nested subagent.*; root owns session state.
+- Prefer specialist names exactly: goal-analyst, goal-planner, goal-implementer, goal-verifier, goal-evaluator.`
+
+// rootAgentTodoPolicy is injected for root runs that expose todo.write.
+// Guides models to use the structured checklist instead of free-text plans or memory.kind=task.
+const rootAgentTodoPolicy = `Session task list (todo.write / todo.list) — mandatory for multi-step work:
+
+When to use:
+- Use todo.write whenever the user request needs 2+ sequential steps (investigate then fix, multi-file change, implement feature, debug then verify, plan then execute).
+- Skip todos only for trivial one-shot Q&A, pure greeting, or a single read/lookup with no follow-up work.
+- Never use memory.create with kind=task as a work queue; memory is durable knowledge, todos are the live checklist.
+
+How to use:
+1. At the start of multi-step work, call todo.write once with the full plan (merge=false or a complete list). Mark the first active item in_progress; others pending.
+2. Keep at most ONE item in_progress. Before switching work, mark the current item completed (or cancelled) and set the next to in_progress.
+3. Prefer sending the full active list each write. merge defaults to true: omitted items are KEPT (not deleted). To drop items, set status=cancelled or use merge=false.
+4. todos[].id may be your short key ("1","2") or the Gateway id returned earlier. Prefer reusing the same short keys across turns so items update in place.
+5. Update the list when steps finish, fail, or the plan changes — do not only describe progress in prose.
+6. Users see the list above the chat input; keep content short, concrete, and action-oriented (Chinese or English matching the user).
+7. Call todo.list only if you need to re-read the list; the current checklist is also injected as system context when present.
+
+Example first write:
+  todos: [
+    {id:"1", content:"定位失败用例", status:"in_progress"},
+    {id:"2", content:"修复实现", status:"pending"},
+    {id:"3", content:"跑测试确认", status:"pending"}
+  ]`
 
 func openAICompatibleMessages(req ProviderRequest) []map[string]any {
-	messages := make([]map[string]any, 0, 3+len(req.Session.Conversation)+1+len(req.ToolHistory)*2)
+	messages := make([]map[string]any, 0, 4+len(req.Session.Conversation)+1+len(req.ToolHistory)*2)
 	// Always inject fresh local time so the model does not rely on training-data dates.
 	messages = append(messages, map[string]any{
 		"role":    "system",
 		"content": currentTimeContextMessage(time.Now()),
 	})
-	if hasToolNamed(req.Tools, "subagent.run") {
+	goalPipeline := hasToolNamed(req.Tools, "goal.write")
+	if hasToolNamed(req.Tools, "subagent.run") && !goalPipeline {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": rootAgentOrchestrationPolicy,
+		})
+	}
+	if hasSuccessfulSubagentResult(req.ToolHistory) && !goalPipeline {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": rootAgentPostDelegationPolicy,
+		})
+	}
+	if goalPipeline {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": rootAgentGoalPipelinePolicy,
+		})
+	}
+	if hasToolNamed(req.Tools, "todo.write") {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": rootAgentTodoPolicy,
 		})
 	}
 	if req.Options.MemoryContext != nil && strings.TrimSpace(req.Options.MemoryContext.Context) != "" {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": strings.TrimSpace(req.Options.MemoryContext.Context),
+		})
+	}
+	if req.Options.GoalContext != nil && strings.TrimSpace(req.Options.GoalContext.Context) != "" {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": strings.TrimSpace(req.Options.GoalContext.Context),
+		})
+		// User/command may have already created+bound the Goal; prefer update over write.
+		if id := strings.TrimSpace(req.Options.GoalContext.GoalID); id != "" {
+			messages = append(messages, map[string]any{
+				"role": "system",
+				"content": "A session Goal is already bound to this run (id=" + id + "). " +
+					"Do NOT call goal.write to create another. Use goal.update / goal.checkpoint / goal.complete and todo.write. " +
+					"Start from the current pipeline_phase (usually analyze) with the phase specialists.",
+			})
+		}
+	}
+	if req.Options.TodoContext != nil && strings.TrimSpace(req.Options.TodoContext.Context) != "" {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": strings.TrimSpace(req.Options.TodoContext.Context),
 		})
 	}
 	if req.Options.SkillsContext != nil && strings.TrimSpace(req.Options.SkillsContext.Context) != "" {
@@ -605,6 +771,15 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		}
 	}
 	return messages
+}
+
+func hasSuccessfulSubagentResult(history []ToolExchange) bool {
+	for _, exchange := range history {
+		if exchange.Call.Name == "subagent.run" && exchange.Result.Status == tools.CallStatusCompleted {
+			return true
+		}
+	}
+	return false
 }
 
 func toolRoundsForRequest(req ProviderRequest) [][]ToolExchange {

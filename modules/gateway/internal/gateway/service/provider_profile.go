@@ -19,6 +19,7 @@ type ProviderProfileDTO struct {
 	Provider     string    `json:"provider"`
 	BaseURL      string    `json:"base_url"`
 	Model        string    `json:"model"`
+	MaxTokens    int       `json:"max_tokens"`
 	APIKeySet    bool      `json:"api_key_set"`
 	APIKeyMasked string    `json:"api_key_masked,omitempty"`
 	IsDefault    bool      `json:"is_default"`
@@ -32,6 +33,7 @@ type ProviderProfileCreate struct {
 	Provider  string
 	BaseURL   string
 	Model     string
+	MaxTokens int
 	APIKey    string
 	IsDefault bool
 }
@@ -41,6 +43,7 @@ type ProviderProfileUpdate struct {
 	Provider  *string
 	BaseURL   *string
 	Model     *string
+	MaxTokens *int
 	APIKey    *string
 	IsDefault *bool
 	Active    *bool
@@ -59,11 +62,16 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 	if baseURL == "" {
 		return ProviderProfileDTO{}, fmt.Errorf("base_url is required")
 	}
+	maxTokens, err := normalizeMaxTokens(input.MaxTokens)
+	if err != nil {
+		return ProviderProfileDTO{}, err
+	}
 	row, err := s.repos.Providers.Create(model.ProviderProfile{
 		Name:         strings.TrimSpace(input.Name),
 		Provider:     profile,
 		BaseURL:      strings.TrimRight(baseURL, "/"),
 		Model:        strings.TrimSpace(input.Model),
+		MaxTokens:    maxTokens,
 		APIKeySecret: input.APIKey,
 		IsDefault:    input.IsDefault,
 	})
@@ -84,6 +92,7 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 		Provider:     current.Provider,
 		BaseURL:      current.BaseURL,
 		Model:        current.Model,
+		MaxTokens:    current.MaxTokens,
 		APIKeySecret: current.APIKeySecret,
 		IsDefault:    current.IsDefault,
 		Active:       current.Active,
@@ -106,6 +115,13 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 	}
 	if input.Model != nil {
 		next.Model = strings.TrimSpace(*input.Model)
+	}
+	if input.MaxTokens != nil {
+		maxTokens, err := normalizeMaxTokens(*input.MaxTokens)
+		if err != nil {
+			return ProviderProfileDTO{}, err
+		}
+		next.MaxTokens = maxTokens
 	}
 	if input.APIKey != nil {
 		next.APIKeySecret = *input.APIKey
@@ -167,6 +183,7 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		Provider:     row.Provider,
 		BaseURL:      row.BaseURL,
 		Model:        row.Model,
+		MaxTokens:    row.MaxTokens,
 		APIKeySet:    row.APIKeySecret != "",
 		APIKeyMasked: maskSecret(row.APIKeySecret),
 		IsDefault:    row.IsDefault,
@@ -174,6 +191,18 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,
 	}
+}
+
+const maxProviderContextTokens = 2_000_000
+
+func normalizeMaxTokens(value int) (int, error) {
+	if value < 0 {
+		return 0, fmt.Errorf("max_tokens must be >= 0")
+	}
+	if value > maxProviderContextTokens {
+		return 0, fmt.Errorf("max_tokens must be <= %d", maxProviderContextTokens)
+	}
+	return value, nil
 }
 
 func maskSecret(value string) string {

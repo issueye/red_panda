@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"redpanda/ipc"
 	"redpanda/protocol/events"
 	"redpanda/protocol/jsonrpc"
 	protocolmcp "redpanda/protocol/mcp"
@@ -23,6 +25,8 @@ type EventHandler func(events.Envelope)
 
 type RequestHandler func(context.Context, string, json.RawMessage) (any, error)
 
+const maxRuntimeJSONRPCLineBytes = 4 * 1024 * 1024
+
 type Client struct {
 	command   string
 	args      []string
@@ -30,13 +34,15 @@ type Client struct {
 	onEvent   EventHandler
 	onRequest RequestHandler
 
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	pending map[jsonrpc.ID]chan jsonrpc.Response
-	nextID  uint64
-	running bool
-	perRuns map[string]*Client
+	mu        sync.Mutex
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	ipcCloser io.Closer // session listener when transport is IPC
+	pending   map[jsonrpc.ID]chan jsonrpc.Response
+	nextID    uint64
+	running   bool
+	perRuns   map[string]*Client
+	transport string // "stdio" or "ipc"
 }
 
 func New(command string, args []string, version string, onEvent EventHandler, onRequest RequestHandler) *Client {
@@ -62,9 +68,14 @@ func (c *Client) Status() map[string]any {
 	case activePerRuns > 0:
 		mode = "per_run_process"
 	}
+	transport := c.transport
+	if transport == "" {
+		transport = runtimeTransport()
+	}
 	return map[string]any{
 		"available":       c.running || activePerRuns > 0,
 		"mode":            mode,
+		"transport":       transport,
 		"command":         c.command,
 		"active_per_runs": activePerRuns,
 		"core_running":    c.running,
@@ -293,6 +304,11 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	defer c.mu.Unlock()
 	if c.stdin != nil {
 		_ = c.stdin.Close()
+		c.stdin = nil
+	}
+	if c.ipcCloser != nil {
+		_ = c.ipcCloser.Close()
+		c.ipcCloser = nil
 	}
 	if c.cmd != nil && c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
@@ -375,6 +391,33 @@ func (c *Client) ensureStarted(ctx context.Context) error {
 		c.mu.Unlock()
 		return nil
 	}
+	c.mu.Unlock()
+
+	if runtimeTransport() == "ipc" {
+		return c.ensureStartedIPC(ctx)
+	}
+	return c.ensureStartedStdio()
+}
+
+// runtimeTransport selects the gateway↔agent wire transport.
+// Default is IPC (Windows named pipes / Unix domain sockets).
+// Set RED_PANDA_RUNTIME_IPC=0 (or "false"/"stdio") to force legacy stdio.
+func runtimeTransport() string {
+	v := strings.TrimSpace(os.Getenv("RED_PANDA_RUNTIME_IPC"))
+	switch strings.ToLower(v) {
+	case "0", "false", "no", "stdio", "off":
+		return "stdio"
+	default:
+		return "ipc"
+	}
+}
+
+func (c *Client) ensureStartedStdio() error {
+	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		return nil
+	}
 
 	cmd := exec.Command(c.command, c.args...)
 	stdin, err := cmd.StdinPipe()
@@ -399,12 +442,64 @@ func (c *Client) ensureStarted(ctx context.Context) error {
 
 	c.cmd = cmd
 	c.stdin = stdin
+	c.transport = "stdio"
 	c.running = true
 	c.mu.Unlock()
 
 	go c.readStdout(stdout)
 	go c.drainStderr(stderr)
 	go c.wait(cmd)
+	return nil
+}
+
+func (c *Client) ensureStartedIPC(ctx context.Context) error {
+	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		return nil
+	}
+	c.mu.Unlock()
+
+	stderrReader, stderrWriter, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+
+	proc, err := ipc.StartProcess(ctx, ipc.ProcessConfig{
+		Command: c.command,
+		Args:    c.args,
+		Prefix:  "red-panda-agent",
+		Configure: func(cmd *exec.Cmd) {
+			cmd.Stderr = stderrWriter
+		},
+	})
+	if err != nil {
+		_ = stderrReader.Close()
+		_ = stderrWriter.Close()
+		return err
+	}
+	// Parent keeps the read end; child holds the write end via inheritance.
+	_ = stderrWriter.Close()
+
+	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		_ = proc.Close()
+		_ = stderrReader.Close()
+		return nil
+	}
+	c.cmd = proc.Cmd
+	// net.Conn is ReadWriteCloser; gateway writes requests/responses on the
+	// same stream it reads agent events from (replaces stdin+stdout pair).
+	c.stdin = proc.Conn
+	c.ipcCloser = proc.Session
+	c.transport = "ipc"
+	c.running = true
+	c.mu.Unlock()
+
+	go c.readStdout(proc.Conn)
+	go c.drainStderr(stderrReader)
+	go c.wait(proc.Cmd)
 	return nil
 }
 
@@ -469,6 +564,7 @@ func (c *Client) removePending(id jsonrpc.ID) {
 
 func (c *Client) readStdout(stdout io.Reader) {
 	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), maxRuntimeJSONRPCLineBytes)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var probe struct {
@@ -565,6 +661,10 @@ func (c *Client) wait(cmd *exec.Cmd) {
 		c.running = false
 		c.cmd = nil
 		c.stdin = nil
+		if c.ipcCloser != nil {
+			_ = c.ipcCloser.Close()
+			c.ipcCloser = nil
+		}
 		for id, ch := range c.pending {
 			delete(c.pending, id)
 			close(ch)

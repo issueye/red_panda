@@ -53,6 +53,18 @@ func Run(ctx context.Context, cfg Config) error {
 				return nil, fmt.Errorf("invalid memory tool params")
 			}
 			return services.Memory.ExecuteRuntimeTool(req)
+		case methods.TodoToolExecute:
+			var req methods.TodoToolExecuteParams
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, fmt.Errorf("invalid todo tool params")
+			}
+			return services.Todo.ExecuteRuntimeTool(req)
+		case methods.GoalToolExecute:
+			var req methods.GoalToolExecuteParams
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, fmt.Errorf("invalid goal tool params")
+			}
+			return services.Goal.ExecuteRuntimeTool(req)
 		default:
 			return nil, fmt.Errorf("method not found: %s", method)
 		}
@@ -102,11 +114,18 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.DELETE("/sessions/:id", controllers.Session.Delete)
 	api.GET("/sessions/:id/history", controllers.Session.History)
 	api.POST("/sessions/:id/fork", controllers.Session.Fork)
+	api.GET("/sessions/:id/compact", controllers.Session.CompactionState)
 	api.POST("/sessions/:id/compact/preview", controllers.Session.CompactPreview)
 	api.POST("/sessions/:id/compact", controllers.Session.Compact)
 	api.GET("/sessions/:id/permissions", controllers.Permission.ListBySession)
 	api.GET("/sessions/:id/runs", controllers.Run.ListBySession)
 	api.GET("/sessions/:id/tools", controllers.Tool.ListBySession)
+	api.GET("/sessions/:id/todos", controllers.Todo.ListBySession)
+	api.GET("/sessions/:id/goals", controllers.Goal.ListBySession)
+	api.POST("/sessions/:id/goals/start", controllers.Goal.Start)
+	api.GET("/sessions/:id/goals/:goalId", controllers.Goal.Get)
+	api.POST("/sessions/:id/goals/:goalId/cancel", controllers.Goal.Cancel)
+	api.POST("/sessions/:id/goals/:goalId/continue", controllers.Goal.Continue)
 	api.GET("/memory", controllers.Memory.List)
 	api.POST("/memory", controllers.Memory.Create)
 	api.PUT("/memory/:id", controllers.Memory.Update)
@@ -130,6 +149,12 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/skills/:name", controllers.Skills.Get)
 	api.PUT("/skills/:name", controllers.Skills.Update)
 	api.DELETE("/skills/:name", controllers.Skills.Delete)
+	api.GET("/agents", controllers.Agents.List)
+	api.GET("/agents/enabled", controllers.Agents.ListEnabled)
+	api.POST("/agents", controllers.Agents.Create)
+	api.GET("/agents/:id", controllers.Agents.Get)
+	api.PUT("/agents/:id", controllers.Agents.Update)
+	api.DELETE("/agents/:id", controllers.Agents.Delete)
 	api.GET("/runs/:id", controllers.Run.Get)
 	api.GET("/runs/:id/events", controllers.Run.Events)
 	api.GET("/runs/:id/permissions", controllers.Permission.ListByRun)

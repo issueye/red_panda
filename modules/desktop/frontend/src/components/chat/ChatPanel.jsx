@@ -32,6 +32,25 @@ export function ChatPanel({
   onSelectConversationTab,
   onCloseConversationTab,
   subAgents = [],
+  goal = null,
+  goalExpanded = false,
+  goalLoading = false,
+  goalBusy = false,
+  onGoalExpandToggle,
+  onGoalContinue,
+  onGoalCancel,
+  todos = [],
+  todoOpenCount = 0,
+  todosExpanded = false,
+  todosLoading = false,
+  onTodosExpandToggle,
+  onTodosRefresh,
+  tokenUsed = 0,
+  tokenMax = 0,
+  tokenRatio = 0,
+  tokenDisplayRatio = 0,
+  tokenBudgetEnabled = false,
+  tokenSoftBudget = false,
 }) {
   const activeTab = conversationTabs.find((tab) => tab.id === activeConversationTab) || conversationTabs[0] || {
     id: 'main',
@@ -113,18 +132,37 @@ export function ChatPanel({
       <ConversationView
         draft={draft}
         emptyTitle={scoped.emptyTitle}
+        goal={goal}
+        goalBusy={goalBusy}
+        goalExpanded={goalExpanded}
+        goalLoading={goalLoading}
         messages={scoped.messages}
         onCancel={onCancel}
         onDraftChange={onDraftChange}
+        onGoalCancel={onGoalCancel}
+        onGoalContinue={onGoalContinue}
+        onGoalExpandToggle={onGoalExpandToggle}
         onProviderProfileChange={onProviderProfileChange}
         onResolvePermission={onResolvePermission}
         onSend={onSend}
+        onTodosExpandToggle={onTodosExpandToggle}
+        onTodosRefresh={onTodosRefresh}
         permissions={scoped.permissions}
         providerProfileId={providerProfileId}
         providerProfiles={providerProfiles}
         readOnlyHint={scoped.readOnlyHint}
         running={running}
         showComposer={scoped.showComposer}
+        todoOpenCount={todoOpenCount}
+        todos={todos}
+        todosExpanded={todosExpanded}
+        todosLoading={todosLoading}
+        tokenBudgetEnabled={tokenBudgetEnabled}
+        tokenDisplayRatio={tokenDisplayRatio}
+        tokenMax={tokenMax}
+        tokenRatio={tokenRatio}
+        tokenSoftBudget={tokenSoftBudget}
+        tokenUsed={tokenUsed}
         tools={scoped.tools}
       />
     </section>

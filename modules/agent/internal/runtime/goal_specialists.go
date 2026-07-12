@@ -1,0 +1,308 @@
+package runtime
+
+import (
+	"fmt"
+	"strings"
+
+	"redpanda/protocol/methods"
+)
+
+// goalSpecialist is a built-in Goal pipeline role (docs/32 §2.10).
+// Applied when subagent.run name matches Key (e.g. goal-analyst).
+type goalSpecialist struct {
+	Key             string
+	NameZH          string
+	Phase           string
+	DefaultMaxTurns int
+	// Allowlist when non-empty: only these tools are exposed (plus denylist still applies).
+	Allowlist []string
+	// ExtraDenylist is merged on top of subagentRunDenylist.
+	ExtraDenylist []string
+	SystemPrompt  string
+	// CapMaxTurns hard-caps specialist budget (0 = use effectiveSubagentToolTurns only).
+	CapMaxTurns int
+}
+
+var workspaceReadTools = []string{
+	"workspace.read_file",
+	"workspace.list",
+	"workspace.grep",
+	"workspace.diff_file",
+	"workspace.stats",
+}
+
+var workspaceWriteTools = []string{
+	"workspace.write_file",
+	"workspace.edit_file",
+	"workspace.apply_patch",
+}
+
+// builtinGoalSpecialists are the five phase experts. Keys match Gateway agent_definitions.
+var builtinGoalSpecialists = map[string]goalSpecialist{
+	"goal-analyst": {
+		Key: "goal-analyst", NameZH: "目标分析师", Phase: "analyze",
+		DefaultMaxTurns: 12, CapMaxTurns: 24,
+		Allowlist:     append(append([]string{}, workspaceReadTools...), "web.search", "web.fetch"),
+		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec"),
+		SystemPrompt: `You are goal-analyst for red_panda (目标分析师).
+
+Role: analyze the user request and codebase only. Read-only.
+
+Rules:
+- Do NOT modify files or run write/shell commands.
+- Do NOT call goal.* or todo.* tools.
+- Do NOT spawn nested subagents.
+- Produce a clear final report the parent can trust.
+
+Preferred final report shape (JSON in a fenced block is ideal):
+{
+  "intent": "...",
+  "in_scope": ["..."],
+  "out_of_scope": ["..."],
+  "constraints": ["..."],
+  "success_signals": ["..."],
+  "risks": ["..."],
+  "suggested_approach": "...",
+  "trivial": false,
+  "key_paths": ["..."]
+}
+
+If the request is trivial one-shot Q&A, set "trivial": true and explain why a Goal is unnecessary.`,
+	},
+	"goal-planner": {
+		Key: "goal-planner", NameZH: "目标规划师", Phase: "plan",
+		DefaultMaxTurns: 8, CapMaxTurns: 12,
+		Allowlist:     append([]string{}, workspaceReadTools...),
+		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec", "web.search", "web.fetch"),
+		SystemPrompt: `You are goal-planner for red_panda (目标规划师).
+
+Role: turn analysis into an executable plan. Read-only.
+
+Rules:
+- Do NOT write files or claim tools that create goals/todos (parent owns goal.write / todo.write).
+- Steps must be verifiable and ordered; keep granularity practical.
+- success_criteria must be checkable (tests, files, behaviors).
+
+Preferred final report JSON:
+{
+  "title": "...",
+  "objective": "...",
+  "success_criteria": "multi-line criteria",
+  "steps": [{"id":"1","content":"...","verify_hint":"..."}],
+  "notes": "..."
+}`,
+	},
+	"goal-implementer": {
+		Key: "goal-implementer", NameZH: "目标实施者", Phase: "execute",
+		DefaultMaxTurns: 24, CapMaxTurns: 48,
+		// No allowlist → all tools except denylist.
+		ExtraDenylist: []string{"web.search", "web.fetch", "skill.run", "skill.create", "skill.update", "skill.delete"},
+		SystemPrompt: `You are goal-implementer for red_panda (目标实施者).
+
+Role: implement ONLY the current assigned step. Prefer minimal diffs.
+
+Rules:
+- Stay inside the step scope; do not rewrite unrelated modules.
+- Do NOT call goal.* / todo.* / subagent.* (parent owns session state).
+- End with a concrete ImplementationReport the verifier can check.
+
+Preferred final report JSON:
+{
+  "step_id": "...",
+  "done_claim": true,
+  "changes": [{"path":"...","summary":"..."}],
+  "commands_run": ["..."],
+  "blockers": [],
+  "notes_for_verifier": "..."
+}`,
+	},
+	"goal-verifier": {
+		Key: "goal-verifier", NameZH: "目标验证者", Phase: "verify",
+		DefaultMaxTurns: 12, CapMaxTurns: 16,
+		Allowlist:     append(append([]string{}, workspaceReadTools...), "shell.exec"),
+		ExtraDenylist: append([]string{}, workspaceWriteTools...),
+		SystemPrompt: `You are goal-verifier for red_panda (目标验证者).
+
+Role: skeptically verify the current step with evidence (read/tests/commands).
+
+Rules:
+- Prefer evidence over the implementer's claims.
+- Do NOT edit product source in v1 (no write/edit/apply_patch).
+- shell.exec is only for tests/builds that validate the step.
+- Do NOT call goal.* / todo.* / subagent.*.
+
+Preferred final report JSON:
+{
+  "step_id": "...",
+  "passed": true,
+  "evidence": [{"kind":"test|read|command","detail":"..."}],
+  "failures": [],
+  "retry_suggestion": "..."
+}`,
+	},
+	"goal-evaluator": {
+		Key: "goal-evaluator", NameZH: "目标终评官", Phase: "evaluate",
+		DefaultMaxTurns: 8, CapMaxTurns: 12,
+		Allowlist:     append([]string{}, workspaceReadTools...),
+		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec", "web.search", "web.fetch"),
+		SystemPrompt: `You are goal-evaluator for red_panda (目标终评官).
+
+Role: evaluate the whole goal against success_criteria and draft the user-facing completion report.
+
+Rules:
+- Read-only. Do not write files or run shell.
+- Compare evidence from prior specialist reports and the workspace.
+- Do NOT call goal.complete (parent does after publishing the report).
+
+Preferred final report JSON:
+{
+  "verdict": "succeeded|partial|failed",
+  "criteria": [{"item":"...","result":"met|partial|not_met|blocked","evidence":"..."}],
+  "steps_summary": [{"id":"...","status":"completed","note":"..."}],
+  "risks": ["..."],
+  "followups": ["..."],
+  "report_markdown": "## 目标完成报告\\n..."
+}`,
+	},
+}
+
+func lookupGoalSpecialist(name string) (goalSpecialist, bool) {
+	key := normalizeGoalSpecialistKey(name)
+	if key == "" {
+		return goalSpecialist{}, false
+	}
+	spec, ok := builtinGoalSpecialists[key]
+	return spec, ok
+}
+
+func normalizeGoalSpecialistKey(name string) string {
+	key := strings.ToLower(strings.TrimSpace(name))
+	key = strings.ReplaceAll(key, "_", "-")
+	return key
+}
+
+func isGoalSpecialistName(name string) bool {
+	_, ok := lookupGoalSpecialist(name)
+	return ok
+}
+
+func (r *Runtime) validateGoalSpecialistPhase(runID string, spec goalSpecialist) error {
+	state := r.getRunGoal(runID)
+	if state == nil || strings.TrimSpace(state.Goal.ID) == "" || state.Terminal {
+		return fmt.Errorf("%s requires an active goal", spec.Key)
+	}
+	current := strings.TrimSpace(state.Goal.PipelinePhase)
+	if current == "" {
+		current = "analyze"
+	}
+	if current != spec.Phase {
+		return fmt.Errorf(
+			"%s is only valid in goal phase %q; current phase is %q",
+			spec.Key,
+			spec.Phase,
+			current,
+		)
+	}
+	return nil
+}
+
+// Child agents must never inherit the root Goal binding. Otherwise each child
+// starts its own multi-segment Goal loop and can multiply its tool budget.
+func disableGoalPipelineForChild(options *methods.ReplyOptions) {
+	if options == nil {
+		return
+	}
+	disabled := false
+	options.GoalsEnabled = &disabled
+	options.GoalID = ""
+	options.GoalContext = nil
+}
+
+// applyGoalSpecialist configures child ReplyParams for a phase specialist.
+// Returns adjusted maxTurns.
+func applyGoalSpecialist(child *methods.ReplyParams, spec goalSpecialist, task string, maxTurns int) int {
+	if child == nil {
+		return maxTurns
+	}
+	if maxTurns <= 0 {
+		maxTurns = spec.DefaultMaxTurns
+	}
+	if spec.CapMaxTurns > 0 && maxTurns > spec.CapMaxTurns {
+		maxTurns = spec.CapMaxTurns
+	}
+	if maxTurns < 1 {
+		maxTurns = 1
+	}
+
+	// Session-scoped tools stay root-only.
+	child.Options.TodoContext = nil
+	disableGoalPipelineForChild(&child.Options)
+	child.Options.SpawnSubAgents = false
+	child.Options.SubAgentBackend = ""
+	child.Options.MaxToolTurns = maxTurns
+
+	// Denylist: always include global subagent denylist + specialist extras.
+	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, subagentRunDenylist...)
+	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, spec.ExtraDenylist...)
+
+	if len(spec.Allowlist) > 0 {
+		// Allowlist is authoritative for exposed tools; keep parent allowlist intersection if set.
+		if len(child.Options.ToolAllowlist) > 0 {
+			child.Options.ToolAllowlist = intersectStrings(child.Options.ToolAllowlist, spec.Allowlist)
+		} else {
+			child.Options.ToolAllowlist = append([]string{}, spec.Allowlist...)
+		}
+	}
+
+	// System role: specialist prompt + task framing.
+	roleBlock := strings.TrimSpace(spec.SystemPrompt)
+	if roleBlock == "" {
+		roleBlock = fmt.Sprintf("You are specialist %q.", spec.Key)
+	}
+	budgetNote := fmt.Sprintf(
+		"\n\nSpecialist key=%s phase=%s (%s). Tool-turn budget=%d. "+
+			"Return one final report for the parent. Do not nest subagents.",
+		spec.Key, spec.Phase, spec.NameZH, maxTurns,
+	)
+	child.Options.MemoryContext = &methods.MemoryContext{
+		Context: roleBlock + budgetNote,
+	}
+
+	// Ensure task text still carries the user assignment.
+	if strings.TrimSpace(task) != "" && !strings.Contains(child.Input.Text, task) {
+		child.Input.Text = strings.TrimSpace(task) + "\n\n" + strings.TrimSpace(child.Input.Text)
+	}
+	return maxTurns
+}
+
+func intersectStrings(a, b []string) []string {
+	set := map[string]struct{}{}
+	for _, item := range b {
+		set[strings.TrimSpace(item)] = struct{}{}
+	}
+	out := make([]string, 0, len(a))
+	seen := map[string]struct{}{}
+	for _, item := range a {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := set[item]; !ok {
+			continue
+		}
+		if _, dup := seen[item]; dup {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+// goalSpecialistDisplayName returns Chinese label for UI events when known.
+func goalSpecialistDisplayName(name string) string {
+	if spec, ok := lookupGoalSpecialist(name); ok && spec.NameZH != "" {
+		return spec.NameZH
+	}
+	return name
+}

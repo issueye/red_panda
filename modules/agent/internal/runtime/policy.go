@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"strings"
 
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
@@ -22,6 +23,9 @@ type ToolDecision struct {
 }
 
 func EvaluateToolPolicy(options methods.ReplyOptions, call tools.Call) ToolDecision {
+	if options.GoalsEnabled != nil && !*options.GoalsEnabled && strings.HasPrefix(call.Name, "goal.") {
+		return ToolDecision{Action: ToolDecisionDeny, Reason: "goals are disabled"}
+	}
 	if containsString(options.ToolDenylist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is denied by tool_denylist"}
 	}
@@ -77,6 +81,9 @@ func containsString(items []string, value string) bool {
 func availableToolsForOptions(definitions []tools.Definition, options methods.ReplyOptions) []tools.Definition {
 	filtered := make([]tools.Definition, 0, len(definitions))
 	for _, definition := range definitions {
+		if options.GoalsEnabled != nil && !*options.GoalsEnabled && strings.HasPrefix(definition.Name, "goal.") {
+			continue
+		}
 		if containsString(options.ToolDenylist, definition.Name) {
 			continue
 		}

@@ -1,5 +1,7 @@
 import { ChatComposer } from './ChatComposer.jsx';
 import { ChatConversation } from './ChatConversation.jsx';
+import { GoalComposerStrip } from './GoalComposerStrip.jsx';
+import { TodoComposerStrip } from './TodoComposerStrip.jsx';
 import { classNames } from '../../lib/format.js';
 
 /**
@@ -23,6 +25,25 @@ export function ConversationView({
   providerProfileId = '',
   onProviderProfileChange,
   readOnlyHint = '',
+  goal = null,
+  goalExpanded = false,
+  goalLoading = false,
+  goalBusy = false,
+  onGoalExpandToggle,
+  onGoalContinue,
+  onGoalCancel,
+  todos = [],
+  todoOpenCount = 0,
+  todosExpanded = false,
+  todosLoading = false,
+  onTodosExpandToggle,
+  onTodosRefresh,
+  tokenUsed = 0,
+  tokenMax = 0,
+  tokenRatio = 0,
+  tokenDisplayRatio = 0,
+  tokenBudgetEnabled = false,
+  tokenSoftBudget = false,
 }) {
   return (
     <section className={classNames('conversation-view', className)}>
@@ -35,16 +56,43 @@ export function ConversationView({
         tools={tools}
       />
       {showComposer ? (
-        <ChatComposer
-          onCancel={onCancel}
-          onChange={onDraftChange}
-          onProviderProfileChange={onProviderProfileChange}
-          onSend={onSend}
-          providerProfileId={providerProfileId}
-          providerProfiles={providerProfiles}
-          running={running}
-          value={draft}
-        />
+        <div className="conversation-footer">
+          <div className="composer-strips">
+            <GoalComposerStrip
+              busy={goalBusy}
+              expanded={goalExpanded}
+              goal={goal}
+              loading={goalLoading}
+              onCancel={onGoalCancel}
+              onContinue={onGoalContinue}
+              onToggleExpanded={onGoalExpandToggle}
+            />
+            <TodoComposerStrip
+              expanded={todosExpanded}
+              items={todos}
+              loading={todosLoading}
+              onRefresh={onTodosRefresh}
+              onToggleExpanded={onTodosExpandToggle}
+              openCount={todoOpenCount}
+            />
+          </div>
+          <ChatComposer
+            onCancel={onCancel}
+            onChange={onDraftChange}
+            onProviderProfileChange={onProviderProfileChange}
+            onSend={onSend}
+            providerProfileId={providerProfileId}
+            providerProfiles={providerProfiles}
+            running={running}
+            tokenBudgetEnabled={tokenBudgetEnabled}
+            tokenDisplayRatio={tokenDisplayRatio}
+            tokenMax={tokenMax}
+            tokenRatio={tokenRatio}
+            tokenSoftBudget={tokenSoftBudget}
+            tokenUsed={tokenUsed}
+            value={draft}
+          />
+        </div>
       ) : readOnlyHint ? (
         <div className="conversation-readonly-hint" data-testid="conversation-readonly-hint">
           {readOnlyHint}

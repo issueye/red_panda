@@ -20,6 +20,8 @@ const (
 	PermissionResolve   = "permission.resolve"
 	AgentEvent          = "agent.event"
 	MemoryToolExecute   = "memory.tool.execute"
+	TodoToolExecute     = "todo.tool.execute"
+	GoalToolExecute     = "goal.tool.execute"
 )
 
 type PeerInfo struct {
@@ -97,7 +99,17 @@ type ReplyOptions struct {
 	RequirePermission bool           `json:"require_permission,omitempty"`
 	SpawnSubAgents    bool           `json:"spawn_subagents,omitempty"`
 	SubAgentBackend   string         `json:"subagent_backend,omitempty"`
-	MemoryContext       *MemoryContext `json:"memory_context,omitempty"`
+	MemoryContext     *MemoryContext `json:"memory_context,omitempty"`
+	// TodoContext is the session checklist injected into provider messages.
+	TodoContext *TodoContext `json:"todo_context,omitempty"`
+	// GoalContext is the active/bound goal for long-horizon runs.
+	GoalContext *GoalContext `json:"goal_context,omitempty"`
+	// GoalsEnabled when false omits goal tools (nil/true = enabled).
+	GoalsEnabled *bool `json:"goals_enabled,omitempty"`
+	// GoalID binds this run to an existing goal (pending/paused → active).
+	GoalID string `json:"goal_id,omitempty"`
+	// ContinueGoal binds the latest paused (or pending) goal for the session.
+	ContinueGoal bool `json:"continue_goal,omitempty"`
 	// SkillsContext is refreshed on every conversation start so newly created
 	// managed skills are immediately visible to the model.
 	SkillsContext       *SkillsContext `json:"skills_context,omitempty"`
@@ -113,6 +125,9 @@ type ReplyOptions struct {
 	WebHTTPProxy string `json:"web_http_proxy,omitempty"`
 	// MaxToolTurns limits provider↔tool loops per root reply. Zero means runtime default.
 	MaxToolTurns int `json:"max_tool_turns,omitempty"`
+	// LogLLMRequests writes each outbound provider request body to the local
+	// diagnostic log directory (API keys are never written). Toggle from Desktop settings.
+	LogLLMRequests bool `json:"log_llm_requests,omitempty"`
 }
 
 type MemoryContext struct {
@@ -158,6 +173,109 @@ type MemoryToolItem struct {
 	Title      string `json:"title"`
 	Content    string `json:"content,omitempty"`
 	Confidence string `json:"confidence,omitempty"`
+}
+
+// TodoContext is the formatted session task list for one reply turn.
+type TodoContext struct {
+	Items   []TodoItemDTO `json:"items,omitempty"`
+	Context string        `json:"context,omitempty"`
+}
+
+// TodoItemDTO is the shared todo item shape for tools, HTTP, and events.
+type TodoItemDTO struct {
+	ID         string `json:"id"`
+	ClientKey  string `json:"client_key,omitempty"`
+	Content    string `json:"content"`
+	Status     string `json:"status"`
+	SortOrder  int    `json:"sort_order"`
+	Priority   string `json:"priority,omitempty"`
+	ActiveForm string `json:"active_form,omitempty"`
+}
+
+// TodoToolExecuteParams is Runtime -> Gateway for todo.write / todo.list.
+type TodoToolExecuteParams struct {
+	RunID         string         `json:"run_id"`
+	SessionID     string         `json:"session_id"`
+	WorkspaceRoot string         `json:"workspace_root,omitempty"`
+	ToolCallID    string         `json:"tool_call_id"`
+	ToolName      string         `json:"tool_name"`
+	Arguments     map[string]any `json:"arguments,omitempty"`
+}
+
+// TodoToolExecuteResult is Gateway -> Runtime for todo tools.
+type TodoToolExecuteResult struct {
+	Status    string        `json:"status"`
+	Output    string        `json:"output,omitempty"`
+	Items     []TodoItemDTO `json:"items,omitempty"`
+	OpenCount int           `json:"open_count,omitempty"`
+}
+
+// GoalContext is model-facing goal state for one reply turn.
+type GoalContext struct {
+	GoalID            string `json:"goal_id"`
+	Title             string `json:"title,omitempty"`
+	Objective         string `json:"objective"`
+	SuccessCriteria   string `json:"success_criteria,omitempty"`
+	Status            string `json:"status"`
+	PipelinePhase     string `json:"pipeline_phase,omitempty"`
+	AnalysisSummary   string `json:"analysis_summary,omitempty"`
+	CheckpointSummary string `json:"checkpoint_summary,omitempty"`
+	ProgressNote      string `json:"progress_note,omitempty"`
+	CurrentStep       string `json:"current_step,omitempty"`
+	UsedToolTurns     int    `json:"used_tool_turns"`
+	MaxTotalToolTurns int    `json:"max_total_tool_turns"`
+	UsedSegments      int    `json:"used_segments"`
+	MaxSegmentsPerRun int    `json:"max_segments_per_run"`
+	MaxToolTurnsSeg   int    `json:"max_tool_turns_per_segment"`
+	UsedWallTimeSec   int    `json:"used_wall_time_sec"`
+	MaxWallTimeSec    int    `json:"max_wall_time_sec"`
+	Context           string `json:"context,omitempty"`
+}
+
+// GoalDTO is the shared goal shape for tools, HTTP, and events.
+type GoalDTO struct {
+	ID                string `json:"id"`
+	SessionID         string `json:"session_id"`
+	Title             string `json:"title,omitempty"`
+	Objective         string `json:"objective"`
+	SuccessCriteria   string `json:"success_criteria,omitempty"`
+	Status            string `json:"status"`
+	PipelinePhase     string `json:"pipeline_phase,omitempty"`
+	PauseReason       string `json:"pause_reason,omitempty"`
+	FailReason        string `json:"fail_reason,omitempty"`
+	AnalysisSummary   string `json:"analysis_summary,omitempty"`
+	CheckpointSummary string `json:"checkpoint_summary,omitempty"`
+	ProgressNote      string `json:"progress_note,omitempty"`
+	ReportMarkdown    string `json:"report_markdown,omitempty"`
+	UsedToolTurns     int    `json:"used_tool_turns"`
+	MaxTotalToolTurns int    `json:"max_total_tool_turns"`
+	UsedSegments      int    `json:"used_segments"`
+	MaxSegmentsPerRun int    `json:"max_segments_per_run"`
+	MaxToolTurnsSeg   int    `json:"max_tool_turns_per_segment"`
+	UsedWallTimeSec   int    `json:"used_wall_time_sec"`
+	MaxWallTimeSec    int    `json:"max_wall_time_sec"`
+	ActiveRunID       string `json:"active_run_id,omitempty"`
+	LastRunID         string `json:"last_run_id,omitempty"`
+	CreatedAt         string `json:"created_at,omitempty"`
+	UpdatedAt         string `json:"updated_at,omitempty"`
+}
+
+// GoalToolExecuteParams is Runtime -> Gateway for goal.* tools.
+type GoalToolExecuteParams struct {
+	RunID         string         `json:"run_id"`
+	SessionID     string         `json:"session_id"`
+	WorkspaceRoot string         `json:"workspace_root,omitempty"`
+	ToolCallID    string         `json:"tool_call_id"`
+	ToolName      string         `json:"tool_name"`
+	Arguments     map[string]any `json:"arguments,omitempty"`
+}
+
+// GoalToolExecuteResult is Gateway -> Runtime for goal tools.
+type GoalToolExecuteResult struct {
+	Status string    `json:"status"`
+	Output string    `json:"output,omitempty"`
+	Goal   *GoalDTO  `json:"goal,omitempty"`
+	Goals  []GoalDTO `json:"goals,omitempty"`
 }
 
 type Message struct {
@@ -245,9 +363,9 @@ type SkillsListResult struct {
 }
 
 type SkillLoadParams struct {
-	WorkspaceRoot        string `json:"workspace_root"`
-	Name                 string `json:"name"`
-	IncludeInstructions  bool   `json:"include_instructions,omitempty"`
+	WorkspaceRoot       string `json:"workspace_root"`
+	Name                string `json:"name"`
+	IncludeInstructions bool   `json:"include_instructions,omitempty"`
 }
 
 type SkillLoadResult struct {

@@ -23,7 +23,7 @@ func TestSummarizeMessagesExcludesSubagentContent(t *testing.T) {
 		}
 		return string(raw)
 	}
-	summary := summarizeMessages([]model.Message{
+	summary := summarizeMessagesLocal([]model.Message{
 		{Role: "user", ContentJSON: encode("root question")},
 		{Role: "subagent", ContentJSON: encode("PRIVATE_SUBAGENT_SENTINEL")},
 		{Role: "assistant", ContentJSON: encode("root answer")},
@@ -110,8 +110,10 @@ func TestSessionServiceCompactPreviewAndApply(t *testing.T) {
 		}
 	}
 
+	// Explicit keep_tail_messages forces message-count mode (legacy contract).
 	preview, err := service.CompactPreview(source.ID, CompactPreviewRequest{
 		KeepTailMessages: 1,
+		Mode:             "local",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -120,46 +122,138 @@ func TestSessionServiceCompactPreviewAndApply(t *testing.T) {
 		preview.Preview.KeepTailMessages != 1 || preview.Preview.Summary.Summary == "" {
 		t.Fatalf("preview mismatch: %#v", preview)
 	}
+	if preview.Preview.SummaryMethod != "local" {
+		t.Fatalf("summary_method = %q, want local", preview.Preview.SummaryMethod)
+	}
 	sessionsBefore, err := repos.Sessions.List(10)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	result, err := service.Compact(source.ID, CompactSessionRequest{
-		Name:             "compact",
 		KeepTailMessages: 1,
+		Mode:             "local",
 		Summary:          preview.Preview.Summary,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Session.ParentID != source.ID || result.Session.Kind != "compact" ||
-		result.CopiedTailMessages != 1 || result.Compaction.Status != "applied" {
+	if result.Session.ID != source.ID || result.Session.Kind != "normal" ||
+		result.KeepTailMessages != 1 || result.Compaction.Status != "applied" ||
+		result.Compaction.TargetSessionID != source.ID {
 		t.Fatalf("compact result mismatch: %#v", result)
 	}
-	if result.Lineage.Operation != "compact" || result.Lineage.SourceStartSeq != 1 || result.Lineage.SourceEndSeq != 3 {
-		t.Fatalf("compact lineage mismatch: %#v", result.Lineage)
-	}
 
-	compactMessages, err := repos.Messages.List(result.Session.ID, 10)
+	originalMessages, err := repos.Messages.List(source.ID, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(compactMessages) != 2 {
-		t.Fatalf("len(compactMessages) = %d, want 2", len(compactMessages))
+	if len(originalMessages) != 4 {
+		t.Fatalf("compaction mutated history, len(messages) = %d, want 4", len(originalMessages))
 	}
-	assertSessionTestMessageText(t, compactMessages[0], preview.Preview.Summary.Summary)
-	assertSessionTestMessageText(t, compactMessages[1], "second answer")
-	if compactMessages[0].MetadataJSON == "" || compactMessages[1].SourceMessageID == "" {
-		t.Fatalf("compact message metadata mismatch: %#v", compactMessages)
+	assertSessionTestMessageText(t, originalMessages[0], "first prompt")
+	assertSessionTestMessageText(t, originalMessages[3], "second answer")
+	state, err := service.CompactionState(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Active || state.Compaction == nil || state.Compaction.ID != result.Compaction.ID || state.Summary.Summary == "" {
+		t.Fatalf("compaction state mismatch: %#v", state)
 	}
 
 	sessionsAfter, err := repos.Sessions.List(10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessionsAfter) != len(sessionsBefore)+1 {
-		t.Fatalf("preview should not create sessions and apply should create one, before=%d after=%d", len(sessionsBefore), len(sessionsAfter))
+	if len(sessionsAfter) != len(sessionsBefore) {
+		t.Fatalf("compaction must not create a session, before=%d after=%d", len(sessionsBefore), len(sessionsAfter))
+	}
+}
+
+func TestRunConversationUsesSummarySnapshotAndPreservesTail(t *testing.T) {
+	repos, sessionService := newSessionServiceTestFixture(t)
+	source, err := repos.Sessions.Create("source", "D:\\workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct {
+		role string
+		text string
+	}{
+		{"user", "old question"},
+		{"assistant", "old answer"},
+		{"user", "recent question"},
+		{"assistant", "recent answer"},
+	} {
+		if _, err := repos.Messages.Add(source.ID, item.role, item.text, "run"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	preview, err := sessionService.CompactPreview(source.ID, CompactPreviewRequest{KeepTailMessages: 2, Mode: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessionService.Compact(source.ID, CompactSessionRequest{
+		KeepTailMessages: 2,
+		Mode:             "local",
+		Summary:          preview.Preview.Summary,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := (RunService{repos: repos}).buildRunConversation(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) != 3 || conversation[0].Role != "system" ||
+		conversation[1].Role != "user" || conversation[2].Role != "assistant" {
+		t.Fatalf("conversation shape = %#v", conversation)
+	}
+	if !strings.Contains(conversation[0].Content[0].Text, "old question") ||
+		conversation[1].Content[0].Text != "recent question" ||
+		conversation[2].Content[0].Text != "recent answer" {
+		t.Fatalf("conversation content = %#v", conversation)
+	}
+}
+
+func TestSessionServiceCompactSupersedesPreviousSnapshot(t *testing.T) {
+	repos, sessionService := newSessionServiceTestFixture(t)
+	source, err := repos.Sessions.Create("source", "D:\\workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"one", "two", "three", "four"} {
+		role := "user"
+		if text == "two" || text == "four" {
+			role = "assistant"
+		}
+		if _, err := repos.Messages.Add(source.ID, role, text, "run"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := sessionService.Compact(source.ID, CompactSessionRequest{
+		KeepTailMessages: 2,
+		Mode:             "local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := sessionService.Compact(source.ID, CompactSessionRequest{
+		KeepTailMessages: 1,
+		Mode:             "local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Compaction.ID == second.Compaction.ID {
+		t.Fatal("expected a new snapshot")
+	}
+	rows, err := repos.Compactions.ListForSession(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Status != "superseded" || rows[1].Status != "applied" {
+		t.Fatalf("snapshot statuses = %#v", rows)
 	}
 }
 
@@ -181,7 +275,58 @@ func newSessionServiceTestFixture(t *testing.T) (repository.Set, SessionService)
 	}
 
 	repos := repository.NewSet(db)
-	return repos, NewSessionService(repos)
+	return repos, NewSessionService(repos, nil)
+}
+
+func TestSessionServiceCompactPausesActiveRuns(t *testing.T) {
+	repos, service := newSessionServiceTestFixture(t)
+	source, err := repos.Sessions.Create("compact-pause", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"user goal", "assistant progress", "user more", "assistant more"} {
+		role := "user"
+		if strings.HasPrefix(text, "assistant") {
+			role = "assistant"
+		}
+		if _, err := repos.Messages.Add(source.ID, role, text, "run_active"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repos.Runs.Start(model.RunRecord{
+		ID:        "run_active",
+		SessionID: source.ID,
+		Status:    "running",
+		Input:     "user goal",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without a runtime client, pause must still force-finish the active run.
+	result, err := service.Compact(source.ID, CompactSessionRequest{
+		KeepTailTurns: 1,
+		Mode:          "local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PausedRuns != 1 {
+		t.Fatalf("PausedRuns = %d, want 1", result.PausedRuns)
+	}
+	active, err := repos.Runs.CountActiveBySession(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatalf("active runs after compact = %d, want 0", active)
+	}
+	run, err := repos.Runs.Get("run_active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "cancelled" {
+		t.Fatalf("run status = %q, want cancelled", run.Status)
+	}
 }
 
 func assertSessionTestMessageText(t *testing.T, row model.Message, want string) {

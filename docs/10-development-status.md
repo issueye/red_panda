@@ -32,8 +32,8 @@ Updated: 2026-07-11
 - `scripts/protocol-compat.ps1` covers public WebSocket/API failed tool and failed subagent paths: denied `shell.exec` produces `tool_failed` plus denied projections, and invalid `RED_PANDA_SUBAGENT_COMMAND` produces failed `subagent_update` events in persisted timeline.
 - Gateway-backed Playwright teardown now snapshots `red-panda-gateway` / `red-panda-agent` processes before each test and fails if newly created processes remain after teardown.
 - Gateway-backed Playwright e2e covers user-visible subagent cancellation over the real Gateway/Runtime/Desktop chain using `RED_PANDA_PLANNER_DRAFT_DELAY_MS` to keep the planner subagent cancellable without relying on a narrow timing window.
-- Gateway session fork/compact backend is implemented: models, migrations, repository/service/controller routes, service tests, and protocol compatibility coverage for fork, compact preview, and compact apply.
-- Desktop exposes session Fork and Compact controls, selects returned derived sessions, and restores forked/compacted history through the existing session restore flow.
+- Gateway session fork/context-summary backend is implemented: forks create derived sessions, while summary apply stores an in-place snapshot and assembles future model context from summary plus recent original messages.
+- Desktop exposes Fork and Summary controls; summary updates keep the same selected session and preserve the complete visible message history.
 - Memory/history design is documented in `docs/14-memory-history-design.md`.
 - Gateway memory/history backend is implemented: `memory_records` persistence, CRUD HTTP APIs, soft delete, run memory preview selection, repository/service tests, and protocol compatibility coverage.
 - Runtime memory injection is implemented: Gateway selects active project/session memory before `agent.reply`, Runtime receives structured memory context, emits `memory_injected`, and OpenAI-compatible provider requests include memory as a separate system message before the user message.
@@ -44,6 +44,7 @@ Updated: 2026-07-11
 - Gateway Runtime subprocess is detached from the request context: `ensureStarted` spawns the long-lived single-core Runtime with `exec.Command` instead of `exec.CommandContext(reqCtx)`, so one-shot management requests (skills, MCP discovery) no longer kill the Runtime when their HTTP handler returns. A regression test locks this in.
 - Network access tools are implemented: high-risk `web.search` (DuckDuckGo HTML endpoint, no API key, structured title/url/snippet results with sponsored-result filtering and `uddg=` redirect decoding) and high-risk `web.fetch` (http/https GET with scheme validation, body-size cap, HTML-to-text extraction). Both honor `RiskHigh` permission policy and per-run tuning (`web_search_max_results`, `web_fetch_max_bytes`) transparently passed from Desktop settings through `run.start` options. No SSRF IP filtering by design (permission-gated); URL scheme is validated to http/https only.
 - Desktop SettingsPanel exposes a "网络工具" (Web Tools) section for search result count and fetch byte cap; `runOptions.js` forwards them as `run.start` options; Gateway extracts them via a new `intOption` helper into `ReplyOptions`.
+- Session-scoped TODO checklist is implemented end to end (design: `docs/30-todo-feature-design.md`): Runtime tools `todo.write`/`todo.list` (low risk) via Gateway-mediated `todo.tool.execute`, SQLite `todo_items` with Gateway PK + `client_key` merge, `todo_updated` events, `ReplyOptions.TodoContext` injection on run start and mid-loop, compact/fork copy of open/all todos, and Desktop collapsible **任务** strip above the chat input (`TodoComposerStrip`).
 
 ## Completed
 

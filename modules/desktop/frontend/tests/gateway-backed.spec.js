@@ -88,7 +88,7 @@ test('Gateway-backed desktop renders denied tool failure path @gateway-backed', 
   }
 });
 
-test('Gateway-backed desktop forks and compacts a session @gateway-backed', async ({ page }) => {
+test('Gateway-backed desktop forks and summarizes a session in place @gateway-backed', async ({ page }) => {
   const gateway = await startGateway();
   try {
     await page.addInitScript(() => window.localStorage.clear());
@@ -97,7 +97,7 @@ test('Gateway-backed desktop forks and compacts a session @gateway-backed', asyn
 
     await page.getByTestId('chat-composer-input').fill('/read README.md');
     await page.getByTestId('chat-composer-send').click();
-    await expect(page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' })).toContainText('已完成', { timeout: 20000 });
+    await expect(page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' })).toHaveClass(/tool-completed/, { timeout: 20000 });
 
     await page.getByTestId('session-fork').click();
     const forkedSession = page.getByTestId('session-item').filter({ hasText: '的分叉' });
@@ -105,11 +105,15 @@ test('Gateway-backed desktop forks and compacts a session @gateway-backed', asyn
     await expect(forkedSession).toContainText('分叉');
     await expect(page.getByTestId('message-row').filter({ hasText: '/read README.md' }).first()).toBeVisible({ timeout: 15000 });
 
+    const sessionsBefore = await page.getByTestId('session-item').count();
+    const applied = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && /\/api\/v1\/sessions\/[^/]+\/compact$/.test(new URL(response.url()).pathname)
+    ));
     await page.getByTestId('session-compact').click();
-    const compactSession = page.getByTestId('session-item').filter({ hasText: '的压缩版' });
-    await expect(compactSession).toBeVisible({ timeout: 15000 });
-    await expect(compactSession).toContainText('压缩');
-    await expect(page.getByTestId('message-row').filter({ hasText: 'Compacted session messages' }).first()).toBeVisible({ timeout: 15000 });
+    await applied;
+    await expect(page.getByTestId('session-item')).toHaveCount(sessionsBefore);
+    await expect(page.getByTestId('message-row').filter({ hasText: '/read README.md' }).first()).toBeVisible();
   } finally {
     await page.close().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, 300));

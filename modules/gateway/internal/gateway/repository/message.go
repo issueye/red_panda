@@ -125,6 +125,11 @@ func (r MessageRepository) ListLatestConversation(sessionID string, limit int) (
 	return r.listLatestQuery(r.db.Where("session_id = ? AND role IN ?", sessionID, []string{"user", "assistant"}), limit)
 }
 
+func (r MessageRepository) ListConversationAfterSeq(sessionID string, afterSeq uint64, limit int) ([]model.Message, error) {
+	query := r.db.Where("session_id = ? AND role IN ? AND seq > ?", sessionID, []string{"user", "assistant"}, afterSeq)
+	return r.listLatestQuery(query, limit)
+}
+
 func (r MessageRepository) listLatestQuery(query *gorm.DB, limit int) ([]model.Message, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200

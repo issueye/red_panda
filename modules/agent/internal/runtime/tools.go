@@ -26,11 +26,22 @@ const defaultListDepth = 3
 const maxListEntries = 500
 const defaultGrepMatches = 100
 const maxPatchBytes = 256 * 1024
+
 // defaultShellTimeout bounds shell.exec. Many CLI tools (e.g. Office automation)
 // print success then hang on child/COM processes; we must still return.
 const defaultShellTimeout = 60 * time.Second
 
+// defaultLocalToolTimeout is a hard upper bound for local FS/RPC tools that do not
+// manage their own deadline. Normal reads fail in milliseconds; this only prevents
+// stuck network mounts, pathological trees, or hung gateway RPCs from freezing a run.
+const defaultLocalToolTimeout = 30 * time.Second
+
+// defaultGatewayToolTimeout bounds memory/todo tools that call back into Gateway.
+const defaultGatewayToolTimeout = 30 * time.Second
+
 type MemoryToolExecutor func(context.Context, methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error)
+type TodoToolExecutor func(context.Context, methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error)
+type GoalToolExecutor func(context.Context, methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error)
 type SkillRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
 type SubagentRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
 
@@ -46,6 +57,8 @@ type SubagentManager interface {
 
 type ToolRunner struct {
 	MemoryExecutor   MemoryToolExecutor
+	TodoExecutor     TodoToolExecutor
+	GoalExecutor     GoalToolExecutor
 	SkillExecutor    SkillRunExecutor
 	SubagentExecutor SubagentRunExecutor
 	SubagentManager  SubagentManager
@@ -261,13 +274,13 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "subagent.run",
 			DisplayName: "Run subagent",
-			Description: "REQUIRED for analysis/investigation/multi-area work. Spawn a process-pool specialist and return its final report. First call workspace.stats on the target directory, then set budget as max_turns = file_count + summary turns (use suggested_max_turns / top_level[].recommended_max_turns). Pass path and/or file_count so the runtime can apply the same formula. No artificial maximum: budget scales with file count.",
+			Description: "Spawn a process-pool specialist and return its final report. For Goal multi-step work use phase names exactly: goal-analyst, goal-planner, goal-implementer, goal-verifier, goal-evaluator (tool policy and prompts are applied automatically). For broad codebase analysis without Goal, call workspace.stats first and set file_count/max_turns; split non-overlapping scopes; synthesize results instead of re-reading.",
 			Risk:        tools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"task": map[string]any{"type": "string", "description": "Focused task for the subagent. Include scope, goals, and expected output."},
-					"name": map[string]any{"type": "string", "description": "Short subagent label, e.g. desktop-analyst or backend-analyst."},
+					"name": map[string]any{"type": "string", "description": "Specialist id. Goal pipeline: goal-analyst|goal-planner|goal-implementer|goal-verifier|goal-evaluator. Otherwise e.g. desktop-analyst."},
 					"path": map[string]any{"type": "string", "description": "Workspace-relative directory this specialist owns. Used to count files when file_count/max_turns are omitted."},
 					"file_count": map[string]any{
 						"type":        "integer",
@@ -356,6 +369,129 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "todo.write",
+			DisplayName: "Update todos",
+			Description: "REQUIRED for multi-step work: create/update the session checklist shown to the user above the chat input. Call at plan start and whenever a step starts/finishes/changes. Prefer the full list each time. todos[].id = your short key (\"1\",\"2\") or a prior Gateway id. status: pending|in_progress|completed|cancelled (at most one in_progress). merge defaults true (omitted items kept). Do NOT use memory.create for a work queue. Skip only for trivial one-shot Q&A.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"todos": map[string]any{
+						"type":        "array",
+						"description": "Task list entries. Prefer full active plan each call.",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"id":          map[string]any{"type": "string", "description": "Short stable key or Gateway id from a prior result."},
+								"client_key":  map[string]any{"type": "string", "description": "Optional explicit short key."},
+								"content":     map[string]any{"type": "string", "description": "Short actionable task text."},
+								"status":      map[string]any{"type": "string", "description": "pending | in_progress | completed | cancelled"},
+								"priority":    map[string]any{"type": "string", "description": "low | medium | high"},
+								"active_form": map[string]any{"type": "string", "description": "Optional present continuous UI form while in_progress."},
+							},
+							"required": []string{"content", "status"},
+						},
+					},
+					"merge": map[string]any{"type": "boolean", "description": "true (default): keep items not listed. false: replace entire list."},
+				},
+				"required": []string{"todos"},
+			},
+		},
+		{
+			Name:        "goal.write",
+			DisplayName: "Create goal",
+			Description: "Create a session Goal after analyzing the user request. Provide objective; set activate=true with success_criteria to start long-horizon work. Then write steps with todo.write. Do not skip analysis.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":             map[string]any{"type": "string"},
+					"objective":         map[string]any{"type": "string"},
+					"success_criteria":  map[string]any{"type": "string"},
+					"analysis_summary":  map[string]any{"type": "string"},
+					"activate":          map[string]any{"type": "boolean"},
+				},
+				"required": []string{"objective"},
+			},
+		},
+		{
+			Name:        "goal.update",
+			DisplayName: "Update goal",
+			Description: "Update goal fields, pipeline_phase, or action=cancel. Use activate=true to activate a pending goal.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal_id":           map[string]any{"type": "string"},
+					"title":             map[string]any{"type": "string"},
+					"objective":         map[string]any{"type": "string"},
+					"success_criteria":  map[string]any{"type": "string"},
+					"analysis_summary":  map[string]any{"type": "string"},
+					"pipeline_phase":    map[string]any{"type": "string"},
+					"activate":          map[string]any{"type": "boolean"},
+					"action":            map[string]any{"type": "string", "description": "cancel to cancel the goal"},
+				},
+				"required": []string{"goal_id"},
+			},
+		},
+		{
+			Name:        "goal.checkpoint",
+			DisplayName: "Goal checkpoint",
+			Description: "Save progress summary after verifying a step. Required for durable recovery across continues.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal_id":            map[string]any{"type": "string"},
+					"summary":            map[string]any{"type": "string"},
+					"progress_note":      map[string]any{"type": "string"},
+					"pipeline_phase":     map[string]any{"type": "string"},
+					"checkpoint_summary": map[string]any{"type": "string"},
+				},
+				"required": []string{"summary"},
+			},
+		},
+		{
+			Name:        "goal.complete",
+			DisplayName: "Complete goal",
+			Description: "Mark goal succeeded or failed AFTER final evaluation and user-facing completion report. Requires summary.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal_id":          map[string]any{"type": "string"},
+					"status":           map[string]any{"type": "string", "description": "succeeded | failed"},
+					"summary":          map[string]any{"type": "string"},
+					"report_markdown":  map[string]any{"type": "string"},
+					"report":           map[string]any{"type": "object"},
+				},
+				"required": []string{"status", "summary"},
+			},
+		},
+		{
+			Name:        "goal.list",
+			DisplayName: "List goals",
+			Description: "List session goals. Prefer injected Goal context when present.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "todo.list",
+			DisplayName: "List todos",
+			Description: "Read the current session checklist. Prefer relying on injected Todo context after writes; call this if you need an explicit refresh. Not for durable memory.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"status": map[string]any{"type": "string", "description": "all|open|pending|in_progress|completed|cancelled"},
+					"limit":  map[string]any{"type": "integer"},
+				},
 			},
 		},
 		{
@@ -528,108 +664,9 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 		Status:     tools.CallStatusCompleted,
 	}
 
-	var output string
-	var err error
-	switch call.Name {
-	case "workspace.read_file":
-		output, err = runReadFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"))
-	case "workspace.list":
-		output, err = runListWorkspace(runCtx.WorkingDir, stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_depth", defaultListDepth))
-	case "workspace.stats":
-		output, err = runWorkspaceStats(runCtx.WorkingDir, stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_depth", 4))
-	case "workspace.grep":
-		output, err = runGrepWorkspace(runCtx.WorkingDir, stringArg(call.Arguments, "pattern"), stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_matches", defaultGrepMatches))
-	case "workspace.write_file":
-		output, err = runWriteFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), stringArg(call.Arguments, "content"))
-	case "workspace.edit_file":
-		output, err = runEditFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), stringArg(call.Arguments, "old_text"), stringArg(call.Arguments, "new_text"), boolArg(call.Arguments, "replace_all", false))
-	case "workspace.diff_file":
-		content, hasContent := stringArgPresent(call.Arguments, "content")
-		output, err = runDiffFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), content, hasContent, stringArg(call.Arguments, "old_text"), stringArg(call.Arguments, "new_text"), boolArg(call.Arguments, "replace_all", false))
-	case "workspace.apply_patch":
-		output, err = runApplyPatch(runCtx.WorkingDir, stringArg(call.Arguments, "patch"))
-	case "shell.exec":
-		output, err = runShell(ctx, runCtx.WorkingDir, stringArg(call.Arguments, "command"))
-	case "skill.list":
-		output, err = runListSkills(runCtx.WorkingDir)
-	case "skill.create":
-		output, err = runCreateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
-	case "skill.update":
-		output, err = runUpdateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
-	case "skill.delete":
-		output, err = runDeleteSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"))
-	case "skill.run":
-		if runner.SkillExecutor == nil {
-			err = fmt.Errorf("skill subagent executor is not available")
-		} else {
-			output, err = runner.SkillExecutor(ctx, runCtx, call)
-		}
-	case "subagent.run":
-		if runner.SubagentExecutor == nil {
-			err = fmt.Errorf("subagent executor is not available")
-		} else {
-			output, err = runner.SubagentExecutor(ctx, runCtx, call)
-		}
-	case "subagent.list":
-		if runner.SubagentManager == nil {
-			err = fmt.Errorf("subagent manager is not available")
-		} else {
-			output, err = runner.SubagentManager.List(runCtx, call)
-		}
-	case "subagent.cancel":
-		if runner.SubagentManager == nil {
-			err = fmt.Errorf("subagent manager is not available")
-		} else {
-			output, err = runner.SubagentManager.Cancel(runCtx, call)
-		}
-	case "subagent.reset":
-		if runner.SubagentManager == nil {
-			err = fmt.Errorf("subagent manager is not available")
-		} else {
-			output, err = runner.SubagentManager.Reset(runCtx, call)
-		}
-	case "subagent.pool_status":
-		if runner.SubagentManager == nil {
-			err = fmt.Errorf("subagent manager is not available")
-		} else {
-			output, err = runner.SubagentManager.PoolStatus()
-		}
-	case "subagent.pool_resize":
-		if runner.SubagentManager == nil {
-			err = fmt.Errorf("subagent manager is not available")
-		} else {
-			output, err = runner.SubagentManager.PoolResize(call)
-		}
-	case "subagent.pool_reset":
-		if runner.SubagentManager == nil {
-			err = fmt.Errorf("subagent manager is not available")
-		} else {
-			output, err = runner.SubagentManager.PoolReset()
-		}
-	case "memory.list", "memory.create", "memory.update", "memory.delete":
-		output, err = runner.runMemoryTool(ctx, runCtx, call)
-	case "web.search":
-		searchOpts := effectiveWebSearchOptions(runCtx)
-		output, err = runWebOp(ctx, func(opCtx context.Context) (string, error) {
-			return runWebSearch(
-				opCtx,
-				stringArg(call.Arguments, "query"),
-				effectiveWebResultCount(runCtx, intArg(call.Arguments, "max_results", 0)),
-				searchOpts,
-			)
-		})
-	case "web.fetch":
-		output, err = runWebOp(ctx, func(opCtx context.Context) (string, error) {
-			return runWebFetch(
-				opCtx,
-				stringArg(call.Arguments, "url"),
-				effectiveWebFetchBytes(runCtx, intArg(call.Arguments, "max_bytes", 0)),
-				effectiveWebHTTPProxy(runCtx),
-			)
-		})
-	default:
-		err = fmt.Errorf("unknown tool %s", call.Name)
-	}
+	output, err := runBounded(ctx, toolTimeoutFor(call.Name), func(toolCtx context.Context) (string, error) {
+		return runner.dispatchTool(toolCtx, runCtx, call)
+	})
 
 	result.DurationMS = time.Since(started).Milliseconds()
 	if err != nil {
@@ -641,6 +678,160 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 	}
 	result.Output = standardizeToolOutput(call.Name, output, nil, result.DurationMS)
 	return result, result.Output
+}
+
+// toolTimeoutFor returns the hard upper bound for a tool, or 0 when the tool
+// already manages its own deadline (shell/web/subagent/skill).
+func toolTimeoutFor(name string) time.Duration {
+	switch name {
+	case "shell.exec", "web.search", "web.fetch", "skill.run", "subagent.run":
+		return 0
+	case "memory.list", "memory.create", "memory.update", "memory.delete",
+		"todo.write", "todo_write", "todo.list",
+		"goal.write", "goal.update", "goal.checkpoint", "goal.complete", "goal.list":
+		return defaultGatewayToolTimeout
+	default:
+		return defaultLocalToolTimeout
+	}
+}
+
+// runBounded runs fn and fails fast when timeout elapses so one stuck tool cannot
+// freeze the whole agent turn. timeout<=0 means "no outer bound" (self-managed tools).
+func runBounded(ctx context.Context, timeout time.Duration, fn func(context.Context) (string, error)) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout <= 0 {
+		return fn(ctx)
+	}
+
+	toolCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type outcome struct {
+		output string
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		out, err := fn(toolCtx)
+		done <- outcome{output: out, err: err}
+	}()
+
+	select {
+	case res := <-done:
+		return res.output, res.err
+	case <-toolCtx.Done():
+		// Prefer a completed result if the tool finished in the same instant as the deadline.
+		select {
+		case res := <-done:
+			return res.output, res.err
+		default:
+		}
+		if err := toolCtx.Err(); err != nil && ctx.Err() != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("tool timed out after %s (operation did not finish; check working_dir, path, or network mounts)", timeout)
+	}
+}
+
+func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+	switch call.Name {
+	case "workspace.read_file":
+		return runReadFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"))
+	case "workspace.list":
+		return runListWorkspace(runCtx.WorkingDir, stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_depth", defaultListDepth))
+	case "workspace.stats":
+		return runWorkspaceStats(runCtx.WorkingDir, stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_depth", 4))
+	case "workspace.grep":
+		return runGrepWorkspace(runCtx.WorkingDir, stringArg(call.Arguments, "pattern"), stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_matches", defaultGrepMatches))
+	case "workspace.write_file":
+		return runWriteFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), stringArg(call.Arguments, "content"))
+	case "workspace.edit_file":
+		return runEditFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), stringArg(call.Arguments, "old_text"), stringArg(call.Arguments, "new_text"), boolArg(call.Arguments, "replace_all", false))
+	case "workspace.diff_file":
+		content, hasContent := stringArgPresent(call.Arguments, "content")
+		return runDiffFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), content, hasContent, stringArg(call.Arguments, "old_text"), stringArg(call.Arguments, "new_text"), boolArg(call.Arguments, "replace_all", false))
+	case "workspace.apply_patch":
+		return runApplyPatch(runCtx.WorkingDir, stringArg(call.Arguments, "patch"))
+	case "shell.exec":
+		return runShell(ctx, runCtx.WorkingDir, stringArg(call.Arguments, "command"))
+	case "skill.list":
+		return runListSkills(runCtx.WorkingDir)
+	case "skill.create":
+		return runCreateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
+	case "skill.update":
+		return runUpdateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
+	case "skill.delete":
+		return runDeleteSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"))
+	case "skill.run":
+		if runner.SkillExecutor == nil {
+			return "", fmt.Errorf("skill subagent executor is not available")
+		}
+		return runner.SkillExecutor(ctx, runCtx, call)
+	case "subagent.run":
+		if runner.SubagentExecutor == nil {
+			return "", fmt.Errorf("subagent executor is not available")
+		}
+		return runner.SubagentExecutor(ctx, runCtx, call)
+	case "subagent.list":
+		if runner.SubagentManager == nil {
+			return "", fmt.Errorf("subagent manager is not available")
+		}
+		return runner.SubagentManager.List(runCtx, call)
+	case "subagent.cancel":
+		if runner.SubagentManager == nil {
+			return "", fmt.Errorf("subagent manager is not available")
+		}
+		return runner.SubagentManager.Cancel(runCtx, call)
+	case "subagent.reset":
+		if runner.SubagentManager == nil {
+			return "", fmt.Errorf("subagent manager is not available")
+		}
+		return runner.SubagentManager.Reset(runCtx, call)
+	case "subagent.pool_status":
+		if runner.SubagentManager == nil {
+			return "", fmt.Errorf("subagent manager is not available")
+		}
+		return runner.SubagentManager.PoolStatus()
+	case "subagent.pool_resize":
+		if runner.SubagentManager == nil {
+			return "", fmt.Errorf("subagent manager is not available")
+		}
+		return runner.SubagentManager.PoolResize(call)
+	case "subagent.pool_reset":
+		if runner.SubagentManager == nil {
+			return "", fmt.Errorf("subagent manager is not available")
+		}
+		return runner.SubagentManager.PoolReset()
+	case "todo.write", "todo_write", "todo.list":
+		return runner.runTodoTool(ctx, runCtx, call)
+	case "goal.write", "goal.update", "goal.checkpoint", "goal.complete", "goal.list":
+		return runner.runGoalTool(ctx, runCtx, call)
+	case "memory.list", "memory.create", "memory.update", "memory.delete":
+		return runner.runMemoryTool(ctx, runCtx, call)
+	case "web.search":
+		searchOpts := effectiveWebSearchOptions(runCtx)
+		return runWebOp(ctx, func(opCtx context.Context) (string, error) {
+			return runWebSearch(
+				opCtx,
+				stringArg(call.Arguments, "query"),
+				effectiveWebResultCount(runCtx, intArg(call.Arguments, "max_results", 0)),
+				searchOpts,
+			)
+		})
+	case "web.fetch":
+		return runWebOp(ctx, func(opCtx context.Context) (string, error) {
+			return runWebFetch(
+				opCtx,
+				stringArg(call.Arguments, "url"),
+				effectiveWebFetchBytes(runCtx, intArg(call.Arguments, "max_bytes", 0)),
+				effectiveWebHTTPProxy(runCtx),
+			)
+		})
+	default:
+		return "", fmt.Errorf("unknown tool %s", call.Name)
+	}
 }
 
 func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
@@ -660,6 +851,52 @@ func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContex
 	}
 	if result.Status != "" && result.Status != "completed" {
 		return result.Output, fmt.Errorf("memory tool returned status %s", result.Status)
+	}
+	return result.Output, nil
+}
+
+func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+	if runner.TodoExecutor == nil {
+		return "", fmt.Errorf("todo tool executor is not available")
+	}
+	name := call.Name
+	if name == "todo_write" {
+		name = "todo.write"
+	}
+	result, err := runner.TodoExecutor(ctx, methods.TodoToolExecuteParams{
+		RunID:         runCtx.RunID,
+		SessionID:     runCtx.SessionID,
+		WorkspaceRoot: runCtx.WorkingDir,
+		ToolCallID:    call.ID,
+		ToolName:      name,
+		Arguments:     call.Arguments,
+	})
+	if err != nil {
+		return "", err
+	}
+	if result.Status != "" && result.Status != "completed" {
+		return result.Output, fmt.Errorf("todo tool returned status %s", result.Status)
+	}
+	return result.Output, nil
+}
+
+func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+	if runner.GoalExecutor == nil {
+		return "", fmt.Errorf("goal tool executor is not available")
+	}
+	result, err := runner.GoalExecutor(ctx, methods.GoalToolExecuteParams{
+		RunID:         runCtx.RunID,
+		SessionID:     runCtx.SessionID,
+		WorkspaceRoot: runCtx.WorkingDir,
+		ToolCallID:    call.ID,
+		ToolName:      call.Name,
+		Arguments:     call.Arguments,
+	})
+	if err != nil {
+		return "", err
+	}
+	if result.Status != "" && result.Status != "completed" {
+		return result.Output, fmt.Errorf("goal tool returned status %s", result.Status)
 	}
 	return result.Output, nil
 }
@@ -783,14 +1020,14 @@ func runReadFile(root string, relPath string) (string, error) {
 	}
 	info, err := os.Stat(target)
 	if err != nil {
-		return "", err
+		return "", annotateWorkspaceIOError(root, relPath, err)
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("%s is a directory", relPath)
+		return "", fmt.Errorf("%s is a directory (working_dir=%q)", relPath, displayWorkingDir(root))
 	}
 	file, err := os.Open(target)
 	if err != nil {
-		return "", err
+		return "", annotateWorkspaceIOError(root, relPath, err)
 	}
 	defer file.Close()
 	var buf bytes.Buffer
@@ -798,6 +1035,29 @@ func runReadFile(root string, relPath string) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// annotateWorkspaceIOError turns opaque OS errors into model-actionable messages
+// (especially "file not found under the wrong working_dir").
+func annotateWorkspaceIOError(root string, relPath string, err error) error {
+	if err == nil {
+		return nil
+	}
+	wd := displayWorkingDir(root)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("file not found: %q under working_dir %q — verify the active workspace and relative path", relPath, wd)
+	}
+	return fmt.Errorf("%w (path=%q working_dir=%q)", err, relPath, wd)
+}
+
+func displayWorkingDir(root string) string {
+	if strings.TrimSpace(root) == "" {
+		if wd, err := os.Getwd(); err == nil {
+			return wd
+		}
+		return "(unset)"
+	}
+	return root
 }
 
 type workspaceDirStat struct {
@@ -1423,6 +1683,16 @@ func resolveWorkspacePath(root string, relPath string) (string, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
+	}
+	// Fail fast when the session working_dir itself is missing/wrong — otherwise
+	// every relative read looks like a missing file and confuses the model.
+	if info, statErr := os.Stat(absRoot); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", fmt.Errorf("working_dir does not exist: %q", absRoot)
+		}
+		return "", fmt.Errorf("working_dir not accessible: %q: %w", absRoot, statErr)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf("working_dir is not a directory: %q", absRoot)
 	}
 	cleanRoot, err := filepath.EvalSymlinks(absRoot)
 	if err != nil {

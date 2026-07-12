@@ -29,6 +29,14 @@ var subagentRunDenylist = []string{
 	"subagent.pool_resize",
 	"subagent.pool_reset",
 	"skill.run",
+	"todo.write",
+	"todo.list",
+	"todo_write",
+	"goal.write",
+	"goal.update",
+	"goal.checkpoint",
+	"goal.complete",
+	"goal.list",
 }
 
 var subagentNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -68,6 +76,13 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 		name = "worker"
 	}
 	name = sanitizeSubagentName(name)
+	specialist, isSpecialist := lookupGoalSpecialist(name)
+	displayName := goalSpecialistDisplayName(name)
+	if isSpecialist {
+		if err := r.validateGoalSpecialistPhase(runCtx.Reply.RunID, specialist); err != nil {
+			return "", err
+		}
+	}
 
 	// Budget = file_count + summary turns. Parent should pass file_count (from workspace.stats)
 	// or path (auto-counted). Explicit max_turns still wins when provided.
@@ -80,6 +95,10 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	}
 	explicitTurns := intArg(call.Arguments, "max_turns", 0)
 	maxTurns := effectiveSubagentToolTurns(explicitTurns, fileCount)
+	// Goal phase specialists use role defaults when parent omitted budget.
+	if isSpecialist && explicitTurns <= 0 && fileCount <= 0 {
+		maxTurns = specialist.DefaultMaxTurns
+	}
 
 	params := *runCtx.Reply
 	subAgentID := fmt.Sprintf("worker_%s_%d", name, time.Now().UnixNano())
@@ -96,16 +115,23 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	}
 
 	r.registerSubAgent(params, subAgentID, agentName, backend, cancel)
+	startSummary := "subagent started: " + truncateSummary(task, 80)
+	if isSpecialist {
+		startSummary = displayName + " 已启动: " + truncateSummary(task, 60)
+	}
 	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
-		"subagent_id": subAgentID,
-		"name":        agentName,
-		"status":      "running",
-		"summary":     "subagent started: " + truncateSummary(task, 80),
-		"backend":     backend,
-		"task":        task,
-		"file_count":  fileCount,
-		"max_turns":   maxTurns,
-		"path":        scopePath,
+		"subagent_id":     subAgentID,
+		"name":            agentName,
+		"display_name":    displayName,
+		"status":          "running",
+		"summary":         startSummary,
+		"backend":         backend,
+		"task":            task,
+		"file_count":      fileCount,
+		"max_turns":       maxTurns,
+		"path":            scopePath,
+		"goal_specialist": isSpecialist,
+		"goal_phase":      specialist.Phase,
 	})
 
 	child, release, err := r.acquireProcessSubAgent(childCtx, params, subAgentID, backend)
@@ -141,11 +167,17 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 			agentName, maxTurns, fileCount, subagentSummaryTurns,
 		),
 	}
+	childParams.Options.TodoContext = nil
+	disableGoalPipelineForChild(&childParams.Options)
 	childParams.Options.SpawnSubAgents = false
 	childParams.Options.SubAgentBackend = ""
 	childParams.Options.ToolDenylist = appendUniqueStrings(childParams.Options.ToolDenylist, subagentRunDenylist...)
-	// Budget scales with directory file count; no artificial maximum.
+	// Budget scales with directory file count; no artificial maximum (unless specialist cap).
 	childParams.Options.MaxToolTurns = maxTurns
+
+	if isSpecialist {
+		maxTurns = applyGoalSpecialist(&childParams, specialist, task, maxTurns)
+	}
 
 	capture := &subagentRunCapture{
 		maxTurns:  maxTurns,
@@ -187,17 +219,67 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
 		return "", detail
 	}
+	if capture.RecoveredFallback {
+		detail := capture.FailureError("subagent used a recovery fallback instead of a final report")
+		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
+		return "", detail
+	}
+	if !isUsableFinalText(result) {
+		detail := capture.FailureError("subagent returned tool calls instead of a final report")
+		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
+		return "", detail
+	}
 
 	reusable = true
 	r.finishSubAgent(params.RunID, subAgentID, "completed", "subagent completed", "")
+	doneSummary := "subagent completed: " + truncateSummary(task, 80)
+	if isSpecialist {
+		doneSummary = displayName + " 已完成: " + truncateSummary(task, 60)
+	}
 	_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
-		"subagent_id": subAgentID,
-		"name":        agentName,
-		"status":      "completed",
-		"summary":     "subagent completed: " + truncateSummary(task, 80),
-		"backend":     backend,
+		"subagent_id":     subAgentID,
+		"name":            agentName,
+		"display_name":    displayName,
+		"status":          "completed",
+		"summary":         doneSummary,
+		"backend":         backend,
+		"goal_specialist": isSpecialist,
+		"goal_phase":      specialist.Phase,
 	})
 	return result, nil
+}
+
+// isUsableFinalText rejects provider fallback output that contains only
+// textual <tool_call> markup. Those calls were not executed and are not a
+// final answer or specialist report.
+func isUsableFinalText(report string) bool {
+	text := strings.TrimSpace(report)
+	if text == "" {
+		return false
+	}
+	if !strings.Contains(strings.ToLower(text), "<tool_call") {
+		return true
+	}
+
+	for {
+		start := strings.Index(strings.ToLower(text), "<tool_call")
+		if start < 0 {
+			break
+		}
+		rest := text[start:]
+		end := strings.Index(strings.ToLower(rest), "</tool_call")
+		if end < 0 {
+			text = text[:start]
+			break
+		}
+		closeEnd := strings.Index(rest[end:], ">")
+		if closeEnd < 0 {
+			text = text[:start]
+			break
+		}
+		text = text[:start] + text[start+end+closeEnd+1:]
+	}
+	return strings.TrimSpace(text) != ""
 }
 
 // subagentRunCapture collects diagnostics from a child runtime so empty/failed
@@ -217,11 +299,12 @@ type subagentRunCapture struct {
 	FinishMessage string
 	LastError     string
 
-	MessageDeltas   int
-	ReasoningDeltas int
-	ToolStarted     int
-	ToolFinished    int
-	ToolFailed      int
+	MessageDeltas     int
+	ReasoningDeltas   int
+	ToolStarted       int
+	ToolFinished      int
+	ToolFailed        int
+	RecoveredFallback bool
 
 	startedTools []string
 	failedTools  []string
@@ -258,6 +341,9 @@ func (c *subagentRunCapture) Observe(event events.Envelope) {
 			return
 		}
 		c.MessageDeltas++
+		if recovered, _ := event.Payload["recovered"].(bool); recovered {
+			c.RecoveredFallback = true
+		}
 		c.message.WriteString(delta)
 	case events.EventMessage:
 		if text, ok := event.Payload["text"].(string); ok && text != "" {

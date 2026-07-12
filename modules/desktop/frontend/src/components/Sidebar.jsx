@@ -7,7 +7,7 @@ import {
   GitFork,
   MessageSquare,
   MessageSquarePlus,
-  Minimize2,
+  NotebookText,
   Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -76,8 +76,8 @@ export function Sidebar({
         <Button data-testid="session-fork" disabled={!hasCurrentSession} icon={<GitFork size={13} />} onClick={onForkSession} variant="ghost">
           分叉
         </Button>
-        <Button data-testid="session-compact" disabled={!hasCurrentSession} icon={<Minimize2 size={13} />} onClick={onCompactSession} variant="ghost">
-          压缩
+        <Button data-testid="session-compact" disabled={!hasCurrentSession} icon={<NotebookText size={13} />} onClick={onCompactSession} variant="ghost">
+          摘要
         </Button>
       </div>
       <Button

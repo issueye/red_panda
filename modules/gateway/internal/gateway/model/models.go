@@ -76,6 +76,23 @@ type MemoryRecord struct {
 	DeletedAt       *time.Time
 }
 
+// TodoItem is a session-scoped operational checklist entry.
+type TodoItem struct {
+	ID               string `gorm:"primaryKey"`
+	ClientKey        string `gorm:"index"`
+	SessionID        string `gorm:"index"`
+	Content          string
+	Status           string `gorm:"index"`
+	SortOrder        int
+	Priority         string
+	ActiveForm       string
+	SourceRunID      string `gorm:"index"`
+	SourceToolCallID string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	CompletedAt      *time.Time
+}
+
 type RunEvent struct {
 	ID          string `gorm:"primaryKey"`
 	RootRunID   string `gorm:"uniqueIndex:idx_run_seq"`
@@ -92,6 +109,7 @@ type RunRecord struct {
 	RuntimeMode   string
 	Status        string `gorm:"index"`
 	Input         string
+	GoalID        string `gorm:"index"`
 	LastEventType string
 	LastRootSeq   uint64
 	MessageCount  int
@@ -100,6 +118,51 @@ type RunRecord struct {
 	StartedAt     time.Time
 	FinishedAt    *time.Time
 	UpdatedAt     time.Time
+}
+
+// Goal is a session-scoped long-horizon objective with pipeline phase and budgets.
+type Goal struct {
+	ID                     string `gorm:"primaryKey"`
+	SessionID              string `gorm:"index;uniqueIndex:idx_goals_one_active,where:status = 'active'"`
+	Title                  string
+	Objective              string `gorm:"type:text"`
+	SuccessCriteria        string `gorm:"type:text"`
+	Status                 string `gorm:"index"` // pending|active|paused|succeeded|failed|cancelled
+	PipelinePhase          string `gorm:"index"` // analyze|plan|execute|verify|evaluate|report
+	PauseReason            string
+	FailReason             string
+	AnalysisSummary        string `gorm:"type:text"`
+	CheckpointSummary      string `gorm:"type:text"`
+	ProgressNote           string `gorm:"type:text"`
+	ReportJSON             string `gorm:"type:text"`
+	ReportMarkdown         string `gorm:"type:text"`
+	MaxSegmentsPerRun      int
+	MaxToolTurnsPerSegment int
+	MaxTotalToolTurns      int
+	MaxWallTimeSec         int
+	MaxAutoContinues       int
+	UsedToolTurns          int
+	UsedSegments           int
+	UsedAutoContinues      int
+	UsedWallTimeSec        int
+	ActiveRunID            string `gorm:"index"`
+	LastRunID              string `gorm:"index"`
+	SourceRunID            string
+	SourceToolCallID       string
+	StartedAt              *time.Time
+	FinishedAt             *time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+}
+
+// GoalSegment makes Runtime segment accounting idempotent across retries.
+type GoalSegment struct {
+	ID           string `gorm:"primaryKey"`
+	GoalID       string `gorm:"index;uniqueIndex:idx_goal_run_segment"`
+	RunID        string `gorm:"index;uniqueIndex:idx_goal_run_segment"`
+	SegmentIndex int    `gorm:"uniqueIndex:idx_goal_run_segment"`
+	ToolTurns    int
+	CreatedAt    time.Time
 }
 
 type ToolCall struct {
@@ -155,11 +218,14 @@ type PermissionRequest struct {
 }
 
 type ProviderProfile struct {
-	ID           string `gorm:"primaryKey"`
-	Name         string
-	Provider     string `gorm:"index"`
-	BaseURL      string
-	Model        string
+	ID       string `gorm:"primaryKey"`
+	Name     string
+	Provider string `gorm:"index"`
+	BaseURL  string
+	Model    string
+	// MaxTokens is the context window budget used for Desktop usage ring and auto-compact.
+	// Zero means unset (no budget tracking / no auto-compact).
+	MaxTokens    int
 	APIKeySecret string
 	IsDefault    bool `gorm:"index"`
 	Active       bool `gorm:"index"`
@@ -190,4 +256,27 @@ type MCPServerConfig struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 	DeletedAt     *time.Time `gorm:"index"`
+}
+
+// AgentDefinition is a managed specialist / agent profile (builtin goal specialists or custom).
+// Runtime subagent.run matches by Key (e.g. goal-analyst).
+type AgentDefinition struct {
+	ID              string `gorm:"primaryKey"`
+	Key             string `gorm:"uniqueIndex:idx_agent_definitions_key,where:deleted_at IS NULL"`
+	Name            string
+	NameZH          string
+	Kind            string `gorm:"index"` // builtin | custom
+	Phase           string `gorm:"index"` // analyze | plan | execute | verify | evaluate | custom | general
+	Description     string
+	SystemPrompt    string   `gorm:"type:text"`
+	ToolAllowlist   []string `gorm:"column:tool_allowlist_json;serializer:json;type:text"`
+	ToolDenylist    []string `gorm:"column:tool_denylist_json;serializer:json;type:text"`
+	DefaultMaxTurns int
+	Enabled         bool `gorm:"index"`
+	Builtin         bool `gorm:"index"`
+	SortOrder       int
+	MetadataJSON    string `gorm:"type:text"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time `gorm:"index"`
 }

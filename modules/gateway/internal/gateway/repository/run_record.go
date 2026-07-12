@@ -95,11 +95,11 @@ func applyRunEventProjection(row *model.RunRecord, event events.Envelope, now ti
 	if event.Type == events.EventToolStarted {
 		row.ToolCount++
 	}
-	if event.Type == events.EventError {
+	if event.Type == events.EventError && event.Agent.Role != events.AgentRoleSubAgent {
 		row.Status = firstNonEmpty(stringPayload(event.Payload, "status"), "failed")
 		row.Error = firstNonEmpty(stringPayload(event.Payload, "message"), row.Error)
 	}
-	if event.Type == events.EventFinish {
+	if event.Type == events.EventFinish && event.Agent.Role != events.AgentRoleSubAgent {
 		row.Status = firstNonEmpty(stringPayload(event.Payload, "status"), "completed")
 		row.FinishedAt = &now
 	}
@@ -145,6 +145,22 @@ func (r RunRecordRepository) ListActive(limit int) ([]model.RunRecord, error) {
 	}
 	var rows []model.RunRecord
 	err := r.db.Where("status IN ?", []string{"running", "waiting_permission"}).
+		Order("started_at asc").
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
+}
+
+// ListActiveBySession returns active runs for one session ordered by start time.
+func (r RunRecordRepository) ListActiveBySession(sessionID string, limit int) ([]model.RunRecord, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var rows []model.RunRecord
+	err := r.db.Where("session_id = ? AND status IN ?", sessionID, []string{"running", "waiting_permission"}).
 		Order("started_at asc").
 		Limit(limit).
 		Find(&rows).Error

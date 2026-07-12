@@ -1,15 +1,29 @@
 import {
   Blocks,
+  Bot,
   Building2,
   Plus,
   PlugZap,
   RefreshCw,
+  ScrollText,
   Search,
   SlidersHorizontal,
   Trash2,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  agentDraftFrom,
+  agentDisplayName,
+  agentPhaseLabel,
+  emptyAgentDraft,
+} from '../lib/agents.js';
+import {
+  clearDiagnosticLogs,
+  defaultLlmLogDirHint,
+  getDiagnosticLogs,
+  subscribeDiagnosticLogs,
+} from '../lib/diagnosticLog.js';
 import { emptyProfileDraft, profileDraftFrom } from '../lib/providerProfiles.js';
 import { Badge } from './ui/badge.jsx';
 import { Button, IconButton } from './ui/button.jsx';
@@ -17,6 +31,7 @@ import { useDialog } from './ui/dialog.jsx';
 import { EmptyState, ErrorMessage } from './ui/feedback.jsx';
 import { Field } from './ui/field.jsx';
 import { SelectMenu } from './ui/select.jsx';
+import { HelpTooltip } from './ui/tooltip.jsx';
 
 const RUNTIME_MODES = [
   ['per_run_process', '每次运行独立进程（推荐）'],
@@ -51,9 +66,21 @@ const WEB_SEARCH_PROVIDERS = [
 
 const SETTINGS_TABS = [
   { id: 'providers', label: '供应商管理', shortLabel: '供应商', icon: Building2 },
+  { id: 'agents', label: '智能体管理', shortLabel: '智能体', icon: Bot },
   { id: 'skills', label: '技能管理', shortLabel: '技能', icon: Blocks },
   { id: 'mcp', label: 'MCP 管理', shortLabel: 'MCP', icon: PlugZap },
+  { id: 'logs', label: '日志审计', shortLabel: '日志', icon: ScrollText },
   { id: 'other', label: '其他设置', shortLabel: '其他', icon: SlidersHorizontal },
+];
+
+const AGENT_PHASE_OPTIONS = [
+  ['analyze', '分析'],
+  ['plan', '规划'],
+  ['execute', '执行'],
+  ['verify', '验证'],
+  ['evaluate', '终评'],
+  ['general', '通用'],
+  ['custom', '自定义'],
 ];
 
 const emptySkillDraft = {
@@ -88,17 +115,17 @@ function localID(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function SettingRow({ children, label }) {
+function SettingRow({ children, label, tooltip }) {
   return (
-    <Field className="settings-row" label={label}>
+    <Field className="settings-row" label={label} tooltip={tooltip}>
       {children}
     </Field>
   );
 }
 
-function SettingSelect({ label, options, settings, settingKey, onUpdate }) {
+function SettingSelect({ label, options, settings, settingKey, onUpdate, tooltip }) {
   return (
-    <SettingRow label={label}>
+    <SettingRow label={label} tooltip={tooltip}>
       <SelectMenu
         ariaLabel={label}
         testId={`settings-${settingKey}`}
@@ -110,9 +137,9 @@ function SettingSelect({ label, options, settings, settingKey, onUpdate }) {
   );
 }
 
-function SettingTextInput({ label, placeholder, settings, settingKey, onUpdate }) {
+function SettingTextInput({ label, placeholder, settings, settingKey, onUpdate, tooltip }) {
   return (
-    <SettingRow label={label}>
+    <SettingRow label={label} tooltip={tooltip}>
       <input
         type="text"
         value={settings?.[settingKey] ?? ''}
@@ -120,6 +147,22 @@ function SettingTextInput({ label, placeholder, settings, settingKey, onUpdate }
         onChange={(event) => onUpdate(settingKey, event.target.value)}
       />
     </SettingRow>
+  );
+}
+
+function SettingCheck({ checked, label, onChange, tooltip }) {
+  return (
+    <label className="settings-check">
+      <input
+        checked={Boolean(checked)}
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span className="settings-check-label">
+        <span>{label}</span>
+        {tooltip ? <HelpTooltip content={tooltip} /> : null}
+      </span>
+    </label>
   );
 }
 
@@ -234,6 +277,9 @@ export function SettingsPanel({
   providerProfiles = [],
   providerProfilesLoading = false,
   providerProfilesError = '',
+  agents = [],
+  agentsLoading = false,
+  agentsError = '',
   mcpServers = [],
   mcpServersLoading = false,
   mcpServersError = '',
@@ -248,6 +294,10 @@ export function SettingsPanel({
   onUpdateProviderProfile,
   onDeleteProviderProfile,
   onRefreshProviderProfiles,
+  onCreateAgent,
+  onUpdateAgent,
+  onDeleteAgent,
+  onRefreshAgents,
   onCreateMcpServer,
   onUpdateMcpServer,
   onDeleteMcpServer,
@@ -267,12 +317,17 @@ export function SettingsPanel({
   const [profileDraft, setProfileDraft] = useState(emptyProfileDraft);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState('');
+  const [agentDraft, setAgentDraft] = useState(null);
+  const [agentSaving, setAgentSaving] = useState(false);
+  const [agentError, setAgentError] = useState('');
   const [skillDraft, setSkillDraft] = useState(null);
   const [skillSaving, setSkillSaving] = useState(false);
   const [skillError, setSkillError] = useState('');
   const [mcpDraft, setMcpDraft] = useState(null);
   const [mcpSaving, setMcpSaving] = useState(false);
   const [mcpError, setMcpError] = useState('');
+  const [diagnosticLogs, setDiagnosticLogs] = useState(() => getDiagnosticLogs());
+  const visibleAgents = Array.isArray(agents) ? agents : [];
 
   const visibleSkills = Array.isArray(skills) ? skills : [];
   const visibleMcpServers = Array.isArray(mcpServers) ? mcpServers : [];
@@ -307,6 +362,11 @@ export function SettingsPanel({
         previous.focus();
       }
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    return subscribeDiagnosticLogs(setDiagnosticLogs);
   }, [open]);
 
   if (!open) {
@@ -530,6 +590,92 @@ export function SettingsPanel({
     }
   }
 
+  async function saveAgent() {
+    if (!agentDraft?.name?.trim()) return;
+    if (agentDraft.isNew && !agentDraft.key?.trim()) return;
+    setAgentSaving(true);
+    setAgentError('');
+    try {
+      if (agentDraft.isNew) {
+        const created = await onCreateAgent?.({
+          key: agentDraft.key,
+          name: agentDraft.name,
+          name_zh: agentDraft.name_zh,
+          phase: agentDraft.phase,
+          description: agentDraft.description,
+          system_prompt: agentDraft.system_prompt,
+          default_max_turns: Number(agentDraft.default_max_turns) || 12,
+          enabled: agentDraft.enabled !== false,
+        });
+        setAgentDraft(agentDraftFrom(created));
+      } else {
+        const updated = await onUpdateAgent?.(agentDraft.id, {
+          name: agentDraft.name,
+          name_zh: agentDraft.name_zh,
+          phase: agentDraft.builtin ? undefined : agentDraft.phase,
+          description: agentDraft.description,
+          system_prompt: agentDraft.system_prompt,
+          default_max_turns: Number(agentDraft.default_max_turns) || 12,
+          enabled: agentDraft.enabled !== false,
+        });
+        setAgentDraft(agentDraftFrom(updated));
+      }
+    } catch (error) {
+      setAgentError(error.message);
+    } finally {
+      setAgentSaving(false);
+    }
+  }
+
+  async function toggleAgent(agent, enabled) {
+    setAgentSaving(true);
+    setAgentError('');
+    try {
+      const updated = await onUpdateAgent?.(agent.id, { enabled });
+      if (agentDraft?.id === agent.id) {
+        setAgentDraft(agentDraftFrom(updated));
+      }
+    } catch (error) {
+      setAgentError(error.message);
+    } finally {
+      setAgentSaving(false);
+    }
+  }
+
+  async function deleteAgent(agent) {
+    if (agent.builtin) return;
+    const ok = await dialog.confirm({
+      title: '删除智能体',
+      message: `确定删除自定义智能体「${agentDisplayName(agent)}」？`,
+      description: '内置阶段专家不可删除；自定义配置将被移除。',
+      confirmLabel: '删除',
+      tone: 'danger',
+      testId: 'confirm-delete-agent',
+    });
+    if (!ok) return;
+    setAgentSaving(true);
+    setAgentError('');
+    try {
+      await onDeleteAgent?.(agent.id);
+      if (agentDraft?.id === agent.id) {
+        setAgentDraft(null);
+      }
+    } catch (error) {
+      setAgentError(error.message);
+    } finally {
+      setAgentSaving(false);
+    }
+  }
+
+  async function refreshAgents() {
+    setAgentError('');
+    try {
+      await onRefreshAgents?.();
+    } catch (error) {
+      setAgentError(error.message);
+    }
+  }
+
   async function discoverMcpServer(server) {
     setMcpError('');
     setMcpDraft({ ...server });
@@ -645,6 +791,21 @@ export function SettingsPanel({
               placeholder="gpt-4.1-mini"
               type="text"
               value={profileDraft.model}
+            />
+          </Field>
+          <Field
+            className="settings-row"
+            label="最大 Token 数"
+            tooltip="上下文窗口预算，用于输入框旁进度环。达到 90% 时自动更新同一会话的上下文摘要。留空表示不限制。"
+          >
+            <input
+              data-testid="provider-max-tokens"
+              min={0}
+              onChange={(event) => updateProfileDraft('maxTokens', event.target.value)}
+              placeholder="例如 128000"
+              step={1000}
+              type="number"
+              value={profileDraft.maxTokens}
             />
           </Field>
           <Field className="settings-row settings-form-span" label="基础 URL">
@@ -942,6 +1103,154 @@ export function SettingsPanel({
     </>
   );
 
+  const agentsContent = (
+    <>
+      <ModuleHeader badge={`${visibleAgents.length} 个`} title="智能体管理">
+        <IconButton
+          disabled={agentsLoading || agentSaving}
+          label="刷新智能体"
+          onClick={refreshAgents}
+        >
+          <RefreshCw size={15} />
+        </IconButton>
+        <Button
+          disabled={agentSaving}
+          icon={<Plus size={15} />}
+          onClick={() => {
+            setAgentError('');
+            setAgentDraft(emptyAgentDraft());
+          }}
+          variant="soft"
+        >
+          新建智能体
+        </Button>
+      </ModuleHeader>
+      <p className="settings-module-hint">
+        管理 Goal 流水线阶段专家（分析 / 规划 / 实施 / 验证 / 终评）与自定义智能体。内置专家可停用或改提示词，不可删除。
+      </p>
+      {agentsError || agentError ? <ErrorMessage>{agentError || agentsError}</ErrorMessage> : null}
+      <div className="settings-split">
+        <div className="settings-manager-list" data-testid="agents-list">
+          {agentsLoading && visibleAgents.length === 0 ? (
+            <EmptyState title="加载中">正在读取智能体定义…</EmptyState>
+          ) : null}
+          {!agentsLoading && visibleAgents.length === 0 ? (
+            <EmptyState title="暂无智能体">点击新建，或刷新以加载内置阶段专家。</EmptyState>
+          ) : null}
+          {visibleAgents.map((agent) => (
+            <ManagerItem
+              active={agentDraft?.id === agent.id}
+              enabled={agent.enabled !== false}
+              icon={Bot}
+              key={agent.id}
+              meta={`${agentPhaseLabel(agent.phase)} · ${agent.key}${agent.builtin ? ' · 内置' : ''}`}
+              name={agentDisplayName(agent)}
+              onDelete={() => deleteAgent(agent)}
+              onSelect={() => {
+                setAgentError('');
+                setAgentDraft(agentDraftFrom(agent));
+              }}
+              onToggle={(event) => toggleAgent(agent, event.target.checked)}
+              disabled={agentSaving}
+            />
+          ))}
+        </div>
+        <div className="settings-editor-panel settings-collection-editor">
+          {agentDraft ? (
+            <>
+              <div className="settings-editor-title">
+                <strong>{agentDraft.isNew ? '新建智能体' : '编辑智能体'}</strong>
+                <Badge>{agentDraft.builtin ? '内置' : agentDraft.isNew ? '新配置' : '自定义'}</Badge>
+              </div>
+              <Field className="settings-row" label="标识 Key" tooltip="subagent.run 的 name；内置不可改">
+                <input
+                  disabled={!agentDraft.isNew || agentDraft.builtin}
+                  onChange={(event) => setAgentDraft((c) => ({ ...c, key: event.target.value }))}
+                  placeholder="my-helper"
+                  type="text"
+                  value={agentDraft.key}
+                />
+              </Field>
+              <Field className="settings-row" label="名称">
+                <input
+                  onChange={(event) => setAgentDraft((c) => ({ ...c, name: event.target.value }))}
+                  type="text"
+                  value={agentDraft.name}
+                />
+              </Field>
+              <Field className="settings-row" label="中文名">
+                <input
+                  onChange={(event) => setAgentDraft((c) => ({ ...c, name_zh: event.target.value }))}
+                  placeholder="目标分析师"
+                  type="text"
+                  value={agentDraft.name_zh}
+                />
+              </Field>
+              <Field className="settings-row" label="阶段">
+                <SelectMenu
+                  ariaLabel="阶段"
+                  disabled={agentDraft.builtin}
+                  options={AGENT_PHASE_OPTIONS}
+                  value={agentDraft.phase || 'custom'}
+                  onChange={(value) => setAgentDraft((c) => ({ ...c, phase: value }))}
+                />
+              </Field>
+              <Field className="settings-row" label="默认最大轮次">
+                <input
+                  min={1}
+                  max={48}
+                  onChange={(event) => setAgentDraft((c) => ({
+                    ...c,
+                    default_max_turns: Number(event.target.value) || 12,
+                  }))}
+                  type="number"
+                  value={agentDraft.default_max_turns}
+                />
+              </Field>
+              <Field className="settings-row" label="描述">
+                <textarea
+                  onChange={(event) => setAgentDraft((c) => ({ ...c, description: event.target.value }))}
+                  rows={2}
+                  value={agentDraft.description}
+                />
+              </Field>
+              <Field className="settings-row" label="系统提示词">
+                <textarea
+                  onChange={(event) => setAgentDraft((c) => ({ ...c, system_prompt: event.target.value }))}
+                  rows={8}
+                  value={agentDraft.system_prompt}
+                />
+              </Field>
+              <label className="settings-check">
+                <input
+                  checked={agentDraft.enabled !== false}
+                  onChange={(event) => setAgentDraft((c) => ({ ...c, enabled: event.target.checked }))}
+                  type="checkbox"
+                />
+                <span>启用智能体</span>
+              </label>
+              <div className="settings-editor-actions">
+                <Button disabled={agentSaving} onClick={() => setAgentDraft(null)} variant="ghost">取消</Button>
+                <Button
+                  disabled={
+                    agentSaving
+                    || !agentDraft.name.trim()
+                    || (agentDraft.isNew && !agentDraft.key.trim())
+                  }
+                  onClick={saveAgent}
+                >
+                  {agentSaving ? '保存中' : agentDraft.isNew ? '创建智能体' : '保存'}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <EmptyState title="选择智能体">从左侧选择内置阶段专家，或新建自定义智能体。</EmptyState>
+          )}
+        </div>
+      </div>
+    </>
+  );
+
   const otherContent = (
     <>
       <ModuleHeader title="其他设置" />
@@ -954,6 +1263,10 @@ export function SettingsPanel({
             settings={settings}
             settingKey="runtimeMode"
             onUpdate={updateSetting}
+            tooltip={
+              '每次运行独立进程（推荐）：多会话并发时每任务独立 Agent 进程，隔离更强、结束后回收。\n'
+              + '单核心：共享常驻进程，开销更低，不适合高并发隔离场景。'
+            }
           />
           <SettingSelect
             label="子代理后端"
@@ -961,6 +1274,12 @@ export function SettingsPanel({
             settings={settings}
             settingKey="subAgentBackend"
             onUpdate={updateSetting}
+            tooltip={
+              '进程池（推荐）：复用子代理进程。\n'
+              + '运行时进程：每次一次性子进程。\n'
+              + '进程内：仅 planner 等轻量子代理。\n'
+              + '主代理可用 subagent.run / list / cancel / reset / pool_* 管理子代理与进程池。'
+            }
           />
           <SettingTextInput
             label="模型"
@@ -968,24 +1287,15 @@ export function SettingsPanel({
             settings={settings}
             settingKey="model"
             onUpdate={updateSetting}
+            tooltip="可选覆盖本轮使用的模型名。留空则使用所选供应商配置中的模型。"
           />
         </div>
-        <label className="settings-check">
-          <input
-            type="checkbox"
-            checked={Boolean(settings?.spawnSubAgents)}
-            onChange={(event) => updateSetting('spawnSubAgents', event.target.checked)}
-          />
-          <span>运行时自动启动 planner 子代理</span>
-        </label>
-        <p className="settings-hint">
-          默认「每次运行独立进程」：多会话并发时每个任务使用独立 Agent 进程，隔离更强、结束后回收。
-          「单核心」共享一个常驻进程，开销更低但不适合高并发隔离场景。
-          主代理可通过 <code>subagent.run</code> 从进程池派发专科子代理，并用
-          <code>subagent.list</code> / <code>subagent.cancel</code> / <code>subagent.reset</code> /
-          <code>subagent.pool_status</code> / <code>subagent.pool_resize</code> / <code>subagent.pool_reset</code>
-          管理子代理与进程池。子代理后端默认使用进程池。
-        </p>
+        <SettingCheck
+          checked={Boolean(settings?.spawnSubAgents)}
+          label="运行时自动启动 planner 子代理"
+          onChange={(next) => updateSetting('spawnSubAgents', next)}
+          tooltip="开启后，每次运行会自动启动 planner 子代理参与规划。也可由主代理按需调用 subagent 工具派发。"
+        />
       </section>
       <section className="settings-section">
         <h3>工具与授权</h3>
@@ -996,6 +1306,7 @@ export function SettingsPanel({
             settings={settings}
             settingKey="toolPolicy"
             onUpdate={updateSetting}
+            tooltip="控制工具调用是否按风险询问、全部允许、全部询问或全部拒绝。"
           />
           <SettingSelect
             label="授权模式"
@@ -1003,6 +1314,7 @@ export function SettingsPanel({
             settings={settings}
             settingKey="permissionMode"
             onUpdate={updateSetting}
+            tooltip="严格/宽松影响高风险工具是否需要用户确认；全部允许/拒绝覆盖默认策略。"
           />
           <SettingTextInput
             label="工具轮次上限"
@@ -1010,6 +1322,10 @@ export function SettingsPanel({
             settings={settings}
             settingKey="maxToolTurns"
             onUpdate={updateSetting}
+            tooltip={
+              '主要约束主代理自身的工具循环次数。\n'
+              + '分析类子代理轮次由主代理根据 workspace.stats 的文件数按 max_turns = file_count + 总结轮次 指定（无固定上限）。'
+            }
           />
           <SettingTextInput
             label="最大并发会话运行数"
@@ -1017,6 +1333,7 @@ export function SettingsPanel({
             settings={settings}
             settingKey="maxConcurrentRuns"
             onUpdate={updateSetting}
+            tooltip="限制同时进行的会话任务数量（默认 3，上限 16）。同一会话内任务仍串行。"
           />
           <SettingTextInput
             label="工具允许列表"
@@ -1024,6 +1341,7 @@ export function SettingsPanel({
             settings={settings}
             settingKey="toolAllowlist"
             onUpdate={updateSetting}
+            tooltip="逗号分隔的工具名白名单。非空时仅允许列表中的工具（再叠加其他策略）。"
           />
           <SettingTextInput
             label="工具拒绝列表"
@@ -1031,13 +1349,9 @@ export function SettingsPanel({
             settings={settings}
             settingKey="toolDenylist"
             onUpdate={updateSetting}
+            tooltip="逗号分隔的工具名黑名单。列表中的工具将被拒绝或需额外授权。"
           />
         </div>
-        <p className="settings-hint">
-          工具轮次上限主要约束主代理自身。分析类子代理的轮次由主代理先 <code>workspace.stats</code> 统计文件数后，按
-          <code>max_turns = file_count + 总结轮次</code> 指定（无固定上限），并传入 <code>path</code>/<code>file_count</code>。
-          最大并发会话运行数限制同时进行的会话任务数量（默认 3，上限 16）；同一会话内仍串行。
-        </p>
       </section>
       <section className="settings-section">
         <h3>网络工具</h3>
@@ -1048,6 +1362,11 @@ export function SettingsPanel({
             settings={settings}
             settingKey="webSearchProvider"
             onUpdate={updateSetting}
+            tooltip={
+              'web.search 支持 Tavily 与 DuckDuckGo。\n'
+              + '自动：有 Tavily Key 时优先 Tavily。\n'
+              + 'Tavily 国内网络更稳定，可在 app.tavily.com 申请 Key，或设置环境变量 RED_PANDA_TAVILY_API_KEY。'
+            }
           />
           <SettingTextInput
             label="搜索结果数量"
@@ -1055,6 +1374,7 @@ export function SettingsPanel({
             settings={settings}
             settingKey="webSearchResults"
             onUpdate={updateSetting}
+            tooltip="单次 web.search 返回的结果条数上限。"
           />
           <div className="settings-form-span">
             <SettingTextInput
@@ -1063,6 +1383,7 @@ export function SettingsPanel({
               settings={settings}
               settingKey="webTavilyApiKey"
               onUpdate={updateSetting}
+              tooltip="Tavily 密钥（tvly-…）。也可使用环境变量 RED_PANDA_TAVILY_API_KEY。修改后重新发送任务生效。"
             />
           </div>
           <SettingTextInput
@@ -1071,6 +1392,7 @@ export function SettingsPanel({
             settings={settings}
             settingKey="webFetchMaxBytes"
             onUpdate={updateSetting}
+            tooltip="web.fetch 响应体大小上限（字节），防止超大页面占满上下文。默认约 2MB。"
           />
           <div className="settings-form-span">
             <SettingTextInput
@@ -1079,27 +1401,93 @@ export function SettingsPanel({
               settings={settings}
               settingKey="webHttpProxy"
               onUpdate={updateSetting}
+              tooltip={
+                '仅作用于 web.search / web.fetch。\n'
+                + '示例：http://127.0.0.1:7890 或 socks5://127.0.0.1:7891。\n'
+                + '修改后重新发送任务即可生效。'
+              }
             />
           </div>
         </div>
+      </section>
+    </>
+  );
+
+  const logsContent = (
+    <>
+      <ModuleHeader
+        badge={`${diagnosticLogs.length} 条`}
+        title="日志审计"
+      >
+        <Button
+          data-testid="settings-clear-diagnostic-logs"
+          onClick={() => clearDiagnosticLogs()}
+          type="button"
+          variant="soft"
+        >
+          清空客户端日志
+        </Button>
+      </ModuleHeader>
+
+      <section className="settings-section" data-testid="settings-diagnostics">
+        <h3>LLM 请求记录</h3>
+        <SettingCheck
+          checked={Boolean(settings?.logLlmRequests)}
+          label="记录发往 LLM 的请求数据"
+          onChange={(next) => updateSetting('logLlmRequests', next)}
+          tooltip={
+            '开启后，Agent Runtime 会把每次向模型发送的 messages/tools 请求体写入本机日志目录，便于排查上下文与工具调用问题。\n'
+            + '不会写入 API Key。修改后重新发送任务生效。\n'
+            + `默认目录：${defaultLlmLogDirHint()}（可用环境变量 RED_PANDA_LOG_DIR 覆盖）。`
+          }
+        />
         <p className="settings-hint">
-          <code>web.search</code> 支持 Tavily 与 DuckDuckGo。
-          Tavily 在国内网络更稳定，需在 <a href="https://app.tavily.com" target="_blank" rel="noreferrer">app.tavily.com</a> 申请 Key。
-          也可设置环境变量 <code>RED_PANDA_TAVILY_API_KEY</code>。
-          代理仅作用于 <code>web.search</code> / <code>web.fetch</code>，例如 <code>http://127.0.0.1:7890</code> 或 <code>socks5://127.0.0.1:7891</code>。
-          修改后重新发送任务即可生效。
+          LLM 请求日志目录：
+          <code data-testid="settings-llm-log-dir">{defaultLlmLogDirHint()}</code>
         </p>
+        <p className="settings-hint">
+          开关状态会随设置保存；关闭后新的运行不再落盘。已有 JSON 文件需手动清理。
+        </p>
+      </section>
+
+      <section className="settings-section">
+        <h3>桌面端运行日志</h3>
+        <div className="settings-log-viewer settings-log-viewer-tall" data-testid="settings-diagnostic-logs">
+          {diagnosticLogs.length === 0 ? (
+            <EmptyState title="暂无日志">运行任务或发生错误后，客户端诊断信息会出现在这里。</EmptyState>
+          ) : (
+            <ul className="settings-log-list">
+              {[...diagnosticLogs].reverse().slice(0, 120).map((entry) => (
+                <li className={`settings-log-item is-${entry.level}`} key={entry.id}>
+                  <div className="settings-log-meta">
+                    <Badge tone={entry.level === 'error' ? 'danger' : entry.level === 'warn' ? 'warning' : 'neutral'}>
+                      {entry.level}
+                    </Badge>
+                    <small>{entry.ts}</small>
+                    <small>{entry.source}</small>
+                  </div>
+                  <strong>{entry.message}</strong>
+                  {entry.detail ? <pre>{entry.detail}</pre> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
     </>
   );
 
   const activeContent = activeTab === 'providers'
     ? providerContent
-    : activeTab === 'skills'
-      ? skillsContent
-      : activeTab === 'mcp'
-        ? mcpContent
-        : otherContent;
+    : activeTab === 'agents'
+      ? agentsContent
+      : activeTab === 'skills'
+        ? skillsContent
+        : activeTab === 'mcp'
+          ? mcpContent
+          : activeTab === 'logs'
+            ? logsContent
+            : otherContent;
   const activeTabLabel = SETTINGS_TABS.find((tab) => tab.id === activeTab)?.label || '设置';
 
   return (

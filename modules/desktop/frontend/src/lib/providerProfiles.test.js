@@ -14,6 +14,7 @@ test('normalizeProviderProfile maps masked key state and defaults', () => {
     name: '',
     base_url: 'https://provider.invalid',
     model: 'model-a',
+    max_tokens: 128000,
     api_key_set: true,
     api_key_masked: '****1234',
     is_default: true,
@@ -23,6 +24,7 @@ test('normalizeProviderProfile maps masked key state and defaults', () => {
   assert.equal(profile.provider, 'openai_compatible');
   assert.equal(profile.baseUrl, 'https://provider.invalid');
   assert.equal(profile.model, 'model-a');
+  assert.equal(profile.maxTokens, 128000);
   assert.equal(profile.apiKeySet, true);
   assert.equal(profile.apiKeyMasked, '****1234');
   assert.equal(profile.isDefault, true);
@@ -35,6 +37,7 @@ test('profileDraftFrom never copies saved API key state into editable draft', ()
     provider: 'openai_compatible',
     baseUrl: 'https://provider.invalid',
     model: 'model-a',
+    maxTokens: 64000,
     apiKeySet: true,
     apiKeyMasked: '****1234',
     isDefault: true,
@@ -42,6 +45,7 @@ test('profileDraftFrom never copies saved API key state into editable draft', ()
 
   assert.equal(draft.name, 'Work');
   assert.equal(draft.apiKey, '');
+  assert.equal(draft.maxTokens, '64000');
   assert.equal(draft.isDefault, true);
 });
 
@@ -51,6 +55,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     provider: '',
     baseUrl: 'https://provider.invalid',
     model: 'model-a',
+    maxTokens: '128000',
     apiKey: 'sk-live',
     isDefault: true,
   }), {
@@ -58,6 +63,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     provider: 'openai_compatible',
     base_url: 'https://provider.invalid',
     model: 'model-a',
+    max_tokens: 128000,
     api_key: 'sk-live',
     is_default: true,
   });
@@ -67,11 +73,13 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     provider: 'openai_compatible',
     baseUrl: 'https://provider.invalid',
     model: 'model-b',
+    maxTokens: '',
     apiKey: '',
     isDefault: false,
     active: true,
   });
   assert.equal(Object.hasOwn(update, 'api_key'), false);
   assert.equal(update.model, 'model-b');
+  assert.equal(update.max_tokens, 0);
   assert.equal(update.active, true);
 });

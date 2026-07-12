@@ -2,6 +2,7 @@ import { ArrowDown, Bot, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildConversationTimeline } from '../../lib/conversationTimeline.js';
 import { classNames, formatSeq } from '../../lib/format.js';
+import { isSubagentToolFallback } from '../../lib/toolResultDisplay.js';
 import {
   messageHasToolCallMarkup,
   parseMessageContent,
@@ -30,6 +31,13 @@ function displayMessageAgent(message) {
  */
 function AssistantMessageBody({ message }) {
   const text = message.text || '';
+  if (isSubagentToolFallback(message)) {
+    return (
+      <div className="message-recovery-notice" data-testid="message-recovery-notice">
+        子代理未生成可用的最终报告。完整执行结果仍保留在工具卡片中。
+      </div>
+    );
+  }
   const segments = useMemo(() => {
     if (!messageHasToolCallMarkup(text)) {
       return [{ type: 'text', text }];

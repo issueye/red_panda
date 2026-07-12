@@ -13,11 +13,14 @@ type Set struct {
 	Workspace  WorkspaceController
 	Session    SessionController
 	Memory     MemoryController
+	Todo       TodoController
 	Tool       ToolController
 	Permission PermissionController
 	Provider   ProviderProfileController
 	MCPServers MCPServerConfigController
 	Skills     SkillController
+	Agents     AgentDefinitionController
+	Goal       GoalController
 	WebSocket  WebSocketController
 }
 
@@ -30,11 +33,14 @@ func NewSet(services service.Set, hub *eventhub.Hub) Set {
 		Workspace:  WorkspaceController{Services: services},
 		Session:    SessionController{Services: services},
 		Memory:     MemoryController{Services: services},
+		Todo:       TodoController{Services: services},
 		Tool:       ToolController{Services: services},
 		Permission: PermissionController{Services: services},
 		Provider:   ProviderProfileController{Services: services},
 		MCPServers: MCPServerConfigController{Services: services},
 		Skills:     SkillController{Services: services},
+		Agents:     AgentDefinitionController{Services: services},
+		Goal:       GoalController{Services: services},
 		WebSocket: WebSocketController{
 			Services: services,
 			Hub:      hub,

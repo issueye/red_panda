@@ -30,6 +30,22 @@ export function createEmptySessionRuntime(overrides = {}) {
     runEventsError: {},
     draft: '',
     hydrated: false,
+    todos: [],
+    todoOpenCount: 0,
+    todosVersion: 0,
+    todosHydrated: false,
+    todosExpanded: false,
+    todosAutoExpandedOnce: false,
+    contextSummary: null,
+    contextSummaryEndSeq: 0,
+    // True while this session is pausing runs and applying a context summary.
+    compacting: false,
+    // Long-horizon Goal strip (docs/32 M5).
+    goal: null,
+    goals: [],
+    goalHydrated: false,
+    goalExpanded: false,
+    goalBusy: false,
     ...overrides,
   };
 }

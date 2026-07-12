@@ -20,6 +20,14 @@ var skillSubagentDenylist = []string{
 	"memory.create",
 	"memory.update",
 	"memory.delete",
+	"todo.write",
+	"goal.write",
+	"goal.update",
+	"goal.checkpoint",
+	"goal.complete",
+	"goal.list",
+	"todo.list",
+	"todo_write",
 	"skill.create",
 	"skill.update",
 	"skill.delete",
@@ -70,6 +78,8 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx ToolRunContext, ca
 	childParams.Options.MemoryContext = &methods.MemoryContext{
 		Context: fmt.Sprintf("Managed skill %q instructions:\n\n%s", name, skill),
 	}
+	childParams.Options.TodoContext = nil
+	disableGoalPipelineForChild(&childParams.Options)
 	childParams.Options.RequirePermission = false
 	childParams.Options.SpawnSubAgents = false
 	childParams.Options.SubAgentBackend = ""

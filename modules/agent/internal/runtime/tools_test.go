@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -93,6 +94,61 @@ func TestWorkspaceToolsRejectTraversal(t *testing.T) {
 	_, err = runGrepWorkspace(root, "anything", "..", 10)
 	if err == nil || !strings.Contains(err.Error(), "escapes workspace root") {
 		t.Fatalf("expected traversal rejection, got %v", err)
+	}
+}
+
+func TestRunReadFileMissingPathIsActionable(t *testing.T) {
+	root := t.TempDir()
+	_, err := runReadFile(root, "OfficeCli/README_zh.md")
+	if err == nil {
+		t.Fatal("expected missing file error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"file not found", "OfficeCli/README_zh.md", "working_dir"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q should contain %q", msg, want)
+		}
+	}
+}
+
+func TestResolveWorkspacePathRejectsMissingWorkingDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	_, err := resolveWorkspacePath(missing, "README.md")
+	if err == nil || !strings.Contains(err.Error(), "working_dir does not exist") {
+		t.Fatalf("expected missing working_dir error, got %v", err)
+	}
+}
+
+func TestRunBoundedTimesOutStuckTool(t *testing.T) {
+	started := time.Now()
+	_, err := runBounded(context.Background(), 50*time.Millisecond, func(context.Context) (string, error) {
+		// Simulate a stuck FS/RPC call that never observes context cancel.
+		time.Sleep(2 * time.Second)
+		return "too slow", nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("timeout took too long: %s", elapsed)
+	}
+}
+
+func TestRunBoundedNoTimeoutWhenDisabled(t *testing.T) {
+	out, err := runBounded(context.Background(), 0, func(context.Context) (string, error) {
+		return "ok", nil
+	})
+	if err != nil || out != "ok" {
+		t.Fatalf("got %q, %v", out, err)
+	}
+}
+
+func TestToolTimeoutForSelfManagedTools(t *testing.T) {
+	if got := toolTimeoutFor("shell.exec"); got != 0 {
+		t.Fatalf("shell.exec timeout = %s, want 0 (self-managed)", got)
+	}
+	if got := toolTimeoutFor("workspace.read_file"); got != defaultLocalToolTimeout {
+		t.Fatalf("workspace.read_file timeout = %s, want %s", got, defaultLocalToolTimeout)
 	}
 }
 

@@ -140,6 +140,12 @@ export function classifyRunEventKind(type, streamKind, payload = {}) {
   if (value.includes('memory') || payload.memory_ids) {
     return 'memory';
   }
+  if (type === 'todo_updated' || value.includes('todo_updated')) {
+    return 'todo';
+  }
+  if (type === 'goal_updated' || value.includes('goal_updated')) {
+    return 'goal';
+  }
   if (value.includes('tool') || payload.tool_name || payload.toolName) {
     return 'tool';
   }

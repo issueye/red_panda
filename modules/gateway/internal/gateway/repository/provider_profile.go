@@ -62,6 +62,8 @@ func (r ProviderProfileRepository) Update(profile model.ProviderProfile) (model.
 	if profile.Model != "" {
 		current.Model = profile.Model
 	}
+	// MaxTokens is intentionally always applied so callers can clear it to 0.
+	current.MaxTokens = profile.MaxTokens
 	if profile.APIKeySecret != "" {
 		current.APIKeySecret = profile.APIKeySecret
 	}

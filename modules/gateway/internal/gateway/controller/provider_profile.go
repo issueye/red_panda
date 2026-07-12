@@ -17,6 +17,7 @@ type providerProfileCreateRequest struct {
 	Provider  string `json:"provider"`
 	BaseURL   string `json:"base_url"`
 	Model     string `json:"model"`
+	MaxTokens int    `json:"max_tokens"`
 	APIKey    string `json:"api_key"`
 	IsDefault bool   `json:"is_default"`
 }
@@ -26,6 +27,7 @@ type providerProfileUpdateRequest struct {
 	Provider  *string `json:"provider"`
 	BaseURL   *string `json:"base_url"`
 	Model     *string `json:"model"`
+	MaxTokens *int    `json:"max_tokens"`
 	APIKey    *string `json:"api_key"`
 	IsDefault *bool   `json:"is_default"`
 	Active    *bool   `json:"active"`
@@ -51,6 +53,7 @@ func (p ProviderProfileController) Create(c *gin.Context) {
 		Provider:  req.Provider,
 		BaseURL:   req.BaseURL,
 		Model:     req.Model,
+		MaxTokens: req.MaxTokens,
 		APIKey:    req.APIKey,
 		IsDefault: req.IsDefault,
 	})
@@ -81,6 +84,7 @@ func (p ProviderProfileController) Update(c *gin.Context) {
 		Provider:  req.Provider,
 		BaseURL:   req.BaseURL,
 		Model:     req.Model,
+		MaxTokens: req.MaxTokens,
 		APIKey:    req.APIKey,
 		IsDefault: req.IsDefault,
 		Active:    req.Active,

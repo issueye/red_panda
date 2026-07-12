@@ -23,6 +23,7 @@ import (
 const (
 	defaultProviderToolTurns = 12
 	maxProviderToolTurnsCap  = 48
+	maxJSONRPCLineBytes      = 4 * 1024 * 1024
 )
 
 var plannerStartDelay = durationFromEnvMillis("RED_PANDA_PLANNER_START_DELAY_MS", 10*time.Millisecond)
@@ -67,6 +68,8 @@ type Runtime struct {
 	tools              ToolRunner
 	processPool        *subAgentProcessPool
 	mcpProcesses       map[*mcpProcess]struct{}
+	runTodos           map[string][]methods.TodoItemDTO
+	runGoals           map[string]*runGoalState
 	newProcessSubAgent func(context.Context, methods.ReplyParams, string) (processSubAgent, error)
 }
 
@@ -94,16 +97,24 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 		activeRuns:     map[string]context.CancelFunc{},
 		subagents:      map[string]*runtimeSubAgent{},
 		mcpProcesses:   map[*mcpProcess]struct{}{},
+		runTodos:       map[string][]methods.TodoItemDTO{},
+		runGoals:       map[string]*runGoalState{},
 		provider:       newProviderFromEnv(log),
 		tools:          ToolRunner{},
 	}
 	rt.tools.MemoryExecutor = rt.executeMemoryTool
+	rt.tools.TodoExecutor = rt.todoExecutor
+	rt.tools.GoalExecutor = rt.goalExecutor
 	rt.tools.SkillExecutor = rt.executeSkillRun
 	rt.tools.SubagentExecutor = rt.executeSubagentRun
 	rt.tools.SubagentManager = rt
-	rt.newProcessSubAgent = newSubAgentProcess
+	rt.newProcessSubAgent = rt.createProcessSubAgent
 	rt.processPool = newSubAgentProcessPool(subAgentPoolSizeFromEnv(), rt.newProcessSubAgent)
 	return rt
+}
+
+func (r *Runtime) createProcessSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+	return newSubAgentProcessWithRequestHandler(ctx, params, subAgentID, r.callGateway)
 }
 
 // SubagentManager implementation (parent-agent tool control surface).
@@ -146,6 +157,7 @@ func durationFromEnvMillis(key string, fallback time.Duration) time.Duration {
 
 func (r *Runtime) Serve(ctx context.Context) error {
 	scanner := bufio.NewScanner(r.in)
+	scanner.Buffer(make([]byte, 64*1024), maxJSONRPCLineBytes)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -409,14 +421,34 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		subAgentDone = done
 	}
 
-	status := r.runProviderLoop(ctx, params, providerInput, toolHistory, messageID, streamID, &streamSeq)
+	// Multi-segment when a Goal is bound (or becomes bound mid-run via goal.write).
+	seg := r.runWithGoalLoop(ctx, params, providerInput, toolHistory, messageID, streamID, &streamSeq)
+	goalStreamNeedsFinal := r.deferGoalStreamFinal(params.RunID)
+	if goalStreamNeedsFinal && ctx.Err() == nil {
+		_ = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
+			StreamID: streamID,
+			Kind:     events.StreamMessage,
+			Seq:      streamSeq,
+			Final:    true,
+		}, map[string]any{
+			"message_id":    messageID,
+			"delta":         "",
+			"provider_name": r.provider.Name(),
+		})
+		streamSeq++
+	}
+	// Snapshots are cleared only on root-run terminal — not mid-segment.
+	r.clearRunSnapshots(params.RunID)
+
+	status := finishStatusFromLoopEnd(seg.Reason)
 	if status != "completed" {
 		<-subAgentDone
 		if status == "cancelled" {
 			r.emitCancelled(params)
 		} else {
 			_ = r.emitEvent(ctx, params, events.EventFinish, nil, map[string]any{
-				"status": status,
+				"status":          status,
+				"loop_end_reason": string(seg.Reason),
 			})
 		}
 		return
@@ -431,10 +463,52 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		r.emitCancelled(params)
 		return
 	}
-	_ = r.emitEvent(ctx, params, events.EventFinish, nil, map[string]any{
-		"status":        "completed",
-		"provider_name": r.provider.Name(),
-	})
+	finishPayload := map[string]any{
+		"status":          "completed",
+		"provider_name":   r.provider.Name(),
+		"loop_end_reason": string(seg.Reason),
+		"tool_turns":      seg.ToolTurns,
+	}
+	if seg.Reason == loopEndMaxTurns {
+		finishPayload["max_turns_reached"] = true
+	}
+	_ = r.emitEvent(ctx, params, events.EventFinish, nil, finishPayload)
+}
+
+// loopEndReason is the structured exit cause of one provider↔tool segment.
+// It must not be collapsed into stringly "completed" for multi-segment outer loops.
+type loopEndReason string
+
+const (
+	loopEndNoTools   loopEndReason = "no_tools"
+	loopEndMaxTurns  loopEndReason = "max_turns"
+	loopEndCancelled loopEndReason = "cancelled"
+	loopEndFailed    loopEndReason = "failed"
+	loopEndBudget    loopEndReason = "budget_exhausted"
+)
+
+// providerSegmentResult is one runProviderLoopSegment outcome.
+type providerSegmentResult struct {
+	Reason    loopEndReason
+	ToolTurns int
+	// History is the accumulated tool exchanges for carry_summarized / next segment.
+	History []ToolExchange
+}
+
+func finishStatusFromLoopEnd(reason loopEndReason) string {
+	switch reason {
+	case loopEndCancelled:
+		return "cancelled"
+	case loopEndFailed, loopEndBudget:
+		return "failed"
+	case loopEndNoTools, loopEndMaxTurns:
+		// External finish status stays "completed" when the segment produced a
+		// recoverable answer (including max-turns synthesis). Distinct reason is
+		// preserved on the finish payload as loop_end_reason.
+		return "completed"
+	default:
+		return "completed"
+	}
 }
 
 func (r *Runtime) emitMemoryInjected(ctx context.Context, params methods.ReplyParams) {
@@ -471,14 +545,32 @@ func (r *Runtime) emitSkillsInjected(ctx context.Context, params methods.ReplyPa
 	})
 }
 
+// runProviderLoop is a thin wrapper kept for call sites/tests that only need
+// the legacy string status. Prefer runProviderLoopSegment for new code.
 func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParams, input string, history []ToolExchange, messageID string, streamID string, streamSeq *uint64) string {
+	seg := r.runProviderLoopSegment(ctx, params, input, history, messageID, streamID, streamSeq)
+	return finishStatusFromLoopEnd(seg.Reason)
+}
+
+// runProviderLoopSegment runs one provider↔tool budget segment.
+// It does NOT clear run snapshots and does NOT emit EventFinish — the outer
+// emitRun / Goal multi-segment controller owns terminal cleanup and finish.
+func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.ReplyParams, input string, history []ToolExchange, messageID string, streamID string, streamSeq *uint64) providerSegmentResult {
 	maxTurns := effectiveProviderToolTurns(params.Options)
 	var rounds [][]ToolExchange
 	if len(history) > 0 {
 		// Initial pre-loop tools (if any) are treated as one round.
 		rounds = append(rounds, append([]ToolExchange(nil), history...))
 	}
+	turnsUsed := 0
 	for turn := 0; turn < maxTurns; turn++ {
+		// Mid-loop: refresh Todo/Goal context from run snapshots.
+		if ctxTodos := r.todoContextForRun(params.RunID); ctxTodos != nil {
+			params.Options.TodoContext = ctxTodos
+		}
+		if ctxGoal := r.goalContextForRun(params.RunID); ctxGoal != nil {
+			params.Options.GoalContext = ctxGoal
+		}
 		var requestedCalls []tools.Call
 		emittedText := false
 		flatHistory := flattenToolRounds(rounds)
@@ -493,32 +585,33 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 		}, func(chunk ProviderChunk) error {
 			return r.consumeProviderChunk(ctx, params, chunk, messageID, streamID, streamSeq, &requestedCalls, &emittedText)
 		})
+		turnsUsed++
 		if err != nil {
 			if ctx.Err() != nil {
-				return "cancelled"
+				return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 			}
 			_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
 				"message":       err.Error(),
 				"status":        "failed",
 				"provider_name": r.provider.Name(),
 			})
-			return "failed"
+			return providerSegmentResult{Reason: loopEndFailed, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
 		if ctx.Err() != nil {
-			return "cancelled"
+			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
 		if len(requestedCalls) == 0 {
 			if !emittedText && len(flatHistory) > 0 {
 				// Retry once without tools so the model must produce a final answer.
 				if r.retryFinalAnswer(ctx, params, input, rounds, messageID, streamID, streamSeq) {
-					return "completed"
+					return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 				}
-				fallback := synthesizeToolAnswer(flatHistory)
+				fallback := recoveryAnswerForRun(params, flatHistory)
 				_ = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
 					StreamID: streamID,
 					Kind:     events.StreamMessage,
 					Seq:      *streamSeq,
-					Final:    true,
+					Final:    !r.deferGoalStreamFinal(params.RunID),
 				}, map[string]any{
 					"message_id":    messageID,
 					"delta":         fallback,
@@ -527,7 +620,7 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 				})
 				(*streamSeq)++
 			}
-			return "completed"
+			return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
 		// Preserve call order in history; run multiple subagent.run workers concurrently.
 		exchanges, cancelled := r.executeToolBatch(ctx, params, requestedCalls)
@@ -535,20 +628,21 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 			rounds = append(rounds, exchanges)
 		}
 		if cancelled {
-			return "cancelled"
+			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
 	}
 	// Budget exhausted after tools — still try a final text-only synthesis.
+	// Reason stays max_turns so Goal outer loops can open another segment.
 	if len(rounds) > 0 {
 		if r.retryFinalAnswer(ctx, params, input, rounds, messageID, streamID, streamSeq) {
-			return "completed"
+			return providerSegmentResult{Reason: loopEndMaxTurns, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
-		fallback := synthesizeToolAnswer(flattenToolRounds(rounds))
+		fallback := recoveryAnswerForRun(params, flattenToolRounds(rounds))
 		_ = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
 			StreamID: streamID,
 			Kind:     events.StreamMessage,
 			Seq:      *streamSeq,
-			Final:    true,
+			Final:    !r.deferGoalStreamFinal(params.RunID),
 		}, map[string]any{
 			"message_id":    messageID,
 			"delta":         fallback,
@@ -557,14 +651,42 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 			"max_turns":     maxTurns,
 		})
 		(*streamSeq)++
-		return "completed"
+		return providerSegmentResult{Reason: loopEndMaxTurns, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 	}
 	_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
 		"message":   fmt.Sprintf("provider exceeded tool turn limit (%d)", maxTurns),
 		"status":    "failed",
 		"max_turns": maxTurns,
 	})
-	return "failed"
+	return providerSegmentResult{Reason: loopEndFailed, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+}
+
+// carrySummarizedHistory compresses tool exchanges for the next Goal segment.
+// K most recent exchanges keep truncated outputs (rule-only, no LLM).
+func carrySummarizedHistory(history []ToolExchange, k int, maxRunes int) []ToolExchange {
+	if k <= 0 || len(history) == 0 {
+		return nil
+	}
+	if maxRunes <= 0 {
+		maxRunes = 500
+	}
+	start := 0
+	if len(history) > k {
+		start = len(history) - k
+	}
+	out := make([]ToolExchange, 0, len(history)-start)
+	for _, ex := range history[start:] {
+		cp := ex
+		if len(cp.Result.Output) > maxRunes {
+			// Output is string; truncate by runes for CJK-safe budgets.
+			runes := []rune(cp.Result.Output)
+			if len(runes) > maxRunes {
+				cp.Result.Output = string(runes[:maxRunes]) + "…"
+			}
+		}
+		out = append(out, cp)
+	}
+	return out
 }
 
 func (r *Runtime) consumeProviderChunk(
@@ -597,7 +719,7 @@ func (r *Runtime) consumeProviderChunk(
 		StreamID: streamID,
 		Kind:     events.StreamMessage,
 		Seq:      *streamSeq,
-		Final:    chunk.Final,
+		Final:    chunk.Final && !r.deferGoalStreamFinal(params.RunID),
 	}, map[string]any{
 		"message_id":    messageID,
 		"delta":         chunk.Delta,
@@ -624,8 +746,8 @@ func (r *Runtime) retryFinalAnswer(
 		"Write a complete, helpful final answer for the user based on the tool results above. " +
 		"Do not call tools. Respond in the user's language. " +
 		"If some tools failed, still summarize what succeeded and what is known."
-	emittedText := false
-	var ignoredCalls []tools.Call
+	var answer strings.Builder
+	returnedToolCalls := false
 	err := r.provider.Complete(ctx, ProviderRequest{
 		RunID:   params.RunID,
 		Session: params.Session,
@@ -636,12 +758,32 @@ func (r *Runtime) retryFinalAnswer(
 		ToolHistory: flattenToolRounds(rounds),
 		ToolRounds:  rounds,
 	}, func(chunk ProviderChunk) error {
-		return r.consumeProviderChunk(ctx, params, chunk, messageID, streamID, streamSeq, &ignoredCalls, &emittedText)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if len(chunk.ToolCalls) > 0 {
+			returnedToolCalls = true
+		}
+		answer.WriteString(chunk.Delta)
+		return nil
 	})
-	if err != nil || !emittedText {
+	text := strings.TrimSpace(answer.String())
+	if err != nil || returnedToolCalls || !isUsableFinalText(text) {
 		return false
 	}
-	return true
+	err = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
+		StreamID: streamID,
+		Kind:     events.StreamMessage,
+		Seq:      *streamSeq,
+		Final:    !r.deferGoalStreamFinal(params.RunID),
+	}, map[string]any{
+		"message_id":    messageID,
+		"delta":         text,
+		"provider_name": r.provider.Name(),
+		"recovered":     true,
+	})
+	(*streamSeq)++
+	return err == nil
 }
 
 func flattenToolRounds(rounds [][]ToolExchange) []ToolExchange {
@@ -700,6 +842,13 @@ func synthesizeToolAnswer(history []ToolExchange) string {
 		b.WriteString("\n\n")
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func recoveryAnswerForRun(params methods.ReplyParams, history []ToolExchange) string {
+	if strings.Contains(params.RunID, ":subagent:") {
+		return "子代理已完成工具调用，但未生成可用的最终报告。工具结果已保留在工具卡片中。"
+	}
+	return synthesizeToolAnswer(history)
 }
 
 func readableToolResultText(result tools.Result) string {
@@ -876,6 +1025,7 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 	childParams.Input.Text = "planner subagent task: " + params.Input.Text
 	childParams.Options.SpawnSubAgents = false
 	childParams.Options.SubAgentBackend = ""
+	disableGoalPipelineForChild(&childParams.Options)
 
 	err = child.Start(ctx, childParams, func(event events.Envelope) {
 		r.bridgeProcessSubAgentEvent(context.Background(), params, subAgentID, "planner", backend, event)
@@ -1286,7 +1436,49 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		return result, output, false
 	}
 	_ = r.emitEvent(ctx, params, events.EventToolFinished, nil, toolResultPayload(result))
+	if call.Name == "todo.write" || call.Name == "todo_write" {
+		items := r.getRunTodos(params.RunID)
+		open, completed, cancelled := todoStatusCounts(items)
+		_ = r.emitEvent(ctx, params, events.EventTodoUpdated, nil, map[string]any{
+			"session_id":      params.Session.ID,
+			"run_id":          params.RunID,
+			"tool_call_id":    call.ID,
+			"action":          "write",
+			"items":           items,
+			"open_count":      open,
+			"completed_count": completed,
+			"cancelled_count": cancelled,
+		})
+	}
+	switch call.Name {
+	case "goal.write", "goal.update", "goal.checkpoint", "goal.complete":
+		if state := r.getRunGoal(params.RunID); state != nil && state.Goal.ID != "" {
+			_ = r.emitEvent(ctx, params, events.EventGoalUpdated, nil, map[string]any{
+				"session_id":     params.Session.ID,
+				"run_id":         params.RunID,
+				"tool_call_id":   call.ID,
+				"action":         strings.TrimPrefix(call.Name, "goal."),
+				"goal":           state.Goal,
+				"pipeline_phase": state.Goal.PipelinePhase,
+				"status":         state.Goal.Status,
+			})
+		}
+	}
 	return result, output, true
+}
+
+func todoStatusCounts(items []methods.TodoItemDTO) (open, completed, cancelled int) {
+	for _, item := range items {
+		switch item.Status {
+		case "pending", "in_progress":
+			open++
+		case "completed":
+			completed++
+		case "cancelled":
+			cancelled++
+		}
+	}
+	return
 }
 
 func (r *Runtime) executeMemoryTool(ctx context.Context, req methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error) {
@@ -1299,6 +1491,153 @@ func (r *Runtime) executeMemoryTool(ctx context.Context, req methods.MemoryToolE
 		return methods.MemoryToolExecuteResult{}, err
 	}
 	return result, nil
+}
+
+func (r *Runtime) todoExecutor(ctx context.Context, req methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error) {
+	result, err := r.executeTodoTool(ctx, req)
+	if err != nil {
+		return result, err
+	}
+	name := strings.TrimSpace(req.ToolName)
+	if name == "todo.write" || name == "todo_write" {
+		r.setRunTodos(req.RunID, result.Items)
+	}
+	return result, nil
+}
+
+func (r *Runtime) executeTodoTool(ctx context.Context, req methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error) {
+	raw, err := r.callGateway(ctx, methods.TodoToolExecute, req)
+	if err != nil {
+		return methods.TodoToolExecuteResult{}, err
+	}
+	var result methods.TodoToolExecuteResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.TodoToolExecuteResult{}, err
+	}
+	return result, nil
+}
+
+func (r *Runtime) goalExecutor(ctx context.Context, req methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
+	result, err := r.executeGoalTool(ctx, req)
+	if err != nil {
+		return result, err
+	}
+	name := strings.TrimSpace(req.ToolName)
+	if name != "goal.list" && name != "segment_end" {
+		r.applyGoalToolResult(req.RunID, name, result)
+	} else if name == "segment_end" {
+		r.applyGoalToolResult(req.RunID, name, result)
+	}
+	return result, nil
+}
+
+func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
+	raw, err := r.callGateway(ctx, methods.GoalToolExecute, req)
+	if err != nil {
+		return methods.GoalToolExecuteResult{}, err
+	}
+	var result methods.GoalToolExecuteResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.GoalToolExecuteResult{}, err
+	}
+	return result, nil
+}
+
+func (r *Runtime) setRunTodos(runID string, items []methods.TodoItemDTO) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.runTodos == nil {
+		r.runTodos = map[string][]methods.TodoItemDTO{}
+	}
+	copied := append([]methods.TodoItemDTO(nil), items...)
+	r.runTodos[runID] = copied
+}
+
+func (r *Runtime) getRunTodos(runID string) []methods.TodoItemDTO {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := r.runTodos[runID]
+	if len(items) == 0 {
+		return nil
+	}
+	return append([]methods.TodoItemDTO(nil), items...)
+}
+
+func (r *Runtime) clearRunTodos(runID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.runTodos, runID)
+}
+
+func (r *Runtime) todoContextForRun(runID string) *methods.TodoContext {
+	items := r.getRunTodos(runID)
+	if len(items) == 0 {
+		return nil
+	}
+	return formatTodoContext(items)
+}
+
+const todoContextHeader = `Current session task list (update via todo.write when progress changes; keep one in_progress):
+`
+
+func formatTodoContext(items []methods.TodoItemDTO) *methods.TodoContext {
+	const limit = 3000
+	const maxLine = 200
+	// open-first
+	ordered := append([]methods.TodoItemDTO(nil), items...)
+	sortTodoItemsOpenFirst(ordered)
+	lines := make([]string, 0, len(ordered))
+	kept := make([]methods.TodoItemDTO, 0, len(ordered))
+	header := todoContextHeader
+	total := len(header)
+	for _, item := range ordered {
+		key := item.ClientKey
+		if key == "" {
+			key = item.ID
+		}
+		line := fmt.Sprintf("- [%s] %s (%s)", item.Status, item.Content, key)
+		runes := []rune(line)
+		if len(runes) > maxLine {
+			line = string(runes[:maxLine-1]) + "…"
+		}
+		if total+len(line)+1 > limit {
+			break
+		}
+		lines = append(lines, line)
+		kept = append(kept, item)
+		total += len(line) + 1
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return &methods.TodoContext{
+		Items:   kept,
+		Context: header + strings.Join(lines, "\n"),
+	}
+}
+
+func sortTodoItemsOpenFirst(items []methods.TodoItemDTO) {
+	rank := func(status string) int {
+		switch status {
+		case "in_progress":
+			return 0
+		case "pending":
+			return 1
+		case "completed":
+			return 2
+		case "cancelled":
+			return 3
+		default:
+			return 9
+		}
+	}
+	for i := 0; i < len(items); i++ {
+		for j := i + 1; j < len(items); j++ {
+			if rank(items[j].Status) < rank(items[i].Status) {
+				items[i], items[j] = items[j], items[i]
+			}
+		}
+	}
 }
 
 func (r *Runtime) callGateway(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -1472,7 +1811,20 @@ func (r *Runtime) unregisterRun(runID string) {
 func (r *Runtime) cancelRun(runID string) bool {
 	r.mu.Lock()
 	cancel := r.activeRuns[runID]
+	// Pause every subagent bound to this root run before cancelling the parent
+	// so process-pool workers stop promptly (not only via shared context).
+	var subCancels []context.CancelFunc
+	for _, state := range r.subagents {
+		if state == nil || state.record.RootRunID != runID || state.cancel == nil {
+			continue
+		}
+		subCancels = append(subCancels, state.cancel)
+	}
 	r.mu.Unlock()
+
+	for _, subCancel := range subCancels {
+		subCancel()
+	}
 	if cancel == nil {
 		return false
 	}

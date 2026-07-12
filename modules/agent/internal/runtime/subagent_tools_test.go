@@ -83,6 +83,41 @@ func TestSubagentRunCaptureCollectsMessageWithoutRootRoleFilter(t *testing.T) {
 	}
 }
 
+func TestSubagentRunCaptureMarksRecoveryFallback(t *testing.T) {
+	capture := &subagentRunCapture{name: "goal-analyst"}
+	capture.Observe(events.Envelope{
+		Type: events.EventMessageDelta,
+		Payload: map[string]any{
+			"delta":     "子代理已完成工具调用，但未生成可用的最终报告。",
+			"recovered": true,
+		},
+	})
+	if !capture.RecoveredFallback {
+		t.Fatal("expected recovered fallback to be tracked")
+	}
+}
+
+func TestIsUsableFinalTextRejectsToolCallOnlyOutput(t *testing.T) {
+	toolCalls := `<tool_call>
+<function=workspace__read>
+<parameter=path>frontend/package.json</parameter>
+</function>
+</tool_call><tool_call>
+<function=workspace__read>
+<parameter=path>frontend/src/App.vue</parameter>
+</function>
+</tool_call>`
+	if isUsableFinalText(toolCalls) {
+		t.Fatal("tool-call-only output must not be accepted as a completed report")
+	}
+	if !isUsableFinalText(toolCalls + "\nFrontend uses Vue and Vite.") {
+		t.Fatal("tool calls followed by a real report should remain usable")
+	}
+	if isUsableFinalText("<tool_call>\n<function=workspace__read>") {
+		t.Fatal("incomplete tool-call-only output must not be accepted")
+	}
+}
+
 func TestAvailableToolsIncludesSubagentRun(t *testing.T) {
 	var found bool
 	for _, definition := range (ToolRunner{}).AvailableTools() {
@@ -221,6 +256,66 @@ func TestRuntimeSubagentRunToolReturnsChildFinalText(t *testing.T) {
 	}
 }
 
+func TestRuntimeContinuesAfterInvalidSubagentReport(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	lines := make(chan []byte, 64)
+	go readJSONLines(t, reader, lines)
+
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+		return toolCallOnlyFakeSubAgent{}, nil
+	}
+	rt.provider = subagentFailureRecoveryProvider{}
+
+	sendRequest(t, context.Background(), rt, "reply_invalid_subagent", methods.AgentReply, methods.ReplyParams{
+		RunID: "run_invalid_subagent",
+		Session: methods.ReplySession{
+			ID:         "session_invalid_subagent",
+			WorkingDir: t.TempDir(),
+		},
+		Input: methods.ReplyInput{Text: "analyze frontend"},
+		Options: methods.ReplyOptions{
+			ToolPolicy:      "allow_all",
+			SubAgentBackend: "runtime_process",
+			MaxToolTurns:    4,
+		},
+	})
+
+	waitForResponse(t, lines, "reply_invalid_subagent")
+	runEvents := waitForEventsUntilFinish(t, lines)
+
+	var sawWorkerFailure bool
+	var sawToolFailure bool
+	var sawParentRecovery bool
+	for _, event := range runEvents {
+		switch event.Type {
+		case events.EventSubAgentUpdate:
+			if event.Payload["status"] == "failed" {
+				sawWorkerFailure = true
+			}
+		case events.EventToolFailed:
+			if event.Payload["tool_name"] == "subagent.run" {
+				sawToolFailure = true
+			}
+		case events.EventMessageDelta:
+			if strings.Contains(stringValue(event.Payload["delta"]), "continued after worker failure") {
+				sawParentRecovery = true
+			}
+		}
+	}
+	if !sawWorkerFailure || !sawToolFailure || !sawParentRecovery {
+		t.Fatalf("missing recovery events: workerFailure=%v toolFailure=%v parentRecovery=%v events=%#v",
+			sawWorkerFailure, sawToolFailure, sawParentRecovery, summarizeEventTypes(runEvents))
+	}
+	finish := runEvents[len(runEvents)-1]
+	if finish.Type != events.EventFinish || finish.Payload["status"] != "completed" {
+		t.Fatalf("finish = %#v, want completed", finish)
+	}
+}
+
 type subagentToolProvider struct{}
 
 func (subagentToolProvider) Name() string { return "subagent-tool-test" }
@@ -244,9 +339,55 @@ func (subagentToolProvider) Complete(_ context.Context, req ProviderRequest, emi
 	return emit(ProviderChunk{Final: true})
 }
 
+type subagentFailureRecoveryProvider struct{}
+
+func (subagentFailureRecoveryProvider) Name() string { return "subagent-failure-recovery-test" }
+
+func (subagentFailureRecoveryProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	if len(req.ToolHistory) == 0 {
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:   "call_invalid_subagent",
+			Name: "subagent.run",
+			Arguments: map[string]any{
+				"name": "frontend",
+				"task": "analyze frontend",
+			},
+		}}})
+	}
+	if err := emit(ProviderChunk{Delta: "continued after worker failure"}); err != nil {
+		return err
+	}
+	return emit(ProviderChunk{Final: true})
+}
+
 type taskAwareFakeSubAgent struct {
 	taskPrefix string
 }
+
+type toolCallOnlyFakeSubAgent struct{}
+
+func (toolCallOnlyFakeSubAgent) Start(_ context.Context, childParams methods.ReplyParams, onEvent func(events.Envelope)) error {
+	onEvent(events.Envelope{
+		RootRunID: childParams.RunID,
+		RunID:     childParams.RunID,
+		SessionID: childParams.Session.ID,
+		Type:      events.EventMessageDelta,
+		Payload: map[string]any{
+			"delta": "<tool_call><function=workspace__read><parameter=path>frontend/package.json</parameter></function></tool_call>",
+		},
+	})
+	onEvent(events.Envelope{
+		RootRunID: childParams.RunID,
+		RunID:     childParams.RunID,
+		SessionID: childParams.Session.ID,
+		Type:      events.EventFinish,
+		Payload:   map[string]any{"status": "completed"},
+	})
+	return nil
+}
+
+func (toolCallOnlyFakeSubAgent) Cancel(context.Context, string, string) error { return nil }
+func (toolCallOnlyFakeSubAgent) Close(context.Context) error                  { return nil }
 
 func (f taskAwareFakeSubAgent) Start(ctx context.Context, childParams methods.ReplyParams, onEvent func(events.Envelope)) error {
 	delta := f.taskPrefix + " report: " + childParams.Input.Text

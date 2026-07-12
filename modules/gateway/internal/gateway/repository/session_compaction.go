@@ -37,3 +37,24 @@ func (r SessionCompactionRepository) ListForSession(sessionID string) ([]model.S
 		Find(&rows).Error
 	return rows, err
 }
+
+func (r SessionCompactionRepository) LatestAppliedInPlace(sessionID string) (model.SessionCompaction, error) {
+	var row model.SessionCompaction
+	err := r.db.
+		Where("source_session_id = ? AND target_session_id = ? AND status = ?", sessionID, sessionID, "applied").
+		Order("created_at desc").
+		First(&row).Error
+	return row, err
+}
+
+func (r SessionCompactionRepository) SupersedeAppliedInPlace(sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+	return r.db.Model(&model.SessionCompaction{}).
+		Where("source_session_id = ? AND target_session_id = ? AND status = ?", sessionID, sessionID, "applied").
+		Updates(map[string]any{
+			"status":     "superseded",
+			"updated_at": time.Now().UTC(),
+		}).Error
+}

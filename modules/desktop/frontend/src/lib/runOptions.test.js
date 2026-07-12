@@ -62,6 +62,24 @@ test('buildRunStartOptions falls back to default web tuning', () => {
   assert.equal(options.max_tool_turns, 12);
   assert.equal(options.runtime_mode, 'per_run_process');
   assert.equal(options.max_concurrent_runs, 3);
+  assert.equal(options.log_llm_requests, false);
+  assert.equal(options.goals_enabled, false);
+});
+
+test('buildRunStartOptions keeps regular conversations out of the goal pipeline', () => {
+  const options = buildRunStartOptions({}, { root: 'D:/ws' }, 'analyze this project');
+
+  assert.equal(options.create_goal, undefined);
+  assert.equal(options.goal_id, undefined);
+  assert.equal(options.continue_goal, undefined);
+  assert.equal(options.goals_enabled, false);
+});
+
+test('buildRunStartOptions passes log_llm_requests toggle', () => {
+  const options = buildRunStartOptions({
+    logLlmRequests: true,
+  }, { root: 'D:/ws' }, 'debug llm');
+  assert.equal(options.log_llm_requests, true);
 });
 
 test('buildRunStartOptions passes max tool turns', () => {
@@ -76,4 +94,27 @@ test('buildRunStartOptions passes max concurrent runs', () => {
     maxConcurrentRuns: '5',
   }, { root: 'D:/ws' }, 'parallel sessions');
   assert.equal(options.max_concurrent_runs, 5);
+});
+
+test('buildRunStartOptions accepts create_goal overrides from command system', () => {
+  const options = buildRunStartOptions(
+    { spawnSubAgents: false },
+    { root: 'D:/ws' },
+    '/goal 实现登录',
+    {
+      create_goal: true,
+      goal_objective: '实现登录',
+      goal_title: '实现登录',
+      goal_success_criteria: '能登录',
+      require_permission: false,
+      spawn_subagents: true,
+    },
+  );
+  assert.equal(options.create_goal, true);
+  assert.equal(options.goal_objective, '实现登录');
+  assert.equal(options.goal_title, '实现登录');
+  assert.equal(options.goal_success_criteria, '能登录');
+  assert.equal(options.goals_enabled, true);
+  assert.equal(options.spawn_subagents, true);
+  assert.equal(options.require_permission, false);
 });

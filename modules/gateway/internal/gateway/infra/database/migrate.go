@@ -12,6 +12,7 @@ func Migrate(db *gorm.DB) error {
 		&model.SessionLineage{},
 		&model.SessionCompaction{},
 		&model.MemoryRecord{},
+		&model.TodoItem{},
 		&model.Message{},
 		&model.RunRecord{},
 		&model.RunEvent{},
@@ -20,5 +21,8 @@ func Migrate(db *gorm.DB) error {
 		&model.PermissionRequest{},
 		&model.ProviderProfile{},
 		&model.MCPServerConfig{},
+		&model.AgentDefinition{},
+		&model.Goal{},
+		&model.GoalSegment{},
 	)
 }

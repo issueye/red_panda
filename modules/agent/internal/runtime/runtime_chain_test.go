@@ -18,6 +18,25 @@ type chainedToolProvider struct {
 	requests []ProviderRequest
 }
 
+func TestRecoveryAnswerForSubagentDoesNotDuplicateToolOutput(t *testing.T) {
+	history := []ToolExchange{{
+		Call: tools.Call{Name: "workspace.read_file", DisplayName: "Read file"},
+		Result: tools.Result{
+			Name:   "workspace.read_file",
+			Status: tools.CallStatusCompleted,
+			Output: "large file contents",
+		},
+	}}
+	child := recoveryAnswerForRun(methods.ReplyParams{RunID: "root:subagent:analyst"}, history)
+	if strings.Contains(child, "large file contents") || !strings.Contains(child, "工具卡片") {
+		t.Fatalf("child recovery should be concise: %q", child)
+	}
+	root := recoveryAnswerForRun(methods.ReplyParams{RunID: "root"}, history)
+	if !strings.Contains(root, "large file contents") {
+		t.Fatalf("root recovery should retain useful output: %q", root)
+	}
+}
+
 func (*chainedToolProvider) Name() string {
 	return "chained-tool-test"
 }
@@ -159,6 +178,28 @@ type emptyAfterToolsProvider struct {
 	requests []ProviderRequest
 }
 
+type toolCallOnlyFinalProvider struct{}
+
+func (*toolCallOnlyFinalProvider) Name() string { return "tool-call-only-final" }
+
+func (*toolCallOnlyFinalProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	if len(req.ToolHistory) == 0 {
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:        "tool_list_before_invalid_final",
+			Name:      "workspace.list",
+			Risk:      tools.RiskLow,
+			Arguments: map[string]any{"path": ".", "max_depth": 1},
+		}}})
+	}
+	if len(req.Tools) > 0 {
+		return emit(ProviderChunk{Final: true})
+	}
+	if err := emit(ProviderChunk{Delta: "<tool_call><function=workspace__read><parameter=path>main.go</parameter></function></tool_call>"}); err != nil {
+		return err
+	}
+	return emit(ProviderChunk{Final: true})
+}
+
 func (*emptyAfterToolsProvider) Name() string { return "empty-after-tools" }
 
 func (p *emptyAfterToolsProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
@@ -226,6 +267,51 @@ func TestRuntimeRecoversWhenProviderReturnsEmptyAfterTools(t *testing.T) {
 	finish := runEvents[len(runEvents)-1]
 	if finish.Type != events.EventFinish || finish.Payload["status"] != "completed" {
 		t.Fatalf("finish event = %#v, want completed", finish)
+	}
+}
+
+func TestRuntimeRejectsToolCallMarkupAsFinalAnswer(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	lines := make(chan []byte, 32)
+	go readJSONLines(t, reader, lines)
+
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	rt.provider = &toolCallOnlyFinalProvider{}
+
+	sendRequest(t, context.Background(), rt, "reply_invalid_final", methods.AgentReply, methods.ReplyParams{
+		RunID: "run_invalid_final",
+		Session: methods.ReplySession{
+			ID:         "session_invalid_final",
+			WorkingDir: t.TempDir(),
+		},
+		Input: methods.ReplyInput{Text: "analyze project"},
+	})
+
+	waitForResponse(t, lines, "reply_invalid_final")
+	runEvents := waitForEventsUntilFinish(t, lines)
+
+	var recovered string
+	for _, event := range runEvents {
+		if event.Type != events.EventMessageDelta {
+			continue
+		}
+		delta, _ := event.Payload["delta"].(string)
+		if strings.Contains(delta, "<tool_call>") {
+			t.Fatalf("textual tool call leaked as final answer: %q", delta)
+		}
+		if event.Payload["recovered"] == true || strings.Contains(delta, "根据工具执行结果") {
+			recovered = delta
+		}
+	}
+	if recovered == "" {
+		t.Fatalf("expected deterministic fallback summary, events=%#v", summarizeEventTypes(runEvents))
+	}
+	finish := runEvents[len(runEvents)-1]
+	if finish.Type != events.EventFinish || finish.Payload["status"] != "completed" {
+		t.Fatalf("finish = %#v, want completed", finish)
 	}
 }
 

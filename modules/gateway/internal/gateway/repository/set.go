@@ -11,11 +11,14 @@ type Set struct {
 	Lineage     SessionLineageRepository
 	Compactions SessionCompactionRepository
 	Memory      MemoryRepository
+	Todos       TodoRepository
 	Messages    MessageRepository
 	ToolCalls   ToolCallRepository
 	Permissions PermissionRequestRepository
 	Providers   ProviderProfileRepository
 	MCPServers  MCPServerConfigRepository
+	Agents      AgentDefinitionRepository
+	Goals       GoalRepository
 }
 
 func NewSet(db *gorm.DB) Set {
@@ -28,10 +31,13 @@ func NewSet(db *gorm.DB) Set {
 		Lineage:     NewSessionLineageRepository(db),
 		Compactions: NewSessionCompactionRepository(db),
 		Memory:      NewMemoryRepository(db),
+		Todos:       NewTodoRepository(db),
 		Messages:    NewMessageRepository(db),
 		ToolCalls:   NewToolCallRepository(db),
 		Permissions: NewPermissionRequestRepository(db),
 		Providers:   NewProviderProfileRepository(db),
 		MCPServers:  NewMCPServerConfigRepository(db),
+		Agents:      NewAgentDefinitionRepository(db),
+		Goals:       NewGoalRepository(db),
 	}
 }
