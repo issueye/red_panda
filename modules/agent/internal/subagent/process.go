@@ -149,7 +149,7 @@ func (c *subAgentProcess) Close(ctx context.Context) error {
 	return nil
 }
 
-// subAgentTransport mirrors gateway default: IPC unless explicitly forced to stdio.
+// subAgentTransport 与 Gateway 默认行为一致：除非显式指定 stdio，否则使用 IPC。
 func subAgentTransport() string {
 	v := strings.TrimSpace(os.Getenv("RED_PANDA_RUNTIME_IPC"))
 	switch strings.ToLower(v) {
@@ -330,8 +330,8 @@ func (c *subAgentProcess) handleRequest(line []byte) {
 		return
 	}
 
-	// Return a proxy error before the child runtime reaches its own 30-second
-	// request deadline, so a Gateway failure is explicit instead of ambiguous.
+	// 在子 Runtime 触发自身 30 秒请求期限前返回代理错误，
+	// 使 Gateway 故障明确可见而非含糊不清。
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	result, err := c.onRequest(ctx, req.Method, req.Params)
@@ -385,8 +385,8 @@ func (c *subAgentProcess) enqueueEvent(event events.Envelope) {
 		return
 	}
 
-	// Lifecycle and final-message events must never disappear. Losing a
-	// tool_finished/tool_failed event leaves the parent UI permanently running.
+	// 生命周期和最终消息事件绝不能丢失。丢失 tool_finished 或 tool_failed 事件
+	// 会使父 UI 永久显示为运行中。
 	select {
 	case c.events <- event:
 	case <-c.done:

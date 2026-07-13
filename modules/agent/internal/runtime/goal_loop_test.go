@@ -16,7 +16,7 @@ import (
 	"redpanda/protocol/tools"
 )
 
-// stickyToolProvider requests a tool every turn until MaxToolTurns is hit.
+// stickyToolProvider 在每个回合请求工具，直到达到 MaxToolTurns。
 type stickyToolProvider struct {
 	completes atomic.Int32
 }
@@ -39,7 +39,7 @@ func (p *stickyToolProvider) Complete(_ context.Context, req ProviderRequest, em
 
 func TestRunWithGoalLoopOpensMultipleSegmentsWhenBound(t *testing.T) {
 	provider := &stickyToolProvider{}
-	// Discard events so emit paths never block on an unread pipe.
+	// 丢弃事件，避免发送路径阻塞在未读取的管道上。
 	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
 	rt.provider = provider
 
@@ -75,7 +75,7 @@ func TestRunWithGoalLoopOpensMultipleSegmentsWhenBound(t *testing.T) {
 	if seg.Reason != loopEndMaxTurns {
 		t.Fatalf("final reason = %q, want max_turns", seg.Reason)
 	}
-	// 3 segments × at least 1 Complete each (+ possible retryFinalAnswer with tools nil).
+	// 三个分段各至少调用一次 Complete，另可能有 tools 为 nil 的 retryFinalAnswer。
 	if provider.completes.Load() < 3 {
 		t.Fatalf("provider completes = %d, want >= 3 segments", provider.completes.Load())
 	}
@@ -91,8 +91,7 @@ func TestGoalRunSegmentLimitExtendsToRemainingBudget(t *testing.T) {
 	if got := goalRunSegmentLimit(goal, 0); got != 4 {
 		t.Fatalf("initial segment limit = %d, want configured minimum 4", got)
 	}
-	// If early segments consume less than their cap, the limit grows so the run
-	// keeps moving instead of pausing for user confirmation.
+	// 若早期分段消耗少于上限，则扩大限制以持续推进运行，避免暂停等待用户确认。
 	goal.UsedToolTurns = 73
 	if got := goalRunSegmentLimit(goal, 4); got != 6 {
 		t.Fatalf("expanded segment limit = %d, want 6", got)
@@ -122,17 +121,16 @@ func TestRunWithGoalLoopSingleSegmentWhenUnbound(t *testing.T) {
 
 	streamSeq := uint64(1)
 	_ = rt.runWithGoalLoop(ctx, params, params.Input.Text, nil, "msg_u", "stream_u", &streamSeq)
-	// Unbound: only one segment. Complete once for the tool turn, maybe once more for retry without tools.
+	// 未绑定时仅有一个分段：工具回合调用一次 Complete，可能还会为无工具重试再调用一次。
 	if provider.completes.Load() > 3 {
 		t.Fatalf("unbound completes = %d, expected single-segment budget", provider.completes.Load())
 	}
 }
 
 func TestMidRunGoalActivateExpandsSegments(t *testing.T) {
-	// Seed unbound; after first segment we'd stop — but we pre-bind via setRunGoal
-	// after simulating activate between segments by using BoundToThisRun from start
-	// of second logic: seed bound mid-loop by mutating runGoals after first segment.
-	// Here we verify get/set + maxSeg expansion path via seedRunGoalFromParams.
+	// 初始设为未绑定，首个分段后本应停止；通过 setRunGoal 模拟分段间激活，
+	// 并在第二段逻辑开始时使用 BoundToThisRun 预绑定。这里通过 seedRunGoalFromParams
+	// 验证获取、设置和 maxSeg 扩展路径。
 	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
 	params := methods.ReplyParams{
 		RunID:   "run_mid",
@@ -150,7 +148,7 @@ func TestMidRunGoalActivateExpandsSegments(t *testing.T) {
 	if state == nil || !state.BoundToThisRun || state.Goal.MaxSegmentsPerRun != 4 {
 		t.Fatalf("seed state = %#v", state)
 	}
-	// Activate path via applyGoalToolResult
+	// 通过 applyGoalToolResult 激活目标。
 	rt.applyGoalToolResult(params.RunID, "goal.write", methods.GoalToolExecuteResult{
 		Status: "completed",
 		Goal: &methods.GoalDTO{
@@ -231,17 +229,15 @@ func TestBoundGoalSuppressesProviderStreamFinal(t *testing.T) {
 	}
 }
 
-// TestBoundGoalMultiSegmentSingleRootFinalAndFinish locks A5 stream semantics:
-// intermediate segments must not close the root message stream; exactly one
-// root message_delta with final=true and exactly one root finish close the run.
+// TestBoundGoalMultiSegmentSingleRootFinalAndFinish 固化 A5 流语义：中间分段不得关闭根消息流；
+// 必须恰好由一个 final=true 的根 message_delta 和一个根 finish 结束运行。
 func TestBoundGoalMultiSegmentSingleRootFinalAndFinish(t *testing.T) {
 	provider := &stickyToolProvider{}
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
 
-	// Multi-segment runs emit many notifications; keep the channel large so the
-	// producer never blocks on a full buffer before the consumer drains finish.
+	// 多分段运行会发送大量通知；保持通道足够大，避免消费者读取 finish 前生产者被满缓冲阻塞。
 	lines := make(chan []byte, 512)
 	go readJSONLines(t, reader, lines)
 
@@ -258,7 +254,7 @@ func TestBoundGoalMultiSegmentSingleRootFinalAndFinish(t *testing.T) {
 		Input: methods.ReplyInput{Text: "long goal multi-segment"},
 		Options: methods.ReplyOptions{
 			MaxToolTurns: 1,
-			// Keep event volume low; A5 cares about message_delta.final + finish.
+			// 保持事件数量较少；A5 只关注 message_delta.final 和 finish。
 			EmitToolEvents: false,
 			GoalID:         "goal_stream_final",
 			GoalContext: &methods.GoalContext{
@@ -324,8 +320,8 @@ func TestBoundGoalMultiSegmentSingleRootFinalAndFinish(t *testing.T) {
 	}
 }
 
-// TestUnboundRunAllowsProviderStreamFinal ensures A5 does not break normal chat:
-// unbound single-segment runs still close the message stream from the provider path.
+// TestUnboundRunAllowsProviderStreamFinal 确保 A5 不影响普通聊天：
+// 未绑定的单分段运行仍由提供方路径关闭消息流。
 func TestUnboundRunAllowsProviderStreamFinal(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()
@@ -361,7 +357,7 @@ func TestUnboundRunAllowsProviderStreamFinal(t *testing.T) {
 	}
 }
 
-// textOnlyFinalProvider emits a single text chunk closed with Final=true.
+// textOnlyFinalProvider 发送单个以 Final=true 结束的文本块。
 type textOnlyFinalProvider struct {
 	text string
 }
@@ -373,8 +369,8 @@ func (p *textOnlyFinalProvider) Complete(_ context.Context, _ ProviderRequest, e
 	return emit(ProviderChunk{Final: true})
 }
 
-// waitForEventsUntilFinishTimeout is like waitForEventsUntilFinish but allows
-// multi-segment Goal runs that spend time on soft segment_end RPC timeouts.
+// waitForEventsUntilFinishTimeout 与 waitForEventsUntilFinish 类似，
+// 但允许多分段 Goal 运行在软 segment_end RPC 超时上消耗时间。
 func waitForEventsUntilFinishTimeout(t *testing.T, lines <-chan []byte, timeout time.Duration) []events.Envelope {
 	t.Helper()
 	var items []events.Envelope

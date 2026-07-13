@@ -18,7 +18,7 @@ func (r *Runtime) createProcessSubAgent(ctx context.Context, params methods.Repl
 	return subagent.NewProcessWithRequestHandler(ctx, params, subAgentID, r.callGateway)
 }
 
-// SubagentManager implementation (parent-agent tool control surface).
+// SubagentManager 的实现，作为父代理的工具控制接口。
 
 func (r *Runtime) List(runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
 	return r.executeSubagentList(runCtx, call)

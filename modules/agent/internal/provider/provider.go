@@ -33,10 +33,10 @@ type ProviderRequest struct {
 	Input   methods.ReplyInput
 	Options methods.ReplyOptions
 	Tools   []tools.Definition
-	// ToolHistory is a flat list (used by EchoProvider and tests).
+	// ToolHistory 是平铺列表，供 EchoProvider 和测试使用。
 	ToolHistory []ToolExchange
-	// ToolRounds groups tools that ran in the same model turn (OpenAI multi-tool format).
-	// When empty, each ToolHistory item is treated as its own round.
+	// ToolRounds 对同一模型回合运行的工具分组，符合 OpenAI 多工具格式。
+	// 为空时，每个 ToolHistory 项视为独立回合。
 	ToolRounds [][]ToolExchange
 }
 
@@ -220,7 +220,7 @@ func echoToolCalls(req ProviderRequest) []tools.Call {
 			Arguments:   map[string]any{"status": "all"},
 		}}
 	case strings.HasPrefix(lower, "todo ") || lower == "/todo":
-		// Simple smoke helper: "todo plan a; plan b"
+		// 简单冒烟测试辅助："todo plan a; plan b"。
 		rest := strings.TrimSpace(text)
 		if strings.HasPrefix(lower, "todo ") {
 			rest = strings.TrimSpace(text[len("todo "):])
@@ -365,7 +365,7 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 	}
 	endpoint := openAICompatibleChatCompletionsURL(p.BaseURL)
 	if path, logErr := logLLMRequest(req.Options.LogLLMRequests, req.RunID, req.Session.ID, model, endpoint, rawBody); logErr != nil {
-		// Never fail the user-facing request because diagnostics failed.
+		// 诊断失败不能导致面向用户的请求失败。
 		fmt.Fprintf(os.Stderr, "red-panda-agent: llm request log failed: %v\n", logErr)
 	} else if path != "" {
 		fmt.Fprintf(os.Stderr, "red-panda-agent: llm request logged to %s\n", path)
@@ -573,8 +573,8 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 	return emit(ProviderChunk{Final: true})
 }
 
-// rootAgentOrchestrationPolicy is injected only for root runs that can call subagent tools.
-// Child specialists intentionally do not receive this (they cannot nest subagents).
+// rootAgentOrchestrationPolicy 仅注入可调用子代理工具的根运行。
+// 专业子代理不会接收该策略，因为它们不能嵌套创建子代理。
 const rootAgentOrchestrationPolicy = `You are the red_panda root orchestrator.
 
 Survey-then-split policy (mandatory for analysis when tools include subagent.run):
@@ -597,9 +597,8 @@ Survey-then-split policy (mandatory for analysis when tools include subagent.run
 9. Trivial single-file Q&A or tiny edits may stay on the root agent without subagents.
 10. For multi-step work, maintain a session checklist with todo.write (see the dedicated todo policy when available). Do not track plans only in free-text.`
 
-// rootAgentPostDelegationPolicy is added once a specialist has returned a usable
-// result. It keeps the next model turn focused on synthesis instead of silently
-// repeating the specialist's file reads on the root agent.
+// rootAgentPostDelegationPolicy 在专业子代理返回可用结果后加入。
+// 它让下一轮模型专注于综合，而非让根代理悄然重复子代理已完成的文件读取。
 const rootAgentPostDelegationPolicy = `Delegation results are now available.
 
 Post-delegation rule:
@@ -609,7 +608,7 @@ Post-delegation rule:
 4. If an exact fact is missing, identify that gap and issue one narrowly scoped follow-up subagent.run. Direct root-agent file reads are reserved for genuinely unassigned trivial scope or an explicit user request.
 5. Failed specialists do not invalidate successful reports from other specialists; reassign only the failed/missing scope and continue.`
 
-// rootAgentGoalPipelinePolicy guides long-horizon Goal work (docs/32 §2 / §2.10).
+// rootAgentGoalPipelinePolicy 指导长程 Goal 工作（文档 32，第 2 / 2.10 节）。
 const rootAgentGoalPipelinePolicy = `Goal pipeline (goal.* + todo.*) — mandatory for multi-step user goals.
 
 For multi-step work you MUST use phase specialists via subagent.run with these exact names
@@ -648,8 +647,8 @@ Where to write state (avoid overlap):
 - goal.checkpoint — short recovery summary only (not a findings dump)
 - memory.create — durable preferences/facts that should outlive this Goal`
 
-// rootAgentTodoPolicy is injected for root runs that expose todo.write.
-// Guides models to use the structured checklist instead of free-text plans or memory.kind=task.
+// rootAgentTodoPolicy 注入给暴露 todo.write 的根运行。
+// 它引导模型使用结构化清单，而非自由文本计划或 memory.kind=task。
 const rootAgentTodoPolicy = `Session task list (todo.write / todo.list) — mandatory for multi-step work:
 
 When to use:
@@ -675,7 +674,7 @@ Example first write:
 
 func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 	messages := make([]map[string]any, 0, 4+len(req.Session.Conversation)+1+len(req.ToolHistory)*2)
-	// Always inject fresh local time so the model does not rely on training-data dates.
+	// 始终注入最新本地时间，避免模型依赖训练数据中的日期。
 	messages = append(messages, map[string]any{
 		"role":    "system",
 		"content": currentTimeContextMessage(time.Now()),
@@ -705,7 +704,7 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 			"content": rootAgentTodoPolicy,
 		})
 	}
-	// Specialist/worker/skill role briefs are separate from long-term memory.
+	// 专业角色、工作进程和技能的角色简介与长期记忆分离。
 	if req.Options.SpecialistContext != nil && strings.TrimSpace(req.Options.SpecialistContext.Context) != "" {
 		messages = append(messages, map[string]any{
 			"role":    "system",
@@ -723,7 +722,7 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 			"role":    "system",
 			"content": strings.TrimSpace(req.Options.GoalContext.Context),
 		})
-		// User/command may have already created+bound the Goal; prefer update over write.
+		// 用户或命令可能已创建并绑定 Goal，此时优先更新而不是写入。
 		if id := strings.TrimSpace(req.Options.GoalContext.GoalID); id != "" {
 			messages = append(messages, map[string]any{
 				"role": "system",
@@ -815,8 +814,8 @@ func toolRoundsForRequest(req ProviderRequest) [][]ToolExchange {
 	return rounds
 }
 
-// currentTimeContextMessage builds an authoritative local-time system note.
-// Injected on every provider turn so multi-step tool loops also stay accurate.
+// currentTimeContextMessage 构建权威的本地时间系统提示。
+// 每个提供方回合均会注入，确保多步骤工具循环也保持准确。
 func currentTimeContextMessage(now time.Time) string {
 	zoneName, offsetSec := now.Zone()
 	if zoneName == "" {
@@ -858,12 +857,12 @@ func hasToolNamed(definitions []tools.Definition, name string) bool {
 	return false
 }
 
-// maxToolResultForModel caps each tool result fed back into the next LLM turn.
-// Full standardized output remains available on the tool event / UI card.
+// maxToolResultForModel 限制每条回传给下一轮 LLM 的工具结果。
+// 完整标准输出仍保留在工具事件和 UI 工具卡片中。
 const maxToolResultForModel = 16 * 1024
 
-// toolExchangeContent formats a tool result for the next provider turn.
-// Always returns a standardized JSON envelope (never silently drops fields).
+// toolExchangeContent 为下一轮提供方调用格式化工具结果。
+// 始终返回标准 JSON 封装，绝不静默丢弃字段。
 func toolExchangeContent(result tools.Result) string {
 	return agenttools.ModelFacingToolContent(result)
 }

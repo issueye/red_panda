@@ -12,6 +12,8 @@ import (
 	"redpanda/protocol/methods"
 )
 
+// callGatewayResult 调用 Gateway RPC，并将响应解组到调用方提供的结果对象。
+// 统一该流程可避免各类 Gateway 工具各自处理传输和解组错误。
 func (r *Runtime) callGatewayResult(ctx context.Context, method string, params any, out any) error {
 	raw, err := r.callGateway(ctx, method, params)
 	if err != nil {
@@ -73,9 +75,8 @@ func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecu
 	return result, nil
 }
 
-// executeContextTool forwards a context.* (goal scratchpad) tool call to the
-// Gateway. It is available to both the root run and specialist children because
-// context.* is intentionally absent from subagent.RunDenylist.
+// executeContextTool 将 context.*（目标暂存区）工具调用转发至 Gateway。
+// 根运行和专业子代理均可使用它，因为 context.* 被有意排除在 subagent.RunDenylist 之外。
 func (r *Runtime) executeContextTool(ctx context.Context, req methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
 	var result methods.ContextToolExecuteResult
 	if err := r.callGatewayResult(ctx, methods.ContextToolExecute, req, &result); err != nil {

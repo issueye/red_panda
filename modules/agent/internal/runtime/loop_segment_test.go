@@ -45,13 +45,13 @@ func TestCarrySummarizedHistoryKeepsTailAndTruncates(t *testing.T) {
 	if got[0].Result.Output != "yyyyy…" {
 		t.Fatalf("truncated = %q", got[0].Result.Output)
 	}
-	// Original history unchanged.
+	// 原始历史记录不变。
 	if history[0].Result.Output != strings.Repeat("x", 20) {
 		t.Fatal("source history mutated")
 	}
 }
 
-// maxTurnsOnceProvider always requests one more tool until budget is gone.
+// maxTurnsOnceProvider 总会继续请求工具，直到预算耗尽。
 type maxTurnsOnceProvider struct {
 	calls int
 }
@@ -60,7 +60,7 @@ func (*maxTurnsOnceProvider) Name() string { return "max-turns-test" }
 
 func (p *maxTurnsOnceProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
 	p.calls++
-	// When tools are stripped (retryFinalAnswer), produce text.
+	// 移除工具后（retryFinalAnswer）生成文本。
 	if len(req.Tools) == 0 {
 		_ = emit(ProviderChunk{Delta: "synthesized after max turns"})
 		return emit(ProviderChunk{Final: true})
@@ -87,7 +87,7 @@ func TestRunProviderLoopSegmentReportsMaxTurnsReason(t *testing.T) {
 		Input:   methods.ReplyInput{Text: "list forever"},
 		Options: methods.ReplyOptions{MaxToolTurns: 2, EmitToolEvents: true},
 	}
-	// Register so emit paths work.
+	// 注册以使事件发送路径正常工作。
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if !rt.registerRun(params.RunID, cancel) {

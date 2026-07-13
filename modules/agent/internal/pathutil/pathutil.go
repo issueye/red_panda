@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// CleanWorkspaceRoot resolves an absolute, symlink-evaluated workspace root.
+// CleanWorkspaceRoot 解析绝对路径并展开符号链接，得到工作区根目录。
 func CleanWorkspaceRoot(root string) (string, error) {
 	if root == "" {
 		wd, err := os.Getwd()
@@ -27,7 +27,7 @@ func CleanWorkspaceRoot(root string) (string, error) {
 	return filepath.Clean(cleanRoot), nil
 }
 
-// IsPathInside reports whether target is root or a descendant of root.
+// IsPathInside 判断 target 是否为 root 本身或其子路径。
 func IsPathInside(root string, target string) bool {
 	root = filepath.Clean(root)
 	target = filepath.Clean(target)

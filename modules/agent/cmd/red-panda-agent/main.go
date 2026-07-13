@@ -30,9 +30,8 @@ func main() {
 	}
 }
 
-// openTransport prefers IPC when RED_PANDA_IPC_ADDR is set (normal gateway
-// launch path). Falls back to stdio for manual/local debugging without a
-// parent listener. Diagnostic logs always stay on stderr.
+// openTransport 在设置 RED_PANDA_IPC_ADDR 时优先使用 IPC（正常 Gateway 启动路径）。
+// 手动或本地调试未启动父监听器时回退为 stdio。诊断日志始终输出到 stderr。
 func openTransport() (in io.Reader, out io.Writer, closer io.Closer, err error) {
 	if strings.TrimSpace(os.Getenv(ipc.EnvAddr)) == "" {
 		return os.Stdin, os.Stdout, nil, nil
@@ -41,6 +40,6 @@ func openTransport() (in io.Reader, out io.Writer, closer io.Closer, err error) 
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("ipc dial: %w", err)
 	}
-	// net.Conn is both Reader and Writer; one connection replaces the pair of pipes.
+	// net.Conn 同时实现 Reader 和 Writer，一个连接即可替代一对管道。
 	return conn, conn, conn, nil
 }

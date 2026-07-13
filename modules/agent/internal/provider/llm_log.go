@@ -14,8 +14,8 @@ const maxLLMLogBodyBytes = 4 << 20 // 4 MiB per request file
 
 var llmLogMu sync.Mutex
 
-// defaultLLMLogDir is the directory for optional LLM request diagnostics.
-// Override with RED_PANDA_LOG_DIR (llm-requests is created underneath).
+// defaultLLMLogDir 是可选 LLM 请求诊断日志的目录。
+// 可通过 RED_PANDA_LOG_DIR 覆盖，其下会创建 llm-requests 目录。
 func defaultLLMLogDir() string {
 	if dir := strings.TrimSpace(os.Getenv("RED_PANDA_LOG_DIR")); dir != "" {
 		return filepath.Join(dir, "llm-requests")
@@ -26,8 +26,8 @@ func defaultLLMLogDir() string {
 	return filepath.Join(os.TempDir(), "red-panda", "logs", "llm-requests")
 }
 
-// logLLMRequest writes the outbound provider JSON body when logging is enabled.
-// API keys live only in HTTP headers and are never written.
+// logLLMRequest 在启用日志时写入发往提供方的 JSON 请求体。
+// API 密钥仅存在于 HTTP 标头中，绝不写入日志。
 func logLLMRequest(enabled bool, runID string, sessionID string, model string, url string, rawBody []byte) (string, error) {
 	if !enabled {
 		return "", nil
@@ -55,7 +55,7 @@ func logLLMRequest(enabled bool, runID string, sessionID string, model string, u
 		truncated = true
 	}
 
-	// Pretty-print when possible so files are easy to inspect offline.
+	// 尽可能格式化输出，便于离线检查文件。
 	var pretty json.RawMessage
 	payload := map[string]any{
 		"logged_at":  time.Now().UTC().Format(time.RFC3339Nano),

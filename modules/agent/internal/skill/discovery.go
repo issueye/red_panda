@@ -12,8 +12,8 @@ import (
 	"redpanda/protocol/methods"
 )
 
-// buildSkillsContext loads the latest managed skills from disk for one conversation.
-// It is intentionally re-read every time so newly created skills are usable immediately.
+// buildSkillsContext 从磁盘加载单个会话所需的最新受管技能。
+// 每次都会重新读取，使新建技能能够立即使用。
 func BuildContext(workspaceRoot string) *methods.SkillsContext {
 	root := strings.TrimSpace(workspaceRoot)
 	if root == "" {
@@ -84,7 +84,7 @@ func ListManaged(workspaceRoot string) ([]methods.SkillSummary, error) {
 		if !managedSkillNamePattern.MatchString(name) {
 			continue
 		}
-		// Description-only is enough for catalogs and conversation injection.
+		// 技能目录和会话注入仅需描述信息。
 		detail, err := LoadManagedDetail(root, name, false)
 		if err != nil {
 			continue
@@ -133,7 +133,7 @@ func LoadManagedDetail(workspaceRoot string, name string, includeInstructions bo
 		return methods.SkillDetail{}, err
 	}
 	if parsed.Name != "" && parsed.Name != name {
-		// Prefer directory name as canonical identity; keep parsed description/instructions.
+		// 优先使用目录名作为规范标识，并保留解析出的描述和指令。
 	}
 	detail := methods.SkillDetail{
 		Name:        name,
@@ -162,7 +162,7 @@ func parseManagedSkillMarkdown(content string) (parsedManagedSkill, error) {
 	rest := strings.TrimPrefix(content, "---\n")
 	end := strings.Index(rest, "\n---\n")
 	if end < 0 {
-		// allow trailing --- without trailing newline body
+		// 允许以 --- 结尾且正文末尾没有换行。
 		if strings.HasSuffix(rest, "\n---") {
 			end = len(rest) - len("\n---")
 			front := rest[:end]
@@ -208,7 +208,7 @@ func decodeFrontmatterDescription(raw string) string {
 	if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
 		return strings.TrimSpace(decoded)
 	}
-	// Accept plain unquoted description for hand-edited files.
+	// 接受手工编辑文件中的无引号纯文本描述。
 	return strings.Trim(raw, `"'`)
 }
 
@@ -233,7 +233,7 @@ func RunDelete(workspaceRoot string, name string) (string, error) {
 	if !managedSkillNamePattern.MatchString(name) {
 		return "", fmt.Errorf("skill name must be lowercase ASCII and use only letters, digits, and hyphens")
 	}
-	// managedSkillFile validates directory boundaries and symlink escape.
+	// managedSkillFile 校验目录边界和符号链接越界。
 	target, err := ManagedFile(workspaceRoot, name, false)
 	if err != nil {
 		return "", err
@@ -252,7 +252,7 @@ func RunDelete(workspaceRoot string, name string) (string, error) {
 	if err := os.Remove(target); err != nil {
 		return "", err
 	}
-	// Best-effort remove empty skill directory.
+	// 尽力删除空技能目录。
 	_ = os.Remove(skillDir)
 
 	raw, _ := json.Marshal(map[string]any{

@@ -104,7 +104,7 @@ func (p *ProcessPool) releaseFunc(child Process) func(bool) {
 	}
 }
 
-// Status returns a snapshot of pool capacity and occupancy.
+// Status 返回进程池容量和占用情况的快照。
 func (p *ProcessPool) Status() subAgentPoolStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -118,8 +118,8 @@ func (p *ProcessPool) Status() subAgentPoolStatus {
 	}
 }
 
-// SetLimit updates the pool capacity. Shrinking only affects future acquires
-// and how many idle workers may be retained; excess idle workers are closed.
+// SetLimit 更新进程池容量。缩容仅影响后续获取操作和保留的空闲工作进程数量；
+// 超出的空闲工作进程会被关闭。
 func (p *ProcessPool) SetLimit(limit int) subAgentPoolStatus {
 	if limit <= 0 {
 		limit = defaultSubAgentPoolSize
@@ -150,8 +150,8 @@ func (p *ProcessPool) SetLimit(limit int) subAgentPoolStatus {
 	return status
 }
 
-// Reset closes all idle workers so the next acquire creates fresh processes.
-// In-use workers are left alone until they complete.
+// Reset 关闭全部空闲工作进程，使下次获取操作创建新进程。
+// 正在使用的工作进程保持不变，直至其自行完成。
 func (p *ProcessPool) Reset(ctx context.Context) subAgentPoolStatus {
 	p.mu.Lock()
 	idle := p.idle

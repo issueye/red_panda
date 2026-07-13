@@ -1,7 +1,6 @@
 package runtime
 
-// Test aliases keep runtime integration tests concise while production code
-// depends directly on the packages that own these types.
+// 测试别名让 Runtime 集成测试保持简洁；生产代码仍直接依赖类型所属的包。
 
 import (
 	"redpanda/agent/internal/provider"

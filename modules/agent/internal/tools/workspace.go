@@ -159,8 +159,8 @@ func runReadFile(root string, relPath string) (string, error) {
 	return buf.String(), nil
 }
 
-// annotateWorkspaceIOError turns opaque OS errors into model-actionable messages
-// (especially "file not found under the wrong working_dir").
+// annotateWorkspaceIOError 将难以理解的操作系统错误转换为模型可操作的提示，
+// 尤其是“错误 working_dir 下找不到文件”的情况。
 func annotateWorkspaceIOError(root string, relPath string, err error) error {
 	if err == nil {
 		return nil
@@ -205,7 +205,7 @@ type workspaceStatsResult struct {
 	TopLevel          []workspaceDirStat `json:"top_level"`
 }
 
-// runWorkspaceStats walks a directory and returns counts for split planning.
+// runWorkspaceStats 遍历目录并返回用于拆分规划的统计数量。
 func runWorkspaceStats(root string, relPath string, maxDepth int) (string, error) {
 	result, err := ComputeWorkspaceStats(root, relPath, maxDepth)
 	if err != nil {
@@ -218,7 +218,7 @@ func runWorkspaceStats(root string, relPath string, maxDepth int) (string, error
 	return string(raw), nil
 }
 
-// computeWorkspaceStats returns structured counts used by workspace.stats and subagent.run budgeting.
+// computeWorkspaceStats 返回供 workspace.stats 和 subagent.run 预算使用的结构化统计值。
 func ComputeWorkspaceStats(root string, relPath string, maxDepth int) (workspaceStatsResult, error) {
 	if strings.TrimSpace(relPath) == "" {
 		relPath = "."
@@ -278,7 +278,7 @@ func ComputeWorkspaceStats(root string, relPath string, maxDepth int) (workspace
 		}
 		name := d.Name()
 		if d.IsDir() && shouldSkipSearchDir(name) {
-			// Still count skipped top-level packages so the orchestrator can assign them.
+			// 仍统计被跳过的顶级包，便于编排器分配任务。
 			if depth == 1 {
 				key := filepath.ToSlash(name)
 				stat := topLevel[key]
@@ -723,8 +723,8 @@ func resolveWorkspacePath(root string, relPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Fail fast when the session working_dir itself is missing/wrong 鈥?otherwise
-	// every relative read looks like a missing file and confuses the model.
+	// 会话 working_dir 不存在或错误时快速失败；否则每次相对路径读取都会像文件缺失，
+	// 从而误导模型。
 	if info, statErr := os.Stat(absRoot); statErr != nil {
 		if os.IsNotExist(statErr) {
 			return "", fmt.Errorf("working_dir does not exist: %q", absRoot)

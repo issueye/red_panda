@@ -290,7 +290,7 @@ func TestMCPHelperProcess(t *testing.T) {
 				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"permission denied by server"}],"isError":true}}`)
 				continue
 			}
-			// Echo mode for successful tools/call.
+			// 成功 tools/call 的回显模式。
 			var full struct {
 				Params struct {
 					Name      string         `json:"name"`

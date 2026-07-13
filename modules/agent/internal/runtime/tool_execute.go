@@ -118,6 +118,7 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 	return result, output, true
 }
 
+// todoStatusCounts 按状态汇总待办项，为工具结果和运行上下文提供一致的统计值。
 func todoStatusCounts(items []methods.TodoItemDTO) (open, completed, cancelled int) {
 	for _, item := range items {
 		switch item.Status {
@@ -132,8 +133,7 @@ func todoStatusCounts(items []methods.TodoItemDTO) (open, completed, cancelled i
 	return
 }
 
-// callGatewayResult forwards a gateway-backed tool/state RPC and unmarshals the
-// typed result. Memory/todo/goal/context all share this path so wire method
+// toolResultPayload 将工具执行结果转换为事件载荷。
 
 func toolResultPayload(result tools.Result) map[string]any {
 	return map[string]any{

@@ -124,7 +124,7 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 		}
 	}
 
-	// Explicit allowlist opt-in for one ops tool.
+	// 显式允许列表启用单个运维工具。
 	one := AvailableToolsForOptions(definitions, methods.ReplyOptions{
 		ToolAllowlist: []string{"skill.create", "workspace.read_file"},
 	})
@@ -132,7 +132,7 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 		t.Fatalf("allowlist opt-in = %#v", one)
 	}
 
-	// DebugTools opens all ops tools.
+	// DebugTools 开放全部运维工具。
 	debug := AvailableToolsForOptions(definitions, methods.ReplyOptions{DebugTools: true})
 	if len(debug) != len(definitions) {
 		t.Fatalf("debug tools len = %d, want %d", len(debug), len(definitions))
@@ -169,7 +169,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 		{Name: "skill.create"},
 		{Name: "web.search"},
 	}
-	// Bound goal with no client allowlist → Goal default set.
+	// 已绑定目标且客户端未提供允许列表时，使用 Goal 默认集合。
 	filtered := AvailableToolsForOptions(definitions, methods.ReplyOptions{
 		GoalsEnabled: &enabled,
 	})
@@ -189,7 +189,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 		t.Fatalf("goal mode should still hide ops skill.create: %#v", names)
 	}
 
-	// Client allowlist intersected with goal defaults (cannot expand past defaults).
+	// 客户端允许列表与目标默认值求交集，不能超出默认范围。
 	narrow := AvailableToolsForOptions(definitions, methods.ReplyOptions{
 		GoalsEnabled:  &enabled,
 		ToolAllowlist: []string{"workspace.read_file", "memory.create"},
@@ -198,7 +198,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 		t.Fatalf("intersect should drop memory.create: %#v", narrow)
 	}
 
-	// Non-goal chat keeps memory tools (minus ops-only).
+	// 非目标聊天保留记忆工具，但排除仅限运维的工具。
 	disabled := false
 	open := AvailableToolsForOptions(definitions, methods.ReplyOptions{GoalsEnabled: &disabled})
 	openNames := map[string]bool{}

@@ -12,13 +12,13 @@ import (
 	"redpanda/protocol/methods"
 )
 
-// Unit test for gateway request proxy without depending on the runtime package.
+// 测试 Gateway 请求代理，无需依赖 Runtime 包。
 func TestSubAgentProcessProxiesGatewayRequestAndReturnsResponse(t *testing.T) {
 	childReader, childWriter := io.Pipe()
 	defer childReader.Close()
 	defer childWriter.Close()
 
-	// Mock gateway: echo a completed memory.create result for any MemoryToolExecute.
+	// 模拟 Gateway：对任意 MemoryToolExecute 回显已完成的 memory.create 结果。
 	onRequest := func(ctx context.Context, method string, params any) (json.RawMessage, error) {
 		if method != methods.MemoryToolExecute {
 			t.Fatalf("unexpected method %s", method)

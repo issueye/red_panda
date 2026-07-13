@@ -43,7 +43,7 @@ func TestStandardizeToolOutputWrapsJSONData(t *testing.T) {
 	if !strings.Contains(env.Text, "Sunny") {
 		t.Fatalf("text should include answer: %q", env.Text)
 	}
-	// Idempotent: wrapping twice should keep schema.
+	// 幂等性：重复封装应保持相同架构。
 	out2 := StandardizeToolOutput("web.search", out, nil, 9)
 	env2, ok := ParseStandardToolResult(out2)
 	if !ok || env2.Schema != toolResultSchemaV1 {
@@ -77,7 +77,7 @@ func TestModelFacingToolContentKeepsSchemaAndMarksTruncation(t *testing.T) {
 	if len(env.Text) > maxToolResultForModel+8 {
 		t.Fatalf("text still too large: %d", len(env.Text))
 	}
-	// Full output on Result is still present for UI.
+	// Result 上的完整输出仍保留给 UI。
 	if full, ok := ParseStandardToolResult(result.Output); !ok || len(full.Text) < maxToolResultForModel {
 		t.Fatalf("full result should retain original text length, got %#v", full)
 	}
@@ -106,7 +106,7 @@ func TestExtractSearchAnswerFromStandardEnvelope(t *testing.T) {
 	}
 }
 
-// fmtError avoids importing fmt only for errors in this tiny helper file usage.
+// fmtError 避免此小型辅助文件仅为构造错误而引入 fmt。
 func fmtError(msg string) error {
 	return errString(msg)
 }

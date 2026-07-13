@@ -8,19 +8,19 @@ import (
 	"redpanda/protocol/methods"
 )
 
-// goalSpecialist is a built-in Goal pipeline role (docs/32 §2.10).
-// Applied when subagent.run name matches Key (e.g. goal-analyst).
+// goalSpecialist 是内置 Goal 流程角色（文档 32，第 2.10 节）。
+// 当 subagent.run 的名称匹配 Key（如 goal-analyst）时应用。
 type goalSpecialist struct {
 	Key             string
 	NameZH          string
 	Phase           string
 	DefaultMaxTurns int
-	// Allowlist when non-empty: only these tools are exposed (plus denylist still applies).
+	// 非空时作为允许列表：仅暴露这些工具，拒绝列表仍然生效。
 	Allowlist []string
-	// ExtraDenylist is merged on top of subagent.RunDenylist.
+	// ExtraDenylist 会叠加到 subagent.RunDenylist。
 	ExtraDenylist []string
 	SystemPrompt  string
-	// CapMaxTurns hard-caps specialist budget (0 = use effectiveSubagentToolTurns only).
+	// CapMaxTurns 硬性限制专业子代理预算，0 表示仅使用 effectiveSubagentToolTurns。
 	CapMaxTurns int
 }
 
@@ -38,9 +38,8 @@ var workspaceWriteTools = []string{
 	"workspace.apply_patch",
 }
 
-// contextShareTools are goal scratchpad tools. Specialists with an allowlist must
-// include these explicitly — otherwise policy hides them even though they are
-// absent from subagent.RunDenylist.
+// contextShareTools 是目标暂存区工具。使用允许列表的专业子代理必须显式包含这些工具，
+// 否则策略会将其隐藏，尽管它们不在 subagent.RunDenylist 中。
 var contextShareTools = []string{
 	"context.read",
 	"context.search",
@@ -55,7 +54,7 @@ func withContextShareTools(base ...string) []string {
 	return out
 }
 
-// builtinGoalSpecialists are the five phase experts. Keys match Gateway agent_definitions.
+// builtinGoalSpecialists 是五个阶段的内置专家，Key 与 Gateway 的 agent_definitions 匹配。
 var builtinGoalSpecialists = map[string]goalSpecialist{
 	"goal-analyst": {
 		Key: "goal-analyst", NameZH: "目标分析师", Phase: "analyze",
@@ -115,7 +114,7 @@ Preferred final report JSON:
 	"goal-implementer": {
 		Key: "goal-implementer", NameZH: "目标实施者", Phase: "execute",
 		DefaultMaxTurns: 24, CapMaxTurns: 48,
-		// No allowlist → all tools except denylist.
+		// 没有允许列表时，暴露除拒绝列表外的全部工具。
 		ExtraDenylist: []string{"web.search", "web.fetch", "skill.run", "skill.create", "skill.update", "skill.delete"},
 		SystemPrompt: `You are goal-implementer for red_panda (目标实施者).
 
@@ -197,10 +196,9 @@ func lookupGoalSpecialist(name string) (goalSpecialist, bool) {
 	return spec, ok
 }
 
-// resolveGoalSpecialist merges Gateway-managed agent_definitions over builtin
-// specialists. Prompt, default max turns, phase, and display name come from
-// Gateway when present; tool allow/deny policy stays Runtime-owned (context
-// share tools, write isolation) so Settings cannot accidentally strip safety.
+// resolveGoalSpecialist 将 Gateway 管理的 agent_definitions 合并到内置专家配置。
+// 存在时，提示词、默认最大回合、阶段和显示名称取自 Gateway；工具允许和拒绝策略仍由 Runtime
+// 管理（共享上下文工具与写入隔离），避免设置意外移除安全约束。
 func resolveGoalSpecialist(defs []methods.AgentDefinitionRef, name string) (goalSpecialist, bool) {
 	base, ok := lookupGoalSpecialist(name)
 	if !ok {
@@ -265,8 +263,8 @@ func (r *Runtime) validateGoalSpecialistPhase(runID string, spec goalSpecialist)
 	return nil
 }
 
-// Child agents must never inherit the root Goal binding. Otherwise each child
-// starts its own multi-segment Goal loop and can multiply its tool budget.
+// 子代理绝不能继承根 Goal 绑定，否则每个子代理都会启动自己的多分段 Goal 循环，
+// 并可能成倍放大工具预算。
 func disableGoalPipelineForChild(options *methods.ReplyOptions) {
 	if options == nil {
 		return
@@ -277,9 +275,8 @@ func disableGoalPipelineForChild(options *methods.ReplyOptions) {
 	options.GoalContext = nil
 }
 
-// applyGoalSpecialist configures child ReplyParams for a phase specialist and
-// injects a brief of the parent goal (objective + shared notes) so the child is
-// not context-blind. Returns adjusted maxTurns.
+// applyGoalSpecialist 为阶段专家配置子代理 ReplyParams，并注入父目标摘要（目标与共享笔记），
+// 避免子代理缺少上下文；返回调整后的 maxTurns。
 func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpecialist, task string, maxTurns int, parentRunID string, sessionID string, goalID string, objective string) int {
 	if child == nil {
 		return maxTurns
@@ -294,21 +291,20 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 		maxTurns = 1
 	}
 
-	// Session-scoped tools stay root-only.
+	// 会话级工具仅供根代理使用。
 	child.Options.TodoContext = nil
 	disableGoalPipelineForChild(&child.Options)
 	child.Options.SpawnSubAgents = false
 	child.Options.SubAgentBackend = ""
 	child.Options.MaxToolTurns = maxTurns
 
-	// Denylist: always include global subagent denylist + specialist extras.
-	// Note: context.* tools are intentionally NOT denylisted, and specialists
-	// with an allowlist must also list them (see withContextShareTools).
+	// 拒绝列表始终包含全局子代理拒绝列表和专家额外项。
+	// context.* 工具被有意排除在拒绝列表外；使用允许列表的专家也必须列出它们（见 withContextShareTools）。
 	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, subagent.RunDenylist...)
 	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, spec.ExtraDenylist...)
 
 	if len(spec.Allowlist) > 0 {
-		// Allowlist is authoritative for exposed tools; keep parent allowlist intersection if set.
+		// 允许列表决定暴露的工具；若父代理设置了允许列表，则保留交集。
 		if len(child.Options.ToolAllowlist) > 0 {
 			child.Options.ToolAllowlist = intersectStrings(child.Options.ToolAllowlist, spec.Allowlist)
 		} else {
@@ -316,7 +312,7 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 		}
 	}
 
-	// System role: specialist prompt + task framing.
+	// 系统角色内容：专家提示词和任务框架。
 	roleBlock := strings.TrimSpace(spec.SystemPrompt)
 	if roleBlock == "" {
 		roleBlock = fmt.Sprintf("You are specialist %q.", spec.Key)
@@ -327,22 +323,21 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 		spec.Key, spec.Phase, spec.NameZH, maxTurns,
 	)
 
-	// Inject a brief of the parent goal's shared notes so the specialist is not
-	// context-blind. Includes the goal_id so the child can call context.read
-	// itself for deeper detail. Best-effort: empty when no notes/gateway.
+	// 注入父目标共享笔记摘要，避免专家缺少上下文。摘要包含 goal_id，
+	// 子代理可自行调用 context.read 获取细节。尽力而为：无笔记或 Gateway 时为空。
 	brief := ""
 	if strings.TrimSpace(goalID) != "" {
 		brief = "\n\n" + r.goalNotesBrief(parentRunID, sessionID, goalID, objective)
 	}
-	// Role text lives in SpecialistContext — not MemoryContext — so project/session
-	// memory is not overwritten or mislabeled as "memory".
+	// 角色文本存于 SpecialistContext 而非 MemoryContext，避免覆盖项目或会话记忆，
+	// 也避免被错误标记为“记忆”。
 	child.Options.MemoryContext = nil
 	child.Options.SpecialistContext = &methods.SpecialistContext{
 		Kind:    "specialist",
 		Context: roleBlock + budgetNote + brief,
 	}
 
-	// Ensure task text still carries the user assignment.
+	// 确保任务文本仍包含用户分配的任务。
 	if strings.TrimSpace(task) != "" && !strings.Contains(child.Input.Text, task) {
 		child.Input.Text = strings.TrimSpace(task) + "\n\n" + strings.TrimSpace(child.Input.Text)
 	}
@@ -373,7 +368,7 @@ func intersectStrings(a, b []string) []string {
 	return out
 }
 
-// goalSpecialistDisplayName returns Chinese label for UI events when known.
+// goalSpecialistDisplayName 为已知角色返回 UI 事件使用的中文名称。
 func goalSpecialistDisplayName(name string) string {
 	if spec, ok := lookupGoalSpecialist(name); ok && spec.NameZH != "" {
 		return spec.NameZH

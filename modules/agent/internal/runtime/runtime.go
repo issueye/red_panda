@@ -31,7 +31,7 @@ const (
 var plannerStartDelay = durationFromEnvMillis("RED_PANDA_PLANNER_START_DELAY_MS", 10*time.Millisecond)
 var plannerDraftDelay = durationFromEnvMillis("RED_PANDA_PLANNER_DRAFT_DELAY_MS", 120*time.Millisecond)
 
-// effectiveProviderToolTurns returns the provider↔tool loop budget for one reply.
+// effectiveProviderToolTurns 返回单次回复中提供方与工具循环的预算。
 func effectiveProviderToolTurns(options methods.ReplyOptions) int {
 	if options.MaxToolTurns > 0 {
 		if options.MaxToolTurns > maxProviderToolTurnsCap {
@@ -302,8 +302,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 	streamID := "stream_" + params.RunID + "_message"
 	streamSeq := uint64(1)
 
-	// Always reload skills from disk for this conversation so newly created
-	// skills are immediately available without restarting sessions/runtime.
+	// 每次会话均从磁盘重新加载技能，使新建技能无需重启会话或 Runtime 即可使用。
 	params.Options.SkillsContext = skill.BuildContext(params.Session.WorkingDir)
 	r.emitSkillsInjected(ctx, params)
 	r.emitMemoryInjected(ctx, params)
@@ -388,7 +387,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		subAgentDone = done
 	}
 
-	// Multi-segment when a Goal is bound (or becomes bound mid-run via goal.write).
+	// 绑定 Goal 时执行多分段流程；也支持通过 goal.write 在运行中途绑定。
 	seg := r.runWithGoalLoop(ctx, params, providerInput, toolHistory, messageID, streamID, &streamSeq)
 	goalStreamNeedsFinal := r.deferGoalStreamFinal(params.RunID)
 	if goalStreamNeedsFinal && ctx.Err() == nil {
@@ -404,7 +403,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		})
 		streamSeq++
 	}
-	// Snapshots are cleared only on root-run terminal — not mid-segment.
+	// 仅在根运行结束时清理快照，不能在分段中途清理。
 	r.clearRunSnapshots(params.RunID)
 
 	status := finishStatusFromLoopEnd(seg.Reason)
@@ -555,8 +554,8 @@ func (r *Runtime) unregisterRun(runID string) {
 func (r *Runtime) cancelRun(runID string) bool {
 	r.mu.Lock()
 	cancel := r.activeRuns[runID]
-	// Pause every subagent bound to this root run before cancelling the parent
-	// so process-pool workers stop promptly (not only via shared context).
+	// 取消父运行前暂停绑定到该根运行的全部子代理，
+	// 使进程池工作进程能及时停止，而非只依赖共享上下文。
 	var subCancels []context.CancelFunc
 	for _, state := range r.subagents {
 		if state == nil || state.record.RootRunID != runID || state.cancel == nil {

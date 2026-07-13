@@ -213,7 +213,7 @@ func (p *emptyAfterToolsProvider) Complete(_ context.Context, req ProviderReques
 			Arguments: map[string]any{"path": ".", "max_depth": 1},
 		}}})
 	}
-	// Simulate a model that ends the tool loop with only empty finals.
+	// 模拟模型仅以空最终消息结束工具循环。
 	if err := emit(ProviderChunk{Delta: ""}); err != nil {
 		return err
 	}

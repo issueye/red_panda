@@ -17,7 +17,7 @@ const (
 	goalNoteDigestBodyRune       = 300
 )
 
-// runGoalState is the per-run Goal snapshot used by the multi-segment controller.
+// runGoalState 是多分段控制器使用的单次运行 Goal 快照。
 type runGoalState struct {
 	Goal              methods.GoalDTO
 	BoundToThisRun    bool
@@ -120,11 +120,11 @@ func (r *Runtime) applyGoalToolResult(runID string, toolName string, result meth
 	if prev != nil && prev.WasBoundToThisRun {
 		state.WasBoundToThisRun = true
 	}
-	// Keep bound flag if we already bound this run and goal remains active.
+	// 若该运行已绑定且目标仍处于活动状态，则保留绑定标志。
 	if prev != nil && prev.BoundToThisRun && g.Status == "active" {
 		state.BoundToThisRun = true
 	}
-	// goal.write/update activate mid-run.
+	// goal.write 或 goal.update 可在运行中途激活目标。
 	if (toolName == "goal.write" || toolName == "goal.update") && g.Status == "active" {
 		state.BoundToThisRun = true
 		state.WasBoundToThisRun = true
@@ -135,15 +135,15 @@ func (r *Runtime) applyGoalToolResult(runID string, toolName string, result meth
 	}
 	r.setRunGoal(runID, state)
 
-	// Refresh injected GoalContext for subsequent provider turns.
+	// 刷新注入的 GoalContext，供后续提供方回合使用。
 	if params := r.lookupActiveReplyParams(runID); params != nil {
 		params.Options.GoalContext = goalDTOToContext(g)
 		params.Options.GoalID = g.ID
 	}
 }
 
-// lookupActiveReplyParams is a no-op hook placeholder — GoalContext is refreshed
-// from runGoals inside the segment loop via goalContextForRun.
+// lookupActiveReplyParams 是空操作钩子占位符；分段循环会通过 goalContextForRun
+// 从 runGoals 刷新 GoalContext。
 func (r *Runtime) lookupActiveReplyParams(runID string) *methods.ReplyParams {
 	return nil
 }
@@ -156,8 +156,8 @@ func (r *Runtime) goalContextForRun(runID string) *methods.GoalContext {
 	return goalDTOToContext(state.Goal)
 }
 
-// deferGoalStreamFinal keeps one root message stream open across Goal segments.
-// The root runner emits the single final marker after the outer loop stops.
+// deferGoalStreamFinal 在多个 Goal 分段间保持同一根消息流打开。
+// 外层循环停止后由根运行器发送唯一的最终标记。
 func (r *Runtime) deferGoalStreamFinal(runID string) bool {
 	state := r.getRunGoal(runID)
 	return state != nil && state.Goal.ID != ""
@@ -203,9 +203,9 @@ func formatGoalContextFromDTO(g methods.GoalDTO) string {
 	return b.String()
 }
 
-// runWithGoalLoop runs one or more provider segments for a root reply.
-// Unbound runs use maxSeg=1 (legacy single segment). Bound Goal runs may open
-// additional segments on no_tools/max_turns until budgets or goal.complete.
+// runWithGoalLoop 为根回复执行一个或多个提供方分段。
+// 未绑定运行使用 maxSeg=1（旧版单分段）；绑定 Goal 的运行会在 no_tools 或 max_turns 时
+// 打开更多分段，直至预算耗尽或调用 goal.complete。
 func (r *Runtime) runWithGoalLoop(
 	ctx context.Context,
 	params methods.ReplyParams,
@@ -263,22 +263,20 @@ func (r *Runtime) runWithGoalLoop(
 			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: last.ToolTurns, History: last.History}
 		}
 
-		// Refresh contexts each segment.
+		// 每个分段均刷新上下文。
 		if ctxTodos := r.todoContextForRun(params.RunID); ctxTodos != nil {
 			params.Options.TodoContext = ctxTodos
 		}
 		if ctxGoal := r.goalContextForRun(params.RunID); ctxGoal != nil {
-			// Splice pinned/recent scratchpad notes into the goal context so
-			// segment N+1 sees segment N's key findings without an explicit
-			// context.read call. Best-effort: failures are logged, not fatal.
+			// 将置顶和最近的暂存区笔记合并至目标上下文，使分段 N+1 无需显式
+			// 调用 context.read 即可看到分段 N 的关键发现。尽力而为：失败只记录日志，不会终止运行。
 			if notes := r.goalNotesDigest(params.RunID, params.Session.ID, ctxGoal.GoalID); notes != "" {
 				ctxGoal.Context = strings.TrimSpace(ctxGoal.Context) + "\n\n" + notes
 			}
 			params.Options.GoalContext = ctxGoal
 		}
 
-		// Goal segment budget is authoritative each segment; remaining total
-		// tool turns can only tighten further (never raise client options).
+		// 每个分段以 Goal 预算为准；剩余工具回合只能进一步收紧，不能提高客户端选项。
 		if state := r.getRunGoal(params.RunID); state != nil {
 			limit := state.Goal.MaxToolTurnsSeg
 			if state.Goal.MaxTotalToolTurns > 0 {
@@ -296,7 +294,7 @@ func (r *Runtime) runWithGoalLoop(
 		}
 		last = r.runProviderLoopSegment(loopCtx, params, segmentInput, seedHistory, messageID, streamID, streamSeq)
 
-		// Report segment budget to Gateway when a goal is bound.
+		// 绑定目标时向 Gateway 上报分段预算。
 		state = r.getRunGoal(params.RunID)
 		if state != nil && state.WasBoundToThisRun && state.Goal.ID != "" && last.ToolTurns > 0 {
 			r.reportSegmentEnd(loopCtx, params, state.Goal.ID, seg, last.ToolTurns)
@@ -319,23 +317,23 @@ func (r *Runtime) runWithGoalLoop(
 			return last
 		}
 
-		// Mid-run activate may expand maxSeg after first segment.
+		// 运行中激活目标后，首个分段之后可能扩展 maxSeg。
 		if state != nil && state.BoundToThisRun {
 			want := goalRunSegmentLimit(state.Goal, seg+1)
 			if want > maxSeg {
 				maxSeg = want
 			}
 		} else if state == nil || !state.BoundToThisRun {
-			// Unbound: single segment only.
+			// 未绑定时仅执行单个分段。
 			return last
 		}
 
-		// Total budget exhausted (Gateway may have terminalized).
+		// 总预算耗尽，Gateway 可能已结束目标。
 		if state != nil && state.Goal.MaxTotalToolTurns > 0 && state.Goal.UsedToolTurns >= state.Goal.MaxTotalToolTurns {
 			return last
 		}
 
-		// Continue outer loop only on soft segment boundaries.
+		// 仅在软分段边界继续外层循环。
 		if last.Reason != loopEndNoTools && last.Reason != loopEndMaxTurns {
 			return last
 		}
@@ -349,10 +347,8 @@ func (r *Runtime) runWithGoalLoop(
 	return last
 }
 
-// goalRunSegmentLimit keeps a bound Goal moving without asking the user to
-// manually start another run at an arbitrary segment boundary. The persisted
-// per-run value remains the minimum chunk size; remaining budget can extend the
-// same run, which is still bounded by total tool turns and wall time.
+// goalRunSegmentLimit 让绑定 Goal 持续推进，无需用户在任意分段边界手动启动新运行。
+// 持久化的单次运行值仍是最小分块大小；剩余预算可扩展同一运行，但仍受总工具回合和墙钟时间限制。
 func goalRunSegmentLimit(goal methods.GoalDTO, completedThisRun int) int {
 	limit := firstPositive(goal.MaxSegmentsPerRun, defaultGoalMaxSegmentsPerRun)
 	remaining := goal.MaxTotalToolTurns - goal.UsedToolTurns
@@ -389,8 +385,8 @@ func (r *Runtime) reportSegmentEnd(ctx context.Context, params methods.ReplyPara
 	if deltaTurns <= 0 || goalID == "" {
 		return
 	}
-	// Bound RPC so a missing gateway cannot stall the outer multi-segment loop.
-	// Local gateway should answer well under this; tests without a gateway also fail fast.
+	// 限制 RPC 时间，避免缺少 Gateway 时外层多分段循环停滞。
+	// 本地 Gateway 应在此期限内响应；未配置 Gateway 的测试也能快速失败。
 	callCtx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
 	defer cancel()
 	result, err := r.executeGoalTool(callCtx, methods.GoalToolExecuteParams{
@@ -406,7 +402,7 @@ func (r *Runtime) reportSegmentEnd(ctx context.Context, params methods.ReplyPara
 	})
 	if err != nil {
 		fmt.Fprintf(r.log, "segment_end: %v\n", err)
-		// Still advance local counters so outer-loop budget decisions remain possible offline/tests.
+		// 仍推进本地计数器，使离线和测试场景下外层循环仍可进行预算决策。
 		if state := r.getRunGoal(params.RunID); state != nil {
 			state.Goal.UsedToolTurns += deltaTurns
 			state.Goal.UsedSegments++
@@ -464,17 +460,16 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// goalNotesDigest reads pinned + recent scratchpad notes for a goal from the
-// Gateway and renders a compact digest. Used to auto-inject shared findings into
-// each new goal segment. Returns "" when there are no notes or the gateway is
-// unavailable (best-effort, never blocks the goal loop).
+// goalNotesDigest 从 Gateway 读取目标的置顶和最近暂存区笔记，并生成紧凑摘要。
+// 它将共享发现自动注入每个新目标分段；无笔记或 Gateway 不可用时返回空字符串，
+// 采用尽力而为策略，绝不阻塞目标循环。
 func (r *Runtime) goalNotesDigest(runID string, sessionID string, goalID string) string {
 	notes := r.fetchGoalNotes(runID, sessionID, goalID, 10)
 	return renderNotesDigest("Shared goal notes", notes)
 }
 
-// goalNotesBrief renders the goal objective + pinned/recent notes for a specialist
-// child. It includes the goal_id so the child can call context.read/search itself.
+// goalNotesBrief 为专业子代理生成目标、置顶和最近笔记的摘要。
+// 摘要包含 goal_id，使子代理可自行调用 context.read 或 context.search。
 func (r *Runtime) goalNotesBrief(runID string, sessionID string, goalID string, objective string) string {
 	header := fmt.Sprintf("Parent goal %q (use context.read with goal_id=%s to read full notes):\nObjective: %s\n", goalID, goalID, strings.TrimSpace(objective))
 	notes := r.fetchGoalNotes(runID, sessionID, goalID, 8)
@@ -484,10 +479,9 @@ func (r *Runtime) goalNotesBrief(runID string, sessionID string, goalID string, 
 	return header + renderNotesDigest("", notes)
 }
 
-// fetchGoalNotes calls the context.read tool via the gateway RPC. Best-effort:
-// on any error returns nil so callers degrade gracefully.
-// sessionID is required: Gateway rejects empty session_id, and without it
-// auto-inject would silently no-op every segment/specialist handoff.
+// fetchGoalNotes 通过 Gateway RPC 调用 context.read 工具。该操作尽力而为：
+// 任意错误都会返回 nil，供调用方平滑降级。
+// sessionID 必填：Gateway 会拒绝空 session_id，缺少它会使每个分段和专业子代理交接的自动注入静默失效。
 func (r *Runtime) fetchGoalNotes(runID string, sessionID string, goalID string, limit int) []methods.GoalNoteDTO {
 	if strings.TrimSpace(goalID) == "" || strings.TrimSpace(sessionID) == "" {
 		return nil

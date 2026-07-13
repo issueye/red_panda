@@ -60,7 +60,7 @@ func TestBuildSkillsContextReflectsLatestDiskSkills(t *testing.T) {
 	if !strings.Contains(catalog.Context, "code-review") || !strings.Contains(catalog.Context, "Review code safely.") {
 		t.Fatalf("catalog context missing skill details: %q", catalog.Context)
 	}
-	// Creating another skill must appear on the next build (no cache).
+	// 新建的技能必须在下一次构建时出现，不能使用缓存。
 	if _, err := skill.RunCreate(root, "release-notes", "Draft release notes.", "# Notes"); err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func TestRuntimeManagedSkillCreateHonorsPermissionDenial(t *testing.T) {
 	}
 	eventsAfterDenial := waitForEventsUntilFinish(t, lines)
 	finish := eventsAfterDenial[len(eventsAfterDenial)-1]
-	// Permission denial fails the tool but the provider loop continues so the model can recover.
+	// 权限拒绝会使工具失败，但提供方循环继续运行，使模型可以恢复。
 	if finish.Payload["status"] != "completed" {
 		t.Fatalf("finish = %#v, want completed after recoverable tool denial", finish.Payload)
 	}

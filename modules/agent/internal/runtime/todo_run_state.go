@@ -47,7 +47,7 @@ const todoContextHeader = `Current session task list (update via todo.write when
 func formatTodoContext(items []methods.TodoItemDTO) *methods.TodoContext {
 	const limit = 3000
 	const maxLine = 200
-	// open-first
+	// 优先处理进行中的待办事项。
 	ordered := append([]methods.TodoItemDTO(nil), items...)
 	sortTodoItemsOpenFirst(ordered)
 	lines := make([]string, 0, len(ordered))

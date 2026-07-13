@@ -122,7 +122,7 @@ func TestResolveWorkspacePathRejectsMissingWorkingDir(t *testing.T) {
 func TestRunBoundedTimesOutStuckTool(t *testing.T) {
 	started := time.Now()
 	_, err := runBounded(context.Background(), 50*time.Millisecond, func(context.Context) (string, error) {
-		// Simulate a stuck FS/RPC call that never observes context cancel.
+		// 模拟永不响应上下文取消的卡住文件系统或 RPC 调用。
 		time.Sleep(2 * time.Second)
 		return "too slow", nil
 	})

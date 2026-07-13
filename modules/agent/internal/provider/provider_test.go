@@ -162,7 +162,7 @@ func TestOpenAICompatibleMessagesInjectsCurrentTime(t *testing.T) {
 }
 
 func TestCurrentTimeContextMessageIncludesZone(t *testing.T) {
-	// Fixed instant in Asia/Shanghai if available; otherwise local.
+	// 若可用则固定为 Asia/Shanghai 时刻，否则使用本地时区。
 	loc := time.FixedZone("CST", 8*3600)
 	now := time.Date(2026, 7, 11, 16, 30, 0, 0, loc)
 	msg := currentTimeContextMessage(now)
@@ -193,7 +193,7 @@ func TestOpenAICompatibleMessagesInjectsSkillsCatalog(t *testing.T) {
 	if len(messages) < 3 {
 		t.Fatalf("messages = %#v", messages)
 	}
-	// messages[0] is current time; skills catalog follows.
+	// messages[0] 为当前时间，后续为技能目录。
 	if messages[1]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[1]["content"]), "code-review") {
 		t.Fatalf("expected skills system catalog, got %#v", messages[1])
 	}
@@ -215,7 +215,7 @@ func TestOpenAICompatibleMessagesPutsSpecialistContextBeforeMemory(t *testing.T)
 			},
 		},
 	})
-	// [0]=time, [1]=specialist, [2]=memory, [3]=user
+	// [0]=时间，[1]=专业角色，[2]=记忆，[3]=用户。
 	if len(messages) < 4 {
 		t.Fatalf("messages = %#v", messages)
 	}
@@ -423,7 +423,7 @@ func TestOpenAICompatibleMessagesInjectTodoPolicyWhenTodoWriteAvailable(t *testi
 			},
 		},
 	})
-	// time, orchestration, todo policy, todo context, user
+	// 时间、编排策略、待办策略、待办上下文、用户。
 	if len(withBoth) < 5 {
 		t.Fatalf("messages = %#v", withBoth)
 	}
@@ -476,7 +476,7 @@ func TestOpenAICompatibleMessagesIncludeConversationInOrderAndCurrentInputOnce(t
 		}},
 	})
 
-	// [0]=time system, [1]=memory system, then conversation + current input + tool exchange
+	// [0]=时间系统提示，[1]=记忆系统提示，之后为会话、当前输入和工具交互。
 	want := []struct {
 		role    string
 		content string

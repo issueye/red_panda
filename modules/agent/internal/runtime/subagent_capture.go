@@ -10,7 +10,7 @@ import (
 	"redpanda/protocol/methods"
 )
 
-// outcomes can be explained to the parent agent.
+// 使处理结果能够向父代理解释。
 type subagentRunCapture struct {
 	maxTurns  int
 	backend   string
@@ -58,8 +58,7 @@ func (c *subagentRunCapture) Observe(event events.Envelope) {
 		if event.Stream != nil && event.Stream.Kind != "" {
 			kind = event.Stream.Kind
 		}
-		// Child stdout is collected regardless of agent role; bridged events still
-		// keep their subagent identity for the parent UI.
+		// 无论代理角色如何均收集子进程 stdout；桥接事件仍保留子代理身份供父 UI 使用。
 		if kind == events.StreamReasoning {
 			c.ReasoningDeltas++
 			if c.reasoning.Len() < 8*1024 {
@@ -124,7 +123,7 @@ func (c *subagentRunCapture) Observe(event events.Envelope) {
 		if msg, ok := event.Payload["error"].(string); ok && msg != "" && c.LastError == "" {
 			c.LastError = msg
 		}
-		// Some providers only put the final answer on finish.
+		// 部分提供方仅在 finish 事件中提供最终答案。
 		if text, ok := event.Payload["text"].(string); ok && text != "" && c.message.Len() == 0 {
 			c.message.WriteString(text)
 		}
@@ -180,7 +179,7 @@ func (c *subagentRunCapture) FailureError(headline string) error {
 	if c.task != "" {
 		parts = append(parts, "task="+subagent.TruncateSummary(c.task, 120))
 	}
-	// Reasoning can help the parent understand silent failures, but keep it short.
+	// 推理内容可帮助父代理理解静默失败，但应保持简短。
 	if reasoning := strings.TrimSpace(c.reasoning.String()); reasoning != "" && c.FinalText() == "" {
 		parts = append(parts, "reasoning_preview="+subagent.TruncateSummary(reasoning, 240))
 	}

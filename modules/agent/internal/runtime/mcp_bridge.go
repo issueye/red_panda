@@ -11,7 +11,7 @@ import (
 	"redpanda/protocol/tools"
 )
 
-// handleMCPDiscover proxies JSON-RPC mcp.discover to the MCP manager.
+// handleMCPDiscover 将 JSON-RPC mcp.discover 代理给 MCP 管理器。
 func (r *Runtime) handleMCPDiscover(ctx context.Context, req jsonrpc.Request) error {
 	var params methods.MCPDiscoverParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {

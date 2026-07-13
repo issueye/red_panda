@@ -77,7 +77,7 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx agenttools.ToolRun
 	childParams.RunID = childRunID
 	childParams.Session.Conversation = nil
 	childParams.Input.Text = fmt.Sprintf("Execute this task using the managed skill instructions. Return only the final result and do not quote or describe the skill definition.\n\n%s", task)
-	// Skill body is role/instructions, not long-term memory.
+	// 技能正文是角色和指令，不属于长期记忆。
 	childParams.Options.MemoryContext = nil
 	childParams.Options.SpecialistContext = &methods.SpecialistContext{
 		Kind:    "skill",

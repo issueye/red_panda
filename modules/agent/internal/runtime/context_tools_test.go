@@ -14,9 +14,8 @@ import (
 	"redpanda/protocol/tools"
 )
 
-// TestContextToolsRegisteredAndNotDenylisted verifies the key design property:
-// context.* tools exist with the right risk levels AND are intentionally absent
-// from subagent.RunDenylist so specialist children can share scratchpad notes.
+// TestContextToolsRegisteredAndNotDenylisted 验证关键设计：context.* 工具具有正确风险等级，
+// 且被有意排除在 subagent.RunDenylist 外，使专业子代理可共享暂存区笔记。
 func TestContextToolsRegisteredAndNotDenylisted(t *testing.T) {
 	runner := ToolRunner{}
 	wantRisk := map[string]tools.Risk{
@@ -39,8 +38,7 @@ func TestContextToolsRegisteredAndNotDenylisted(t *testing.T) {
 		}
 	}
 
-	// The critical assertion: no context.* entry may appear in the subagent
-	// denylist, otherwise specialist children could not read/write shared notes.
+	// 关键断言：子代理拒绝列表不得出现 context.* 项，否则专业子代理无法读写共享笔记。
 	for _, denied := range subagent.RunDenylist {
 		if len(denied) >= 8 && denied[:8] == "context." {
 			t.Fatalf("context tool must not be denylisted for subagents: %q", denied)
@@ -95,7 +93,7 @@ func TestFetchGoalNotesPassesSessionIDAndReturnsNotes(t *testing.T) {
 	if params.Arguments["goal_id"] != "goal_inject" {
 		t.Fatalf("goal_id = %#v", params.Arguments["goal_id"])
 	}
-	// JSON numbers decode as float64.
+	// JSON 数字会被解码为 float64。
 	limitVal, ok := params.Arguments["limit"].(float64)
 	if !ok || limitVal != 5 {
 		t.Fatalf("limit = %#v, want 5", params.Arguments["limit"])
@@ -142,7 +140,7 @@ func TestGoalNotesDigestAndBriefIncludeFetchedNotes(t *testing.T) {
 	}
 	done := make(chan digests, 1)
 	go func() {
-		// Two sequential gateway calls: digest then brief.
+		// 两次顺序 Gateway 调用：先获取摘要，再获取简报。
 		d := rt.goalNotesDigest("run_d", "sess_d", "goal_d")
 		b := rt.goalNotesBrief("run_d", "sess_d", "goal_d", "Ship feature X")
 		done <- digests{digest: d, brief: b}

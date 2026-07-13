@@ -14,8 +14,8 @@ import (
 	"redpanda/protocol/tools"
 )
 
-// loopEndReason is the structured exit cause of one provider↔tool segment.
-// It must not be collapsed into stringly "completed" for multi-segment outer loops.
+// loopEndReason 表示单个提供方与工具分段循环的结构化退出原因。
+// 在多分段外层循环中，不能将其简化为字符串形式的“completed”。
 type loopEndReason string
 
 const (
@@ -26,11 +26,11 @@ const (
 	loopEndBudget    loopEndReason = "budget_exhausted"
 )
 
-// providerSegmentResult is one runProviderLoopSegment outcome.
+// providerSegmentResult 表示一次 runProviderLoopSegment 的结果。
 type providerSegmentResult struct {
 	Reason    loopEndReason
 	ToolTurns int
-	// History is the accumulated tool exchanges for carry_summarized / next segment.
+	// History 是为 carry_summarized 和下一分段累计的工具交互记录。
 	History []provider.ToolExchange
 }
 
@@ -41,9 +41,8 @@ func finishStatusFromLoopEnd(reason loopEndReason) string {
 	case loopEndFailed, loopEndBudget:
 		return "failed"
 	case loopEndNoTools, loopEndMaxTurns:
-		// External finish status stays "completed" when the segment produced a
-		// recoverable answer (including max-turns synthesis). Distinct reason is
-		// preserved on the finish payload as loop_end_reason.
+		// 分段生成可恢复答案时（包括达到最大回合数后的综合），对外结束状态仍为“completed”。
+		// 区分性的原因会以 loop_end_reason 保留在结束载荷中。
 		return "completed"
 	default:
 		return "completed"
@@ -84,26 +83,26 @@ func (r *Runtime) emitSkillsInjected(ctx context.Context, params methods.ReplyPa
 	})
 }
 
-// runProviderLoop is a thin wrapper kept for call sites/tests that only need
-// the legacy string status. Prefer runProviderLoopSegment for new code.
+// runProviderLoop 是为仅需旧版字符串状态的调用方和测试保留的轻量包装。
+// 新代码应优先使用 runProviderLoopSegment。
 func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParams, input string, history []provider.ToolExchange, messageID string, streamID string, streamSeq *uint64) string {
 	seg := r.runProviderLoopSegment(ctx, params, input, history, messageID, streamID, streamSeq)
 	return finishStatusFromLoopEnd(seg.Reason)
 }
 
-// runProviderLoopSegment runs one provider↔tool budget segment.
-// It does NOT clear run snapshots and does NOT emit EventFinish — the outer
-// emitRun / Goal multi-segment controller owns terminal cleanup and finish.
+// runProviderLoopSegment 执行一个提供方与工具预算分段。
+// 它不清理运行快照，也不发送 EventFinish；终止清理和结束事件由外层
+// emitRun 或 Goal 多分段控制器负责。
 func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.ReplyParams, input string, history []provider.ToolExchange, messageID string, streamID string, streamSeq *uint64) providerSegmentResult {
 	maxTurns := effectiveProviderToolTurns(params.Options)
 	var rounds [][]provider.ToolExchange
 	if len(history) > 0 {
-		// Initial pre-loop tools (if any) are treated as one round.
+		// 初始循环前工具（如有）视为一个回合。
 		rounds = append(rounds, append([]provider.ToolExchange(nil), history...))
 	}
 	turnsUsed := 0
 	for turn := 0; turn < maxTurns; turn++ {
-		// Mid-loop: refresh Todo/Goal context from run snapshots.
+		// 循环中：从运行快照刷新 Todo 和 Goal 上下文。
 		if ctxTodos := r.todoContextForRun(params.RunID); ctxTodos != nil {
 			params.Options.TodoContext = ctxTodos
 		}
@@ -141,7 +140,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		}
 		if len(requestedCalls) == 0 {
 			if !emittedText && len(flatHistory) > 0 {
-				// Retry once without tools so the model must produce a final answer.
+				// 不使用工具重试一次，迫使模型生成最终答案。
 				if r.retryFinalAnswer(ctx, params, input, rounds, messageID, streamID, streamSeq) {
 					return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 				}
@@ -161,7 +160,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 			}
 			return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
-		// Preserve call order in history; run multiple subagent.run workers concurrently.
+		// 在历史记录中保留调用顺序；多个 subagent.run 工作进程可并发执行。
 		exchanges, cancelled := r.executeToolBatch(ctx, params, requestedCalls)
 		if len(exchanges) > 0 {
 			rounds = append(rounds, exchanges)
@@ -170,8 +169,8 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
 	}
-	// Budget exhausted after tools — still try a final text-only synthesis.
-	// Reason stays max_turns so Goal outer loops can open another segment.
+	// 工具执行后预算耗尽时，仍尝试仅文本的最终综合。
+	// 原因保持为 max_turns，以便 Goal 外层循环开启下一分段。
 	if len(rounds) > 0 {
 		if r.retryFinalAnswer(ctx, params, input, rounds, messageID, streamID, streamSeq) {
 			return providerSegmentResult{Reason: loopEndMaxTurns, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
@@ -200,8 +199,8 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 	return providerSegmentResult{Reason: loopEndFailed, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 }
 
-// carrySummarizedHistory compresses tool exchanges for the next Goal segment.
-// K most recent exchanges keep truncated outputs (rule-only, no LLM).
+// carrySummarizedHistory 压缩供下一 Goal 分段使用的工具交互记录。
+// 最近 K 次交互保留截断输出，仅按规则处理，不调用 LLM。
 func carrySummarizedHistory(history []provider.ToolExchange, k int, maxRunes int) []provider.ToolExchange {
 	if k <= 0 || len(history) == 0 {
 		return nil
@@ -217,7 +216,7 @@ func carrySummarizedHistory(history []provider.ToolExchange, k int, maxRunes int
 	for _, ex := range history[start:] {
 		cp := ex
 		if len(cp.Result.Output) > maxRunes {
-			// Output is string; truncate by runes for CJK-safe budgets.
+			// 输出为字符串，按 UTF-8 字符截断以保证中日韩文本预算安全。
 			runes := []rune(cp.Result.Output)
 			if len(runes) > maxRunes {
 				cp.Result.Output = string(runes[:maxRunes]) + "…"
@@ -251,9 +250,8 @@ func (r *Runtime) consumeProviderChunk(
 	if strings.TrimSpace(chunk.Delta) != "" {
 		*emittedText = true
 	}
-	// Empty Final markers close the root message stream. Under a bound Goal the
-	// outer runner owns the single terminal final (A5), so intermediate empty
-	// finals are deferred; unbound runs must still close the stream here.
+	// 空 Final 标记会关闭根消息流。绑定 Goal 时，外层运行器负责唯一的终止 Final（A5），
+	// 因此延后处理中间空 Final；未绑定的运行仍必须在此关闭消息流。
 	if strings.TrimSpace(chunk.Delta) == "" && chunk.Final {
 		if r.deferGoalStreamFinal(params.RunID) {
 			return nil
@@ -285,7 +283,7 @@ func (r *Runtime) consumeProviderChunk(
 	return err
 }
 
-// retryFinalAnswer asks the model once more without tools to produce a user-facing answer.
+// retryFinalAnswer 在不使用工具的前提下再次请求模型生成面向用户的答案。
 func (r *Runtime) retryFinalAnswer(
 	ctx context.Context,
 	params methods.ReplyParams,
@@ -309,7 +307,7 @@ func (r *Runtime) retryFinalAnswer(
 		Session: params.Session,
 		Input:   methods.ReplyInput{Text: recoveryPrompt},
 		Options: params.Options,
-		// Force a text answer — no more tool calls.
+		// 强制生成文本答案，不允许再调用工具。
 		Tools:       nil,
 		ToolHistory: flattenToolRounds(rounds),
 		ToolRounds:  rounds,
@@ -357,9 +355,8 @@ func flattenToolRounds(rounds [][]provider.ToolExchange) []provider.ToolExchange
 	return out
 }
 
-// synthesizeToolAnswer builds a visible user-facing summary when the provider
-// ends a tool loop without emitting any natural-language reply.
-// Prefer standardized tool envelopes (text/data) — never silently drop results.
+// synthesizeToolAnswer 在提供方结束工具循环却未输出自然语言回复时，构建面向用户的可见摘要。
+// 优先使用标准工具封装中的 text/data，绝不静默丢弃结果。
 func synthesizeToolAnswer(history []provider.ToolExchange) string {
 	if len(history) == 0 {
 		return "工具已执行，但模型未生成最终回复。请重试一次。"

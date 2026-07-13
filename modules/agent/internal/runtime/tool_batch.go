@@ -19,8 +19,8 @@ type toolBatchItem struct {
 	ok         bool
 }
 
-// executeToolBatch runs non-subagent tools sequentially, then runs all
-// subagent.run tools in parallel so multi-area analysis can proceed concurrently.
+// executeToolBatch 顺序执行非子代理工具，随后并行执行全部 subagent.run 工具，
+// 使多个区域的分析可并发进行。
 func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyParams, calls []tools.Call) ([]provider.ToolExchange, bool) {
 	items := make([]toolBatchItem, len(calls))
 	var serial []int
@@ -91,12 +91,12 @@ func batchToHistory(items []toolBatchItem) []provider.ToolExchange {
 		if item.invocation.Call.ID != "" {
 			call = item.invocation.Call
 		}
-		// Skip slots never executed (e.g. cancelled before parallel start).
+		// 跳过从未执行的槽位，例如并行启动前已取消的槽位。
 		if item.result.ToolCallID == "" && item.result.Name == "" && item.result.Error == "" && item.result.Status == "" {
 			if item.call.ID == "" && item.call.Name == "" {
 				continue
 			}
-			// Still record cancelled/not-started calls as failed for model continuity.
+			// 仍将已取消或未启动的调用记为失败，保持模型上下文连续。
 			if item.result.Status == "" {
 				item.result = tools.Result{
 					ToolCallID: item.call.ID,

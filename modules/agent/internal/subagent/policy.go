@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	// Turns reserved for reasoning + writing the final analysis report after file work.
+	// 为文件处理后的推理和最终分析报告预留的回合数。
 	SummaryTurns = 8
-	// Fallback only when neither max_turns nor file_count/path is provided.
+	// 仅在未提供 max_turns、file_count 或 path 时使用的回退值。
 	DefaultToolTurns = 16
 )
 
@@ -33,8 +33,8 @@ var RunDenylist = []string{
 
 var subagentNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
-// recommendedSubagentTurns is file_count + summary/analysis allowance.
-// There is no artificial maximum; budget scales with the directory size.
+// recommendedSubagentTurns 等于文件数量加上摘要和分析预留回合。
+// 没有人为上限，预算随目录规模增长。
 func RecommendedTurns(fileCount int) int {
 	if fileCount < 1 {
 		fileCount = 1
@@ -42,9 +42,9 @@ func RecommendedTurns(fileCount int) int {
 	return fileCount + SummaryTurns
 }
 
-// effectiveSubagentToolTurns picks the specialist budget.
-// Priority: explicit max_turns > file_count formula > default.
-// No hard maximum cap: turns scale with files being analyzed.
+// effectiveSubagentToolTurns 确定专业子代理预算。
+// 优先级：显式 max_turns > 基于 file_count 的公式 > 默认值。
+// 没有硬性最大值，回合数会随待分析文件数量增长。
 func EffectiveToolTurns(explicit int, fileCount int) int {
 	if explicit > 0 {
 		return explicit
@@ -55,9 +55,8 @@ func EffectiveToolTurns(explicit int, fileCount int) int {
 	return DefaultToolTurns
 }
 
-// isUsableFinalText rejects provider fallback output that contains only
-// textual <tool_call> markup. Those calls were not executed and are not a
-// final answer or specialist report.
+// isUsableFinalText 拒绝仅包含文本形式 <tool_call> 标记的提供方回退输出。
+// 这些调用没有被执行，因此不构成最终答案或专业子代理报告。
 func ReportUsable(report string) bool {
 	text := strings.TrimSpace(report)
 	if text == "" {

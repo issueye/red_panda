@@ -18,9 +18,9 @@ import (
 
 const maxToolOutputBytes = 64 * 1024
 
-// PrepareToolsForRun discovers tools from enabled MCP server configs on the
-// reply options and registers bindings for tools/call (docs/36 D2 / docs/19).
-// Discovery failures for one server omit that server's tools; Runtime stays up.
+// PrepareToolsForRun 根据回复选项中启用的 MCP 服务配置发现工具，
+// 并注册 tools/call 所需的绑定关系（文档 36 D2 / 文档 19）。
+// 单个服务发现失败时仅忽略该服务的工具，Runtime 仍会继续运行。
 func (m *Manager) PrepareToolsForRun(ctx context.Context, params methods.ReplyParams) []tools.Definition {
 	servers := params.Options.MCPServers
 	if len(servers) == 0 {
@@ -47,7 +47,7 @@ func (m *Manager) PrepareToolsForRun(ctx context.Context, params methods.ReplyPa
 				continue
 			}
 			if _, exists := bindings[canonical]; exists {
-				// Prefer the first registered server/tool pair; skip duplicates.
+				// 优先保留首个注册的服务和工具组合，跳过重复项。
 				continue
 			}
 			def := tools.Definition{
@@ -120,8 +120,8 @@ func (m *Manager) ExecuteTool(ctx context.Context, runID string, workingDir stri
 	return m.CallTool(ctx, workingDir, binding.Config, binding.RawName, call.Arguments)
 }
 
-// callMCPTool starts a one-shot MCP stdio session, runs tools/call, then cleans up.
-// Process reuse is deferred to D3.
+// callMCPTool 启动一次性 MCP stdio 会话，执行 tools/call 后清理资源。
+// 进程复用延后至 D3 实现。
 func (m *Manager) CallTool(
 	ctx context.Context,
 	workspaceRoot string,
@@ -259,7 +259,7 @@ func (m *Manager) CallTool(
 		return text, fmt.Errorf("%s", text)
 	}
 	if text == "" {
-		// Preserve a structured empty success for Activity/UI.
+		// 为活动记录和 UI 保留结构化的空成功结果。
 		raw, _ := json.Marshal(callResult)
 		text = string(raw)
 	}
@@ -269,7 +269,7 @@ func (m *Manager) CallTool(
 	return text, nil
 }
 
-// mcpCanonicalName builds mcp__server__tool (design docs/19 §8.1).
+// mcpCanonicalName 构建 mcp__server__tool 名称（设计文档 19，第 8.1 节）。
 func CanonicalName(serverName, rawTool string) string {
 	server := strings.TrimSpace(serverName)
 	raw := strings.TrimSpace(rawTool)
@@ -294,7 +294,7 @@ func sanitizeMCPToken(value string) string {
 	}
 	out := b.String()
 	for strings.Contains(out, "__") {
-		// Keep double-underscore only as the mcp name separator; collapse inside token.
+		// 双下划线仅作为 MCP 名称分隔符使用，令牌内部的连续下划线需合并。
 		out = strings.ReplaceAll(out, "__", "_")
 	}
 	return strings.Trim(out, "_")
@@ -313,7 +313,7 @@ func toolRisk(config protomcp.MCPServerConfig, rawTool string) tools.Risk {
 			}
 		}
 	}
-	// Default high until a trusted metadata contract exists (docs/19).
+	// 在建立可信元数据约定前，默认风险等级为高（文档 19）。
 	return tools.RiskHigh
 }
 
@@ -321,7 +321,7 @@ func parametersSchema(schema map[string]any) map[string]any {
 	if schema == nil {
 		return map[string]any{"type": "object", "properties": map[string]any{}}
 	}
-	// Shallow clone so callers cannot mutate discovery cache.
+	// 浅拷贝，防止调用方修改发现缓存。
 	out := make(map[string]any, len(schema))
 	for k, v := range schema {
 		out[k] = v

@@ -23,7 +23,7 @@ func TestLookupGoalSpecialists(t *testing.T) {
 			t.Fatalf("bad default turns for %s", key)
 		}
 	}
-	// Normalization
+	// 规范化。
 	if _, ok := lookupGoalSpecialist("Goal_Analyst"); !ok {
 		t.Fatal("expected normalize Goal_Analyst -> goal-analyst")
 	}
@@ -58,7 +58,7 @@ func TestResolveGoalSpecialistPrefersGatewayPromptAndTurns(t *testing.T) {
 	if spec.NameZH != "自定义分析师" {
 		t.Fatalf("name_zh = %q", spec.NameZH)
 	}
-	// Tool policy stays Runtime-owned.
+	// 工具策略仍由 Runtime 管理。
 	if len(spec.Allowlist) != len(builtin.Allowlist) {
 		t.Fatalf("allowlist should remain builtin: got %v want %v", spec.Allowlist, builtin.Allowlist)
 	}
@@ -117,7 +117,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 	if params.Options.SpawnSubAgents {
 		t.Fatal("spawn subagents must be false")
 	}
-	// Allowlist must include reads + context share tools and exclude writes via availableToolsForOptions.
+	// 允许列表必须包含读取和上下文共享工具，并通过 availableToolsForOptions 排除写入工具。
 	defs := []tools.Definition{
 		{Name: "workspace.read_file"},
 		{Name: "workspace.write_file"},
@@ -167,7 +167,7 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 	spec, _ := lookupGoalSpecialist("goal-implementer")
 	params := methods.ReplyParams{Options: methods.ReplyOptions{}}
 	_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "implement step", 100, "run_test", "sess_test", "", "")
-	// Cap to CapMaxTurns
+	// 限制为 CapMaxTurns。
 	if params.Options.MaxToolTurns != spec.CapMaxTurns {
 		t.Fatalf("max turns = %d, want cap %d", params.Options.MaxToolTurns, spec.CapMaxTurns)
 	}

@@ -77,9 +77,8 @@ func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext,
 	return result.Output, nil
 }
 
-// runContextTool dispatches a context.* (goal scratchpad) tool to the Gateway.
-// Unlike goal/todo tools, context tools are intentionally NOT on the subagent
-// denylist, so specialist children can read shared findings and write handoffs.
+// runContextTool 将 context.*（目标暂存区）工具请求转发到 Gateway。
+// context 工具不会被加入子代理拒绝列表，使专业子代理可以读取共享发现并写入交接信息。
 func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
 	if runner.ContextExecutor == nil {
 		return "", fmt.Errorf("context tool executor is not available")
@@ -98,7 +97,7 @@ func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunConte
 	if result.Status != "" && result.Status != "completed" {
 		return result.Output, fmt.Errorf("context tool returned status %s", result.Status)
 	}
-	// Include structured notes in the output so the model sees them inline.
+	// 将结构化笔记加入输出，确保模型能在当前上下文中看到它们。
 	output := result.Output
 	if len(result.Notes) > 0 {
 		notesJSON, _ := json.Marshal(map[string]any{"notes": result.Notes})

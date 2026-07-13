@@ -37,8 +37,8 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 		}
 	}
 
-	// Budget = file_count + summary turns. Parent should pass file_count (from workspace.stats)
-	// or path (auto-counted). Explicit max_turns still wins when provided.
+	// 预算 = file_count + 摘要回合。父代理应传入 file_count（来自 workspace.stats）
+	// 或 path（自动统计）；提供显式 max_turns 时仍以其为准。
 	fileCount := agenttools.IntArg(call.Arguments, "file_count", 0)
 	scopePath := strings.TrimSpace(agenttools.StringArg(call.Arguments, "path"))
 	if fileCount <= 0 && scopePath != "" && runCtx.WorkingDir != "" {
@@ -48,7 +48,7 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 	}
 	explicitTurns := agenttools.IntArg(call.Arguments, "max_turns", 0)
 	maxTurns := subagent.EffectiveToolTurns(explicitTurns, fileCount)
-	// Goal phase specialists use role defaults when parent omitted budget.
+	// 父代理未提供预算时，Goal 阶段专家使用角色默认值。
 	if isSpecialist && explicitTurns <= 0 && fileCount <= 0 {
 		maxTurns = specialist.DefaultMaxTurns
 	}
@@ -60,10 +60,10 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Specialist workers always use the process pool so workers can be reused and reset.
+	// 专家工作进程始终使用进程池，以便复用和重置。
 	backend := "process_pool"
 	if requested := normalizedSubAgentBackend(params.Options.SubAgentBackend); requested == "runtime_process" {
-		// Explicit one-shot process is still allowed when parent opts out of pooling.
+		// 父代理显式不使用池化时，仍可启动一次性进程。
 		backend = "runtime_process"
 	}
 
@@ -112,7 +112,7 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 	childParams.RunID = childRunID
 	childParams.Session.Conversation = nil
 	childParams.Input.Text = childTask
-	// Workers do not inherit root memory; role text is SpecialistContext only.
+	// 工作进程不继承根记忆，角色文本仅存于 SpecialistContext。
 	childParams.Options.MemoryContext = nil
 	childParams.Options.SpecialistContext = &methods.SpecialistContext{
 		Kind: "worker",
@@ -128,7 +128,7 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 	childParams.Options.SpawnSubAgents = false
 	childParams.Options.SubAgentBackend = ""
 	childParams.Options.ToolDenylist = appendUniqueStrings(childParams.Options.ToolDenylist, subagent.RunDenylist...)
-	// Budget scales with directory file count; no artificial maximum (unless specialist cap).
+	// 预算随目录文件数量变化，没有人为上限，除非专家配置了上限。
 	childParams.Options.MaxToolTurns = maxTurns
 
 	if isSpecialist {

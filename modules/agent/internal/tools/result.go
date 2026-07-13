@@ -9,14 +9,13 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-// Standard tool result schema version. All tools should return this envelope so
-// UI, model, and recovery paths can parse results consistently.
+// 标准工具结果架构版本。所有工具均应返回此封装，便于 UI、模型和恢复流程一致解析。
 const toolResultSchemaV1 = "red_panda.tool_result.v1"
 
-// maxToolResultForModel caps each tool result fed back into the next LLM turn.
+// maxToolResultForModel 限制每条回传给下一轮 LLM 的工具结果大小。
 const maxToolResultForModel = 16 * 1024
 
-// StandardToolResult is the canonical envelope for tool success/failure payloads.
+// StandardToolResult 是工具成功或失败载荷的标准封装。
 type StandardToolResult struct {
 	Schema string         `json:"schema"`
 	Tool   string         `json:"tool"`
@@ -28,7 +27,7 @@ type StandardToolResult struct {
 	Meta   ToolResultMeta `json:"meta"`
 }
 
-// ToolResultMeta carries non-payload facts (timing, truncation notices, etc.).
+// ToolResultMeta 保存非载荷信息，如耗时和截断提示。
 type ToolResultMeta struct {
 	DurationMS    int64  `json:"duration_ms,omitempty"`
 	Truncated     bool   `json:"truncated,omitempty"`
@@ -39,7 +38,7 @@ type ToolResultMeta struct {
 
 func StandardizeToolOutput(toolName string, raw string, runErr error, durationMS int64) string {
 	if env, ok := ParseStandardToolResult(raw); ok {
-		// Already standardized — only refresh duration when missing.
+		// 已是标准格式，仅在缺失时补充耗时。
 		if env.Meta.DurationMS == 0 && durationMS > 0 {
 			env.Meta.DurationMS = durationMS
 		}
@@ -76,8 +75,8 @@ func StandardizeToolOutput(toolName string, raw string, runErr error, durationMS
 	if raw != "" && json.Unmarshal([]byte(raw), &data) == nil {
 		text = PreferReadableText(data, raw)
 	} else if raw != "" {
-		// Plain text already lives in Text. Duplicating it in Data can double a
-		// JSON-RPC event beyond scanner/transport limits for large file reads.
+		// 纯文本已存入 Text；在 Data 中重复会使大型文件读取的 JSON-RPC 事件翻倍，
+		// 从而超过扫描器或传输层限制。
 		data = nil
 	} else {
 		data = map[string]any{}
@@ -87,7 +86,7 @@ func StandardizeToolOutput(toolName string, raw string, runErr error, durationMS
 	originalBytes := len(raw)
 	truncated := false
 	if originalBytes > maxToolOutputBytes {
-		// Keep envelope under storage/event size; never silently drop without meta.
+		// 将封装控制在存储和事件大小限制内，且必须通过元数据说明截断。
 		if s, ok := data.(string); ok && len(s) > maxToolOutputBytes {
 			data = s[:maxToolOutputBytes]
 		}
@@ -144,7 +143,7 @@ func mustMarshalToolResult(env StandardToolResult) string {
 	}
 	raw, err := json.Marshal(env)
 	if err != nil {
-		// Extremely unlikely; keep a parseable fallback.
+		// 极少发生，仍提供可解析的回退结果。
 		fallback, _ := json.Marshal(map[string]any{
 			"schema": toolResultSchemaV1,
 			"tool":   env.Tool,
@@ -159,7 +158,7 @@ func mustMarshalToolResult(env StandardToolResult) string {
 	return string(raw)
 }
 
-// preferReadableText extracts a human-readable summary from structured tool data.
+// PreferReadableText 从结构化工具数据中提取人类可读的摘要。
 func PreferReadableText(data any, fallback string) string {
 	switch v := data.(type) {
 	case string:
@@ -170,7 +169,7 @@ func PreferReadableText(data any, fallback string) string {
 				return strings.TrimSpace(s)
 			}
 		}
-		// web.search style
+		// web.search 风格的结果。
 		if items, ok := v["items"].([]any); ok && len(items) > 0 {
 			var b strings.Builder
 			if answer, ok := v["answer"].(string); ok && strings.TrimSpace(answer) != "" {
@@ -208,7 +207,7 @@ func PreferReadableText(data any, fallback string) string {
 				return out
 			}
 		}
-		// Pretty compact JSON as last resort for structured data.
+		// 结构化数据的最后回退方式：格式化后的紧凑 JSON。
 		if raw, err := json.Marshal(v); err == nil {
 			return string(raw)
 		}
@@ -221,19 +220,19 @@ func CompactOneLine(value string, max int) string {
 	if max <= 0 || len(value) <= max {
 		return value
 	}
-	// Avoid cutting mid-rune.
+	// 避免在 UTF-8 字符中间截断。
 	if max > 1 && utf8.ValidString(value[:max]) {
 		return value[:max] + "…"
 	}
 	return string([]rune(value)[:max]) + "…"
 }
 
-// modelFacingToolContent returns a standardized, bounded view of a tool result
-// for the next LLM turn. Full Result.Output is preserved for UI/events.
+// ModelFacingToolContent 返回供下一轮 LLM 使用的标准化、限长工具结果视图。
+// 完整的 Result.Output 仍保留给 UI 和事件流。
 func ModelFacingToolContent(result ptools.Result) string {
 	env, ok := ParseStandardToolResult(result.Output)
 	if !ok {
-		// Legacy/non-standard output — still wrap so the model always sees a schema.
+		// 旧版或非标准输出也要封装，确保模型始终收到统一架构。
 		raw := strings.TrimSpace(result.Output)
 		if raw == "" {
 			raw = strings.TrimSpace(result.Error)
@@ -276,8 +275,8 @@ func ModelFacingToolContent(result ptools.Result) string {
 		if env.Meta.Note == "" {
 			env.Meta.Note = truncationNote(true, original)
 		}
-		// Keep full data out of the model view when large — but never silently drop:
-		// replace with a pointer note so the model knows UI has the full payload.
+		// 数据较大时不将完整内容传给模型，但不能静默丢弃；
+		// 改为指针说明，使模型知道 UI 仍保有完整载荷。
 		if env.Data != nil {
 			env.Data = map[string]any{
 				"omitted":        true,
@@ -295,7 +294,7 @@ func trimToBytes(value string, max int) string {
 	if max <= 0 || len(value) <= max {
 		return value
 	}
-	// Prefer rune-safe cut near max.
+	// 优先在接近上限的位置按 UTF-8 字符安全截断。
 	if max < 4 {
 		return value[:max]
 	}
@@ -309,7 +308,7 @@ func trimToBytes(value string, max int) string {
 	return value[:cut] + "…"
 }
 
-// ReadableToolResultText extracts human-readable text from a standardized tool result.
+// ReadableToolResultText 从标准工具结果中提取人类可读文本。
 func ReadableToolResultText(result ptools.Result) string {
 	if env, ok := ParseStandardToolResult(result.Output); ok {
 		if strings.TrimSpace(env.Text) != "" {
@@ -325,7 +324,7 @@ func ReadableToolResultText(result ptools.Result) string {
 	return strings.TrimSpace(result.Output)
 }
 
-// ExtractSearchAnswer pulls answer + links from a web.search standard envelope or raw JSON.
+// ExtractSearchAnswer 从 web.search 标准封装或原始 JSON 中提取答案和链接。
 func ExtractSearchAnswer(raw string) string {
 	if env, ok := ParseStandardToolResult(raw); ok {
 		if m, ok := env.Data.(map[string]any); ok {

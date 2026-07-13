@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// defaultShellTimeout bounds shell.exec. Many CLI tools (e.g. Office automation)
-// print success then hang on child/COM processes; we must still return.
+// defaultShellTimeout 限制 shell.exec 的执行时长。许多命令行工具（如 Office 自动化）
+// 输出成功后仍会在子进程或 COM 进程上挂起，因此必须及时返回。
 const defaultShellTimeout = 60 * time.Second
 
 func runShell(ctx context.Context, root string, command string) (string, error) {
@@ -27,7 +27,7 @@ func runShell(ctx context.Context, root string, command string) (string, error) 
 
 	var cmd *exec.Cmd
 	if goruntime.GOOS == "windows" {
-		// -NonInteractive avoids prompts that hang the session after work is done.
+		// -NonInteractive 避免任务完成后出现交互提示而挂起会话。
 		cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", command)
 	} else {
 		cmd = exec.Command("sh", "-c", command)
@@ -41,7 +41,7 @@ func runShell(ctx context.Context, root string, command string) (string, error) 
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	// Avoid inheriting a live stdin that some CLIs wait on forever.
+	// 避免继承活动 stdin，部分命令行工具会永久等待该输入。
 	cmd.Stdin = bytes.NewReader(nil)
 
 	if err := cmd.Start(); err != nil {
@@ -55,18 +55,18 @@ func runShell(ctx context.Context, root string, command string) (string, error) 
 
 	select {
 	case <-toolCtx.Done():
-		// Kill the whole tree: PowerShell may exit while officecli/COM children linger,
-		// or the child may hang after printing success (exactly the OfficeCLI case).
+		// 终止整个进程树：PowerShell 退出后 officecli 或 COM 子进程可能残留，
+		// 子进程也可能在输出成功后挂起（OfficeCLI 的典型情况）。
 		killShellProcessTree(cmd)
-		// Give Wait a moment to observe the kill.
+		// 留出短暂时间供 Wait 感知终止操作。
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
 		}
 		output := TruncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
 		if output != "" {
-			// Work often already finished (e.g. "Added slide at /slide[4]") but process
-			// did not exit 鈥?surface partial success clearly instead of a bare timeout.
+			// 工作可能已完成（例如“已在 /slide[4] 添加幻灯片”），但进程尚未退出；
+			// 应明确呈现部分成功，而非只返回超时。
 			return output, fmt.Errorf(
 				"shell command timed out after %s (process did not exit; partial output was captured 鈥?the command may have already succeeded)",
 				defaultShellTimeout,
@@ -82,15 +82,15 @@ func runShell(ctx context.Context, root string, command string) (string, error) 
 	}
 }
 
-// killShellProcessTree terminates the shell and its descendants.
-// On Windows, Process.Kill only kills powershell.exe, not officecli.exe children.
+// killShellProcessTree 终止 shell 及其所有后代进程。
+// 在 Windows 上，Process.Kill 只会终止 powershell.exe，不会终止 officecli.exe 子进程。
 func killShellProcessTree(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
 	pid := cmd.Process.Pid
 	if goruntime.GOOS == "windows" && pid > 0 {
-		// /T = tree, /F = force
+		// /T 表示进程树，/F 表示强制终止。
 		killer := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
 		_ = killer.Run()
 	}

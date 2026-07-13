@@ -10,9 +10,8 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-// opsOnlyTools are registered for Desktop/CLI/debug use but hidden from the
-// default provider tool schema (checklist O1/O3). Enable with RED_PANDA_DEBUG_TOOLS=1,
-// ReplyOptions.DebugTools, or an explicit tool_allowlist entry.
+// opsOnlyTools 会注册给桌面端、命令行和调试用途，但默认不暴露给提供方工具架构（检查项 O1/O3）。
+// 可通过 RED_PANDA_DEBUG_TOOLS=1、ReplyOptions.DebugTools 或显式 tool_allowlist 项启用。
 var opsOnlyTools = map[string]struct{}{
 	"subagent.pool_status": {},
 	"subagent.pool_resize": {},
@@ -46,7 +45,7 @@ func opsToolExposed(options methods.ReplyOptions, name string) bool {
 	if debugToolsEnabled(options) {
 		return true
 	}
-	// Explicit allowlist opt-in for a single ops tool without opening all debug tools.
+	// 显式允许单个运维工具，无需开放全部调试工具。
 	return ContainsString(options.ToolAllowlist, name)
 }
 
@@ -74,7 +73,7 @@ func EvaluateToolPolicy(options methods.ReplyOptions, call ptools.Call) ToolDeci
 	if len(allowlist) > 0 && !ContainsString(allowlist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is not in tool_allowlist"}
 	}
-	// opsToolExposed may treat explicit client allowlist as opt-in for ops tools.
+	// opsToolExposed 可将客户端显式允许列表视为运维工具的启用信号。
 	eff := options
 	eff.ToolAllowlist = allowlist
 	if !opsToolExposed(eff, call.Name) {
@@ -126,9 +125,9 @@ func ContainsString(items []string, value string) bool {
 	return false
 }
 
-// goalModeDefaultAllowlist is applied when a Goal is active (checklist O8).
-// It keeps long-horizon runs focused and excludes memory / ops-only tools.
-// Client tool_allowlist is intersected with this set when both are present.
+// goalModeDefaultAllowlist 在目标处于活动状态时生效（检查项 O8）。
+// 它让长程任务保持聚焦，并排除记忆和仅限运维的工具。
+// 若客户端也提供 tool_allowlist，则取二者交集。
 var goalModeDefaultAllowlist = []string{
 	"workspace.read_file",
 	"workspace.list",
@@ -180,10 +179,9 @@ func goalModeTightensTools(options methods.ReplyOptions) bool {
 	return false
 }
 
-// effectiveToolAllowlist returns the allowlist used for schema + policy.
-// Goal mode injects a default allowlist when the client did not send one;
-// an explicit client list is intersected with the Goal default so clients
-// can only tighten further.
+// effectiveToolAllowlist 返回工具架构和策略实际使用的允许列表。
+// 目标模式下，未提供客户端列表时注入默认列表；提供时与目标默认列表求交集，
+// 因而客户端只能进一步收紧权限。
 func effectiveToolAllowlist(options methods.ReplyOptions) []string {
 	client := options.ToolAllowlist
 	if !goalModeTightensTools(options) {
@@ -226,8 +224,8 @@ func intersectAllowlist(a, b []string) []string {
 
 func AvailableToolsForOptions(definitions []ptools.Definition, options methods.ReplyOptions) []ptools.Definition {
 	allowlist := effectiveToolAllowlist(options)
-	// Copy so opsToolExposed / denylist checks still see original options,
-	// but allowlist enforcement uses the effective list.
+	// 复制选项，让 opsToolExposed 和拒绝列表检查仍能看到原始值，
+	// 同时允许列表校验使用实际生效的列表。
 	eff := options
 	eff.ToolAllowlist = allowlist
 

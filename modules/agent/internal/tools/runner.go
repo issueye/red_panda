@@ -12,12 +12,11 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-// defaultLocalToolTimeout is a hard upper bound for local FS/RPC tools that do not
-// manage their own deadline. Normal reads fail in milliseconds; this only prevents
-// stuck network mounts, pathological trees, or hung gateway RPCs from freezing a run.
+// defaultLocalToolTimeout 是未自行管理期限的本地文件系统和 RPC 工具的硬性时限。
+// 正常读取通常在毫秒内失败；此限制只用于避免网络挂载、异常目录树或 Gateway RPC 挂起冻结运行。
 const defaultLocalToolTimeout = 30 * time.Second
 
-// defaultGatewayToolTimeout bounds memory/todo tools that call back into Gateway.
+// defaultGatewayToolTimeout 限制回调 Gateway 的记忆和待办工具。
 const defaultGatewayToolTimeout = 30 * time.Second
 
 type MemoryToolExecutor func(context.Context, methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error)
@@ -28,7 +27,7 @@ type SkillRunExecutor func(context.Context, ToolRunContext, ptools.Call) (string
 type SubagentRunExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
 type MCPToolExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
 
-// SubagentManager exposes parent-agent control of specialists and the process pool.
+// SubagentManager 向父代理暴露对专业子代理和进程池的控制能力。
 type SubagentManager interface {
 	List(runCtx ToolRunContext, call ptools.Call) (string, error)
 	Cancel(runCtx ToolRunContext, call ptools.Call) (string, error)
@@ -652,9 +651,9 @@ func (ToolRunner) AvailableTools() []ptools.Definition {
 	}
 }
 
-// slashToolsEnabled gates temporary triggers such as /read and /shell. Default off
-// so plain chat text is never parsed as tools (checklist R6). Enable with
-// RED_PANDA_SLASH_TOOLS=1 for local smoke scripts and unit tests.
+// slashToolsEnabled 控制 /read、/shell 等临时触发器。默认关闭，
+// 以免将普通聊天文本解析为工具（检查项 R6）。本地冒烟脚本和单元测试可设置
+// RED_PANDA_SLASH_TOOLS=1 启用。
 func slashToolsEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_SLASH_TOOLS"))) {
 	case "1", "true", "yes", "on":
@@ -732,7 +731,7 @@ func (runner ToolRunner) InvocationFromCall(runID string, index int, call ptools
 			return ToolInvocation{Call: call}, nil
 		}
 	}
-	// MCP tools may be registered after AvailableTools snapshot; accept prefix as last resort.
+	// MCP 工具可能在 AvailableTools 快照之后注册，最后按前缀兜底接受。
 	if IsMCPToolName(call.Name) {
 		if call.DisplayName == "" {
 			call.DisplayName = call.Name
@@ -769,7 +768,7 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 	if err != nil {
 		result.Status = ptools.CallStatusFailed
 		result.Error = err.Error()
-		// Always emit a standardized envelope (even on failure) so UI/model share one schema.
+		// 始终输出标准封装（即使失败），让 UI 和模型共享同一架构。
 		result.Output = StandardizeToolOutput(call.Name, output, err, result.DurationMS)
 		return result, result.Output
 	}
@@ -777,8 +776,8 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 	return result, result.Output
 }
 
-// toolTimeoutFor returns the hard upper bound for a tool, or 0 when the tool
-// already manages its own deadline (shell/web/subagent/skill).
+// toolTimeoutFor 返回工具的硬性时限；工具已自行管理期限时返回 0，
+// 例如 shell、web、subagent 和 skill。
 func toolTimeoutFor(name string) time.Duration {
 	switch name {
 	case "shell.exec", "web.search", "web.fetch", "skill.run", "subagent.run":
@@ -788,7 +787,7 @@ func toolTimeoutFor(name string) time.Duration {
 		"goal.write", "goal.update", "goal.checkpoint", "goal.complete", "goal.list":
 		return defaultGatewayToolTimeout
 	default:
-		// MCP tools manage start/initialize/call timeouts internally (docs/19).
+		// MCP 工具在内部管理启动、初始化和调用超时（文档 19）。
 		if IsMCPToolName(name) {
 			return 0
 		}
@@ -796,8 +795,8 @@ func toolTimeoutFor(name string) time.Duration {
 	}
 }
 
-// runBounded runs fn and fails fast when timeout elapses so one stuck tool cannot
-// freeze the whole agent turn. timeout<=0 means "no outer bound" (self-managed tools).
+// runBounded 执行 fn 并在超时时快速失败，避免单个挂起工具冻结整个代理回合。
+// timeout<=0 表示不施加外层限制，适用于自行管理期限的工具。
 func runBounded(ctx context.Context, timeout time.Duration, fn func(context.Context) (string, error)) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -823,7 +822,7 @@ func runBounded(ctx context.Context, timeout time.Duration, fn func(context.Cont
 	case res := <-done:
 		return res.output, res.err
 	case <-toolCtx.Done():
-		// Prefer a completed result if the tool finished in the same instant as the deadline.
+		// 若工具在截止瞬间完成，优先返回已完成的结果。
 		select {
 		case res := <-done:
 			return res.output, res.err

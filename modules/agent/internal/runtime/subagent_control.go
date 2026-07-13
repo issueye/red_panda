@@ -73,8 +73,8 @@ func (r *Runtime) executeSubagentCancel(runCtx agenttools.ToolRunContext, call t
 	})
 }
 
-// executeSubagentReset cancels a running subagent (if any) and marks it reset so
-// the parent can start a fresh specialist without leaving a stuck running state.
+// executeSubagentReset 取消正在运行的子代理（如有）并将其标记为已重置，
+// 使父代理可启动新的专家，且不会遗留卡住的运行状态。
 func (r *Runtime) executeSubagentReset(runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
 	subAgentID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "subagent_id"))
 	if subAgentID == "" {
@@ -93,9 +93,9 @@ func (r *Runtime) executeSubagentReset(runCtx agenttools.ToolRunContext, call to
 		return "", fmt.Errorf("subagent %s not found", subAgentID)
 	}
 	cancelled := r.cancelSubAgent(runID, subAgentID)
-	// Force terminal state even if the subagent already completed/failed.
+	// 即使子代理已完成或失败，也强制写入终止状态。
 	r.forceFinishSubAgent(runID, subAgentID, "reset", "subagent reset by parent", "")
-	// Clear registry so a later specialist can start cleanly under a new id.
+	// 清理注册表，使后续专家可使用新 ID 干净启动。
 	r.removeSubAgent(runID, subAgentID)
 
 	if runCtx.Reply != nil {
@@ -116,7 +116,7 @@ func (r *Runtime) executeSubagentReset(runCtx agenttools.ToolRunContext, call to
 		})
 	}
 
-	// Optionally recycle idle pool workers so the next run is cold-start clean.
+	// 可选地回收空闲进程池工作进程，使下一次运行获得干净的冷启动环境。
 	resetPool := agenttools.BoolArg(call.Arguments, "reset_pool", false)
 	var pool any
 	if resetPool {
@@ -194,7 +194,7 @@ func (r *Runtime) forceFinishSubAgent(rootRunID string, subAgentID string, statu
 	state.record.Error = errText
 	state.record.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if state.cancel != nil {
-		// Keep cancel nil after reset so later cancel is a no-op.
+		// 重置后保持 cancel 为 nil，使后续取消操作成为空操作。
 		state.cancel = nil
 	}
 }

@@ -34,8 +34,8 @@ func (r *Runtime) handleAgentSkillLoad(req jsonrpc.Request) error {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "skill name is required"))
 	}
 	include := params.IncludeInstructions
-	// Default management loads to include instructions when omitted is false;
-	// callers must opt in. Desktop/Gateway should pass include_instructions=true.
+	// 管理类加载在省略参数时默认不包含指令；调用方必须显式启用。
+	// Desktop 和 Gateway 应传入 include_instructions=true。
 	detail, err := skill.LoadManagedDetail(params.WorkspaceRoot, params.Name, include)
 	if err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32000, err.Error()))

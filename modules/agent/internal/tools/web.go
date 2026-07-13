@@ -19,13 +19,13 @@ import (
 const (
 	maxWebFetchBytes  = 2 * 1024 * 1024
 	defaultWebResults = 8
-	// webRequestTimeout is the hard upper bound for a single search/fetch attempt.
-	// Keep it strict so the UI never sits on "进行中" indefinitely.
+	// webRequestTimeout 是单次搜索或抓取尝试的硬性时限。
+	// 严格限制时限，避免 UI 长时间停留在“进行中”。
 	webRequestTimeout      = 20 * time.Second
 	webDialTimeout         = 8 * time.Second
 	webTLSHandshakeTimeout = 10 * time.Second
 	webResponseHeaderTO    = 15 * time.Second
-	// webToolHardTimeout wraps the full tool call (proxy check + request + body).
+	// webToolHardTimeout 覆盖完整工具调用（代理检查、请求和响应体读取）。
 	webToolHardTimeout     = 25 * time.Second
 	webUserAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 	defaultDDGHTMLEndpoint = "https://html.duckduckgo.com/html/"
@@ -33,8 +33,8 @@ const (
 	defaultTavilyEndpoint  = "https://api.tavily.com/search"
 )
 
-// duckDuckGoHTMLEndpoint / tavilySearchEndpoint are package variables so tests
-// can redirect them at local httptest servers.
+// duckDuckGoHTMLEndpoint 和 tavilySearchEndpoint 为包级变量，
+// 测试可将它们重定向到本地 httptest 服务器。
 var duckDuckGoHTMLEndpoint = defaultDDGHTMLEndpoint
 var tavilySearchEndpoint = defaultTavilyEndpoint
 
@@ -51,14 +51,14 @@ type webSearchOptions struct {
 	Proxy        string
 }
 
-// runWebSearch returns structured search results.
+// runWebSearch 返回结构化的搜索结果。
 //
-// Provider priority (checklist O6 — keep this the single source of truth):
-//   - auto: Tavily when an API key is configured, otherwise DuckDuckGo
-//   - tavily: Tavily only (errors if no key)
-//   - duckduckgo: DDG HTML/JSON fallback path (fragile; prefer Tavily in production)
+// 服务提供方优先级（检查项 O6，此处为唯一事实来源）：
+//   - auto：配置 API 密钥时使用 Tavily，否则使用 DuckDuckGo
+//   - tavily：仅使用 Tavily，未配置密钥时返回错误
+//   - duckduckgo：使用 DDG HTML/JSON 回退路径，生产环境优先使用 Tavily
 //
-// Further DDG HTML parsing may be split to web_tools_ddg.go without changing this contract.
+// 后续可将 DDG HTML 解析拆分至 web_tools_ddg.go，且不改变此约定。
 func runWebSearch(ctx context.Context, query string, maxResults int, opts webSearchOptions) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -438,7 +438,7 @@ func isRetriableWebError(err error) bool {
 		strings.Contains(msg, "eof")
 }
 
-// runWebFetch downloads a single http(s) URL and returns readable text.
+// runWebFetch 下载单个 HTTP(S) URL 并返回可读文本。
 func runWebFetch(ctx context.Context, rawURL string, maxBytes int, proxy string) (string, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
@@ -517,7 +517,7 @@ func runWebFetch(ctx context.Context, rawURL string, maxBytes int, proxy string)
 	return string(raw), nil
 }
 
-// extractTitleAndText turns fetched bytes into readable plain text for agents.
+// extractTitleAndText 将抓取的字节内容转换为供代理使用的可读纯文本。
 func extractTitleAndText(body string, contentType string) (string, string) {
 	ct := strings.ToLower(contentType)
 	if strings.Contains(ct, "application/json") || looksLikeJSON(body) {
@@ -546,14 +546,14 @@ func looksLikeJSON(body string) bool {
 	return strings.HasPrefix(trim, "{") || strings.HasPrefix(trim, "[")
 }
 
-// extractHTMLDocument returns page title and cleaned main text (nav/chrome reduced).
+// extractHTMLDocument 返回页面标题和清理后的正文，并尽量减少导航等页面框架内容。
 func extractHTMLDocument(body string) (string, string) {
 	title := ""
 	if m := htmlTitleRE.FindStringSubmatch(body); len(m) > 1 {
 		title = strings.TrimSpace(cleanHTMLText(m[1]))
 	}
 	text := extractTextFromHTML(body)
-	// Drop extremely noisy leftovers that are not useful to models.
+	// 移除对模型无用的高噪声残留内容。
 	text = collapseBoilerplateNoise(text)
 	return title, text
 }
@@ -585,7 +585,7 @@ func collapseBoilerplateNoise(text string) string {
 		if skip {
 			continue
 		}
-		// Drop pure chrome fragments.
+		// 移除纯页面框架片段。
 		if strings.HasPrefix(trim, "<") && strings.HasSuffix(trim, ">") {
 			continue
 		}
@@ -602,12 +602,12 @@ func newWebHTTPClient(proxy string) (*http.Client, error) {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     false, // HTTP/2 via some proxies can hang forever
+		ForceAttemptHTTP2:     false, // 部分代理上的 HTTP/2 可能永久挂起
 		TLSHandshakeTimeout:   webTLSHandshakeTimeout,
 		ResponseHeaderTimeout: webResponseHeaderTO,
 		ExpectContinueTimeout: 1 * time.Second,
 		IdleConnTimeout:       30 * time.Second,
-		// Disable keep-alive reuse for one-shot tool calls to avoid sticky half-open conns.
+		// 单次工具调用禁用长连接复用，避免残留半开连接。
 		DisableKeepAlives: true,
 	}
 	if err := applyWebProxy(transport, proxy); err != nil {
@@ -619,8 +619,8 @@ func newWebHTTPClient(proxy string) (*http.Client, error) {
 	}, nil
 }
 
-// runWebOp enforces a hard deadline around web tools so a hung dial/proxy/body
-// read cannot leave the tool card in "running" forever.
+// runWebOp 为网络工具设置硬性期限，防止拨号、代理或响应体读取挂起，
+// 使工具卡片永久停留在“运行中”。
 func runWebOp(ctx context.Context, op func(context.Context) (string, error)) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -640,7 +640,7 @@ func runWebOp(ctx context.Context, op func(context.Context) (string, error)) (st
 
 	select {
 	case <-opCtx.Done():
-		// Prefer the operation error if it races in at the same time.
+		// 若操作错误同时到达，优先返回该错误。
 		select {
 		case res := <-done:
 			if res.err != nil {
@@ -652,7 +652,7 @@ func runWebOp(ctx context.Context, op func(context.Context) (string, error)) (st
 		}
 	case res := <-done:
 		if res.err != nil {
-			// Normalize context deadline into a clear tool error.
+			// 将上下文超时统一为清晰的工具错误。
 			if opCtx.Err() != nil && (res.err == context.DeadlineExceeded || strings.Contains(strings.ToLower(res.err.Error()), "deadline exceeded") || strings.Contains(strings.ToLower(res.err.Error()), "context canceled")) {
 				return "", fmt.Errorf("web request timed out after %s: %w", webToolHardTimeout, res.err)
 			}
@@ -662,9 +662,8 @@ func runWebOp(ctx context.Context, op func(context.Context) (string, error)) (st
 	}
 }
 
-// applyWebProxy configures transport for an explicit proxy setting.
-// Empty proxy keeps ProxyFromEnvironment. Invalid explicit proxy is an error
-// (never silently ignored).
+// applyWebProxy 根据显式代理设置配置传输层。
+// 空代理保留 ProxyFromEnvironment；无效的显式代理会返回错误，绝不静默忽略。
 func applyWebProxy(transport *http.Transport, raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -687,17 +686,17 @@ func applyWebProxy(transport *http.Transport, raw string) error {
 				Password: password,
 			}
 		}
-		// Base dialer with timeout so SOCKS setup cannot hang forever.
+		// 使用带超时的基础拨号器，避免 SOCKS 初始化永久挂起。
 		base := &net.Dialer{Timeout: webDialTimeout, KeepAlive: 30 * time.Second}
 		socksDialer, err := xproxy.SOCKS5("tcp", parsed.Host, auth, base)
 		if err != nil {
 			return fmt.Errorf("socks5 dialer: %w", err)
 		}
-		// SOCKS dialer owns connectivity; clear HTTP Proxy to avoid double-proxy.
+		// SOCKS 拨号器负责连接，因此清除 HTTP 代理以避免双重代理。
 		transport.Proxy = nil
 		if contextDialer, ok := socksDialer.(xproxy.ContextDialer); ok {
 			transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-				// Bound each dial attempt even if the parent ctx is long-lived.
+				// 即便父上下文生命周期很长，也限制每次拨号尝试。
 				dialCtx, cancel := context.WithTimeout(ctx, webDialTimeout+webTLSHandshakeTimeout)
 				defer cancel()
 				return contextDialer.DialContext(dialCtx, network, address)
@@ -731,7 +730,7 @@ func parseWebProxyURL(raw string) (*url.URL, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("proxy is empty")
 	}
-	// Tolerate full-width punctuation that sometimes appears after paste.
+	// 兼容粘贴时可能出现的全角标点。
 	raw = strings.Map(func(r rune) rune {
 		switch r {
 		case '：':
@@ -752,7 +751,7 @@ func parseWebProxyURL(raw string) (*url.URL, error) {
 	scheme := strings.ToLower(parsed.Scheme)
 	switch scheme {
 	case "http", "https", "socks5", "socks5h":
-		// supported
+		// 支持的协议。
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme %q (use http://, https://, or socks5://)", parsed.Scheme)
 	}
@@ -774,7 +773,7 @@ func proxyLabel(raw string) string {
 	if err != nil {
 		return "invalid"
 	}
-	// Never leak credentials into tool output / logs.
+	// 绝不将凭据泄露到工具输出或日志。
 	return parsed.Scheme + "://" + parsed.Host
 }
 
@@ -798,7 +797,7 @@ func annotateWebError(err error, proxy string) error {
 	return fmt.Errorf("%v (proxy=%s)%s", err, label, hint)
 }
 
-// ensureWebProxyReachable fails fast when an explicit proxy host is not listening.
+// ensureWebProxyReachable 在显式代理主机未监听时快速失败。
 func ensureWebProxyReachable(ctx context.Context, proxy string) error {
 	proxy = strings.TrimSpace(proxy)
 	if proxy == "" {
@@ -817,9 +816,8 @@ func ensureWebProxyReachable(ctx context.Context, proxy string) error {
 	return nil
 }
 
-// effectiveWebResultCount merges per-run options, explicit tool args, and the
-// package default into a single result-count value. Explicit tool args win,
-// then the Desktop-transmitted run option, then the default.
+// effectiveWebResultCount 合并单次运行选项、显式工具参数和包级默认值，得到结果数量。
+// 优先级依次为显式工具参数、桌面端传入的运行选项和默认值。
 func effectiveWebResultCount(runCtx ToolRunContext, requested int) int {
 	if requested > 0 {
 		return requested
@@ -830,7 +828,7 @@ func effectiveWebResultCount(runCtx ToolRunContext, requested int) int {
 	return defaultWebResults
 }
 
-// effectiveWebFetchBytes applies the same precedence for the fetch body cap.
+// effectiveWebFetchBytes 对抓取响应体上限应用相同的优先级规则。
 func effectiveWebFetchBytes(runCtx ToolRunContext, requested int) int {
 	if requested > 0 {
 		return requested
@@ -841,7 +839,7 @@ func effectiveWebFetchBytes(runCtx ToolRunContext, requested int) int {
 	return maxWebFetchBytes
 }
 
-// effectiveWebHTTPProxy prefers per-run option, then RED_PANDA_WEB_HTTP_PROXY.
+// effectiveWebHTTPProxy 优先使用单次运行选项，其次使用 RED_PANDA_WEB_HTTP_PROXY。
 func effectiveWebHTTPProxy(runCtx ToolRunContext) string {
 	if runCtx.Reply != nil {
 		if proxy := strings.TrimSpace(runCtx.Reply.Options.WebHTTPProxy); proxy != "" {
@@ -865,8 +863,8 @@ func effectiveWebSearchOptions(runCtx ToolRunContext) webSearchOptions {
 		}
 	}
 	if envProvider := strings.TrimSpace(os.Getenv("RED_PANDA_WEB_SEARCH_PROVIDER")); envProvider != "" && opts.Provider == "auto" {
-		// Only use env provider when the run did not set an explicit non-default.
-		// Reply options already default to auto when empty.
+		// 仅当运行未设置非默认值时使用环境变量中的提供方。
+		// 空的回复选项默认值已是 auto。
 		if runCtx.Reply == nil || strings.TrimSpace(runCtx.Reply.Options.WebSearchProvider) == "" {
 			opts.Provider = envProvider
 		}
@@ -874,15 +872,14 @@ func effectiveWebSearchOptions(runCtx ToolRunContext) webSearchOptions {
 	return opts
 }
 
-// DDG HTML structures: results are anchors with class result__a (title + href)
-// and following anchors with class result__snippet. Hrefs may be redirect links
-// like //duckduckgo.com/l/?uddg=<encoded>&rut=... which must be decoded.
+// DDG HTML 结构中，class 为 result__a 的锚点包含标题和 href，
+// 后续 class 为 result__snippet 的锚点包含摘要。href 可能是
+// //duckduckgo.com/l/?uddg=<encoded>&rut=... 形式的跳转链接，必须解码。
 var (
 	ddgResultLinkRE = regexp.MustCompile(`(?s)<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>`)
 	ddgSnippetRE    = regexp.MustCompile(`(?s)<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>`)
-	// ddgSponsoredRE drops the whole sponsored result block: the ad result div
-	// has a flat structure, so match from its opening tag through the nearest
-	// closing </div> that follows its result__a link.
+	// ddgSponsoredRE 删除整个推广结果块：广告结果 div 的结构平坦，
+	// 因此从其开始标签匹配至 result__a 链接之后最近的 </div>。
 	ddgSponsoredRE   = regexp.MustCompile(`(?s)<div[^>]*class="[^"]*result--ad[^"]*".*?</div>`)
 	htmlTagRE        = regexp.MustCompile(`<[^>]*>`)
 	htmlWhitespaceRE = regexp.MustCompile(`[ \t\r\f\v]+`)
@@ -893,7 +890,7 @@ var (
 )
 
 func parseDuckDuckGoHTML(body string, maxResults int) []webSearchItem {
-	// Drop sponsored/ad blocks before parsing organic results.
+	// 解析自然搜索结果前先移除推广和广告块。
 	body = ddgSponsoredRE.ReplaceAllString(body, "")
 	linkMatches := ddgResultLinkRE.FindAllStringSubmatch(body, maxResults)
 	snippetMatches := ddgSnippetRE.FindAllStringSubmatch(body, maxResults)
@@ -923,7 +920,7 @@ func resolveDuckDuckGoURL(href string) string {
 	if href == "" {
 		return ""
 	}
-	// Protocol-relative redirect links: //duckduckgo.com/l/?uddg=<encoded>
+	// 协议相对的跳转链接：//duckduckgo.com/l/?uddg=<encoded>。
 	if strings.HasPrefix(href, "//") {
 		href = "https:" + href
 	}
@@ -938,7 +935,7 @@ func resolveDuckDuckGoURL(href string) string {
 			}
 		}
 	}
-	// Already a direct http(s) link.
+	// 已是直接的 HTTP(S) 链接。
 	if parsed.Scheme == "http" || parsed.Scheme == "https" {
 		return href
 	}
@@ -951,8 +948,8 @@ func extractTextFromHTML(body string) string {
 		title = strings.TrimSpace(cleanHTMLText(m[1]))
 	}
 
-	// Remove the head/title block entirely so its text does not duplicate into
-	// the body extraction, then strip comments and script/style blocks.
+	// 完整移除 head/title 块，避免其文本在正文提取中重复，
+	// 随后移除注释、脚本和样式块。
 	cleaned := htmlTitleRE.ReplaceAllString(body, "")
 	cleaned = htmlCommentRE.ReplaceAllString(cleaned, "")
 	cleaned = scriptBlockRE.ReplaceAllString(cleaned, "")

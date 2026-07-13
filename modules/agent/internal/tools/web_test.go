@@ -15,9 +15,8 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-// duckDuckGoResultHTML renders a fragment that mirrors the structure of
-// https://html.duckduckgo.com/html/ organic results: result__a anchors carry
-// the title and a redirect href, result__snippet anchors carry the snippet.
+// duckDuckGoResultHTML 渲染一个模拟 https://html.duckduckgo.com/html/ 自然搜索结果结构的片段：
+// result__a 锚点携带标题和跳转 href，result__snippet 锚点携带摘要。
 func duckDuckGoResultHTML(title string, target string, snippet string) string {
 	return `<div class="result">
   <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=` + target + `&rut=abc">` + title + `</a>
@@ -47,7 +46,7 @@ func TestParseDuckDuckGoHTMLExtractsResultsAndResolvesRedirects(t *testing.T) {
 	if items[1].URL != "https://example.org/page" {
 		t.Fatalf("second url mismatch: %#v", items[1])
 	}
-	// Sponsored/ad block must be excluded.
+	// 必须排除推广和广告块。
 	for _, item := range items {
 		if strings.Contains(item.URL, "ad.example.com") {
 			t.Fatalf("sponsored result leaked into organic results: %#v", item)
@@ -82,7 +81,7 @@ func TestRunWebSearchViaHTTPTestServer(t *testing.T) {
 		_, _ = io.WriteString(w, html)
 	}))
 	defer server.Close()
-	// Redirect the DDG endpoint at the test server for this test only.
+	// 仅在此测试中将 DDG 端点重定向到测试服务器。
 	previous := duckDuckGoHTMLEndpoint
 	duckDuckGoHTMLEndpoint = server.URL
 	defer func() { duckDuckGoHTMLEndpoint = previous }()
@@ -249,7 +248,7 @@ func TestRunWebFetchExtractsTitleAndText(t *testing.T) {
 func TestRunWebOpTimesOut(t *testing.T) {
 	started := time.Now()
 	_, err := runWebOp(context.Background(), func(ctx context.Context) (string, error) {
-		// Block until cancelled.
+		// 阻塞直到被取消。
 		<-ctx.Done()
 		return "", ctx.Err()
 	})
@@ -259,7 +258,7 @@ func TestRunWebOpTimesOut(t *testing.T) {
 	if !strings.Contains(err.Error(), "timed out") && !strings.Contains(err.Error(), "deadline") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should not wait much longer than hard timeout (+ small scheduling slack).
+	// 不应比硬性超时多等待太久，仅允许少量调度误差。
 	if time.Since(started) > webToolHardTimeout+3*time.Second {
 		t.Fatalf("timeout took too long: %s", time.Since(started))
 	}
@@ -359,7 +358,7 @@ func TestNewWebHTTPClientRejectsInvalidProxy(t *testing.T) {
 }
 
 func TestAnnotateWebErrorMentionsMissingProxy(t *testing.T) {
-	// proxyLabel("") peeks process env; isolate so developer proxies cannot flip the branch.
+	// proxyLabel("") 会读取进程环境变量；隔离环境以免开发者代理改变分支结果。
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
 		t.Setenv(key, "")
 	}
@@ -373,7 +372,7 @@ func TestAnnotateWebErrorMentionsMissingProxy(t *testing.T) {
 }
 
 func TestAnnotateWebErrorMentionsConfiguredEnvProxy(t *testing.T) {
-	// On Windows env keys are case-insensitive; set one and do not clear aliases afterward.
+	// Windows 环境变量键不区分大小写；设置一个键后不要再清除别名。
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:7890")
 	err := annotateWebError(fmt.Errorf(`Post "https://html.duckduckgo.com/html/": net/http: TLS handshake timeout`), "")
 	if err == nil || !strings.Contains(err.Error(), "proxy=env") {
@@ -401,20 +400,20 @@ func TestWebToolsRegisteredAsHighRisk(t *testing.T) {
 }
 
 func TestEffectiveWebOptionsMergePrecedence(t *testing.T) {
-	// Default fallback when neither arg nor run option is set.
+	// 未设置参数和运行选项时使用默认回退值。
 	if got := effectiveWebResultCount(ToolRunContext{}, 0); got != defaultWebResults {
 		t.Fatalf("default result count = %d, want %d", got, defaultWebResults)
 	}
-	// Explicit tool arg wins over run option.
+	// 显式工具参数优先于运行选项。
 	withOption := ToolRunContext{Reply: &methods.ReplyParams{Options: methods.ReplyOptions{WebSearchMaxResults: 3}}}
 	if got := effectiveWebResultCount(withOption, 5); got != 5 {
 		t.Fatalf("arg precedence result count = %d, want 5", got)
 	}
-	// Run option wins when arg omitted.
+	// 省略参数时运行选项优先。
 	if got := effectiveWebResultCount(withOption, 0); got != 3 {
 		t.Fatalf("run option result count = %d, want 3", got)
 	}
-	// Same precedence for fetch bytes.
+	// 抓取字节上限采用相同优先级。
 	fetchOption := ToolRunContext{Reply: &methods.ReplyParams{Options: methods.ReplyOptions{WebFetchMaxBytes: 1024}}}
 	if got := effectiveWebFetchBytes(fetchOption, 0); got != 1024 {
 		t.Fatalf("run option fetch bytes = %d, want 1024", got)
