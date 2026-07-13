@@ -8,7 +8,7 @@ import (
 	"redpanda/gateway/internal/gateway/app"
 )
 
-var version = "dev"
+var version = "0.2.0"
 
 func main() {
 	cfg := app.Config{

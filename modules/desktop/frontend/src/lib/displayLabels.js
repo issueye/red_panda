@@ -1,6 +1,7 @@
 const statusLabel = {
   active: '启用',
   approve: '已允许',
+  busy: '忙碌',
   cancelled: '已取消',
   cancelling: '取消中',
   closed: '已关闭',
@@ -12,13 +13,18 @@ const statusLabel = {
   deny: '已拒绝',
   disabled: '已停用',
   disconnected: '已断开',
+  draining: '排空中',
   error: '错误',
   failed: '失败',
   idle: '空闲',
   pending: '待处理',
+  queued: '排队中',
+  ready: '就绪',
   reset: '已重置',
   resolved: '已处理',
   running: '运行中',
+  stopped: '已停止',
+  unhealthy: '异常',
   unknown: '未知',
   waiting_permission: '等待授权',
 };
@@ -62,13 +68,7 @@ const sessionKindLabel = {
   fork: '分叉',
 };
 
-const subAgentBackendLabel = {
-  in_process: '进程内',
-  process_pool: '进程池',
-  runtime_process: '运行时进程',
-};
-
-/** Goal pipeline phase specialists (subagent.run name). */
+/** Goal pipeline Worker profiles. */
 const goalSpecialistLabel = {
   'goal-analyst': '目标分析师',
   'goal-planner': '目标规划师',
@@ -128,12 +128,8 @@ export function displaySessionKind(value) {
   return displayFrom(sessionKindLabel, value, '');
 }
 
-export function displaySubAgentBackend(value) {
-  return displayFrom(subAgentBackendLabel, value);
-}
-
 /** Prefer Chinese label for Goal phase specialists. */
-export function displayAgentName(value) {
+export function displayWorkerProfileName(value) {
   if (value == null || value === '') return '';
   const key = String(value).trim().toLowerCase().replaceAll('_', '-');
   return goalSpecialistLabel[key] || String(value);
@@ -142,3 +138,4 @@ export function displayAgentName(value) {
 export function displayEventKind(value) {
   return displayFrom(eventKindLabel, value);
 }
+  draining: '排空中',

@@ -6,7 +6,7 @@ import { classNames } from '../../lib/format.js';
 
 /**
  * Standalone conversation surface: timeline + optional composer.
- * Used by the main chat tab and each open subagent tab.
+ * Used by the main Run conversation.
  */
 export function ConversationView({
   className,

@@ -21,7 +21,7 @@ import (
 	"redpanda/protocol/permission"
 )
 
-type EventHandler func(events.Envelope)
+type EventHandler func(events.EnvelopeV2)
 
 type RequestHandler func(context.Context, string, json.RawMessage) (any, error)
 
@@ -86,8 +86,8 @@ func (c *Client) Initialize(ctx context.Context) error {
 	if err := c.ensureStarted(ctx); err != nil {
 		return err
 	}
-	_, err := c.call(ctx, methods.CoreInitialize, methods.InitializeParams{
-		ProtocolVersion: events.ProtocolVersion,
+	raw, err := c.call(ctx, methods.CoreInitialize, methods.InitializeParams{
+		ProtocolVersion: events.ProtocolVersionV2,
 		Client: methods.PeerInfo{
 			Name:    "red-panda-gateway",
 			Version: c.version,
@@ -96,77 +96,145 @@ func (c *Client) Initialize(ctx context.Context) error {
 			PermissionMode: "strict",
 		},
 		Capabilities: []methods.Capability{
-			{Name: methods.AgentEvent, Version: 1},
+			{Name: methods.RunExecute, Version: 1},
+			{Name: methods.RunCancel, Version: 1},
+			{Name: methods.WorkerList, Version: 1},
+			{Name: methods.WorkerAssignmentCancel, Version: 1},
+			{Name: methods.WorkerMessageSend, Version: 1},
+			{Name: methods.WorkerMessageReceive, Version: 1},
+			{Name: methods.WorkerPoolStatus, Version: 1},
 		},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	var result methods.InitializeResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode runtime initialize result: %w", err)
+	}
+	if result.ProtocolVersion != events.ProtocolVersionV2 {
+		return fmt.Errorf("runtime protocol version %q is incompatible with %q", result.ProtocolVersion, events.ProtocolVersionV2)
+	}
+	return nil
 }
 
-func (c *Client) Reply(ctx context.Context, params methods.ReplyParams) (methods.ReplyAccepted, error) {
-	return c.ReplyWithMode(ctx, "single_core", params)
+func (c *Client) Execute(ctx context.Context, params methods.RunExecuteParams) (methods.RunExecuteResult, error) {
+	return c.ExecuteWithMode(ctx, "single_core", params)
 }
 
-func (c *Client) ReplyWithMode(ctx context.Context, mode string, params methods.ReplyParams) (methods.ReplyAccepted, error) {
+func (c *Client) ExecuteWithMode(ctx context.Context, mode string, params methods.RunExecuteParams) (methods.RunExecuteResult, error) {
 	if normalizedRuntimeMode(mode) == "per_run_process" {
-		return c.replyPerRun(ctx, params)
+		return c.executePerRun(ctx, params)
 	}
 	if err := c.Initialize(ctx); err != nil {
-		return methods.ReplyAccepted{}, err
+		return methods.RunExecuteResult{}, err
 	}
-	raw, err := c.call(ctx, methods.AgentReply, params)
+	raw, err := c.call(ctx, methods.RunExecute, params)
 	if err != nil {
-		return methods.ReplyAccepted{}, err
+		return methods.RunExecuteResult{}, err
 	}
-	var accepted methods.ReplyAccepted
+	var accepted methods.RunExecuteResult
 	if err := json.Unmarshal(raw, &accepted); err != nil {
-		return methods.ReplyAccepted{}, err
+		return methods.RunExecuteResult{}, err
 	}
 	return accepted, nil
 }
 
-func (c *Client) Cancel(ctx context.Context, params methods.CancelParams) error {
+func (c *Client) CancelRun(ctx context.Context, params methods.RunCancelParams) (methods.RunCancelResult, error) {
 	if child := c.perRun(params.RunID); child != nil {
-		return child.Cancel(ctx, params)
+		return child.CancelRun(ctx, params)
 	}
 	if err := c.Initialize(ctx); err != nil {
-		return err
+		return methods.RunCancelResult{}, err
 	}
-	_, err := c.call(ctx, methods.AgentCancel, params)
-	return err
-}
-
-func (c *Client) SubAgents(ctx context.Context, params methods.SubAgentsParams) (methods.SubAgentsResult, error) {
-	if child := c.perRun(params.RunID); child != nil {
-		return child.SubAgents(ctx, params)
-	}
-	if err := c.Initialize(ctx); err != nil {
-		return methods.SubAgentsResult{}, err
-	}
-	raw, err := c.call(ctx, methods.AgentSubAgents, params)
+	raw, err := c.call(ctx, methods.RunCancel, params)
 	if err != nil {
-		return methods.SubAgentsResult{}, err
+		return methods.RunCancelResult{}, err
 	}
-	var result methods.SubAgentsResult
+	var result methods.RunCancelResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return methods.SubAgentsResult{}, err
+		return methods.RunCancelResult{}, err
 	}
 	return result, nil
 }
 
-func (c *Client) CancelSubAgent(ctx context.Context, params methods.SubAgentCancelParams) (methods.SubAgentCancelResult, error) {
+func (c *Client) Workers(ctx context.Context, params methods.WorkerListParams) (methods.WorkerListResult, error) {
 	if child := c.perRun(params.RunID); child != nil {
-		return child.CancelSubAgent(ctx, params)
+		return child.Workers(ctx, params)
 	}
 	if err := c.Initialize(ctx); err != nil {
-		return methods.SubAgentCancelResult{}, err
+		return methods.WorkerListResult{}, err
 	}
-	raw, err := c.call(ctx, methods.AgentSubAgentCancel, params)
+	raw, err := c.call(ctx, methods.WorkerList, params)
 	if err != nil {
-		return methods.SubAgentCancelResult{}, err
+		return methods.WorkerListResult{}, err
 	}
-	var result methods.SubAgentCancelResult
+	var result methods.WorkerListResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return methods.SubAgentCancelResult{}, err
+		return methods.WorkerListResult{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) CancelAssignment(ctx context.Context, params methods.WorkerAssignmentCancelParams) (methods.WorkerAssignmentCancelResult, error) {
+	if child := c.perRun(params.RunID); child != nil {
+		return child.CancelAssignment(ctx, params)
+	}
+	if err := c.Initialize(ctx); err != nil {
+		return methods.WorkerAssignmentCancelResult{}, err
+	}
+	raw, err := c.call(ctx, methods.WorkerAssignmentCancel, params)
+	if err != nil {
+		return methods.WorkerAssignmentCancelResult{}, err
+	}
+	var result methods.WorkerAssignmentCancelResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.WorkerAssignmentCancelResult{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) SendWorkerMessage(ctx context.Context, params methods.WorkerMessageSendParams) (methods.WorkerMessageSendResult, error) {
+	if err := c.Initialize(ctx); err != nil {
+		return methods.WorkerMessageSendResult{}, err
+	}
+	raw, err := c.call(ctx, methods.WorkerMessageSend, params)
+	if err != nil {
+		return methods.WorkerMessageSendResult{}, err
+	}
+	var result methods.WorkerMessageSendResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.WorkerMessageSendResult{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) ReceiveWorkerMessage(ctx context.Context, params methods.WorkerMessageReceiveParams) (methods.WorkerMessageReceiveResult, error) {
+	if err := c.Initialize(ctx); err != nil {
+		return methods.WorkerMessageReceiveResult{}, err
+	}
+	raw, err := c.call(ctx, methods.WorkerMessageReceive, params)
+	if err != nil {
+		return methods.WorkerMessageReceiveResult{}, err
+	}
+	var result methods.WorkerMessageReceiveResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.WorkerMessageReceiveResult{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) WorkerPoolStatus(ctx context.Context) (methods.WorkerPoolStatusResult, error) {
+	if err := c.Initialize(ctx); err != nil {
+		return methods.WorkerPoolStatusResult{}, err
+	}
+	raw, err := c.call(ctx, methods.WorkerPoolStatus, methods.WorkerPoolStatusParams{})
+	if err != nil {
+		return methods.WorkerPoolStatusResult{}, err
+	}
+	var result methods.WorkerPoolStatusResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.WorkerPoolStatusResult{}, err
 	}
 	return result, nil
 }
@@ -317,33 +385,33 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) replyPerRun(ctx context.Context, params methods.ReplyParams) (methods.ReplyAccepted, error) {
+func (c *Client) executePerRun(ctx context.Context, params methods.RunExecuteParams) (methods.RunExecuteResult, error) {
 	if params.RunID == "" {
-		return methods.ReplyAccepted{}, fmt.Errorf("run_id is required")
+		return methods.RunExecuteResult{}, fmt.Errorf("run_id is required")
 	}
 	var child *Client
-	child = New(c.command, c.args, c.version, func(event events.Envelope) {
+	child = New(c.command, c.args, c.version, func(event events.EnvelopeV2) {
 		if c.onEvent != nil {
 			c.onEvent(event)
 		}
 		// Release dedicated process on terminal events so multi-session slots free promptly.
-		if event.RootRunID == params.RunID && (event.Type == events.EventFinish || event.Type == events.EventError) {
+		if event.RunID == params.RunID && (event.Type == events.EventFinish || event.Type == events.EventError) {
 			go c.releasePerRun(params.RunID, child)
 		}
 	}, c.onRequest)
 	c.mu.Lock()
 	if _, exists := c.perRuns[params.RunID]; exists {
 		c.mu.Unlock()
-		return methods.ReplyAccepted{}, fmt.Errorf("per-run runtime already exists for %s", params.RunID)
+		return methods.RunExecuteResult{}, fmt.Errorf("per-run runtime already exists for %s", params.RunID)
 	}
 	c.perRuns[params.RunID] = child
 	c.mu.Unlock()
 
-	accepted, err := child.Reply(ctx, params)
+	accepted, err := child.Execute(ctx, params)
 	if err != nil {
 		c.removePerRun(params.RunID, child)
 		_ = child.Shutdown(context.Background())
-		return methods.ReplyAccepted{}, err
+		return methods.RunExecuteResult{}, err
 	}
 	return accepted, nil
 }
@@ -635,14 +703,14 @@ func (c *Client) writeRuntimeResponse(resp jsonrpc.Response) error {
 }
 
 func (c *Client) handleNotification(line []byte, method string) {
-	if method != methods.AgentEvent || c.onEvent == nil {
+	if method != methods.RunEvent || c.onEvent == nil {
 		return
 	}
 	var note jsonrpc.Notification
 	if err := json.Unmarshal(line, &note); err != nil {
 		return
 	}
-	var event events.Envelope
+	var event events.EnvelopeV2
 	if err := json.Unmarshal(note.Params, &event); err != nil {
 		return
 	}

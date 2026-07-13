@@ -2,14 +2,14 @@ package runtime
 
 import (
 	"fmt"
-	"redpanda/agent/internal/subagent"
+	"redpanda/agent/internal/worker"
 	"strings"
 
 	"redpanda/protocol/methods"
 )
 
 // goalSpecialist 是内置 Goal 流程角色（文档 32，第 2.10 节）。
-// 当 subagent.run 的名称匹配 Key（如 goal-analyst）时应用。
+// 当 worker.delegate 的 profile_key 匹配 Key（如 goal-analyst）时应用。
 type goalSpecialist struct {
 	Key             string
 	NameZH          string
@@ -17,10 +17,10 @@ type goalSpecialist struct {
 	DefaultMaxTurns int
 	// 非空时作为允许列表：仅暴露这些工具，拒绝列表仍然生效。
 	Allowlist []string
-	// ExtraDenylist 会叠加到 subagent.RunDenylist。
+	// ExtraDenylist 会叠加到 worker.DelegatedDenylist。
 	ExtraDenylist []string
 	SystemPrompt  string
-	// CapMaxTurns 硬性限制专业子代理预算，0 表示仅使用 effectiveSubagentToolTurns。
+	// CapMaxTurns 硬性限制专业子代理预算，0 表示仅使用 effectiveWorkerToolTurns。
 	CapMaxTurns int
 }
 
@@ -38,8 +38,7 @@ var workspaceWriteTools = []string{
 	"workspace.apply_patch",
 }
 
-// contextShareTools 是目标暂存区工具。使用允许列表的专业子代理必须显式包含这些工具，
-// 否则策略会将其隐藏，尽管它们不在 subagent.RunDenylist 中。
+// contextShareTools 是目标暂存区工具。使用允许列表的专业 Worker 必须显式包含这些工具。
 var contextShareTools = []string{
 	"context.read",
 	"context.search",
@@ -54,7 +53,7 @@ func withContextShareTools(base ...string) []string {
 	return out
 }
 
-// builtinGoalSpecialists 是五个阶段的内置专家，Key 与 Gateway 的 agent_definitions 匹配。
+// builtinGoalSpecialists 是五个阶段的内置专家，Key 与 Worker Profiles 匹配。
 var builtinGoalSpecialists = map[string]goalSpecialist{
 	"goal-analyst": {
 		Key: "goal-analyst", NameZH: "目标分析师", Phase: "analyze",
@@ -68,7 +67,7 @@ Role: analyze the user request and codebase only. Read-only for workspace files.
 Rules:
 - Do NOT modify files or run write/shell commands.
 - Do NOT call goal.* or todo.* tools.
-- Do NOT spawn nested subagents.
+- Do NOT spawn nested Workers.
 - Use context.write / context.replace to persist key findings on the shared goal scratchpad.
 - Produce a clear final report the parent can trust.
 
@@ -122,7 +121,7 @@ Role: implement ONLY the current assigned step. Prefer minimal diffs.
 
 Rules:
 - Stay inside the step scope; do not rewrite unrelated modules.
-- Do NOT call goal.* / todo.* / subagent.* (parent owns session state).
+- Do NOT call goal.* / todo.* / Worker.* (parent owns session state).
 - End with a concrete ImplementationReport the verifier can check.
 
 Preferred final report JSON:
@@ -149,7 +148,7 @@ Rules:
 - Do NOT edit product source in v1 (no write/edit/apply_patch).
 - shell.exec is only for tests/builds that validate the step.
 - Use context.read for implementer handoff notes; context.write for verification outcomes.
-- Do NOT call goal.* / todo.* / subagent.*.
+- Do NOT call goal.* / todo.* / Worker.*.
 
 Preferred final report JSON:
 {
@@ -196,35 +195,35 @@ func lookupGoalSpecialist(name string) (goalSpecialist, bool) {
 	return spec, ok
 }
 
-// resolveGoalSpecialist 将 Gateway 管理的 agent_definitions 合并到内置专家配置。
+// resolveGoalSpecialist 将 Gateway 管理的 Worker Profiles 合并到内置专家配置。
 // 存在时，提示词、默认最大回合、阶段和显示名称取自 Gateway；工具允许和拒绝策略仍由 Runtime
 // 管理（共享上下文工具与写入隔离），避免设置意外移除安全约束。
-func resolveGoalSpecialist(defs []methods.AgentDefinitionRef, name string) (goalSpecialist, bool) {
+func resolveGoalSpecialist(profiles []methods.WorkerProfileRef, name string) (goalSpecialist, bool) {
 	base, ok := lookupGoalSpecialist(name)
 	if !ok {
 		return goalSpecialist{}, false
 	}
 	key := normalizeGoalSpecialistKey(name)
-	for _, def := range defs {
-		if normalizeGoalSpecialistKey(def.Key) != key {
+	for _, profile := range profiles {
+		if normalizeGoalSpecialistKey(profile.Key) != key {
 			continue
 		}
-		if !def.Enabled {
+		if !profile.Enabled {
 			return goalSpecialist{}, false
 		}
-		if prompt := strings.TrimSpace(def.SystemPrompt); prompt != "" {
+		if prompt := strings.TrimSpace(profile.SystemPrompt); prompt != "" {
 			base.SystemPrompt = prompt
 		}
-		if def.DefaultMaxTurns > 0 {
-			base.DefaultMaxTurns = def.DefaultMaxTurns
+		if profile.DefaultMaxTurns > 0 {
+			base.DefaultMaxTurns = profile.DefaultMaxTurns
 		}
-		if phase := strings.TrimSpace(def.Phase); phase != "" {
+		if phase := strings.TrimSpace(profile.Phase); phase != "" {
 			base.Phase = phase
 		}
-		if nameZH := strings.TrimSpace(def.NameZH); nameZH != "" {
+		if nameZH := strings.TrimSpace(profile.NameZH); nameZH != "" {
 			base.NameZH = nameZH
 		}
-		if display := strings.TrimSpace(def.Name); display != "" && base.NameZH == "" {
+		if display := strings.TrimSpace(profile.Name); display != "" && base.NameZH == "" {
 			base.NameZH = display
 		}
 		return base, true
@@ -294,13 +293,11 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 	// 会话级工具仅供根代理使用。
 	child.Options.TodoContext = nil
 	disableGoalPipelineForChild(&child.Options)
-	child.Options.SpawnSubAgents = false
-	child.Options.SubAgentBackend = ""
 	child.Options.MaxToolTurns = maxTurns
 
 	// 拒绝列表始终包含全局子代理拒绝列表和专家额外项。
 	// context.* 工具被有意排除在拒绝列表外；使用允许列表的专家也必须列出它们（见 withContextShareTools）。
-	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, subagent.RunDenylist...)
+	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, worker.DelegatedDenylist...)
 	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, spec.ExtraDenylist...)
 
 	if len(spec.Allowlist) > 0 {
@@ -319,7 +316,7 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 	}
 	budgetNote := fmt.Sprintf(
 		"\n\nSpecialist key=%s phase=%s (%s). Tool-turn budget=%d. "+
-			"Return one final report for the parent. Do not nest subagents.",
+			"Return one final report for the parent. Do not nest Workers.",
 		spec.Key, spec.Phase, spec.NameZH, maxTurns,
 	)
 

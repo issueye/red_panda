@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   latestActiveRun,
-  latestRootSeq,
+  latestRunSeq,
   normalizeHistoryMessage,
   normalizePermission,
   normalizeRun,
@@ -37,10 +37,18 @@ test('normalizeHistoryMessage extracts first text block', () => {
     id: 'm1',
     role: 'assistant',
     seq: 3,
+    run_id: 'run_1',
+    assignment_id: 'assignment_1',
+    worker_id: 'worker-01',
+    profile_key: 'reviewer',
+    run_seq: 5,
     content: [{ type: 'text', text: 'hello' }],
   });
   assert.equal(got.text, 'hello');
   assert.equal(got.messageSeq, 3);
+  assert.equal(got.assignmentId, 'assignment_1');
+  assert.equal(got.workerId, 'worker-01');
+  assert.equal(got.runSeq, 5);
 });
 
 test('normalizeToolCall and normalizeRun keep status fields', () => {
@@ -48,19 +56,23 @@ test('normalizeToolCall and normalizeRun keep status fields', () => {
     id: 't1',
     tool_name: 'workspace.list',
     status: 'completed',
-    started_seq: 2,
+    run_id: 'r1',
+    assignment_id: 'assignment_1',
+    worker_id: 'worker-01',
+    run_seq: 2,
   });
   assert.equal(tool.name, 'workspace.list');
-  assert.equal(tool.rootSeq, 2);
+  assert.equal(tool.runSeq, 2);
+  assert.equal(tool.assignmentId, 'assignment_1');
 
   const run = normalizeRun({
     id: 'r1',
     session_id: 's1',
     status: 'running',
-    last_root_seq: 9,
+    last_run_seq: 9,
   });
   assert.equal(run.sessionId, 's1');
-  assert.equal(run.lastRootSeq, 9);
+  assert.equal(run.lastRunSeq, 9);
 });
 
 test('normalizePermission defaults summary', () => {
@@ -78,7 +90,7 @@ test('latestActiveRun picks newest running run', () => {
   assert.equal(got.id, 'c');
 });
 
-test('latestRootSeq reduces max last_root_seq', () => {
-  assert.equal(latestRootSeq([{ last_root_seq: 2 }, { last_root_seq: 7 }], 1), 7);
-  assert.equal(latestRootSeq(null, 4), 4);
+test('latestRunSeq reduces max last_run_seq', () => {
+  assert.equal(latestRunSeq([{ last_run_seq: 2 }, { last_run_seq: 7 }], 1), 7);
+  assert.equal(latestRunSeq(null, 4), 4);
 });

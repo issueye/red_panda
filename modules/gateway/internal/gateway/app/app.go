@@ -44,7 +44,7 @@ func Run(ctx context.Context, cfg Config) error {
 	hub := eventhub.New()
 	repos := repository.NewSet(db)
 	var services service.Set
-	runtime := runtimeclient.New(agentCommand(cfg.AgentCommand), cfg.AgentArgs, cfg.Version, func(event events.Envelope) {
+	runtime := runtimeclient.New(agentCommand(cfg.AgentCommand), cfg.AgentArgs, cfg.Version, func(event events.EnvelopeV2) {
 		services.Run.HandleRuntimeEvent(event)
 	}, func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		switch method {
@@ -172,12 +172,12 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/skills/:name", controllers.Skills.Get)
 	api.PUT("/skills/:name", controllers.Skills.Update)
 	api.DELETE("/skills/:name", controllers.Skills.Delete)
-	api.GET("/agents", controllers.Agents.List)
-	api.GET("/agents/enabled", controllers.Agents.ListEnabled)
-	api.POST("/agents", controllers.Agents.Create)
-	api.GET("/agents/:id", controllers.Agents.Get)
-	api.PUT("/agents/:id", controllers.Agents.Update)
-	api.DELETE("/agents/:id", controllers.Agents.Delete)
+	api.GET("/worker-profiles", controllers.WorkerProfiles.List)
+	api.GET("/worker-profiles/enabled", controllers.WorkerProfiles.ListEnabled)
+	api.POST("/worker-profiles", controllers.WorkerProfiles.Create)
+	api.GET("/worker-profiles/:id", controllers.WorkerProfiles.Get)
+	api.PUT("/worker-profiles/:id", controllers.WorkerProfiles.Update)
+	api.DELETE("/worker-profiles/:id", controllers.WorkerProfiles.Delete)
 	api.GET("/runs/:id", controllers.Run.Get)
 	api.GET("/runs/:id/events", controllers.Run.Events)
 	api.GET("/runs/:id/permissions", controllers.Permission.ListByRun)

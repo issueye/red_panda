@@ -157,8 +157,8 @@ func NewSessionService(repos repository.Set, runtime *runtimeclient.Client) Sess
 	return SessionService{repos: repos, runtime: runtime}
 }
 
-// pauseSessionForCompact stops the session's active root run and all subagents,
-// then waits until the session is idle so history can be summarized consistently.
+// pauseSessionForCompact stops every active run. Runtime owns cancellation of
+// all Assignments associated with each run.
 // When the runtime client is unavailable, active run records are force-finished.
 func (s SessionService) pauseSessionForCompact(sessionID string) (int, error) {
 	// Authoritative goal pause even when force-finish has no Runtime event.
@@ -185,20 +185,7 @@ func (s SessionService) pauseSessionForCompact(sessionID string) (int, error) {
 	defer cancel()
 
 	for _, run := range active {
-		if res, listErr := s.runtime.SubAgents(ctx, methods.SubAgentsParams{RunID: run.ID}); listErr == nil {
-			for _, item := range res.Items {
-				status := strings.ToLower(strings.TrimSpace(item.Status))
-				if status != "running" && status != "waiting_permission" && status != "cancelling" {
-					continue
-				}
-				_, _ = s.runtime.CancelSubAgent(ctx, methods.SubAgentCancelParams{
-					RunID:      run.ID,
-					SubAgentID: item.SubAgentID,
-					Reason:     "session compact pause",
-				})
-			}
-		}
-		_ = s.runtime.Cancel(ctx, methods.CancelParams{
+		_, _ = s.runtime.CancelRun(ctx, methods.RunCancelParams{
 			RunID:  run.ID,
 			Reason: "session compact pause",
 		})

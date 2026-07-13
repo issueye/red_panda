@@ -14,10 +14,11 @@ type ToolService struct {
 
 type ToolCallDTO struct {
 	ID           string         `json:"id"`
-	RootRunID    string         `json:"root_run_id"`
+	RunID        string         `json:"run_id"`
 	SessionID    string         `json:"session_id"`
-	AgentID      string         `json:"agent_id,omitempty"`
-	AgentRole    string         `json:"agent_role,omitempty"`
+	WorkerID     string         `json:"worker_id,omitempty"`
+	AssignmentID string         `json:"assignment_id,omitempty"`
+	ProfileKey   string         `json:"profile_key,omitempty"`
 	ToolName     string         `json:"tool_name"`
 	DisplayName  string         `json:"display_name,omitempty"`
 	Risk         string         `json:"risk,omitempty"`
@@ -40,8 +41,8 @@ func NewToolService(repos repository.Set) ToolService {
 	return ToolService{repos: repos}
 }
 
-func (s ToolService) ListByRun(rootRunID string, limit int) ([]ToolCallDTO, error) {
-	rows, err := s.repos.ToolCalls.ListByRun(rootRunID, limit)
+func (s ToolService) ListByRun(runID string, limit int) ([]ToolCallDTO, error) {
+	rows, err := s.repos.ToolCalls.ListByRun(runID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -77,10 +78,11 @@ func toolCallDTO(row model.ToolCall) (ToolCallDTO, error) {
 	}
 	return ToolCallDTO{
 		ID:           row.ID,
-		RootRunID:    row.RootRunID,
+		RunID:        row.RunID,
 		SessionID:    row.SessionID,
-		AgentID:      row.AgentID,
-		AgentRole:    row.AgentRole,
+		WorkerID:     row.WorkerID,
+		AssignmentID: row.AssignmentID,
+		ProfileKey:   row.ProfileKey,
 		ToolName:     row.ToolName,
 		DisplayName:  row.DisplayName,
 		Risk:         row.Risk,

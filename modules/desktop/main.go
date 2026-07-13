@@ -13,7 +13,7 @@ import (
 var assets embed.FS
 
 func main() {
-	desktop := desktopapp.New("0.1.0")
+	desktop := desktopapp.New("0.2.0")
 
 	app := application.New(application.Options{
 		Name:        "red_panda",

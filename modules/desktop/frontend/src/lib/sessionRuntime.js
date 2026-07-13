@@ -3,13 +3,6 @@
  * Enables concurrent multi-session runs without sharing one global chat state.
  */
 
-export const MAIN_CONVERSATION_TAB = {
-  id: 'main',
-  kind: 'main',
-  title: '主对话',
-  closable: false,
-};
-
 /**
  * @param {Partial<ReturnType<typeof createEmptySessionRuntime>>} [overrides]
  */
@@ -19,12 +12,11 @@ export function createEmptySessionRuntime(overrides = {}) {
     tools: [],
     permissions: [],
     runs: [],
-    subAgents: [],
-    conversationTabs: [MAIN_CONVERSATION_TAB],
-    activeConversationTab: 'main',
+    assignmentsById: {},
+    assignmentOrder: [],
     running: false,
     currentRunId: '',
-    rootSeq: 1,
+    runSeq: 0,
     runEventsByRun: {},
     runEventsLoading: {},
     runEventsError: {},
@@ -74,22 +66,10 @@ export function patchSessionRuntimeMap(map, sessionId, patch) {
 
 /**
  * Resolve which session an event belongs to.
- * @param {object} eventPayload agent event envelope (has session_id / root_run_id)
- * @param {Record<string, object>} map
- * @param {string} fallbackSessionId
+ * @param {object} eventPayload v0.2 run event envelope (requires session_id)
  */
-export function resolveEventSessionId(eventPayload, map, fallbackSessionId = '') {
-  const direct = eventPayload?.session_id || eventPayload?.sessionId || '';
-  if (direct) return direct;
-
-  const runId = eventPayload?.root_run_id || eventPayload?.run_id || '';
-  if (runId && map) {
-    for (const [sessionId, runtime] of Object.entries(map)) {
-      if (runtime.currentRunId === runId) return sessionId;
-      if ((runtime.runs || []).some((run) => run.id === runId)) return sessionId;
-    }
-  }
-  return fallbackSessionId || '';
+export function resolveEventSessionId(eventPayload) {
+  return eventPayload?.session_id || '';
 }
 
 /**
@@ -101,13 +81,13 @@ export function collectResumeCursors(map) {
   for (const runtime of Object.values(map || {})) {
     for (const run of runtime.runs || []) {
       if (run.status === 'running' || run.status === 'waiting_permission') {
-        cursors[run.id] = Math.max(Number(cursors[run.id]) || 0, Number(run.lastRootSeq) || 0);
+        cursors[run.id] = Math.max(Number(cursors[run.id]) || 0, Number(run.lastRunSeq) || 0);
       }
     }
     if (runtime.running && runtime.currentRunId) {
       cursors[runtime.currentRunId] = Math.max(
         Number(cursors[runtime.currentRunId]) || 0,
-        Number(runtime.rootSeq) || 0,
+        Number(runtime.runSeq) || 0,
       );
     }
   }

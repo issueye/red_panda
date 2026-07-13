@@ -60,8 +60,6 @@ test('Gateway-backed desktop renders denied tool failure path @gateway-backed', 
         toolPolicy: 'allow_all',
         permissionMode: 'strict',
         providerProfileId: '',
-        spawnSubAgents: false,
-        subAgentBackend: 'in_process',
         model: '',
         toolAllowlist: '',
         toolDenylist: 'shell.exec',
@@ -219,8 +217,6 @@ test('Gateway-backed desktop keeps selected inactive provider profile after run.
         toolPolicy: 'risk_based',
         permissionMode: 'strict',
         providerProfileId: profileId,
-        spawnSubAgents: false,
-        subAgentBackend: 'in_process',
         model: '',
         toolAllowlist: '',
         toolDenylist: '',
@@ -291,107 +287,6 @@ test('Gateway-backed desktop cancels a waiting permission run @gateway-backed', 
     await page.getByTestId('right-tab-activity').click();
     const runRow = page.getByTestId('activity-run').filter({ hasText: '/permission cancel e2e' });
     await expect(runRow.getByTestId('activity-run-status')).toContainText('已取消', { timeout: 15000 });
-  } finally {
-    await page.close().catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await gateway.stop();
-  }
-});
-
-test('Gateway-backed desktop renders runtime_process subagent failure @gateway-backed', async ({ page }) => {
-  const missingSubAgent = path.join(process.cwd(), '..', '..', '..', 'bin', 'missing-red-panda-subagent.exe');
-  const gateway = await startGateway({
-    env: {
-      RED_PANDA_SUBAGENT_COMMAND: missingSubAgent,
-    },
-  });
-  try {
-    await page.addInitScript(() => {
-      window.localStorage.clear();
-      window.localStorage.setItem('red_panda_run_settings', JSON.stringify({
-        runtimeMode: 'single_core',
-        toolPolicy: 'risk_based',
-        permissionMode: 'strict',
-        providerProfileId: '',
-        spawnSubAgents: true,
-        subAgentBackend: 'runtime_process',
-        model: '',
-        toolAllowlist: '',
-        toolDenylist: '',
-      }));
-    });
-    await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
-
-    await page.getByTestId('chat-composer-input').fill('/subagent failure e2e');
-    await page.getByTestId('chat-composer-send').click();
-
-    const failedSubAgent = page.getByTestId('subagent-item').filter({ hasText: 'planner' });
-    await expect(failedSubAgent).toContainText('失败', { timeout: 20000 });
-    await expect(failedSubAgent).toContainText('runtime_process');
-    await expect(failedSubAgent).toContainText('runtime_process planner subagent failed');
-
-    await page.getByTestId('right-tab-activity').click();
-    const runRow = page.getByTestId('activity-run').filter({ hasText: '/subagent failure e2e' });
-    await expect(runRow).toBeVisible({ timeout: 15000 });
-    if (await runRow.getByTestId('activity-event-timeline').count() === 0) {
-      await runRow.getByTestId('activity-run-toggle').click();
-    }
-    const timeline = runRow.getByTestId('activity-event-timeline');
-    await expect(timeline).toContainText('subagent_update', { timeout: 15000 });
-    await expect(timeline).toContainText('missing-red-panda-subagent');
-    await expect(timeline).toContainText('子代理 · planner');
-  } finally {
-    await page.close().catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await gateway.stop();
-  }
-});
-
-test('Gateway-backed desktop cancels a running subagent @gateway-backed', async ({ page }) => {
-  const gateway = await startGateway({
-    env: {
-      RED_PANDA_PLANNER_DRAFT_DELAY_MS: '15000',
-    },
-  });
-  try {
-    await page.addInitScript(() => {
-      window.localStorage.clear();
-      window.localStorage.setItem('red_panda_run_settings', JSON.stringify({
-        runtimeMode: 'single_core',
-        toolPolicy: 'risk_based',
-        permissionMode: 'strict',
-        providerProfileId: '',
-        spawnSubAgents: true,
-        subAgentBackend: 'in_process',
-        model: '',
-        toolAllowlist: '',
-        toolDenylist: '',
-      }));
-    });
-    await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
-
-    await page.getByTestId('chat-composer-input').fill('/subagent cancel child e2e');
-    await page.getByTestId('chat-composer-send').click();
-
-    const planner = page.getByTestId('subagent-item').filter({ hasText: 'planner' });
-    await expect(planner).toContainText('运行中', { timeout: 15000 });
-    await expect(planner.getByTestId('subagent-cancel')).toBeEnabled();
-    await planner.getByTestId('subagent-cancel').click();
-    await expect(planner).toContainText('已取消', { timeout: 15000 });
-    await expect(planner).toContainText('planner subagent cancelled');
-
-    await page.getByTestId('right-tab-activity').click();
-    const runRow = page.getByTestId('activity-run').filter({ hasText: '/subagent cancel child e2e' });
-    await expect(runRow).toBeVisible({ timeout: 15000 });
-    if (await runRow.getByTestId('activity-event-timeline').count() === 0) {
-      await runRow.getByTestId('activity-run-toggle').click();
-    }
-    const timeline = runRow.getByTestId('activity-event-timeline');
-    await expect(timeline).toContainText('subagent_update', { timeout: 15000 });
-    await expect(timeline).toContainText('planner subagent cancelled');
-    await expect(timeline).toContainText('子代理 · planner');
   } finally {
     await page.close().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -474,7 +369,7 @@ async function resolvePermissionOverWebSocket(baseURL, payload) {
   try {
     await sendWebSocketRequest(socket, pending, 'auth', undefined, {
       token: '',
-      client: { kind: 'playwright', name: 'red_panda_e2e', version: '0.1.0' },
+      client: { kind: 'playwright', name: 'red_panda_e2e', version: '0.2.0' },
     });
     await sendWebSocketRequest(socket, pending, 'request', 'permission.resolve', payload);
   } finally {

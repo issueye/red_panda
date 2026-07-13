@@ -1,5 +1,5 @@
 // Split from SettingsPanel.jsx (checklist R7c)
-import { ModuleHeader } from './shared.jsx';
+import { ModuleHeader, SettingCheck } from './shared.jsx';
 import { Button } from '../ui/button.jsx';
 import { EmptyState } from '../ui/feedback.jsx';
 import { Badge } from '../ui/badge.jsx';
@@ -9,6 +9,8 @@ import { clearDiagnosticLogs, defaultLlmLogDirHint } from '../../lib/diagnosticL
 export function LogsTab({
   diagnosticLogs,
   setDiagnosticLogs,
+  settings,
+  updateSetting,
 }) {
   return (
     <>

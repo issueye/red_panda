@@ -189,28 +189,25 @@ export function useSessionActions({
     await loadSessionState(normalized.id);
   }, [currentSessionId, loadSessionState, sessions, setCurrentSessionId, setSessions]);
 
-  /**
-   * Pause this session's root run and all subagents before context summary.
-   * Gateway also pauses server-side; Desktop updates local projection promptly.
-   */
+  /** Pause the Run before context summary; Run cancellation owns all Assignments. */
   const pauseSessionForCompact = useCallback(async (sessionId) => {
     const rt = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
     const runId = rt.currentRunId || '';
-    const activeSubs = (rt.subAgents || []).filter((item) => (
+    const activeAssignments = Object.values(rt.assignmentsById || {}).filter((item) => (
       item?.status === 'running' || item?.status === 'waiting_permission' || item?.status === 'cancelling'
     ));
 
-    if (!runId && activeSubs.length === 0 && !rt.running) {
-      return { paused: false, runId: '', subAgents: 0 };
+    if (!runId && activeAssignments.length === 0 && !rt.running) {
+      return { paused: false, runId: '', assignments: 0 };
     }
 
-    appendDiagnosticLog('info', '摘要前暂停会话主代理与子代理', {
+    appendDiagnosticLog('info', '摘要前暂停运行与 Worker 工作分配', {
       source: 'compact',
       detail: {
         sessionId,
         runId,
-        subAgentCount: activeSubs.length,
-        subAgentIds: activeSubs.map((item) => item.id),
+        assignmentCount: activeAssignments.length,
+        assignmentIds: activeAssignments.map((item) => item.id),
       },
     });
 
@@ -219,19 +216,11 @@ export function useSessionActions({
       ...prev,
       compacting: true,
       running: false,
-      subAgents: (prev.subAgents || []).map((item) => (
+      assignmentsById: Object.fromEntries(Object.entries(prev.assignmentsById || {}).map(([id, item]) => [id,
         item.status === 'running' || item.status === 'waiting_permission'
           ? { ...item, status: 'cancelling', summary: '摘要前暂停' }
-          : item
-      )),
+          : item])),
     }));
-
-    // Cancel subagents first, then the root run (mirrors gateway order).
-    await Promise.all(activeSubs.map((agent) => request('subagent.cancel', {
-      run_id: agent.rootRunId || runId,
-      subagent_id: agent.id,
-      reason: 'session compact pause',
-    }).catch(() => null)));
 
     if (runId) {
       await request('run.cancel', {
@@ -245,10 +234,10 @@ export function useSessionActions({
     while (Date.now() < deadline) {
       const latest = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
       const stillRunning = latest.running;
-      const stillActiveSubs = (latest.subAgents || []).some((item) => (
+      const stillActiveAssignments = Object.values(latest.assignmentsById || {}).some((item) => (
         item?.status === 'running' || item?.status === 'waiting_permission' || item?.status === 'cancelling'
       ));
-      if (!stillRunning && !stillActiveSubs) break;
+      if (!stillRunning && !stillActiveAssignments) break;
       await new Promise((resolve) => window.setTimeout(resolve, 120));
     }
 
@@ -257,14 +246,13 @@ export function useSessionActions({
       running: false,
       currentRunId: '',
       compacting: true,
-      subAgents: (prev.subAgents || []).map((item) => (
+      assignmentsById: Object.fromEntries(Object.entries(prev.assignmentsById || {}).map(([id, item]) => [id,
         item.status === 'running' || item.status === 'waiting_permission' || item.status === 'cancelling'
           ? { ...item, status: 'cancelled', summary: '已为上下文摘要暂停' }
-          : item
-      )),
+          : item])),
     }));
 
-    return { paused: true, runId, subAgents: activeSubs.length };
+    return { paused: true, runId, assignments: activeAssignments.length };
   }, [patchRuntime, request, sessionRuntimesRef]);
 
   const compactSession = useCallback(async ({ silent = false } = {}) => {
@@ -309,7 +297,7 @@ export function useSessionActions({
                 id: `compact_pause_${Date.now()}`,
                 role: 'assistant',
                 agent: 'system',
-                text: '已暂停当前会话与子代理并完成上下文摘要。可继续发送下一条消息。',
+                text: '已暂停当前会话与关联 Worker Assignment，并完成上下文摘要。可继续发送下一条消息。',
               },
             ]
           : prev.messages,
@@ -451,7 +439,6 @@ export function useSessionActions({
       try {
         const result = await continueGoal(cmd.extraText || '', {
           require_permission: cmd.requirePermission,
-          spawn_subagents: cmd.spawnSubAgents,
         });
         const nextRunId = result?.run_id || '';
         patchRuntime(sessionId, (rt) => ({
@@ -484,7 +471,6 @@ export function useSessionActions({
     const inputText = cmd.inputText || text;
     const optionOverrides = {
       require_permission: cmd.requirePermission,
-      spawn_subagents: cmd.spawnSubAgents,
     };
     if (cmd.action === 'start_goal') {
       optionOverrides.create_goal = true;
@@ -498,7 +484,8 @@ export function useSessionActions({
       ...rt,
       draft: '',
       running: true,
-      subAgents: [],
+      assignmentsById: {},
+      assignmentOrder: [],
       messages: [
         ...rt.messages,
         { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: displayText },
@@ -551,7 +538,7 @@ export function useSessionActions({
                 runtime_mode: result?.runtime_mode || runSettings.runtimeMode,
                 status: 'running',
                 input: displayText,
-                last_root_seq: result?.root_seq || rt.rootSeq,
+                last_run_seq: result?.run_seq || rt.runSeq,
                 message_count: 1,
                 tool_count: 0,
                 started_at: new Date().toISOString(),

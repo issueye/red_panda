@@ -6,7 +6,7 @@ import {
 } from '../lib/sessionRuntime.js';
 import {
   latestActiveRun,
-  latestRootSeq,
+  latestRunSeq,
   normalizeHistoryMessage,
   normalizePermission,
   normalizeRun,
@@ -22,7 +22,7 @@ import {
 export const INITIAL_BOOTSTRAP_SESSION_ID = 'local-design';
 
 export const initialSessions = [
-  { id: INITIAL_BOOTSTRAP_SESSION_ID, title: '架构', subtitle: '本地任务与子代理' },
+  { id: INITIAL_BOOTSTRAP_SESSION_ID, title: '架构', subtitle: '本地任务与 Worker' },
 ];
 
 /**
@@ -34,7 +34,7 @@ export const initialSessions = [
  *   patchRuntime: (sessionId: string, updater: (prev: any) => any) => void,
  *   workspaceRootRef: { current: string },
  *   loadProviderProfiles: () => Promise<any>,
- *   loadAgents: () => Promise<any>,
+ *   loadWorkerProfiles: () => Promise<any>,
  *   loadMcpServers: () => Promise<any>,
  *   loadSkills: (workspaceRoot?: string) => Promise<any>,
  * }} options
@@ -43,7 +43,7 @@ export function useSessionBootstrap({
   patchRuntime,
   workspaceRootRef,
   loadProviderProfiles,
-  loadAgents,
+  loadWorkerProfiles,
   loadMcpServers,
   loadSkills,
 }) {
@@ -114,7 +114,7 @@ export function useSessionBootstrap({
           runs: normalizedRuns,
           running: Boolean(activeRun) || prev.running,
           currentRunId: activeRun?.id || prev.currentRunId || '',
-          rootSeq: latestRootSeq(serverRuns, prev.rootSeq || 1),
+          runSeq: latestRunSeq(serverRuns, prev.runSeq || 0),
           todos: todoItems,
           todoOpenCount: todoOpen,
           todosHydrated: true,
@@ -185,7 +185,7 @@ export function useSessionBootstrap({
           loadGlobalPendingPermissions();
         }
         loadProviderProfiles?.();
-        loadAgents?.();
+        loadWorkerProfiles?.();
         loadMcpServers?.();
         loadSkills?.(nextWorkspace?.root_path || nextWorkspace?.root || '');
       })

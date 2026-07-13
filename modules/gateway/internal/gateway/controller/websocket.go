@@ -104,10 +104,10 @@ func (s *wsSession) handleRequest(ctx context.Context, msg protows.Envelope) {
 		s.handleRunResume(msg)
 	case protows.MethodRunCancel:
 		s.handleRunCancel(ctx, msg)
-	case protows.MethodSubAgents:
-		s.handleSubAgents(ctx, msg)
-	case protows.MethodSubAgentCancel:
-		s.handleSubAgentCancel(ctx, msg)
+	case protows.MethodWorkerList:
+		s.handleWorkerList(ctx, msg)
+	case protows.MethodAssignmentCancel:
+		s.handleAssignmentCancel(ctx, msg)
 	case protows.MethodPermissionResolve:
 		s.handlePermissionResolve(ctx, msg)
 	default:
@@ -172,38 +172,39 @@ func (s *wsSession) handleRunCancel(ctx context.Context, msg protows.Envelope) {
 	s.enqueue(response(msg.ID, map[string]any{"accepted": true, "run_id": payload.RunID}))
 }
 
-func (s *wsSession) handleSubAgents(ctx context.Context, msg protows.Envelope) {
-	var payload protows.SubAgentsPayload
+func (s *wsSession) handleWorkerList(ctx context.Context, msg protows.Envelope) {
+	var payload protows.WorkerListPayload
 	if len(msg.Payload) > 0 {
 		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			s.enqueue(errorMessage(msg.ID, "invalid_payload", "invalid subagents.list payload"))
+			s.enqueue(errorMessage(msg.ID, "invalid_payload", "invalid worker.list payload"))
 			return
 		}
 	}
-	result, err := s.services.Run.SubAgents(ctx, methods.SubAgentsParams{
-		RunID:      payload.RunID,
-		SubAgentID: payload.SubAgentID,
+	result, err := s.services.Run.Workers(ctx, methods.WorkerListParams{
+		RunID:        payload.RunID,
+		WorkerID:     payload.WorkerID,
+		AssignmentID: payload.AssignmentID,
 	})
 	if err != nil {
-		s.enqueue(errorMessage(msg.ID, "subagents_list_failed", err.Error()))
+		s.enqueue(errorMessage(msg.ID, "worker_list_failed", err.Error()))
 		return
 	}
 	s.enqueue(response(msg.ID, result))
 }
 
-func (s *wsSession) handleSubAgentCancel(ctx context.Context, msg protows.Envelope) {
-	var payload protows.SubAgentCancelPayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RunID == "" || payload.SubAgentID == "" {
-		s.enqueue(errorMessage(msg.ID, "invalid_payload", "invalid subagent.cancel payload"))
+func (s *wsSession) handleAssignmentCancel(ctx context.Context, msg protows.Envelope) {
+	var payload protows.AssignmentCancelPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RunID == "" || payload.AssignmentID == "" {
+		s.enqueue(errorMessage(msg.ID, "invalid_payload", "invalid worker.assignment.cancel payload"))
 		return
 	}
-	result, err := s.services.Run.CancelSubAgent(ctx, methods.SubAgentCancelParams{
-		RunID:      payload.RunID,
-		SubAgentID: payload.SubAgentID,
-		Reason:     payload.Reason,
+	result, err := s.services.Run.CancelAssignment(ctx, methods.WorkerAssignmentCancelParams{
+		RunID:        payload.RunID,
+		AssignmentID: payload.AssignmentID,
+		Reason:       payload.Reason,
 	})
 	if err != nil {
-		s.enqueue(errorMessage(msg.ID, "subagent_cancel_failed", err.Error()))
+		s.enqueue(errorMessage(msg.ID, "assignment_cancel_failed", err.Error()))
 		return
 	}
 	s.enqueue(response(msg.ID, result))
@@ -254,8 +255,8 @@ func (s *wsSession) replay(rootRunID string, afterSeq uint64) {
 	}
 }
 
-func (s *wsSession) sendEvent(event events.Envelope) {
-	if !s.markEventSent(event.RootRunID, event.RootSeq) {
+func (s *wsSession) sendEvent(event events.EnvelopeV2) {
+	if !s.markEventSent(event.RunID, event.RunSeq) {
 		return
 	}
 	raw, err := json.Marshal(event)
@@ -267,8 +268,8 @@ func (s *wsSession) sendEvent(event events.Envelope) {
 		Method:  protows.EventRun,
 		Payload: raw,
 		Meta: map[string]any{
-			"root_run_id": event.RootRunID,
-			"root_seq":    event.RootSeq,
+			"run_id":  event.RunID,
+			"run_seq": event.RunSeq,
 		},
 	})
 }

@@ -20,7 +20,7 @@ func NewToolCallRepository(db *gorm.DB) ToolCallRepository {
 	return ToolCallRepository{db: db}
 }
 
-func (r ToolCallRepository) Project(event events.Envelope) error {
+func (r ToolCallRepository) Project(event events.EnvelopeV2) error {
 	switch event.Type {
 	case events.EventToolStarted:
 		return r.projectStarted(event)
@@ -33,12 +33,12 @@ func (r ToolCallRepository) Project(event events.Envelope) error {
 	}
 }
 
-func (r ToolCallRepository) ListByRun(rootRunID string, limit int) ([]model.ToolCall, error) {
+func (r ToolCallRepository) ListByRun(runID string, limit int) ([]model.ToolCall, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
 	var rows []model.ToolCall
-	err := r.db.Where("root_run_id = ?", rootRunID).Order("started_seq asc").Limit(limit).Find(&rows).Error
+	err := r.db.Where("run_id = ?", runID).Order("started_seq asc").Limit(limit).Find(&rows).Error
 	return rows, err
 }
 
@@ -51,7 +51,7 @@ func (r ToolCallRepository) ListBySession(sessionID string, limit int) ([]model.
 	return rows, err
 }
 
-func (r ToolCallRepository) projectStarted(event events.Envelope) error {
+func (r ToolCallRepository) projectStarted(event events.EnvelopeV2) error {
 	toolCallID := stringPayload(event.Payload, "tool_call_id")
 	if toolCallID == "" {
 		return nil
@@ -63,10 +63,11 @@ func (r ToolCallRepository) projectStarted(event events.Envelope) error {
 	}
 	row := model.ToolCall{
 		ID:            toolCallID,
-		RootRunID:     event.RootRunID,
+		RunID:         event.RunID,
 		SessionID:     event.SessionID,
-		AgentID:       event.Agent.AgentID,
-		AgentRole:     string(event.Agent.Role),
+		WorkerID:      event.Worker.ID,
+		AssignmentID:  event.AssignmentID,
+		ProfileKey:    event.Worker.ProfileKey,
 		ToolName:      stringPayload(event.Payload, "tool_name"),
 		DisplayName:   stringPayload(event.Payload, "display_name"),
 		Risk:          stringPayload(event.Payload, "risk"),
@@ -74,17 +75,18 @@ func (r ToolCallRepository) projectStarted(event events.Envelope) error {
 		PolicyReason:  stringPayload(event.Payload, "policy_reason"),
 		ArgumentsJSON: string(argsRaw),
 		Status:        stringPayload(event.Payload, "status"),
-		StartedSeq:    event.RootSeq,
+		StartedSeq:    event.RunSeq,
 		StartedAt:     now,
 		UpdatedAt:     now,
 	}
 	return r.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"root_run_id":    row.RootRunID,
+			"run_id":         row.RunID,
 			"session_id":     row.SessionID,
-			"agent_id":       row.AgentID,
-			"agent_role":     row.AgentRole,
+			"worker_id":      row.WorkerID,
+			"assignment_id":  row.AssignmentID,
+			"profile_key":    row.ProfileKey,
 			"tool_name":      row.ToolName,
 			"display_name":   row.DisplayName,
 			"risk":           row.Risk,
@@ -99,7 +101,7 @@ func (r ToolCallRepository) projectStarted(event events.Envelope) error {
 	}).Create(&row).Error
 }
 
-func (r ToolCallRepository) projectOutput(event events.Envelope) error {
+func (r ToolCallRepository) projectOutput(event events.EnvelopeV2) error {
 	toolCallID := stringPayload(event.Payload, "tool_call_id")
 	if toolCallID == "" {
 		return nil
@@ -116,15 +118,16 @@ func (r ToolCallRepository) projectOutput(event events.Envelope) error {
 	err := r.db.First(&row, "id = ?", toolCallID).Error
 	if err == gorm.ErrRecordNotFound {
 		row = model.ToolCall{
-			ID:         toolCallID,
-			RootRunID:  event.RootRunID,
-			SessionID:  event.SessionID,
-			AgentID:    event.Agent.AgentID,
-			AgentRole:  string(event.Agent.Role),
-			ToolName:   stringPayload(event.Payload, "tool_name"),
-			Status:     "running",
-			StartedSeq: event.RootSeq,
-			StartedAt:  now,
+			ID:           toolCallID,
+			RunID:        event.RunID,
+			SessionID:    event.SessionID,
+			WorkerID:     event.Worker.ID,
+			AssignmentID: event.AssignmentID,
+			ProfileKey:   event.Worker.ProfileKey,
+			ToolName:     stringPayload(event.Payload, "tool_name"),
+			Status:       "running",
+			StartedSeq:   event.RunSeq,
+			StartedAt:    now,
 		}
 	} else if err != nil {
 		return err
@@ -137,7 +140,7 @@ func (r ToolCallRepository) projectOutput(event events.Envelope) error {
 	return r.db.Save(&row).Error
 }
 
-func (r ToolCallRepository) projectFinished(event events.Envelope) error {
+func (r ToolCallRepository) projectFinished(event events.EnvelopeV2) error {
 	toolCallID := stringPayload(event.Payload, "tool_call_id")
 	if toolCallID == "" {
 		return nil
@@ -150,13 +153,14 @@ func (r ToolCallRepository) projectFinished(event events.Envelope) error {
 	err := r.db.First(&row, "id = ?", toolCallID).Error
 	if err == gorm.ErrRecordNotFound {
 		row = model.ToolCall{
-			ID:         toolCallID,
-			RootRunID:  event.RootRunID,
-			SessionID:  event.SessionID,
-			AgentID:    event.Agent.AgentID,
-			AgentRole:  string(event.Agent.Role),
-			StartedSeq: event.RootSeq,
-			StartedAt:  now,
+			ID:           toolCallID,
+			RunID:        event.RunID,
+			SessionID:    event.SessionID,
+			WorkerID:     event.Worker.ID,
+			AssignmentID: event.AssignmentID,
+			ProfileKey:   event.Worker.ProfileKey,
+			StartedSeq:   event.RunSeq,
+			StartedAt:    now,
 		}
 	} else if err != nil {
 		return err
@@ -169,7 +173,7 @@ func (r ToolCallRepository) projectFinished(event events.Envelope) error {
 		row.Output = output
 	}
 	row.DurationMS = int64Payload(event.Payload, "duration_ms")
-	row.FinishedSeq = event.RootSeq
+	row.FinishedSeq = event.RunSeq
 	row.FinishedAt = &now
 	row.UpdatedAt = now
 	return r.db.Save(&row).Error

@@ -4,9 +4,6 @@ export const defaultRunSettings = {
   toolPolicy: 'risk_based',
   permissionMode: 'strict',
   providerProfileId: '',
-  spawnSubAgents: false,
-  // One-shot child process by default; process_pool remains available as advanced.
-  subAgentBackend: 'runtime_process',
   model: '',
   toolAllowlist: '',
   toolDenylist: '',
@@ -35,7 +32,7 @@ export function splitOptionList(value) {
  * Build run.start options.
  * @param {object} settings
  * @param {object} workspace
- * @param {string} text raw or cleaned composer text (used for /permission /subagent flags)
+ * @param {string} text raw or cleaned composer text (used for /permission flag)
  * @param {object} [overrides] extra options (create_goal, goal_objective, flags from parseCommand, …)
  */
 export function buildRunStartOptions(settings, workspace, text, overrides = {}) {
@@ -44,9 +41,6 @@ export function buildRunStartOptions(settings, workspace, text, overrides = {}) 
   const requirePermission = overrides.require_permission != null
     ? Boolean(overrides.require_permission)
     : textStr.includes('/permission');
-  const spawnSubAgents = overrides.spawn_subagents != null
-    ? Boolean(overrides.spawn_subagents)
-    : (current.spawnSubAgents || textStr.includes('/subagent'));
 
   const options = {
     working_dir: workspace?.root_path || workspace?.root || '',
@@ -74,8 +68,6 @@ export function buildRunStartOptions(settings, workspace, text, overrides = {}) 
       : 0,
     log_llm_requests: Boolean(current.logLlmRequests),
     require_permission: requirePermission,
-    spawn_subagents: spawnSubAgents,
-    subagent_backend: current.subAgentBackend,
     // Regular conversations must not enter the Goal pipeline implicitly.
     goals_enabled: false,
   };

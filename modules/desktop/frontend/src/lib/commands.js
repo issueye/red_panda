@@ -19,7 +19,6 @@
  * @property {string} [title]
  * @property {string} [extraText]   user notes for continue
  * @property {boolean} [requirePermission]
- * @property {boolean} [spawnSubAgents]
  * @property {string} [message]     help / error body
  * @property {boolean} isCommand    true when input started with /
  */
@@ -34,7 +33,6 @@ const HELP_TEXT = [
   '',
   '其它标志（可夹在普通消息中）：',
   '  /permission          强制对本 run 走权限确认',
-  '  /subagent            允许派生子代理',
   '',
   '示例：',
   '  /goal 为项目添加用户登录与会话管理',
@@ -69,7 +67,6 @@ export function parseCommand(text) {
   }
 
   const requirePermission = /(^|\s)\/permission(\s|$)/i.test(raw);
-  const spawnSubAgents = /(^|\s)\/subagent(\s|$)/i.test(raw);
 
   if (!looksLikeCommand(raw)) {
     return {
@@ -79,7 +76,6 @@ export function parseCommand(text) {
       displayText: raw,
       inputText: raw,
       requirePermission,
-      spawnSubAgents,
       isCommand: false,
     };
   }
@@ -116,7 +112,7 @@ export function parseCommand(text) {
     case 'goal':
     case 'g':
     case '目标':
-      return parseGoalCommand(raw, args, { requirePermission, spawnSubAgents });
+      return parseGoalCommand(raw, args, { requirePermission });
 
     case 'permission':
       // Standalone /permission still starts a run (used by e2e fixtures).
@@ -127,19 +123,6 @@ export function parseCommand(text) {
         displayText: raw,
         inputText: raw,
         requirePermission: true,
-        spawnSubAgents,
-        isCommand: true,
-      };
-
-    case 'subagent':
-      return {
-        action: 'run',
-        name: 'subagent',
-        raw,
-        displayText: raw,
-        inputText: raw,
-        requirePermission,
-        spawnSubAgents: true,
         isCommand: true,
       };
 
@@ -158,7 +141,7 @@ export function parseCommand(text) {
 /**
  * @param {string} raw
  * @param {string} args
- * @param {{ requirePermission?: boolean, spawnSubAgents?: boolean }} flags
+ * @param {{ requirePermission?: boolean }} flags
  * @returns {ParsedCommand}
  */
 function parseGoalCommand(raw, args, flags = {}) {
@@ -190,7 +173,6 @@ function parseGoalCommand(raw, args, flags = {}) {
       displayText: rest ? `继续目标：${rest}` : '继续目标',
       extraText: rest,
       requirePermission: flags.requirePermission,
-      spawnSubAgents: flags.spawnSubAgents,
       isCommand: true,
     };
   }
@@ -232,7 +214,6 @@ function parseGoalCommand(raw, args, flags = {}) {
     successCriteria,
     title,
     requirePermission: flags.requirePermission,
-    spawnSubAgents: flags.spawnSubAgents,
     isCommand: true,
   };
 }
@@ -311,14 +292,6 @@ export function listCommands() {
       description: '强制权限确认（可夹在消息中）',
       insert: '/permission ',
       keywords: ['权限', 'perm'],
-    },
-    {
-      id: 'subagent',
-      name: 'subagent',
-      usage: '/subagent',
-      description: '允许派生子代理',
-      insert: '/subagent ',
-      keywords: ['子代理', 'agent'],
     },
   ];
 }

@@ -63,7 +63,7 @@ export class GatewayWebSocketClient {
         type: 'auth',
         payload: {
           token: this.token,
-          client: { kind: 'desktop', name: 'red_panda', version: '0.1.0' },
+          client: { kind: 'desktop', name: 'red_panda', version: '0.2.0' },
         },
       })
         .then(() => {
@@ -170,13 +170,13 @@ export class GatewayWebSocketClient {
       return Promise.resolve(null);
     }
     const cursors = { ...(this.getResumeCursors?.() || {}) };
-    for (const [runId, rootSeq] of this.lastSeen.entries()) {
-      cursors[runId] = Math.max(Number(cursors[runId]) || 0, rootSeq);
+    for (const [runId, runSeq] of this.lastSeen.entries()) {
+      cursors[runId] = Math.max(Number(cursors[runId]) || 0, runSeq);
     }
     const lastSeen = Object.fromEntries(
       Object.entries(cursors)
         .filter(([runId]) => Boolean(runId))
-        .map(([runId, rootSeq]) => [runId, Number(rootSeq) || 0])
+        .map(([runId, runSeq]) => [runId, Number(runSeq) || 0])
         .sort(([left], [right]) => left.localeCompare(right)),
     );
     if (Object.keys(lastSeen).length === 0) {
@@ -203,10 +203,10 @@ export class GatewayWebSocketClient {
     }
 
     if (message.type === 'event') {
-      const rootRunId = message.payload?.root_run_id || message.meta?.root_run_id;
-      const rootSeq = Number(message.payload?.root_seq || message.meta?.root_seq || 0);
-      if (rootRunId && rootSeq > 0) {
-        this.lastSeen.set(rootRunId, Math.max(this.lastSeen.get(rootRunId) || 0, rootSeq));
+      const runId = message.payload?.run_id || message.meta?.run_id;
+      const runSeq = Number(message.payload?.run_seq || message.meta?.run_seq || 0);
+      if (runId && runSeq > 0) {
+        this.lastSeen.set(runId, Math.max(this.lastSeen.get(runId) || 0, runSeq));
       }
       this.onEvent?.(message);
       return;

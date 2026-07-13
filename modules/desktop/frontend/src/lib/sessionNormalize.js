@@ -43,9 +43,13 @@ export function normalizeHistoryMessage(message) {
   return {
     id: message.id,
     role: message.role === 'user' ? 'user' : 'assistant',
-    agent: message.role === 'subagent' ? 'subagent' : message.role,
     messageSeq: message.seq || 0,
     runId: message.run_id || '',
+    assignmentId: message.assignment_id || '',
+    workerId: message.worker_id || '',
+    profileKey: message.profile_key || '',
+    runSeq: message.run_seq || 0,
+    visibility: message.visibility || 'run_public',
     createdAt: message.created_at,
     text: firstText || '',
   };
@@ -57,7 +61,10 @@ export function normalizeHistoryMessage(message) {
 export function normalizeToolCall(item) {
   return {
     id: item.id,
-    rootRunId: item.root_run_id,
+    runId: item.run_id,
+    assignmentId: item.assignment_id,
+    workerId: item.worker_id,
+    profileKey: item.profile_key || '',
     name: item.tool_name || 'tool',
     displayName: item.display_name || item.tool_name || '工具',
     risk: item.risk || 'low',
@@ -66,8 +73,7 @@ export function normalizeToolCall(item) {
     output: item.output || '',
     error: item.error || '',
     durationMs: item.duration_ms,
-    startedSeq: item.started_seq || 0,
-    rootSeq: item.finished_seq || item.started_seq || 0,
+    runSeq: item.run_seq || 0,
     startedAt: item.started_at,
   };
 }
@@ -84,7 +90,7 @@ export function normalizeRun(item) {
     status: item.status || 'unknown',
     input: item.input || '',
     lastEventType: item.last_event_type || '',
-    lastRootSeq: item.last_root_seq || 0,
+    lastRunSeq: item.last_run_seq || 0,
     messageCount: item.message_count || 0,
     toolCount: item.tool_count || 0,
     error: item.error || '',
@@ -101,6 +107,9 @@ export function normalizePermission(item) {
   return {
     id: item.id,
     runId: item.run_id,
+    assignmentId: item.assignment_id || '',
+    workerId: item.worker_id || '',
+    profileKey: item.profile_key || '',
     status: item.status || 'pending',
     decision: item.decision || '',
     summary: item.summary || '需要授权',
@@ -108,7 +117,7 @@ export function normalizePermission(item) {
     risk: item.risk,
     toolName: item.tool_name,
     arguments: item.arguments || {},
-    rootSeq: item.root_seq || 0,
+    runSeq: item.run_seq || 0,
     createdAt: item.created_at,
   };
 }
@@ -128,7 +137,7 @@ export function latestActiveRun(runs) {
  * @param {any[]} runs
  * @param {number} fallback
  */
-export function latestRootSeq(runs, fallback) {
+export function latestRunSeq(runs, fallback) {
   if (!Array.isArray(runs)) return fallback;
-  return runs.reduce((max, item) => Math.max(max, item.last_root_seq || 0), fallback);
+  return runs.reduce((max, item) => Math.max(max, item.last_run_seq || 0), fallback);
 }

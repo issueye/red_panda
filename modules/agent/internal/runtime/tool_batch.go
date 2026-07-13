@@ -19,8 +19,8 @@ type toolBatchItem struct {
 	ok         bool
 }
 
-// executeToolBatch 顺序执行非子代理工具，随后并行执行全部 subagent.run 工具，
-// 使多个区域的分析可并发进行。
+// executeToolBatch 顺序执行普通工具，随后并行执行全部委派工具，
+// 使入口 Assignment 能同时使用多个空闲 Worker。
 func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyParams, calls []tools.Call) ([]provider.ToolExchange, bool) {
 	items := make([]toolBatchItem, len(calls))
 	var serial []int
@@ -28,7 +28,7 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 
 	for index, call := range calls {
 		items[index] = toolBatchItem{index: index, call: call}
-		if call.Name == "subagent.run" {
+		if call.Name == "worker.delegate" || call.Name == "worker.delegate" {
 			parallel = append(parallel, index)
 		} else {
 			serial = append(serial, index)

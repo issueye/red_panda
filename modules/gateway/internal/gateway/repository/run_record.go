@@ -42,8 +42,8 @@ func (r RunRecordRepository) Start(run model.RunRecord) error {
 	}).Create(&run).Error
 }
 
-func (r RunRecordRepository) ProjectEvent(event events.Envelope) error {
-	if event.RootRunID == "" {
+func (r RunRecordRepository) ProjectEvent(event events.EnvelopeV2) error {
+	if event.RunID == "" {
 		return nil
 	}
 	now := event.CreatedAt
@@ -51,10 +51,10 @@ func (r RunRecordRepository) ProjectEvent(event events.Envelope) error {
 		now = time.Now().UTC()
 	}
 	var row model.RunRecord
-	err := r.db.First(&row, "id = ?", event.RootRunID).Error
+	err := r.db.First(&row, "id = ?", event.RunID).Error
 	if err == gorm.ErrRecordNotFound {
 		row = model.RunRecord{
-			ID:        event.RootRunID,
+			ID:        event.RunID,
 			SessionID: event.SessionID,
 			Status:    "running",
 			StartedAt: now,
@@ -81,13 +81,13 @@ func (r RunRecordRepository) ProjectEvent(event events.Envelope) error {
 	if event.Type == events.EventToolStarted {
 		updates["tool_count"] = gorm.Expr("tool_count + ?", 1)
 	}
-	return r.db.Model(&model.RunRecord{}).Where("id = ?", event.RootRunID).Updates(updates).Error
+	return r.db.Model(&model.RunRecord{}).Where("id = ?", event.RunID).Updates(updates).Error
 }
 
-func applyRunEventProjection(row *model.RunRecord, event events.Envelope, now time.Time) {
+func applyRunEventProjection(row *model.RunRecord, event events.EnvelopeV2, now time.Time) {
 	row.SessionID = firstNonEmpty(row.SessionID, event.SessionID)
 	row.LastEventType = string(event.Type)
-	row.LastRootSeq = event.RootSeq
+	row.LastRootSeq = event.RunSeq
 	row.UpdatedAt = now
 	if event.Type == events.EventMessageDelta {
 		row.MessageCount++
@@ -95,11 +95,11 @@ func applyRunEventProjection(row *model.RunRecord, event events.Envelope, now ti
 	if event.Type == events.EventToolStarted {
 		row.ToolCount++
 	}
-	if event.Type == events.EventError && event.Agent.Role != events.AgentRoleSubAgent {
+	if event.Type == events.EventError {
 		row.Status = firstNonEmpty(stringPayload(event.Payload, "status"), "failed")
 		row.Error = firstNonEmpty(stringPayload(event.Payload, "message"), row.Error)
 	}
-	if event.Type == events.EventFinish && event.Agent.Role != events.AgentRoleSubAgent {
+	if event.Type == events.EventFinish {
 		row.Status = firstNonEmpty(stringPayload(event.Payload, "status"), "completed")
 		row.FinishedAt = &now
 	}
@@ -187,15 +187,15 @@ func (r RunRecordRepository) Finish(runID string, status string, errText string)
 	return r.db.Model(&model.RunRecord{}).Where("id = ?", runID).Updates(updates).Error
 }
 
-func (r RunRecordRepository) RefreshToolCount(rootRunID string) error {
-	if rootRunID == "" {
+func (r RunRecordRepository) RefreshToolCount(runID string) error {
+	if runID == "" {
 		return nil
 	}
 	var count int64
-	if err := r.db.Model(&model.ToolCall{}).Where("root_run_id = ?", rootRunID).Count(&count).Error; err != nil {
+	if err := r.db.Model(&model.ToolCall{}).Where("run_id = ?", runID).Count(&count).Error; err != nil {
 		return err
 	}
 	return r.db.Model(&model.RunRecord{}).
-		Where("id = ?", rootRunID).
+		Where("id = ?", runID).
 		Update("tool_count", count).Error
 }

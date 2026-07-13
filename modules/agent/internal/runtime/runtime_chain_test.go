@@ -18,7 +18,7 @@ type chainedToolProvider struct {
 	requests []ProviderRequest
 }
 
-func TestRecoveryAnswerForSubagentDoesNotDuplicateToolOutput(t *testing.T) {
+func TestRecoveryAnswerForWorkerDoesNotDuplicateToolOutput(t *testing.T) {
 	history := []ToolExchange{{
 		Call: tools.Call{Name: "workspace.read_file", DisplayName: "Read file"},
 		Result: tools.Result{
@@ -27,7 +27,7 @@ func TestRecoveryAnswerForSubagentDoesNotDuplicateToolOutput(t *testing.T) {
 			Output: "large file contents",
 		},
 	}}
-	child := recoveryAnswerForRun(methods.ReplyParams{RunID: "root:subagent:analyst"}, history)
+	child := recoveryAnswerForRun(methods.ReplyParams{RunID: "root:Worker:analyst"}, history)
 	if strings.Contains(child, "large file contents") || !strings.Contains(child, "工具卡片") {
 		t.Fatalf("child recovery should be concise: %q", child)
 	}

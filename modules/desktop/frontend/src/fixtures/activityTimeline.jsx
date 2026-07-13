@@ -8,14 +8,11 @@ const runId = 'run_fixture_1';
 
 const events = [
   normalizeRunEvent({
-    id: 'evt_tool',
+    protocol_version: '2026-07-13', event_id: 'evt_tool',
     type: 'tool_started',
-    root_run_id: runId,
     run_id: runId,
-    root_seq: 1,
-    agent_seq: 1,
-    agent_role: 'root',
-    agent_name: 'root',
+    session_id: 'session_fixture', assignment_id: 'assignment-entry', run_seq: 1, worker_seq: 1,
+    worker: { id: 'worker-01', profile_key: 'entry' },
     payload: {
       tool_name: 'workspace.read_file',
       status: 'running',
@@ -23,26 +20,19 @@ const events = [
     },
   }),
   normalizeRunEvent({
-    id: 'evt_message',
+    protocol_version: '2026-07-13', event_id: 'evt_message',
     type: 'message_delta',
-    root_run_id: runId,
-    run_id: `${runId}:planner`,
-    parent_run_id: runId,
-    root_seq: 2,
-    agent_seq: 1,
-    agent_role: 'subagent',
-    agent_name: 'planner',
+    run_id: runId,
+    session_id: 'session_fixture', assignment_id: 'assignment-planner', run_seq: 2, worker_seq: 1,
+    worker: { id: 'worker-02', profile_key: 'goal-planner' },
     payload: { delta: 'planner saw the file' },
   }),
   normalizeRunEvent({
-    id: 'evt_permission',
+    protocol_version: '2026-07-13', event_id: 'evt_permission',
     type: 'permission_required',
-    root_run_id: runId,
     run_id: runId,
-    root_seq: 3,
-    agent_seq: 3,
-    agent_role: 'root',
-    agent_name: 'root',
+    session_id: 'session_fixture', assignment_id: 'assignment-entry', run_seq: 3, worker_seq: 3,
+    worker: { id: 'worker-01', profile_key: 'entry' },
     payload: {
       permission_id: 'perm_fixture',
       tool_name: 'shell.exec',
@@ -51,14 +41,11 @@ const events = [
     },
   }),
   normalizeRunEvent({
-    id: 'evt_finish',
+    protocol_version: '2026-07-13', event_id: 'evt_finish',
     type: 'finish',
-    root_run_id: runId,
     run_id: runId,
-    root_seq: 4,
-    agent_seq: 4,
-    agent_role: 'root',
-    agent_name: 'root',
+    session_id: 'session_fixture', assignment_id: 'assignment-entry', run_seq: 4, worker_seq: 4,
+    worker: { id: 'worker-01', profile_key: 'entry' },
     payload: { status: 'completed' },
   }),
 ];
@@ -70,7 +57,7 @@ const runs = [{
   status: 'completed',
   input: 'fixture run',
   lastEventType: 'finish',
-  lastRootSeq: 4,
+  lastRunSeq: 4,
   messageCount: 1,
   toolCount: 1,
   startedAt: '2026-07-09T00:00:00Z',
@@ -79,11 +66,11 @@ const runs = [{
 
 const tools = [{
   id: 'tool_fixture',
-  rootRunId: runId,
+  runId,
   name: 'workspace.read_file',
   displayName: 'Read file',
   status: 'completed',
-  rootSeq: 1,
+  runSeq: 1,
 }];
 
 const permissions = [{

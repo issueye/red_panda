@@ -20,7 +20,7 @@ import {
 } from '../lib/skills.js';
 
 /**
- * Settings-facing Gateway resources: provider profiles, agents, MCP, skills.
+ * Settings-facing Gateway resources: provider profiles, Worker profiles, MCP, skills.
  * Keeps CRUD + load state out of App.jsx (checklist R7a).
  *
  * @param {{ getWorkspaceRoot: () => string, setRunSettings: Function }} options
@@ -30,9 +30,9 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
   const [providerProfilesLoading, setProviderProfilesLoading] = useState(false);
   const [providerProfilesError, setProviderProfilesError] = useState('');
 
-  const [managedAgents, setManagedAgents] = useState([]);
-  const [managedAgentsLoading, setManagedAgentsLoading] = useState(false);
-  const [managedAgentsError, setManagedAgentsError] = useState('');
+  const [workerProfiles, setWorkerProfiles] = useState([]);
+  const [workerProfilesLoading, setWorkerProfilesLoading] = useState(false);
+  const [workerProfilesError, setWorkerProfilesError] = useState('');
 
   const [mcpServers, setMcpServers] = useState([]);
   const [mcpServersLoading, setMcpServersLoading] = useState(false);
@@ -99,44 +99,44 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     ));
   }, [setRunSettings]);
 
-  const loadAgents = useCallback(async () => {
-    setManagedAgentsLoading(true);
-    setManagedAgentsError('');
+  const loadWorkerProfiles = useCallback(async () => {
+    setWorkerProfilesLoading(true);
+    setWorkerProfilesError('');
     try {
-      const data = await apiJson('/api/v1/agents');
+      const data = await apiJson('/api/v1/worker-profiles');
       const normalized = normalizeAgentList(data);
-      setManagedAgents(normalized);
+      setWorkerProfiles(normalized);
       return normalized;
     } catch (error) {
-      setManagedAgentsError(error.message);
+      setWorkerProfilesError(error.message);
       return [];
     } finally {
-      setManagedAgentsLoading(false);
+      setWorkerProfilesLoading(false);
     }
   }, []);
 
-  const createAgent = useCallback(async (payload) => {
-    const created = await apiJson('/api/v1/agents', {
+  const createWorkerProfile = useCallback(async (payload) => {
+    const created = await apiJson('/api/v1/worker-profiles', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    await loadAgents();
+    await loadWorkerProfiles();
     return created;
-  }, [loadAgents]);
+  }, [loadWorkerProfiles]);
 
-  const updateAgent = useCallback(async (id, payload) => {
-    const updated = await apiJson(`/api/v1/agents/${encodeURIComponent(id)}`, {
+  const updateWorkerProfile = useCallback(async (id, payload) => {
+    const updated = await apiJson(`/api/v1/worker-profiles/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
-    await loadAgents();
+    await loadWorkerProfiles();
     return updated;
-  }, [loadAgents]);
+  }, [loadWorkerProfiles]);
 
-  const deleteAgent = useCallback(async (id) => {
-    await apiJson(`/api/v1/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    await loadAgents();
-  }, [loadAgents]);
+  const deleteWorkerProfile = useCallback(async (id) => {
+    await apiJson(`/api/v1/worker-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await loadWorkerProfiles();
+  }, [loadWorkerProfiles]);
 
   const loadMcpServers = useCallback(async () => {
     setMcpServersLoading(true);
@@ -319,13 +319,13 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     updateProviderProfile,
     deleteProviderProfile,
 
-    managedAgents,
-    managedAgentsLoading,
-    managedAgentsError,
-    loadAgents,
-    createAgent,
-    updateAgent,
-    deleteAgent,
+    workerProfiles,
+    workerProfilesLoading,
+    workerProfilesError,
+    loadWorkerProfiles,
+    createWorkerProfile,
+    updateWorkerProfile,
+    deleteWorkerProfile,
 
     mcpServers,
     mcpServersLoading,

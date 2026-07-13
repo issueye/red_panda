@@ -21,8 +21,8 @@ const (
 	MethodRunResume         = "run.resume"
 	MethodRunCancel         = "run.cancel"
 	MethodPermissionResolve = "permission.resolve"
-	MethodSubAgents         = "subagents.list"
-	MethodSubAgentCancel    = "subagent.cancel"
+	MethodWorkerList        = "worker.list"
+	MethodAssignmentCancel  = "worker.assignment.cancel"
 	MethodAgentStatus       = "agent.status"
 	EventRun                = "run.event"
 	EventRuntimeStatus      = "runtime.status"
@@ -75,13 +75,14 @@ type RunCursor struct {
 	AfterSeq uint64 `json:"after_seq"`
 }
 
-type SubAgentsPayload struct {
-	RunID      string `json:"run_id,omitempty"`
-	SubAgentID string `json:"subagent_id,omitempty"`
+type WorkerListPayload struct {
+	RunID        string `json:"run_id,omitempty"`
+	WorkerID     string `json:"worker_id,omitempty"`
+	AssignmentID string `json:"assignment_id,omitempty"`
 }
 
-type SubAgentCancelPayload struct {
-	RunID      string `json:"run_id"`
-	SubAgentID string `json:"subagent_id"`
-	Reason     string `json:"reason,omitempty"`
+type AssignmentCancelPayload struct {
+	RunID        string `json:"run_id"`
+	AssignmentID string `json:"assignment_id"`
+	Reason       string `json:"reason,omitempty"`
 }

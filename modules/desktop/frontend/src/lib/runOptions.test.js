@@ -3,12 +3,6 @@ import test from 'node:test';
 
 import { buildRunStartOptions, defaultRunSettings, splitOptionList } from './runOptions.js';
 
-test('default subagent backend prefers runtime_process over process_pool', () => {
-  assert.equal(defaultRunSettings.subAgentBackend, 'runtime_process');
-  const options = buildRunStartOptions({}, { root_path: 'D:/ws' }, 'hello');
-  assert.equal(options.subagent_backend, 'runtime_process');
-});
-
 test('splitOptionList trims empty entries', () => {
   assert.deepEqual(
     splitOptionList(' workspace.read_file, ,shell.exec '),
@@ -25,9 +19,7 @@ test('buildRunStartOptions includes provider profile and tool policy fields', ()
     model: ' model-a ',
     toolAllowlist: 'workspace.read_file, workspace.list',
     toolDenylist: 'shell.exec',
-    spawnSubAgents: false,
-    subAgentBackend: 'process_pool',
-  }, { root_path: 'D:/workspace' }, 'do work /permission /subagent');
+  }, { root_path: 'D:/workspace' }, 'do work /permission');
 
   assert.equal(options.working_dir, 'D:/workspace');
   assert.equal(options.runtime_mode, 'per_run_process');
@@ -38,8 +30,8 @@ test('buildRunStartOptions includes provider profile and tool policy fields', ()
   assert.deepEqual(options.tool_allowlist, ['workspace.read_file', 'workspace.list']);
   assert.deepEqual(options.tool_denylist, ['shell.exec']);
   assert.equal(options.require_permission, true);
-  assert.equal(options.spawn_subagents, true);
-  assert.equal(options.subagent_backend, 'process_pool');
+  assert.equal(options.spawn_subagents, undefined);
+  assert.equal(options.subagent_backend, undefined);
 });
 
 test('buildRunStartOptions passes web tool tuning fields', () => {
@@ -104,7 +96,7 @@ test('buildRunStartOptions passes max concurrent runs', () => {
 
 test('buildRunStartOptions accepts create_goal overrides from command system', () => {
   const options = buildRunStartOptions(
-    { spawnSubAgents: false },
+    {},
     { root: 'D:/ws' },
     '/goal 实现登录',
     {
@@ -113,7 +105,6 @@ test('buildRunStartOptions accepts create_goal overrides from command system', (
       goal_title: '实现登录',
       goal_success_criteria: '能登录',
       require_permission: false,
-      spawn_subagents: true,
     },
   );
   assert.equal(options.create_goal, true);
@@ -121,6 +112,6 @@ test('buildRunStartOptions accepts create_goal overrides from command system', (
   assert.equal(options.goal_title, '实现登录');
   assert.equal(options.goal_success_criteria, '能登录');
   assert.equal(options.goals_enabled, true);
-  assert.equal(options.spawn_subagents, true);
+  assert.equal(options.spawn_subagents, undefined);
   assert.equal(options.require_permission, false);
 });

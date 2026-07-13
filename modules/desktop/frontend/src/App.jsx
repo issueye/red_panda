@@ -6,7 +6,7 @@ import { RunActivityPanel } from './components/RunActivityPanel.jsx';
 import { SettingsPanel } from './components/SettingsPanel.jsx';
 import { Sidebar } from './components/Sidebar.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
-import { SubAgentPanel } from './components/SubAgentPanel.jsx';
+import { WorkerPanel } from './components/WorkerPanel.jsx';
 import { TopBar } from './components/TopBar.jsx';
 import { IconButton } from './components/ui/button.jsx';
 import { useDialog } from './components/ui/dialog.jsx';
@@ -23,16 +23,15 @@ import {
 } from './hooks/useSessionBootstrap.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { apiJson, gatewayBase } from './lib/api.js';
-import { displayRuntimeMode, displayStatus } from './lib/displayLabels.js';
+import { displayRuntimeMode } from './lib/displayLabels.js';
 import { defaultRunSettings } from './lib/runOptions.js';
-import { isRootTerminalRunEvent } from './lib/runEventLifecycle.js';
+import { isRunTerminalEvent } from './lib/runEventLifecycle.js';
 import { reduceRunEvent, upsertByID } from './lib/reduceRunEvent.js';
 import {
   collectResumeCursors,
   collectSessionRunStatus,
   countActiveRuns,
   createEmptySessionRuntime,
-  MAIN_CONVERSATION_TAB,
   patchSessionRuntimeMap,
   resolveEventSessionId,
 } from './lib/sessionRuntime.js';
@@ -46,14 +45,14 @@ const initialMessages = [
     id: 'm1',
     role: 'assistant',
     agent: 'root',
-    rootSeq: 1,
+    runSeq: 1,
     text: '已连接。请输入任务。',
   },
 ];
 
 const rightPanelTabs = [
   { id: 'workspace', label: '工作区', testId: '' },
-  { id: 'subagents', label: '子代理', testId: '' },
+  { id: 'workers', label: 'Worker', testId: 'right-tab-workers' },
   { id: 'activity', label: '活动', testId: 'right-tab-activity' },
   { id: 'memory', label: '记忆', testId: 'right-tab-memory' },
 ];
@@ -95,12 +94,38 @@ function loadRightPanelWidth() {
   }
 }
 
-function subagentConversationTabId(subagentId) {
-  return `sub:${subagentId}`;
+function normalizeWorker(worker = {}) {
+  return {
+    id: worker.id || '', state: worker.state || 'ready', healthy: worker.healthy !== false,
+    currentAssignmentId: worker.current_assignment_id || worker.currentAssignmentId || '',
+    profileKey: worker.profile_key || worker.profileKey || '',
+    mailboxDepth: Number(worker.mailbox_depth ?? worker.mailboxDepth) || 0,
+    mailboxCapacity: Number(worker.mailbox_capacity ?? worker.mailboxCapacity) || 0,
+  };
+}
+
+function normalizeAssignment(item = {}) {
+  return {
+    id: item.id || '',
+    runId: item.run_id || item.runId || '',
+    workerId: item.worker_id || item.workerId || '',
+    originWorkerId: item.origin_worker_id || item.originWorkerId || '',
+    profileKey: item.profile_key || item.profileKey || '',
+    task: item.task || '',
+    status: item.status || 'queued',
+    result: item.result || '',
+    error: item.error || '',
+    summary: item.summary || '',
+    createdAt: item.created_at || item.createdAt,
+    startedAt: item.started_at || item.startedAt,
+    finishedAt: item.finished_at || item.finishedAt,
+    workerSeq: Number(item.worker_seq ?? item.workerSeq) || 0,
+  };
 }
 
 export function App() {
   const dialog = useDialog();
+  const [workers, setWorkers] = useState([]);
   const [sessionRuntimes, setSessionRuntimes] = useState(() => ({
     [INITIAL_BOOTSTRAP_SESSION_ID]: createEmptySessionRuntime({
       messages: initialMessages,
@@ -127,13 +152,13 @@ export function App() {
     createProviderProfile,
     updateProviderProfile,
     deleteProviderProfile,
-    managedAgents,
-    managedAgentsLoading,
-    managedAgentsError,
-    loadAgents,
-    createAgent,
-    updateAgent,
-    deleteAgent,
+    workerProfiles,
+    workerProfilesLoading,
+    workerProfilesError,
+    loadWorkerProfiles,
+    createWorkerProfile,
+    updateWorkerProfile,
+    deleteWorkerProfile,
     mcpServers,
     mcpServersLoading,
     mcpServersError,
@@ -180,7 +205,7 @@ export function App() {
     patchRuntime,
     workspaceRootRef,
     loadProviderProfiles,
-    loadAgents,
+    loadWorkerProfiles,
     loadMcpServers,
     loadSkills,
   });
@@ -202,12 +227,11 @@ export function App() {
     tools,
     permissions,
     runs,
-    subAgents,
-    conversationTabs,
-    activeConversationTab,
+    assignmentsById = {},
+    assignmentOrder = [],
     running,
     currentRunId,
-    rootSeq,
+    runSeq,
     runEventsByRun,
     runEventsLoading,
     runEventsError,
@@ -237,18 +261,15 @@ export function App() {
   const setMessages = bindRuntimeField('messages');
   const setPermissions = bindRuntimeField('permissions');
   const setRuns = bindRuntimeField('runs');
-  const setSubAgents = bindRuntimeField('subAgents');
-  const setConversationTabs = bindRuntimeField('conversationTabs');
-  const setActiveConversationTab = bindRuntimeField('activeConversationTab');
   const setRunEventsByRun = bindRuntimeField('runEventsByRun');
   const setRunEventsLoading = bindRuntimeField('runEventsLoading');
   const setRunEventsError = bindRuntimeField('runEventsError');
   const setDraft = bindRuntimeField('draft');
 
-  const agents = useMemo(() => [
-    { id: 'root', name: 'root', role: 'root', status: running ? 'running' : 'idle', seq: rootSeq },
-    ...subAgents,
-  ], [rootSeq, running, subAgents]);
+  const assignments = useMemo(
+    () => assignmentOrder.map((id) => assignmentsById[id]).filter(Boolean),
+    [assignmentOrder, assignmentsById],
+  );
   const pendingPermissions = useMemo(
     () => permissions.filter((item) => item.status === 'pending' || item.status === 'resolved' || !item.status),
     [permissions],
@@ -365,6 +386,7 @@ export function App() {
   useEffect(() => {
     if (settingsOpen) {
       loadProviderProfiles();
+      loadWorkerProfiles();
       loadMcpServers();
       loadSkills();
     }
@@ -376,7 +398,10 @@ export function App() {
     // 网关事件按 session_id 写入对应会话投影，支持多会话并发 run。
     onEvent: (event) => {
       const payload = event.payload || {};
-      if (isRootTerminalRunEvent(payload) && payload.session_id) {
+      if (payload.worker?.id) {
+        setWorkers((items) => upsertByID(items, normalizeWorker(payload.worker)));
+      }
+      if (isRunTerminalEvent(payload) && payload.session_id) {
         // A6: Gateway OnRootRunTerminal mutates Goal (pause/fail/budget) before
         // Publish; re-hydrate so the Goal strip matches persisted state without
         // reopening the session. Live tool mutations still use goal_updated.
@@ -406,6 +431,24 @@ export function App() {
       }
     },
   });
+
+  useEffect(() => {
+    if (status !== 'connected') return;
+    const sessionId = currentSessionId;
+    request('worker.list', currentRunId ? { run_id: currentRunId } : {}).then((result) => {
+      const workerItems = Array.isArray(result?.workers) ? result.workers.map(normalizeWorker) : [];
+      setWorkers(workerItems);
+      const assignmentItems = Array.isArray(result?.assignments)
+        ? result.assignments.map(normalizeAssignment)
+        : [];
+      if (assignmentItems.length === 0) return;
+      patchRuntime(sessionId, (rt) => ({
+        ...rt,
+        assignmentsById: Object.fromEntries(assignmentItems.map((item) => [item.id, item])),
+        assignmentOrder: assignmentItems.map((item) => item.id),
+      }));
+    }).catch(() => {});
+  }, [currentRunId, currentSessionId, patchRuntime, request, status]);
 
   const {
     hydrateTodos,
@@ -467,84 +510,31 @@ export function App() {
     compacting,
   });
 
-  function openSubagentConversation(agent) {
-    if (!agent?.id || agent.role !== 'subagent') return;
-    const tabId = subagentConversationTabId(agent.id);
-    setConversationTabs((tabs) => {
-      if (tabs.some((tab) => tab.id === tabId)) {
-        return tabs.map((tab) => (
-          tab.id === tabId
-            ? {
-                ...tab,
-                title: agent.name || tab.title,
-                status: agent.status,
-                statusLabel: displayStatus(agent.status),
-                runId: agent.runId || tab.runId,
-              }
-            : tab
-        ));
-      }
-      return [
-        ...tabs,
-        {
-          id: tabId,
-          kind: 'subagent',
-          subagentId: agent.id,
-          title: agent.name || agent.id,
-          status: agent.status,
-          statusLabel: displayStatus(agent.status),
-          runId: agent.runId || '',
-          closable: true,
-        },
-      ];
-    });
-    setActiveConversationTab(tabId);
-  }
-
-  function closeConversationTab(tabId) {
-    if (!tabId || tabId === 'main') return;
-    setConversationTabs((tabs) => {
-      const next = tabs.filter((tab) => tab.id !== tabId);
-      return next.length > 0 ? next : [MAIN_CONVERSATION_TAB];
-    });
-    setActiveConversationTab((current) => (current === tabId ? 'main' : current));
-  }
-
-  async function cancelSubAgent(agent) {
-    if (!agent?.id || !agent.rootRunId || agent.status !== 'running') {
+  async function cancelAssignment(assignment) {
+    if (!assignment?.id || !assignment.runId || !['queued', 'running', 'waiting_permission'].includes(assignment.status)) {
       return;
     }
-    setSubAgents((items) => items.map((item) => (
-      item.id === agent.id
-        ? { ...item, status: 'cancelling', summary: '已请求取消' }
-        : item
-    )));
+    patchCurrentRuntime((rt) => ({ ...rt, assignmentsById: {
+      ...rt.assignmentsById,
+      [assignment.id]: { ...assignment, status: 'cancelling', summary: '已请求取消' },
+    } }));
     try {
-      const result = await request('subagent.cancel', {
-        run_id: agent.rootRunId,
-        subagent_id: agent.id,
-        reason: 'desktop',
+      await request('worker.assignment.cancel', {
+        run_id: assignment.runId,
+        assignment_id: assignment.id,
       });
-      if (!result?.cancelled) {
-        setSubAgents((items) => items.map((item) => (
-          item.id === agent.id
-            ? { ...item, status: 'completed', summary: '子代理已结束' }
-            : item
-        )));
-      }
     } catch (error) {
-      setSubAgents((items) => items.map((item) => (
-        item.id === agent.id
-          ? { ...item, status: 'running', summary: error.message }
-          : item
-      )));
+      patchCurrentRuntime((rt) => ({ ...rt, assignmentsById: {
+        ...rt.assignmentsById,
+        [assignment.id]: { ...assignment, summary: error.message },
+      } }));
       setMessages((items) => [
         ...items,
         {
-          id: `subagent_cancel_error_${Date.now()}`,
+          id: `assignment_cancel_error_${Date.now()}`,
           role: 'assistant',
           agent: 'system',
-          text: `取消子代理失败：${error.message}`,
+          text: `取消 Worker 任务失败：${error.message}`,
         },
       ]);
     }
@@ -639,11 +629,11 @@ export function App() {
 
   const rightPanelContent = rightPanelTab === 'workspace' ? (
     <WorkspacePanel apiJson={apiJson} workspace={workspace} />
-  ) : rightPanelTab === 'subagents' ? (
-    <SubAgentPanel
-      agents={agents}
-      onCancelSubAgent={cancelSubAgent}
-      onOpenSubagentConversation={openSubagentConversation}
+  ) : rightPanelTab === 'workers' ? (
+    <WorkerPanel
+      assignments={assignments}
+      onCancelAssignment={cancelAssignment}
+      workers={workers}
     />
   ) : rightPanelTab === 'memory' ? (
     <MemoryPanel
@@ -676,18 +666,18 @@ export function App() {
         status={status}
       />
       <SettingsPanel
-        agents={managedAgents}
-        agentsError={managedAgentsError}
-        agentsLoading={managedAgentsLoading}
+        workerProfiles={workerProfiles}
+        workerProfilesError={workerProfilesError}
+        workerProfilesLoading={workerProfilesLoading}
         mcpServers={mcpServers}
         mcpServersError={mcpServersError}
         mcpServersLoading={mcpServersLoading}
         mcpDiscoveryByServer={mcpDiscoveryByServer}
-        onCreateAgent={createAgent}
+        onCreateWorkerProfile={createWorkerProfile}
         onCreateMcpServer={createMcpServer}
         onCreateProviderProfile={createProviderProfile}
         onCreateSkill={createSkill}
-        onDeleteAgent={deleteAgent}
+        onDeleteWorkerProfile={deleteWorkerProfile}
         onDeleteMcpServer={deleteMcpServer}
         onDeleteProviderProfile={deleteProviderProfile}
         onDeleteSkill={deleteSkill}
@@ -695,11 +685,11 @@ export function App() {
         onLoadSkillDetail={loadSkillDetail}
         onChange={setRunSettings}
         onClose={() => setSettingsOpen(false)}
-        onRefreshAgents={loadAgents}
+        onRefreshWorkerProfiles={loadWorkerProfiles}
         onRefreshMcpServers={loadMcpServers}
         onRefreshProviderProfiles={loadProviderProfiles}
         onRefreshSkills={loadSkills}
-        onUpdateAgent={updateAgent}
+        onUpdateWorkerProfile={updateWorkerProfile}
         onUpdateMcpServer={updateMcpServer}
         onUpdateProviderProfile={updateProviderProfile}
         onUpdateSkill={updateSkill}
@@ -741,16 +731,12 @@ export function App() {
           workspaces={recentWorkspaces}
         />
         <ChatPanel
-          activeConversationTab={activeConversationTab}
-          conversationTabs={conversationTabs}
           draft={draft}
           messages={messages}
           onCancel={cancelRun}
-          onCloseConversationTab={closeConversationTab}
           onDraftChange={setDraft}
           onProviderProfileChange={(id) => setRunSettings((current) => ({ ...current, providerProfileId: id }))}
           onResolvePermission={resolvePermission}
-          onSelectConversationTab={setActiveConversationTab}
           onSend={sendTask}
           onTodosExpandToggle={() => patchCurrentRuntime((rt) => ({
             ...rt,
@@ -772,7 +758,6 @@ export function App() {
           providerProfileId={runSettings.providerProfileId}
           providerProfiles={providerProfiles}
           running={running}
-          subAgents={subAgents}
           todoOpenCount={todoOpenCount}
           todos={todos}
           todosExpanded={todosExpanded}
@@ -884,7 +869,7 @@ export function App() {
       </main>
       {lastError ? <div className="toast" role="alert">{lastError}</div> : null}
       <StatusBar
-        rootSeq={rootSeq}
+        runSeq={runSeq}
         runtimeStatus={
           activeRunCount > 0
             ? `${activeRunCount} 个会话运行中（${displayRuntimeMode(runSettings.runtimeMode)}）`

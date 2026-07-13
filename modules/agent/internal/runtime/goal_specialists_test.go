@@ -37,7 +37,7 @@ func TestResolveGoalSpecialistPrefersGatewayPromptAndTurns(t *testing.T) {
 	if !ok {
 		t.Fatal("builtin analyst")
 	}
-	defs := []methods.AgentDefinitionRef{{
+	defs := []methods.WorkerProfileRef{{
 		Key:             "goal-analyst",
 		NameZH:          "自定义分析师",
 		Phase:           "analyze",
@@ -77,7 +77,7 @@ func TestResolveGoalSpecialistPrefersGatewayPromptAndTurns(t *testing.T) {
 }
 
 func TestResolveGoalSpecialistDisabledDefinition(t *testing.T) {
-	defs := []methods.AgentDefinitionRef{{
+	defs := []methods.WorkerProfileRef{{
 		Key:     "goal-analyst",
 		Enabled: false,
 	}}
@@ -114,8 +114,8 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 	if params.Options.GoalContext != nil || params.Options.TodoContext != nil {
 		t.Fatal("goal/todo context must be nil for specialists")
 	}
-	if params.Options.SpawnSubAgents {
-		t.Fatal("spawn subagents must be false")
+	if params.Options.WorkerContext != nil {
+		t.Fatal("worker context must be nil")
 	}
 	// 允许列表必须包含读取和上下文共享工具，并通过 availableToolsForOptions 排除写入工具。
 	defs := []tools.Definition{
@@ -124,7 +124,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 		{Name: "shell.exec"},
 		{Name: "goal.write"},
 		{Name: "todo.write"},
-		{Name: "subagent.run"},
+		{Name: "worker.delegate"},
 		{Name: "web.search"},
 		{Name: "context.read"},
 		{Name: "context.search"},
@@ -147,7 +147,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 			t.Fatalf("%s should be allowed for analyst: %#v", ctxTool, filtered)
 		}
 	}
-	for _, denied := range []string{"workspace.write_file", "shell.exec", "goal.write", "todo.write", "subagent.run"} {
+	for _, denied := range []string{"workspace.write_file", "shell.exec", "goal.write", "todo.write", "worker.delegate"} {
 		if names[denied] {
 			t.Fatalf("%s should be denied for analyst: %#v", denied, filtered)
 		}
@@ -177,7 +177,7 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 		{Name: "goal.write"},
 		{Name: "todo.write"},
 		{Name: "web.search"},
-		{Name: "subagent.run"},
+		{Name: "worker.delegate"},
 		{Name: "context.read"},
 		{Name: "context.write"},
 	}
@@ -192,7 +192,7 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 	if !names["context.read"] || !names["context.write"] {
 		t.Fatalf("implementer should allow context tools (no allowlist): %#v", filtered)
 	}
-	for _, denied := range []string{"goal.write", "todo.write", "web.search", "subagent.run"} {
+	for _, denied := range []string{"goal.write", "todo.write", "web.search", "worker.delegate"} {
 		if names[denied] {
 			t.Fatalf("%s should be denied: %#v", denied, filtered)
 		}

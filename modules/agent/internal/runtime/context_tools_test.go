@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"redpanda/agent/internal/subagent"
+	"redpanda/agent/internal/worker"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +15,7 @@ import (
 )
 
 // TestContextToolsRegisteredAndNotDenylisted 验证关键设计：context.* 工具具有正确风险等级，
-// 且被有意排除在 subagent.RunDenylist 外，使专业子代理可共享暂存区笔记。
+// 且被有意排除在 worker.DelegatedDenylist 外，使专业子代理可共享暂存区笔记。
 func TestContextToolsRegisteredAndNotDenylisted(t *testing.T) {
 	runner := ToolRunner{}
 	wantRisk := map[string]tools.Risk{
@@ -39,9 +39,9 @@ func TestContextToolsRegisteredAndNotDenylisted(t *testing.T) {
 	}
 
 	// 关键断言：子代理拒绝列表不得出现 context.* 项，否则专业子代理无法读写共享笔记。
-	for _, denied := range subagent.RunDenylist {
+	for _, denied := range worker.DelegatedDenylist {
 		if len(denied) >= 8 && denied[:8] == "context." {
-			t.Fatalf("context tool must not be denylisted for subagents: %q", denied)
+			t.Fatalf("context tool must not be denylisted for delegated Workers: %q", denied)
 		}
 	}
 }

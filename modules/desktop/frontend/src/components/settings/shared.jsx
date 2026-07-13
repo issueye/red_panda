@@ -34,12 +34,6 @@ export const PERMISSION_MODES = [
   ['deny_all', '全部拒绝'],
 ];
 
-export const SUB_AGENT_BACKENDS = [
-  ['runtime_process', '运行时进程（推荐）'],
-  ['process_pool', '进程池（高级）'],
-  ['in_process', '进程内（仅 planner）'],
-];
-
 export const WEB_SEARCH_PROVIDERS = [
   ['auto', '自动（有 Tavily Key 优先用 Tavily）'],
   ['tavily', 'Tavily（推荐，需 API Key）'],
@@ -48,7 +42,7 @@ export const WEB_SEARCH_PROVIDERS = [
 
 export const SETTINGS_TABS = [
   { id: 'providers', label: '供应商管理', shortLabel: '供应商', icon: Building2 },
-  { id: 'agents', label: '智能体管理', shortLabel: '智能体', icon: Bot },
+  { id: 'workers', label: 'Worker 配置', shortLabel: 'Worker', icon: Bot },
   { id: 'skills', label: '技能管理', shortLabel: '技能', icon: Blocks },
   { id: 'mcp', label: 'MCP 管理', shortLabel: 'MCP', icon: PlugZap },
   { id: 'logs', label: '日志审计', shortLabel: '日志', icon: ScrollText },

@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  agentDisplayName,
   agentDraftFrom,
   emptyAgentDraft,
 } from '../lib/agents.js';
@@ -9,7 +10,7 @@ import {
   subscribeDiagnosticLogs,
 } from '../lib/diagnosticLog.js';
 import { emptyProfileDraft, profileDraftFrom } from '../lib/providerProfiles.js';
-import { IconButton } from './ui/button.jsx';
+import { Button, IconButton } from './ui/button.jsx';
 import { useDialog } from './ui/dialog.jsx';
 import { AgentsTab } from './settings/AgentsTab.jsx';
 import { LogsTab } from './settings/LogsTab.jsx';
@@ -31,9 +32,9 @@ export function SettingsPanel({
   providerProfiles = [],
   providerProfilesLoading = false,
   providerProfilesError = '',
-  agents = [],
-  agentsLoading = false,
-  agentsError = '',
+  workerProfiles = [],
+  workerProfilesLoading = false,
+  workerProfilesError = '',
   mcpServers = [],
   mcpServersLoading = false,
   mcpServersError = '',
@@ -48,10 +49,10 @@ export function SettingsPanel({
   onUpdateProviderProfile,
   onDeleteProviderProfile,
   onRefreshProviderProfiles,
-  onCreateAgent,
-  onUpdateAgent,
-  onDeleteAgent,
-  onRefreshAgents,
+  onCreateWorkerProfile,
+  onUpdateWorkerProfile,
+  onDeleteWorkerProfile,
+  onRefreshWorkerProfiles,
   onCreateMcpServer,
   onUpdateMcpServer,
   onDeleteMcpServer,
@@ -81,7 +82,7 @@ export function SettingsPanel({
   const [mcpSaving, setMcpSaving] = useState(false);
   const [mcpError, setMcpError] = useState('');
   const [diagnosticLogs, setDiagnosticLogs] = useState(() => getDiagnosticLogs());
-  const visibleAgents = Array.isArray(agents) ? agents : [];
+  const visibleAgents = Array.isArray(workerProfiles) ? workerProfiles : [];
 
   const visibleSkills = Array.isArray(skills) ? skills : [];
   const visibleMcpServers = Array.isArray(mcpServers) ? mcpServers : [];
@@ -351,7 +352,7 @@ export function SettingsPanel({
     setAgentError('');
     try {
       if (agentDraft.isNew) {
-        const created = await onCreateAgent?.({
+        const created = await onCreateWorkerProfile?.({
           key: agentDraft.key,
           name: agentDraft.name,
           name_zh: agentDraft.name_zh,
@@ -363,7 +364,7 @@ export function SettingsPanel({
         });
         setAgentDraft(agentDraftFrom(created));
       } else {
-        const updated = await onUpdateAgent?.(agentDraft.id, {
+        const updated = await onUpdateWorkerProfile?.(agentDraft.id, {
           name: agentDraft.name,
           name_zh: agentDraft.name_zh,
           phase: agentDraft.builtin ? undefined : agentDraft.phase,
@@ -385,7 +386,7 @@ export function SettingsPanel({
     setAgentSaving(true);
     setAgentError('');
     try {
-      const updated = await onUpdateAgent?.(agent.id, { enabled });
+      const updated = await onUpdateWorkerProfile?.(agent.id, { enabled });
       if (agentDraft?.id === agent.id) {
         setAgentDraft(agentDraftFrom(updated));
       }
@@ -399,9 +400,9 @@ export function SettingsPanel({
   async function deleteAgent(agent) {
     if (agent.builtin) return;
     const ok = await dialog.confirm({
-      title: '删除智能体',
-      message: `确定删除自定义智能体「${agentDisplayName(agent)}」？`,
-      description: '内置阶段专家不可删除；自定义配置将被移除。',
+      title: '删除 Worker Profile',
+      message: `确定删除自定义 Profile「${agentDisplayName(agent)}」？`,
+      description: '内置 Profile 不可删除；自定义配置将被移除。',
       confirmLabel: '删除',
       tone: 'danger',
       testId: 'confirm-delete-agent',
@@ -410,7 +411,7 @@ export function SettingsPanel({
     setAgentSaving(true);
     setAgentError('');
     try {
-      await onDeleteAgent?.(agent.id);
+      await onDeleteWorkerProfile?.(agent.id);
       if (agentDraft?.id === agent.id) {
         setAgentDraft(null);
       }
@@ -424,7 +425,7 @@ export function SettingsPanel({
   async function refreshAgents() {
     setAgentError('');
     try {
-      await onRefreshAgents?.();
+      await onRefreshWorkerProfiles?.();
     } catch (error) {
       setAgentError(error.message);
     }
@@ -548,8 +549,8 @@ export function SettingsPanel({
       agentDraft={agentDraft}
       agentError={agentError}
       agentSaving={agentSaving}
-      agentsError={agentsError}
-      agentsLoading={agentsLoading}
+      agentsError={workerProfilesError}
+      agentsLoading={workerProfilesLoading}
       deleteAgent={deleteAgent}
       refreshAgents={refreshAgents}
       saveAgent={saveAgent}
@@ -564,8 +565,23 @@ export function SettingsPanel({
   );
 
   const logsContent = (
-    <LogsTab diagnosticLogs={diagnosticLogs} setDiagnosticLogs={setDiagnosticLogs} />
+    <LogsTab
+      diagnosticLogs={diagnosticLogs}
+      setDiagnosticLogs={setDiagnosticLogs}
+      settings={settings}
+      updateSetting={updateSetting}
+    />
   );
+
+  const activeTabLabel = SETTINGS_TABS.find((tab) => tab.id === activeTab)?.label || '设置';
+  const activeContent = {
+    providers: providerContent,
+    workers: agentsContent,
+    skills: skillsContent,
+    mcp: mcpContent,
+    logs: logsContent,
+    other: otherContent,
+  }[activeTab] || providerContent;
 
   return (
     <div className="settings-overlay" role="presentation">
@@ -627,4 +643,3 @@ export function SettingsPanel({
     </div>
   );
 }
-

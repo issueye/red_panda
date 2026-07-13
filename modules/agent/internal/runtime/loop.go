@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"redpanda/agent/internal/provider"
-	"redpanda/agent/internal/subagent"
 	agenttools "redpanda/agent/internal/tools"
+	"redpanda/agent/internal/worker"
 	"strings"
 
 	"redpanda/protocol/events"
@@ -160,7 +160,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 			}
 			return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
-		// 在历史记录中保留调用顺序；多个 subagent.run 工作进程可并发执行。
+		// 在历史记录中保留调用顺序；多个 worker.delegate 工作进程可并发执行。
 		exchanges, cancelled := r.executeToolBatch(ctx, params, requestedCalls)
 		if len(exchanges) > 0 {
 			rounds = append(rounds, exchanges)
@@ -322,7 +322,7 @@ func (r *Runtime) retryFinalAnswer(
 		return nil
 	})
 	text := strings.TrimSpace(answer.String())
-	if err != nil || returnedToolCalls || !subagent.ReportUsable(text) {
+	if err != nil || returnedToolCalls || !worker.ReportUsable(text) {
 		return false
 	}
 	err = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
@@ -398,7 +398,7 @@ func synthesizeToolAnswer(history []provider.ToolExchange) string {
 }
 
 func recoveryAnswerForRun(params methods.ReplyParams, history []provider.ToolExchange) string {
-	if strings.Contains(params.RunID, ":subagent:") {
+	if params.Options.WorkerContext != nil {
 		return "子代理已完成工具调用，但未生成可用的最终报告。工具结果已保留在工具卡片中。"
 	}
 	return synthesizeToolAnswer(history)

@@ -28,13 +28,13 @@ func TestPermissionRequestRepositoryProjectAndResolve(t *testing.T) {
 	}
 
 	repo := NewPermissionRequestRepository(db)
-	event := events.Envelope{
-		EventID:   "evt_1",
-		RootRunID: "run_1",
-		RunID:     "run_1",
-		SessionID: "session_1",
-		RootSeq:   3,
-		Type:      events.EventPermissionRequest,
+	event := events.EnvelopeV2{
+		EventID:      "evt_1",
+		RunID:        "run_1",
+		SessionID:    "session_1",
+		AssignmentID: "assignment_1",
+		RunSeq:       3,
+		Type:         events.EventPermissionRequest,
 		Payload: map[string]any{
 			"permission_id": "perm_1",
 			"run_id":        "run_1",

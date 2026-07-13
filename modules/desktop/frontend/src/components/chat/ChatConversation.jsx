@@ -2,7 +2,7 @@ import { ArrowDown, Bot, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildConversationTimeline } from '../../lib/conversationTimeline.js';
 import { classNames, formatSeq } from '../../lib/format.js';
-import { isSubagentToolFallback } from '../../lib/toolResultDisplay.js';
+import { isWorkerToolFallback } from '../../lib/toolResultDisplay.js';
 import {
   messageHasToolCallMarkup,
   parseMessageContent,
@@ -18,23 +18,20 @@ import { RunningPanda } from '../ui/RunningPanda.jsx';
 function displayMessageAgent(message) {
   const agent = message.agent || message.role;
   if (message.role === 'user') return '我';
-  if (agent === 'root') return '主代理';
   if (agent === 'gateway' || agent === 'system') return '系统';
+  if (message.profileKey) return message.profileKey;
+  if (message.workerId) return message.workerId;
   if (agent === 'assistant') return '助手';
-  if (agent === 'subagent') return '子代理';
   return agent;
 }
 
-/**
- * Render assistant/subagent message body, converting embedded <tool_call> markup
- * into ToolCallCard entries so raw XML does not leak into the bubble.
- */
+/** Render assistant message body and convert embedded tool markup into cards. */
 function AssistantMessageBody({ message }) {
   const text = message.text || '';
-  if (isSubagentToolFallback(message)) {
+  if (isWorkerToolFallback(message)) {
     return (
       <div className="message-recovery-notice" data-testid="message-recovery-notice">
-        子代理未生成可用的最终报告。完整执行结果仍保留在工具卡片中。
+        Worker 未生成可用的最终报告。完整执行结果仍保留在工具卡片中。
       </div>
     );
   }
@@ -143,8 +140,8 @@ export function ChatConversation({
             <div className="message-bubble">
               <div className="message-meta">
                 <strong>{displayMessageAgent(message)}</strong>
-                {message.rootSeq ? <span title={`事件 ${formatSeq(message.rootSeq)}`}>{formatSeq(message.rootSeq)}</span> : null}
-                {!message.rootSeq && message.messageSeq ? <span title={`消息 ${formatSeq(message.messageSeq)}`}>{formatSeq(message.messageSeq)}</span> : null}
+                {message.runSeq ? <span title={`事件 ${formatSeq(message.runSeq)}`}>{formatSeq(message.runSeq)}</span> : null}
+                {!message.runSeq && message.messageSeq ? <span title={`消息 ${formatSeq(message.messageSeq)}`}>{formatSeq(message.messageSeq)}</span> : null}
               </div>
               {isUser ? (
                 <p className="message-plain">{message.text}</p>

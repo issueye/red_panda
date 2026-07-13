@@ -197,7 +197,7 @@ export function RunActivityPanel({
           ) : filteredRuns.length === 0 ? (
             <InlineEmpty className="activity-empty">没有符合当前筛选条件的运行。</InlineEmpty>
           ) : filteredRuns.slice(0, 12).map((run) => {
-            const runTools = safeTools.filter((tool) => tool.rootRunId === run.id);
+            const runTools = safeTools.filter((tool) => tool.runId === run.id);
             const runPermissions = safePermissions.filter((item) => item.runId === run.id);
             const runEvents = runEventsByRun?.[run.id] || [];
             const eventsLoading = Boolean(runEventsLoading?.[run.id]);
@@ -227,7 +227,7 @@ export function RunActivityPanel({
                     icon={statusIcon(run.status)}
                     status={run.status || 'unknown'}
                   />
-                  <span>事件 {formatSeq(run.lastRootSeq || 0)}</span>
+                  <span>事件 {formatSeq(run.lastRunSeq || 0)}</span>
                 </div>
                 <strong>{run.input || run.id}</strong>
                 <div className="activity-row-meta">
@@ -248,7 +248,7 @@ export function RunActivityPanel({
                     <div className="activity-detail-group">
                       <strong>工具</strong>
                       {runTools.length === 0 ? <span>本次运行没有工具调用。</span> : runTools.map((tool) => (
-                        <p key={tool.id}>{tool.displayName || tool.name} - {displayStatus(tool.status || 'running')} - 事件 {formatSeq(tool.rootSeq || 0)}</p>
+                        <p key={tool.id}>{tool.displayName || tool.name} - {displayStatus(tool.status || 'running')} - 事件 {formatSeq(tool.runSeq || 0)}</p>
                       ))}
                     </div>
                     <div className="activity-detail-group">
@@ -274,12 +274,12 @@ export function RunActivityPanel({
                           value={eventKindFilter}
                         />
                         <SelectMenu
-                          ariaLabel="事件代理筛选"
-                          testId="activity-event-agent-filter"
+                          ariaLabel="事件 Worker 筛选"
+                          testId="activity-event-worker-filter"
                           onChange={setEventScopeFilter}
                           options={eventOptions.scopes.map((scope) => [
                             scope,
-                            scope === 'all' ? '全部代理' : scope,
+                            scope === 'all' ? '全部 Worker' : scope,
                           ])}
                           value={eventScopeFilter}
                         />
@@ -297,12 +297,12 @@ export function RunActivityPanel({
                           {group.events.slice(0, 16).map((event) => {
                             const meta = getRunEventTimelineMeta(event);
                             const payload = formatRunEventPayload(event);
-                            const eventKey = event.id || `${event.rootRunId || run.id}:${event.rootSeq || 0}:${event.agentSeq || 0}:${event.type || 'event'}`;
+                            const eventKey = event.id || `${event.runId || run.id}:${event.runSeq || 0}:${event.workerSeq || 0}:${event.type || 'event'}`;
                             const payloadOpen = Boolean(expandedPayloads[eventKey]);
                             return (
                               <div className="activity-event-row" key={eventKey}>
                                 <div className="activity-event-meta">
-                                  <span>{meta.sequence || `事件 ${formatSeq(event.rootSeq)}`}</span>
+                                  <span>{meta.sequence || `事件 ${formatSeq(event.runSeq)}`}</span>
                                   <span>{meta.scope}</span>
                                   {payload ? (
                                     <button

@@ -15,11 +15,11 @@ import (
 func TestRunRecordProjectionDoesNotOverwriteStartMetadata(t *testing.T) {
 	repo := newRunRecordTestRepository(t)
 	started := time.Now().UTC()
-	if err := repo.ProjectEvent(events.Envelope{
+	if err := repo.ProjectEvent(events.EnvelopeV2{
 		EventID:   "evt_run_1_1",
-		RootRunID: "run_1",
+		RunID:     "run_1",
 		SessionID: "session_1",
-		RootSeq:   1,
+		RunSeq:    1,
 		Type:      events.EventMessageDelta,
 		Payload:   map[string]any{"delta": "early"},
 		CreatedAt: started,
@@ -37,11 +37,11 @@ func TestRunRecordProjectionDoesNotOverwriteStartMetadata(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.ProjectEvent(events.Envelope{
+	if err := repo.ProjectEvent(events.EnvelopeV2{
 		EventID:   "evt_run_1_2",
-		RootRunID: "run_1",
+		RunID:     "run_1",
 		SessionID: "session_1",
-		RootSeq:   2,
+		RunSeq:    2,
 		Type:      events.EventFinish,
 		Payload:   map[string]any{"status": "completed"},
 		CreatedAt: started.Add(2 * time.Millisecond),
@@ -71,21 +71,21 @@ func TestRunRecordProjectionDoesNotOverwriteEventCounts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.ProjectEvent(events.Envelope{
+	if err := repo.ProjectEvent(events.EnvelopeV2{
 		EventID:   "evt_tool",
-		RootRunID: "run_counts",
+		RunID:     "run_counts",
 		SessionID: "session_1",
-		RootSeq:   1,
+		RunSeq:    1,
 		Type:      events.EventToolStarted,
 		CreatedAt: now.Add(time.Millisecond),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.ProjectEvent(events.Envelope{
+	if err := repo.ProjectEvent(events.EnvelopeV2{
 		EventID:   "evt_finish",
-		RootRunID: "run_counts",
+		RunID:     "run_counts",
 		SessionID: "session_1",
-		RootSeq:   2,
+		RunSeq:    2,
 		Type:      events.EventFinish,
 		Payload:   map[string]any{"status": "completed"},
 		CreatedAt: now.Add(2 * time.Millisecond),
@@ -104,7 +104,7 @@ func TestRunRecordProjectionDoesNotOverwriteEventCounts(t *testing.T) {
 	}
 }
 
-func TestRunRecordProjectionIgnoresSubagentErrorForRootLifecycle(t *testing.T) {
+func TestRunRecordProjectionIgnoresWorkerAssignmentFailureForRunLifecycle(t *testing.T) {
 	repo := newRunRecordTestRepository(t)
 	now := time.Now().UTC()
 	if err := repo.Start(model.RunRecord{
@@ -115,19 +115,16 @@ func TestRunRecordProjectionIgnoresSubagentErrorForRootLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.ProjectEvent(events.Envelope{
-		EventID:   "evt_subagent_error",
-		RootRunID: "run_subagent_error",
-		RunID:     "run_subagent_error:subagent:worker_1",
-		SessionID: "session_1",
-		RootSeq:   1,
-		Type:      events.EventError,
-		Agent: events.AgentRef{
-			Role:       events.AgentRoleSubAgent,
-			SubAgentID: "worker_1",
-		},
-		Payload:   map[string]any{"status": "failed", "message": "provider timeout"},
-		CreatedAt: now.Add(time.Millisecond),
+	if err := repo.ProjectEvent(events.EnvelopeV2{
+		EventID:      "evt_worker_failed",
+		RunID:        "run_subagent_error",
+		SessionID:    "session_1",
+		AssignmentID: "assignment_1",
+		RunSeq:       1,
+		Type:         events.EventWorkerAssignmentUpdated,
+		Worker:       events.EventWorkerRef{ID: "worker-01"},
+		Payload:      map[string]any{"status": "failed", "message": "provider timeout"},
+		CreatedAt:    now.Add(time.Millisecond),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +133,7 @@ func TestRunRecordProjectionIgnoresSubagentErrorForRootLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if row.Status != "running" || row.FinishedAt != nil || row.Error != "" {
-		t.Fatalf("subagent error changed root lifecycle: %#v", row)
+		t.Fatalf("worker assignment failure changed run lifecycle: %#v", row)
 	}
 }
 
@@ -153,7 +150,7 @@ func TestRunRecordRefreshToolCountFromToolCalls(t *testing.T) {
 	}
 	if err := repo.db.Create(&model.ToolCall{
 		ID:        "tool_1",
-		RootRunID: "run_tools",
+		RunID:     "run_tools",
 		SessionID: "session_1",
 		ToolName:  "workspace.read_file",
 		Status:    "completed",

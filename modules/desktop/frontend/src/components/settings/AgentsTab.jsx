@@ -28,10 +28,10 @@ export function AgentsTab({
 }) {
   return (
     <>
-          <ModuleHeader badge={`${visibleAgents.length} 个`} title="智能体管理">
+          <ModuleHeader badge={`${visibleAgents.length} 个`} title="Worker 配置">
             <IconButton
               disabled={agentsLoading || agentSaving}
-              label="刷新智能体"
+              label="刷新 Worker Profile"
               onClick={refreshAgents}
             >
               <RefreshCw size={15} />
@@ -45,20 +45,20 @@ export function AgentsTab({
               }}
               variant="soft"
             >
-              新建智能体
+              新建 Profile
             </Button>
           </ModuleHeader>
           <p className="settings-module-hint">
-            管理 Goal 流水线阶段专家（分析 / 规划 / 实施 / 验证 / 终评）与自定义智能体。内置专家可停用或改提示词，不可删除。
+            管理 Worker 的可复用执行 Profile。Profile 描述能力与策略，不代表运行中的 Worker 槽位。
           </p>
           {agentsError || agentError ? <ErrorMessage>{agentError || agentsError}</ErrorMessage> : null}
           <div className="settings-split">
             <div className="settings-manager-list" data-testid="agents-list">
               {agentsLoading && visibleAgents.length === 0 ? (
-                <EmptyState title="加载中">正在读取智能体定义…</EmptyState>
+                <EmptyState title="加载中">正在读取 Worker Profile…</EmptyState>
               ) : null}
               {!agentsLoading && visibleAgents.length === 0 ? (
-                <EmptyState title="暂无智能体">点击新建，或刷新以加载内置阶段专家。</EmptyState>
+                <EmptyState title="暂无 Profile">点击新建，或刷新以加载内置 Profile。</EmptyState>
               ) : null}
               {visibleAgents.map((agent) => (
                 <ManagerItem
@@ -82,10 +82,10 @@ export function AgentsTab({
               {agentDraft ? (
                 <>
                   <div className="settings-editor-title">
-                    <strong>{agentDraft.isNew ? '新建智能体' : '编辑智能体'}</strong>
+                    <strong>{agentDraft.isNew ? '新建 Profile' : '编辑 Profile'}</strong>
                     <Badge>{agentDraft.builtin ? '内置' : agentDraft.isNew ? '新配置' : '自定义'}</Badge>
                   </div>
-                  <Field className="settings-row" label="标识 Key" tooltip="subagent.run 的 name；内置不可改">
+                  <Field className="settings-row" label="标识 Key" tooltip="worker.delegate 使用的 profile_key；内置不可改">
                     <input
                       disabled={!agentDraft.isNew || agentDraft.builtin}
                       onChange={(event) => setAgentDraft((c) => ({ ...c, key: event.target.value }))}
@@ -150,7 +150,7 @@ export function AgentsTab({
                       onChange={(event) => setAgentDraft((c) => ({ ...c, enabled: event.target.checked }))}
                       type="checkbox"
                     />
-                    <span>启用智能体</span>
+                    <span>启用 Profile</span>
                   </label>
                   <div className="settings-editor-actions">
                     <Button disabled={agentSaving} onClick={() => setAgentDraft(null)} variant="ghost">取消</Button>
@@ -162,12 +162,12 @@ export function AgentsTab({
                       }
                       onClick={saveAgent}
                     >
-                      {agentSaving ? '保存中' : agentDraft.isNew ? '创建智能体' : '保存'}
+                      {agentSaving ? '保存中' : agentDraft.isNew ? '创建 Profile' : '保存'}
                     </Button>
                   </div>
                 </>
               ) : (
-                <EmptyState title="选择智能体">从左侧选择内置阶段专家，或新建自定义智能体。</EmptyState>
+                <EmptyState title="选择 Profile">从左侧选择内置 Profile，或新建自定义 Profile。</EmptyState>
               )}
             </div>
           </div>

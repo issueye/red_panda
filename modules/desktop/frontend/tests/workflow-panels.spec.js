@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 
-test('Restored workflow panels render permissions tools and subagent actions', async ({ page }) => {
+test('Restored workflow panels render permissions tools and Worker assignments', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 
   await expect(page.getByTestId('message-row')).toHaveCount(2);
   await expect(page.getByText('Restore previous session state')).toBeVisible();
-  await expect(page.getByText('Restored messages, tools, permissions, and subagents.')).toBeVisible();
+  await expect(page.getByText('Restored messages, tools, permissions, and Worker assignments.')).toBeVisible();
 
   await expect(page.getByTestId('tool-card')).toHaveCount(2);
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
@@ -38,21 +38,21 @@ test('Restored workflow panels render permissions tools and subagent actions', a
 
   const denyPermission = page.getByTestId('permission-card').filter({ hasText: 'Allow destructive shell command' });
   await expect(denyPermission).toContainText('高风险');
-  await expect(denyPermission).toContainText('子代理 planner');
+  await expect(denyPermission).toContainText('worker-02');
   await denyPermission.getByTestId('permission-deny').click();
   await expect(denyPermission.getByTestId('permission-state')).toHaveText('已拒绝');
   await expect(denyPermission.getByTestId('permission-deny')).toHaveCount(0);
   await expect(page.getByTestId('permission-result')).toHaveText('perm_deny_restore:deny');
 
-  await expect(page.getByTestId('subagent-item')).toHaveCount(3);
-  const planner = page.getByTestId('subagent-item').filter({ hasText: 'planner' });
-  const archivist = page.getByTestId('subagent-item').filter({ hasText: 'archivist' });
-  await expect(planner).toContainText('进程池');
-  await expect(archivist).toContainText('运行时进程');
-  await expect(planner.getByTestId('subagent-cancel')).toBeEnabled();
-  await expect(archivist.getByTestId('subagent-cancel')).toBeDisabled();
-  await planner.getByTestId('subagent-cancel').click();
-  await expect(page.getByTestId('subagent-result')).toHaveText('planner:running');
+  await expect(page.getByTestId('worker-item')).toHaveCount(2);
+  await expect(page.getByTestId('worker-assignment')).toHaveCount(2);
+  const planner = page.getByTestId('worker-assignment').filter({ hasText: 'goal-planner' });
+  const archivist = page.getByTestId('worker-assignment').filter({ hasText: 'archivist' });
+  await expect(planner).toContainText('worker-02');
+  await expect(planner.getByTestId('worker-assignment-cancel')).toBeEnabled();
+  await expect(archivist.getByTestId('worker-assignment-cancel')).toBeDisabled();
+  await planner.getByTestId('worker-assignment-cancel').click();
+  await expect(page.getByTestId('worker-result')).toHaveText('assignment-planner:running');
 });
 
 test('Conversation pauses following after manual scroll and can return to latest', async ({ page }) => {

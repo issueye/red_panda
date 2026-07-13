@@ -11,7 +11,7 @@ import (
 	"redpanda/ipc"
 )
 
-var version = "dev"
+var version = "0.2.0"
 
 func main() {
 	in, out, closer, err := openTransport()

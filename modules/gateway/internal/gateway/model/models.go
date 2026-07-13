@@ -95,8 +95,8 @@ type TodoItem struct {
 
 type RunEvent struct {
 	ID          string `gorm:"primaryKey"`
-	RootRunID   string `gorm:"uniqueIndex:idx_run_seq"`
-	RootSeq     uint64 `gorm:"uniqueIndex:idx_run_seq"`
+	RunID       string `gorm:"uniqueIndex:idx_v2_run_seq"`
+	RunSeq      uint64 `gorm:"uniqueIndex:idx_v2_run_seq"`
 	Type        string
 	PayloadJSON string
 	CreatedAt   time.Time
@@ -185,10 +185,11 @@ type GoalNote struct {
 
 type ToolCall struct {
 	ID            string `gorm:"primaryKey"`
-	RootRunID     string `gorm:"index"`
+	RunID         string `gorm:"index"`
 	SessionID     string `gorm:"index"`
-	AgentID       string
-	AgentRole     string
+	WorkerID      string `gorm:"index"`
+	AssignmentID  string `gorm:"index"`
+	ProfileKey    string `gorm:"index"`
 	ToolName      string `gorm:"index"`
 	DisplayName   string
 	Risk          string
@@ -229,7 +230,7 @@ type PermissionRequest struct {
 	Status        string `gorm:"index"`
 	Decision      string
 	Reason        string
-	RootSeq       uint64
+	RunSeq        uint64
 	CreatedAt     time.Time
 	ResolvedAt    *time.Time
 	UpdatedAt     time.Time
@@ -276,17 +277,19 @@ type MCPServerConfig struct {
 	DeletedAt     *time.Time `gorm:"index"`
 }
 
-// AgentDefinition is a managed specialist / agent profile (builtin goal specialists or custom).
-// Runtime subagent.run matches by Key (e.g. goal-analyst).
-type AgentDefinition struct {
+// WorkerProfile configures how a Worker executes an Assignment. It is not a
+// runtime Worker instance and therefore carries no Worker or Assignment state.
+type WorkerProfile struct {
 	ID              string `gorm:"primaryKey"`
-	Key             string `gorm:"uniqueIndex:idx_agent_definitions_key,where:deleted_at IS NULL"`
+	Key             string `gorm:"uniqueIndex:idx_worker_profiles_key,where:deleted_at IS NULL"`
 	Name            string
 	NameZH          string
 	Kind            string `gorm:"index"` // builtin | custom
 	Phase           string `gorm:"index"` // analyze | plan | execute | verify | evaluate | custom | general
 	Description     string
-	SystemPrompt    string   `gorm:"type:text"`
+	SystemPrompt    string `gorm:"type:text"`
+	Provider        string
+	Model           string
 	ToolAllowlist   []string `gorm:"column:tool_allowlist_json;serializer:json;type:text"`
 	ToolDenylist    []string `gorm:"column:tool_denylist_json;serializer:json;type:text"`
 	DefaultMaxTurns int

@@ -291,10 +291,10 @@ func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) 
 	}
 }
 
-func TestOpenAICompatibleMessagesInjectOrchestrationPolicyWhenSubagentToolAvailable(t *testing.T) {
+func TestOpenAICompatibleMessagesInjectOrchestrationPolicyWhenWorkerToolAvailable(t *testing.T) {
 	messages := openAICompatibleMessages(ProviderRequest{
 		Input: methods.ReplyInput{Text: "分析桌面端和服务端"},
-		Tools: []tools.Definition{{Name: "subagent.run", Description: "run"}},
+		Tools: []tools.Definition{{Name: "worker.delegate", Description: "run"}},
 	})
 	if len(messages) < 3 {
 		t.Fatalf("messages = %#v", messages)
@@ -303,7 +303,7 @@ func TestOpenAICompatibleMessagesInjectOrchestrationPolicyWhenSubagentToolAvaila
 		t.Fatalf("expected time system message first, got %#v", messages[0])
 	}
 	policy := fmt.Sprint(messages[1]["content"])
-	if messages[1]["role"] != "system" || !strings.Contains(policy, "subagent.run") {
+	if messages[1]["role"] != "system" || !strings.Contains(policy, "worker.delegate") {
 		t.Fatalf("expected orchestration system policy, got %#v", messages[1])
 	}
 	if !strings.Contains(policy, "foundation specialist") || !strings.Contains(policy, "main.go") {
@@ -318,10 +318,10 @@ func TestOpenAICompatibleMessagesInjectOrchestrationPolicyWhenSubagentToolAvaila
 		Tools: []tools.Definition{{Name: "workspace.read_file"}},
 	})
 	if len(without) != 2 || without[0]["role"] != "system" || without[1]["role"] != "user" {
-		t.Fatalf("child/specialist without subagent/todo tools should get time + user only: %#v", without)
+		t.Fatalf("child/specialist without Worker/todo tools should get time + user only: %#v", without)
 	}
-	if strings.Contains(fmt.Sprint(without[0]["content"]), "subagent.run") {
-		t.Fatalf("child/specialist without subagent tool should not get orchestration policy: %#v", without[0])
+	if strings.Contains(fmt.Sprint(without[0]["content"]), "worker.delegate") {
+		t.Fatalf("child/specialist without Worker tool should not get orchestration policy: %#v", without[0])
 	}
 }
 
@@ -329,14 +329,14 @@ func TestGoalPipelineDoesNotInjectParallelOrchestrationPolicy(t *testing.T) {
 	messages := openAICompatibleMessages(ProviderRequest{
 		Input: methods.ReplyInput{Text: "分析并实现项目改动"},
 		Tools: []tools.Definition{
-			{Name: "subagent.run"},
+			{Name: "worker.delegate"},
 			{Name: "goal.write"},
 			{Name: "todo.write"},
 		},
 	})
 
 	joined := fmt.Sprint(messages)
-	if strings.Contains(joined, "spawn multiple subagent.run calls IN ONE TURN") {
+	if strings.Contains(joined, "spawn multiple worker.delegate calls IN ONE TURN") {
 		t.Fatalf("goal pipeline must not receive parallel survey policy: %s", joined)
 	}
 	if !strings.Contains(joined, "exactly ONE specialist") || !strings.Contains(joined, "pipeline_phase") {
@@ -348,18 +348,18 @@ func TestOpenAICompatibleMessagesInjectPostDelegationPolicy(t *testing.T) {
 	messages := openAICompatibleMessages(ProviderRequest{
 		Input: methods.ReplyInput{Text: "汇总项目分析"},
 		Tools: []tools.Definition{
-			{Name: "subagent.run"},
+			{Name: "worker.delegate"},
 			{Name: "workspace.read_file"},
 		},
 		ToolHistory: []ToolExchange{{
 			Call: tools.Call{
 				ID:        "call_foundation",
-				Name:      "subagent.run",
+				Name:      "worker.delegate",
 				Arguments: map[string]any{"name": "foundation", "path": "."},
 			},
 			Result: tools.Result{
 				ToolCallID: "call_foundation",
-				Name:       "subagent.run",
+				Name:       "worker.delegate",
 				Status:     tools.CallStatusCompleted,
 				Output:     "main.go starts Wails; wails.json defines the frontend build.",
 			},
@@ -377,15 +377,15 @@ func TestOpenAICompatibleMessagesInjectPostDelegationPolicy(t *testing.T) {
 
 	failed := openAICompatibleMessages(ProviderRequest{
 		Input: methods.ReplyInput{Text: "继续"},
-		Tools: []tools.Definition{{Name: "subagent.run"}},
+		Tools: []tools.Definition{{Name: "worker.delegate"}},
 		ToolHistory: []ToolExchange{{
-			Call:   tools.Call{ID: "call_failed", Name: "subagent.run"},
+			Call:   tools.Call{ID: "call_failed", Name: "worker.delegate"},
 			Result: tools.Result{Status: tools.CallStatusFailed},
 		}},
 	})
 	for _, message := range failed {
 		if strings.Contains(fmt.Sprint(message["content"]), "Post-delegation rule") {
-			t.Fatalf("failed subagent must not trigger successful-report policy: %#v", failed)
+			t.Fatalf("failed Worker must not trigger successful-report policy: %#v", failed)
 		}
 	}
 }
@@ -414,7 +414,7 @@ func TestOpenAICompatibleMessagesInjectTodoPolicyWhenTodoWriteAvailable(t *testi
 	withBoth := openAICompatibleMessages(ProviderRequest{
 		Input: methods.ReplyInput{Text: "大范围重构"},
 		Tools: []tools.Definition{
-			{Name: "subagent.run"},
+			{Name: "worker.delegate"},
 			{Name: "todo.write"},
 		},
 		Options: methods.ReplyOptions{
@@ -428,7 +428,7 @@ func TestOpenAICompatibleMessagesInjectTodoPolicyWhenTodoWriteAvailable(t *testi
 		t.Fatalf("messages = %#v", withBoth)
 	}
 	joined := fmt.Sprint(withBoth[1]["content"]) + fmt.Sprint(withBoth[2]["content"]) + fmt.Sprint(withBoth[3]["content"])
-	if !strings.Contains(joined, "subagent.run") || !strings.Contains(joined, "todo.write") {
+	if !strings.Contains(joined, "worker.delegate") || !strings.Contains(joined, "todo.write") {
 		t.Fatalf("expected orchestration + todo policy when both tools available: %#v", withBoth)
 	}
 	if !strings.Contains(fmt.Sprint(withBoth[3]["content"]), "in_progress") {
@@ -452,7 +452,7 @@ func TestOpenAICompatibleMessagesIncludeConversationInOrderAndCurrentInputOnce(t
 					Content: []methods.ContentBlock{{Type: "text", Text: "first answer"}},
 				},
 				{
-					Role:    "subagent",
+					Role:    "Worker",
 					Content: []methods.ContentBlock{{Type: "text", Text: "planner detail"}},
 				},
 			},

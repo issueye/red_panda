@@ -15,13 +15,13 @@ test('looksLikeCommand detects leading slash', () => {
   assert.equal(looksLikeCommand('plain text'), false);
 });
 
-test('parseCommand plain run keeps text and flags', () => {
-  const cmd = parseCommand('do work /permission /subagent');
+test('parseCommand plain run keeps text and permission flag', () => {
+  const cmd = parseCommand('do work /permission');
   assert.equal(cmd.action, 'run');
   assert.equal(cmd.isCommand, false);
-  assert.equal(cmd.inputText, 'do work /permission /subagent');
+  assert.equal(cmd.inputText, 'do work /permission');
   assert.equal(cmd.requirePermission, true);
-  assert.equal(cmd.spawnSubAgents, true);
+  assert.equal(cmd.spawnSubAgents, undefined);
 });
 
 test('parseCommand /goal starts a user-initiated goal', () => {

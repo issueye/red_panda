@@ -17,37 +17,37 @@ func NewRunEventRepository(db *gorm.DB) RunEventRepository {
 	return RunEventRepository{db: db}
 }
 
-func (r RunEventRepository) Save(event events.Envelope) error {
+func (r RunEventRepository) Save(event events.EnvelopeV2) error {
 	raw, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
 	return r.db.Create(&model.RunEvent{
 		ID:          event.EventID,
-		RootRunID:   event.RootRunID,
-		RootSeq:     event.RootSeq,
+		RunID:       event.RunID,
+		RunSeq:      event.RunSeq,
 		Type:        string(event.Type),
 		PayloadJSON: string(raw),
 		CreatedAt:   event.CreatedAt,
 	}).Error
 }
 
-func (r RunEventRepository) ListAfter(rootRunID string, afterSeq uint64, limit int) ([]events.Envelope, error) {
+func (r RunEventRepository) ListAfter(runID string, afterSeq uint64, limit int) ([]events.EnvelopeV2, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 500
 	}
 	var rows []model.RunEvent
 	if err := r.db.
-		Where("root_run_id = ? AND root_seq > ?", rootRunID, afterSeq).
-		Order("root_seq asc").
+		Where("run_id = ? AND run_seq > ?", runID, afterSeq).
+		Order("run_seq asc").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
-	items := make([]events.Envelope, 0, len(rows))
+	items := make([]events.EnvelopeV2, 0, len(rows))
 	for _, row := range rows {
-		var event events.Envelope
+		var event events.EnvelopeV2
 		if err := json.Unmarshal([]byte(row.PayloadJSON), &event); err != nil {
 			return nil, err
 		}

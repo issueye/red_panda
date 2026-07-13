@@ -1,26 +1,21 @@
 import { displayEventKind, displayRisk, displayStatus } from './displayLabels.js';
 
 export function normalizeRunEvent(item) {
-  const type = item.type || 'event';
-  const agentRole = item.agent_role || item.agent?.role || 'root';
   const payload = item.payload || {};
-  const streamKind = item.stream_kind || item.stream?.kind || '';
-  const eventKind = item.event_kind || item.kind || classifyRunEventKind(type, streamKind, payload);
-
+  const type = item.type || 'event';
+  const worker = item.worker || {};
   return {
-    id: item.id || item.event_id,
+    id: item.event_id,
+    protocolVersion: item.protocol_version || '',
     type,
-    eventKind,
-    rootRunId: item.root_run_id || '',
+    eventKind: item.event_kind || classifyRunEventKind(type, payload),
     runId: item.run_id || '',
-    parentRunId: item.parent_run_id || '',
     sessionId: item.session_id || '',
-    rootSeq: item.root_seq || 0,
-    agentSeq: item.agent_seq || 0,
-    agentId: item.agent_id || item.agent?.agent_id || '',
-    agentRole,
-    agentName: item.agent_name || item.agent?.name || item.agent_id || 'agent',
-    streamKind,
+    assignmentId: item.assignment_id || '',
+    runSeq: Number(item.run_seq) || 0,
+    workerSeq: Number(item.worker_seq) || 0,
+    workerId: worker.id || '',
+    profileKey: worker.profile_key || '',
     payload,
     createdAt: item.created_at,
   };
@@ -28,40 +23,25 @@ export function normalizeRunEvent(item) {
 
 export function summarizeRunEvent(event) {
   const payload = event?.payload || {};
-  const kind = event?.eventKind || classifyRunEventKind(event?.type, event?.streamKind, payload);
-
+  const kind = event?.eventKind || classifyRunEventKind(event?.type, payload);
   if (kind === 'tool') {
-    const name = firstPresent(payload.tool_name, payload.toolName, payload.name, payload.display_name);
-    const status = firstPresent(payload.status, payload.state, payload.result_status);
-    const input = summarizeToolInput(payload);
-    return trimSummary(joinParts([name || '工具', status ? displayStatus(status) : '', input]));
+    const name = firstPresent(payload.tool_name, payload.name, payload.display_name);
+    const status = firstPresent(payload.status, payload.state);
+    return trimSummary(joinParts([name || '工具', status ? displayStatus(status) : '', summarizeToolInput(payload)]));
   }
-
   if (kind === 'permission') {
-    const action = firstPresent(payload.action, payload.decision, payload.status, payload.state);
-    const toolName = firstPresent(payload.tool_name, payload.toolName, payload.name);
+    const action = firstPresent(payload.action, payload.decision, payload.status);
     const reason = firstPresent(payload.summary, payload.reason, payload.risk ? `${displayRisk(payload.risk)}风险` : '');
-    return trimSummary(joinParts(['授权', action ? displayStatus(action) : '', toolName, reason]));
+    return trimSummary(joinParts(['授权', action ? displayStatus(action) : '', payload.tool_name, reason]));
   }
-
-  if (kind === 'error') {
-    return trimSummary(firstPresent(payload.error, payload.message, payload.summary, event?.type, '错误'));
-  }
-
-  if (kind === 'done') {
-    const status = firstPresent(payload.status, payload.state, payload.reason);
-    return trimSummary(joinParts(['完成', status ? displayStatus(status) : '']));
-  }
-
-  if (payload.delta) return trimSummary(payload.delta);
-  if (payload.message) return trimSummary(payload.message);
-  if (payload.summary) return trimSummary(payload.summary);
-  if (payload.status) return trimSummary(displayStatus(payload.status));
-  return trimSummary(event?.streamKind || event?.agentName || displayEventKind('event'));
+  if (kind === 'error') return trimSummary(firstPresent(payload.error, payload.message, payload.summary, event?.type, '错误'));
+  if (kind === 'done') return trimSummary(joinParts(['完成', payload.status ? displayStatus(payload.status) : '']));
+  return trimSummary(firstPresent(payload.delta, payload.message, payload.summary,
+    payload.status ? displayStatus(payload.status) : '', event?.workerId, displayEventKind('event')));
 }
 
 export function getRunEventTimelineMeta(event) {
-  const kind = event?.eventKind || classifyRunEventKind(event?.type, event?.streamKind, event?.payload || {});
+  const kind = event?.eventKind || classifyRunEventKind(event?.type, event?.payload || {});
   return {
     kind,
     scope: formatRunEventScope(event),
@@ -72,17 +52,10 @@ export function getRunEventTimelineMeta(event) {
 }
 
 export function filterRunEvents(events, filters = {}) {
-  const kind = filters.kind || 'all';
-  const scope = filters.scope || 'all';
   return sortRunEvents(safeEvents(events)).filter((event) => {
     const meta = getRunEventTimelineMeta(event);
-    if (kind !== 'all' && meta.kind !== kind) {
-      return false;
-    }
-    if (scope !== 'all' && meta.scope !== scope) {
-      return false;
-    }
-    return true;
+    return (!filters.kind || filters.kind === 'all' || meta.kind === filters.kind)
+      && (!filters.scope || filters.scope === 'all' || meta.scope === filters.scope);
   });
 }
 
@@ -90,161 +63,70 @@ export function groupRunEventsByKind(events) {
   const groups = new Map();
   for (const event of sortRunEvents(safeEvents(events))) {
     const meta = getRunEventTimelineMeta(event);
-    if (!groups.has(meta.kind)) {
-      groups.set(meta.kind, {
-        kind: meta.kind,
-        count: 0,
-        events: [],
-      });
-    }
-    const group = groups.get(meta.kind);
+    const group = groups.get(meta.kind) || { kind: meta.kind, count: 0, events: [] };
     group.count += 1;
     group.events.push(event);
+    groups.set(meta.kind, group);
   }
-  return Array.from(groups.values()).sort((left, right) => (
-    eventKindRank(left.kind) - eventKindRank(right.kind)
-  ));
+  return Array.from(groups.values()).sort((a, b) => eventKindRank(a.kind) - eventKindRank(b.kind));
 }
 
 export function getRunEventFilterOptions(events) {
-  const kinds = new Set();
-  const scopes = new Set();
-  for (const event of safeEvents(events)) {
-    const meta = getRunEventTimelineMeta(event);
-    kinds.add(meta.kind);
-    scopes.add(meta.scope);
-  }
+  const metas = safeEvents(events).map(getRunEventTimelineMeta);
   return {
-    kinds: ['all', ...Array.from(kinds).sort((left, right) => eventKindRank(left) - eventKindRank(right))],
-    scopes: ['all', ...Array.from(scopes).sort()],
+    kinds: ['all', ...Array.from(new Set(metas.map((item) => item.kind))).sort((a, b) => eventKindRank(a) - eventKindRank(b))],
+    scopes: ['all', ...Array.from(new Set(metas.map((item) => item.scope))).sort()],
   };
 }
 
 export function formatRunEventPayload(event) {
   const payload = event?.payload || {};
-  if (Object.keys(payload).length === 0) {
-    return '';
-  }
+  if (Object.keys(payload).length === 0) return '';
   const text = JSON.stringify(payload, null, 2);
-  if (text.length <= 4000) {
-    return text;
-  }
-  return `${text.slice(0, 4000)}\n... 已截断`;
+  return text.length <= 4000 ? text : `${text.slice(0, 4000)}\n... 已截断`;
 }
 
-export function classifyRunEventKind(type, streamKind, payload = {}) {
-  const value = `${type || ''} ${streamKind || ''}`.toLowerCase();
-  if (value.includes('permission') || payload.permission_id || payload.approval_id || payload.decision) {
-    return 'permission';
-  }
-  if (value.includes('memory') || payload.memory_ids) {
-    return 'memory';
-  }
-  if (type === 'todo_updated' || value.includes('todo_updated')) {
-    return 'todo';
-  }
-  if (type === 'goal_updated' || value.includes('goal_updated')) {
-    return 'goal';
-  }
-  if (value.includes('tool') || payload.tool_name || payload.toolName) {
-    return 'tool';
-  }
-  if (value.includes('error') || value.includes('failed') || payload.error) {
-    return 'error';
-  }
-  if (value.includes('done') || value.includes('complete') || value.includes('finish')) {
-    return 'done';
-  }
-  if (value.includes('message') || payload.delta || payload.message) {
-    return 'message';
-  }
+export function classifyRunEventKind(type, payload = {}) {
+  const value = String(type || '').toLowerCase();
+  if (value.includes('permission') || payload.permission_id || payload.decision) return 'permission';
+  if (value.includes('memory') || payload.memory_ids) return 'memory';
+  if (value.includes('todo')) return 'todo';
+  if (value.includes('goal')) return 'goal';
+  if (value.includes('tool') || payload.tool_name) return 'tool';
+  if (value.includes('error') || value.includes('failed') || payload.error) return 'error';
+  if (value.includes('done') || value.includes('complete') || value.includes('finish')) return 'done';
+  if (value.includes('message') || payload.delta || payload.message) return 'message';
   return 'event';
 }
 
-function safeEvents(events) {
-  return Array.isArray(events) ? events : [];
-}
-
+function safeEvents(events) { return Array.isArray(events) ? events : []; }
 function sortRunEvents(events) {
-  return [...events].sort((left, right) => {
-    const leftSeq = Number(left?.rootSeq || 0);
-    const rightSeq = Number(right?.rootSeq || 0);
-    if (leftSeq !== rightSeq) {
-      return leftSeq - rightSeq;
-    }
-    const leftAgentSeq = Number(left?.agentSeq || 0);
-    const rightAgentSeq = Number(right?.agentSeq || 0);
-    if (leftAgentSeq !== rightAgentSeq) {
-      return leftAgentSeq - rightAgentSeq;
-    }
-    return new Date(left?.createdAt || 0).getTime() - new Date(right?.createdAt || 0).getTime();
-  });
+  return [...events].sort((a, b) => a.runSeq - b.runSeq || a.workerSeq - b.workerSeq
+    || new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
 }
-
 function eventKindRank(kind) {
-  return {
-    error: 0,
-    permission: 1,
-    memory: 2,
-    tool: 3,
-    message: 4,
-    done: 5,
-    event: 6,
-    all: -1,
-  }[kind] ?? 99;
+  return ({ all: -1, error: 0, permission: 1, memory: 2, tool: 3, message: 4, done: 5, event: 6 })[kind] ?? 99;
 }
-
 function formatRunEventScope(event) {
-  const role = event?.agentRole || 'root';
-  if (role === 'root') {
-    return '主代理';
-  }
-  if (role === 'subagent') {
-    return event?.agentName ? `子代理 · ${event.agentName}` : event?.agentId ? `子代理 · ${event.agentId}` : '子代理';
-  }
-  if (event?.agentName) {
-    return `${role} · ${event.agentName}`;
-  }
-  if (event?.agentId) {
-    return `${role}:${event.agentId}`;
-  }
-  return role;
+  if (!event?.workerId) return 'Run';
+  return event.profileKey ? `Worker · ${event.workerId} · ${event.profileKey}` : `Worker · ${event.workerId}`;
 }
-
 function formatRunEventSequence(event) {
-  const rootSeq = Number(event?.rootSeq || 0);
-  const agentSeq = Number(event?.agentSeq || 0);
-  if (agentSeq > 0 && event?.agentRole && event.agentRole !== 'root') {
-    return `事件 ${String(rootSeq).padStart(3, '0')} · 代理事件 ${String(agentSeq).padStart(3, '0')}`;
-  }
-  return `事件 ${String(rootSeq).padStart(3, '0')}`;
+  const run = String(Number(event?.runSeq) || 0).padStart(3, '0');
+  const worker = Number(event?.workerSeq) || 0;
+  return worker > 0 ? `运行事件 ${run} · Worker 事件 ${String(worker).padStart(3, '0')}` : `运行事件 ${run}`;
 }
-
 function summarizeToolInput(payload) {
-  const command = firstPresent(payload.command, payload.cmd);
-  if (command) return command;
-  const args = firstPresent(payload.args, payload.arguments, payload.input);
-  if (!args) return '';
-  if (typeof args === 'string') return args;
-  if (Array.isArray(args)) return args.join(' ');
-  if (typeof args === 'object') {
-    return Object.entries(args).slice(0, 2).map(([key, value]) => `${key}=${String(value)}`).join(' ');
-  }
-  return String(args);
+  const value = firstPresent(payload.command, payload.arguments, payload.input);
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.join(' ');
+  if (typeof value === 'object') return Object.entries(value).slice(0, 2).map(([k, v]) => `${k}=${String(v)}`).join(' ');
+  return String(value);
 }
-
-function firstPresent(...values) {
-  return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '') || '';
-}
-
-function joinParts(parts) {
-  return parts.filter((part) => part !== undefined && part !== null && String(part).trim() !== '').join(' - ');
-}
-
+function firstPresent(...values) { return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '') || ''; }
+function joinParts(parts) { return parts.filter((part) => part !== undefined && part !== null && String(part).trim() !== '').join(' - '); }
 function trimSummary(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (text.length <= 96) {
-    return text;
-  }
-  return `${text.slice(0, 93)}...`;
+  return text.length <= 96 ? text : `${text.slice(0, 93)}...`;
 }

@@ -9,13 +9,14 @@ import (
 	"os"
 	"redpanda/agent/internal/skill"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	agentmcp "redpanda/agent/internal/mcp"
 	"redpanda/agent/internal/provider"
-	"redpanda/agent/internal/subagent"
 	agenttools "redpanda/agent/internal/tools"
+	"redpanda/agent/internal/worker"
 	"redpanda/protocol/events"
 	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
@@ -56,24 +57,22 @@ type Runtime struct {
 	log     io.Writer
 	version string
 
-	mu                  sync.Mutex
-	eventMu             sync.Mutex
-	initialized         bool
-	nextSeq             map[string]uint64
-	agentSeq            map[string]map[string]uint64
-	gatewayPending      map[jsonrpc.ID]chan jsonrpc.Response
-	nextGatewayID       uint64
-	permissions         map[string]chan permission.ResolveParams
-	activeRuns          map[string]context.CancelFunc
-	subagents           *subagent.Registry
-	provider            provider.Provider
-	tools               agenttools.ToolRunner
-	processPool         *subagent.ProcessPool
-	subagentCoordinator *subagent.Coordinator
-	mcp                 *agentmcp.Manager
-	runTodos            map[string][]methods.TodoItemDTO
-	runGoals            map[string]*runGoalState
-	newProcessSubAgent  func(context.Context, methods.ReplyParams, string) (subagent.Process, error)
+	mu              sync.Mutex
+	eventMu         sync.Mutex
+	initialized     bool
+	protocolVersion string
+	nextSeq         map[string]uint64
+	agentSeq        map[string]map[string]uint64
+	gatewayPending  map[jsonrpc.ID]chan jsonrpc.Response
+	nextGatewayID   uint64
+	permissions     map[string]chan permission.ResolveParams
+	activeRuns      map[string]context.CancelFunc
+	provider        provider.Provider
+	tools           agenttools.ToolRunner
+	workerPool      *worker.Pool
+	mcp             *agentmcp.Manager
+	runTodos        map[string][]methods.TodoItemDTO
+	runGoals        map[string]*runGoalState
 }
 
 var _ agenttools.SubagentManager = (*Runtime)(nil)
@@ -89,7 +88,6 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 		gatewayPending: map[jsonrpc.ID]chan jsonrpc.Response{},
 		permissions:    map[string]chan permission.ResolveParams{},
 		activeRuns:     map[string]context.CancelFunc{},
-		subagents:      subagent.NewRegistry(),
 		mcp:            agentmcp.NewManager(version, log),
 		runTodos:       map[string][]methods.TodoItemDTO{},
 		runGoals:       map[string]*runGoalState{},
@@ -101,16 +99,20 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 	rt.tools.GoalExecutor = rt.goalExecutor
 	rt.tools.ContextExecutor = rt.executeContextTool
 	rt.tools.SkillExecutor = rt.executeSkillRun
-	rt.tools.SubagentExecutor = rt.executeSubagentRun
-	rt.tools.SubagentManager = rt
+	rt.tools.WorkerDelegate = rt.executeWorkerDelegate
+	rt.tools.WorkerList = rt.executeWorkerList
+	rt.tools.WorkerCancel = rt.executeWorkerCancel
+	rt.tools.WorkerPoolStatus = rt.executeWorkerPoolStatus
+	rt.tools.WorkerSend = rt.executeWorkerSend
+	rt.tools.WorkerReceive = rt.executeWorkerReceive
 	rt.tools.MCPExecutor = rt.executeMCPTool
-	rt.newProcessSubAgent = rt.createProcessSubAgent
-	rt.processPool = subagent.NewProcessPool(subagent.PoolSizeFromEnv(), rt.newProcessSubAgent)
-	coordinator, err := subagent.NewCoordinator(runtimeProcessProvider{runtime: rt}, runtimeEventSink{runtime: rt}, rt.subagents)
+	workerPool, err := worker.NewPool(worker.Config{Size: workerPoolSizeFromEnv()}, func(workerID worker.WorkerID) (worker.Executor, error) {
+		return newLazyProcessExecutor(rt, workerID), nil
+	})
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("create WorkerPool: %w", err))
 	}
-	rt.subagentCoordinator = coordinator
+	rt.workerPool = workerPool
 	return rt
 }
 
@@ -171,12 +173,7 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 	case methods.CorePing:
 		return r.handlePing(req)
 	case methods.CoreShutdown:
-		if r.mcp != nil {
-			r.mcp.CloseAll()
-		}
-		if r.processPool != nil {
-			r.processPool.Close(context.Background())
-		}
+		_ = r.Close(context.Background())
 		resp, err := jsonrpc.NewResult(req.ID, map[string]bool{"accepted": true})
 		if err != nil {
 			return err
@@ -184,6 +181,8 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 		return r.writeResponse(resp)
 	case methods.AgentReply:
 		return r.handleReply(ctx, req)
+	case methods.RunExecute:
+		return r.handleRunExecute(ctx, req)
 	case methods.MCPDiscover:
 		return r.handleMCPDiscover(ctx, req)
 	case methods.AgentSkills:
@@ -198,10 +197,14 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 		return r.handleAgentSkillDelete(req)
 	case methods.AgentCancel:
 		return r.handleCancel(req)
-	case methods.AgentSubAgents:
-		return r.handleSubAgents(req)
-	case methods.AgentSubAgentCancel:
-		return r.handleSubAgentCancel(req)
+	case methods.RunCancel:
+		return r.handleRunCancel(req)
+	case methods.WorkerList:
+		return r.handleWorkerList(req)
+	case methods.WorkerAssignmentCancel:
+		return r.handleWorkerAssignmentCancel(req)
+	case methods.WorkerPoolStatus:
+		return r.handleWorkerPoolStatus(req)
 	case methods.PermissionResolve:
 		return r.handlePermissionResolve(req)
 	default:
@@ -229,20 +232,28 @@ func (r *Runtime) handleInitialize(req jsonrpc.Request) error {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
 	}
+	if params.ProtocolVersion != events.ProtocolVersionV2 {
+		return r.writeResponse(jsonrpc.NewError(req.ID, -32001, "incompatible protocol version"))
+	}
 	r.mu.Lock()
 	r.initialized = true
+	r.protocolVersion = events.ProtocolVersionV2
 	r.mu.Unlock()
 
 	result := methods.InitializeResult{
-		ProtocolVersion: events.ProtocolVersion,
+		ProtocolVersion: events.ProtocolVersionV2,
 		Server:          methods.PeerInfo{Name: "red-panda-agent", Version: r.version},
 		Capabilities: []methods.Capability{
 			{Name: methods.CorePing, Version: 1},
+			{Name: methods.RunExecute, Version: 1},
+			{Name: methods.RunCancel, Version: 1},
+			{Name: methods.RunEvent, Version: 1},
+			{Name: methods.WorkerList, Version: 1},
+			{Name: methods.WorkerAssignmentCancel, Version: 1},
+			{Name: methods.WorkerPoolStatus, Version: 1},
 			{Name: methods.AgentTools, Version: 1},
 			{Name: methods.AgentReply, Version: 1},
 			{Name: methods.AgentCancel, Version: 1},
-			{Name: methods.AgentSubAgents, Version: 1},
-			{Name: methods.AgentSubAgentCancel, Version: 1},
 			{Name: methods.AgentSkills, Version: 1},
 			{Name: methods.AgentSkillLoad, Version: 1},
 			{Name: methods.AgentSkillCreate, Version: 1},
@@ -258,6 +269,19 @@ func (r *Runtime) handleInitialize(req jsonrpc.Request) error {
 		return err
 	}
 	return r.writeResponse(resp)
+}
+
+func (r *Runtime) handleRunExecute(ctx context.Context, req jsonrpc.Request) error {
+	var params methods.RunExecuteParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
+	}
+	req.Params = raw
+	return r.handleReply(ctx, req)
 }
 
 func (r *Runtime) handlePing(req jsonrpc.Request) error {
@@ -284,23 +308,57 @@ func (r *Runtime) handleReply(ctx context.Context, req jsonrpc.Request) error {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32009, "run already exists"))
 	}
 
-	accepted, err := jsonrpc.NewResult(req.ID, methods.ReplyAccepted{Accepted: true, RunID: params.RunID})
+	executionCtx := withWorkerExecution(runCtx, workerExecutionSpec{Kind: workerExecutionEntry, Params: params, Task: params.Input.Text})
+	submitRequest := worker.SubmitRequest{
+		RunID: params.RunID,
+		Task:  params.Input.Text,
+	}
+	var assignment worker.AssignmentRef
+	var err error
+	if proxy := params.Options.WorkerContext; proxy != nil && proxy.ProxyMessages {
+		if proxy.RunID != params.RunID || proxy.WorkerID == "" || proxy.AssignmentID == "" {
+			r.unregisterRun(params.RunID)
+			cancel()
+			return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid worker_context"))
+		}
+		assignment, err = r.workerPool.SubmitRestricted(executionCtx, worker.WorkerID(proxy.WorkerID), submitRequest)
+	} else {
+		assignment, err = r.workerPool.SubmitEntry(executionCtx, submitRequest)
+	}
 	if err != nil {
 		r.unregisterRun(params.RunID)
 		cancel()
+		return r.writeResponse(jsonrpc.NewError(req.ID, -32010, err.Error()))
+	}
+
+	accepted, err := jsonrpc.NewResult(req.ID, methods.RunExecuteResult{
+		Accepted:     true,
+		RunID:        params.RunID,
+		AssignmentID: string(assignment.AssignmentID),
+		WorkerID:     string(assignment.WorkerID),
+	})
+	if err != nil {
+		r.workerPool.Cancel(context.Background(), assignment.AssignmentID, "failed to encode run acceptance")
+		cancel()
+		go r.unregisterRunWhenSettled(params.RunID, assignment.AssignmentID)
 		return err
 	}
 	if err := r.writeResponse(accepted); err != nil {
-		r.unregisterRun(params.RunID)
+		r.workerPool.Cancel(context.Background(), assignment.AssignmentID, "failed to deliver run acceptance")
 		cancel()
+		go r.unregisterRunWhenSettled(params.RunID, assignment.AssignmentID)
 		return err
 	}
 
 	go func() {
-		defer r.unregisterRun(params.RunID)
-		r.emitRun(runCtx, params)
+		r.unregisterRunWhenSettled(params.RunID, assignment.AssignmentID)
 	}()
 	return nil
+}
+
+func (r *Runtime) unregisterRunWhenSettled(runID string, assignmentID worker.AssignmentID) {
+	_, _ = r.workerPool.WaitSettled(context.Background(), assignmentID)
+	r.unregisterRun(runID)
 }
 
 func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
@@ -384,15 +442,6 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		toolHistory = append(toolHistory, provider.ToolExchange{Call: invocation.Call, Result: result})
 	}
 
-	var subAgentDone <-chan struct{}
-	if params.Options.SpawnSubAgents {
-		subAgentDone = r.startPlannerSubAgent(ctx, params)
-	} else {
-		done := make(chan struct{})
-		close(done)
-		subAgentDone = done
-	}
-
 	// 绑定 Goal 时执行多分段流程；也支持通过 goal.write 在运行中途绑定。
 	seg := r.runWithGoalLoop(ctx, params, providerInput, toolHistory, messageID, streamID, &streamSeq)
 	goalStreamNeedsFinal := r.deferGoalStreamFinal(params.RunID)
@@ -414,7 +463,6 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 
 	status := finishStatusFromLoopEnd(seg.Reason)
 	if status != "completed" {
-		<-subAgentDone
 		if status == "cancelled" {
 			r.emitCancelled(params)
 		} else {
@@ -430,7 +478,6 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		r.emitCancelled(params)
 		return
 	}
-	<-subAgentDone
 	if ctx.Err() != nil {
 		r.emitCancelled(params)
 		return
@@ -454,6 +501,12 @@ func (r *Runtime) emitCancelled(params methods.ReplyParams) {
 }
 
 func (r *Runtime) requestPermission(ctx context.Context, params methods.ReplyParams, payload permission.RequestPayload) (permission.ResolveParams, bool) {
+	assignment := assignmentFromContext(ctx)
+	if r.workerPool != nil && assignment.AssignmentID != "" {
+		if err := r.workerPool.SetWaitingPermission(assignment.AssignmentID, true); err == nil {
+			defer func() { _ = r.workerPool.SetWaitingPermission(assignment.AssignmentID, false) }()
+		}
+	}
 	if payload.PermissionID == "" {
 		payload.PermissionID = "perm_" + params.RunID
 	}
@@ -558,20 +611,48 @@ func (r *Runtime) unregisterRun(runID string) {
 }
 
 func (r *Runtime) cancelRun(runID string) bool {
+	return r.cancelRunCount(runID, "run cancelled") > 0
+}
+
+func (r *Runtime) cancelRunCount(runID string, reason string) int {
 	r.mu.Lock()
 	cancel := r.activeRuns[runID]
 	r.mu.Unlock()
 
-	// 取消父运行前暂停绑定到该根运行的全部子代理，
-	// 使进程池工作进程能及时停止，而非只依赖共享上下文。
-	for _, record := range r.subagents.List(methods.SubAgentsParams{RunID: runID}) {
-		r.subagents.Cancel(runID, record.SubAgentID)
+	cancelledAssignments := 0
+	if r.workerPool != nil {
+		if strings.TrimSpace(reason) == "" {
+			reason = "run cancelled"
+		}
+		cancelledAssignments = r.workerPool.CancelRun(context.Background(), runID, reason)
 	}
-	if cancel == nil {
-		return false
+	if cancel != nil {
+		cancel()
+		if cancelledAssignments == 0 {
+			cancelledAssignments = 1
+		}
 	}
-	cancel()
-	return true
+	return cancelledAssignments
+}
+
+// Close stops all active runs and releases Runtime-owned execution resources.
+func (r *Runtime) Close(ctx context.Context) error {
+	r.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(r.activeRuns))
+	for _, cancel := range r.activeRuns {
+		cancels = append(cancels, cancel)
+	}
+	r.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	if r.mcp != nil {
+		r.mcp.CloseAll()
+	}
+	if r.workerPool != nil {
+		return r.workerPool.Close(ctx)
+	}
+	return nil
 }
 
 func (r *Runtime) emitEvent(ctx context.Context, params methods.ReplyParams, typ events.EventType, stream *events.StreamRef, payload map[string]any) error {
@@ -594,6 +675,65 @@ func (r *Runtime) emitAgentEvent(ctx context.Context, params methods.ReplyParams
 	defer r.eventMu.Unlock()
 
 	rootSeq := r.nextRootSeq(params.RunID)
+	r.mu.Lock()
+	protocolVersion := r.protocolVersion
+	r.mu.Unlock()
+	if protocolVersion == events.ProtocolVersionV2 {
+		assignment := assignmentFromContext(ctx)
+		assignmentID := string(assignment.AssignmentID)
+		workerID := string(assignment.WorkerID)
+		profileKey := ""
+		if agent.Role == events.AgentRoleSubAgent {
+			profileKey = agent.Name
+			if assignmentID == "" {
+				assignmentID = agent.SubAgentID
+			}
+			if workerID == "" {
+				workerID = agent.AgentID
+			}
+		}
+		if params.Options.WorkerContext != nil {
+			if assignmentID == "" {
+				assignmentID = params.Options.WorkerContext.AssignmentID
+			}
+			if workerID == "" {
+				workerID = params.Options.WorkerContext.WorkerID
+			}
+		}
+		if workerID == "" {
+			workerID = "worker-unassigned"
+		}
+		workerSeq := r.nextAgentSeq(params.RunID, workerID)
+		body := cloneEventPayload(payload)
+		if agent.Role == events.AgentRoleSubAgent {
+			body["visibility"] = "worker_private"
+			if typ == events.EventSubAgentUpdate {
+				typ = events.EventWorkerAssignmentUpdated
+			}
+		} else if _, exists := body["visibility"]; !exists {
+			body["visibility"] = "conversation"
+		}
+		env := events.EnvelopeV2{
+			ProtocolVersion: events.ProtocolVersionV2,
+			EventID:         fmt.Sprintf("evt_%s_%d", params.RunID, rootSeq),
+			RunID:           params.RunID,
+			SessionID:       params.Session.ID,
+			AssignmentID:    assignmentID,
+			Worker:          events.EventWorkerRef{ID: workerID, ProfileKey: profileKey},
+			RunSeq:          rootSeq,
+			WorkerSeq:       workerSeq,
+			Stream:          stream,
+			Type:            typ,
+			Payload:         body,
+			CreatedAt:       time.Now().UTC(),
+		}
+		note, err := jsonrpc.NewNotification(methods.RunEvent, env)
+		if err != nil {
+			return err
+		}
+		return r.writeNotification(note)
+	}
+
 	agentSeq := r.nextAgentSeq(params.RunID, agent.AgentID)
 	eventRunID := params.RunID
 	parentRunID := ""
@@ -621,6 +761,14 @@ func (r *Runtime) emitAgentEvent(ctx context.Context, params methods.ReplyParams
 		return err
 	}
 	return r.writeNotification(note)
+}
+
+func cloneEventPayload(payload map[string]any) map[string]any {
+	next := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		next[key] = value
+	}
+	return next
 }
 
 func (r *Runtime) nextRootSeq(runID string) uint64 {

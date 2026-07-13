@@ -8,18 +8,10 @@ function timestamp(value) {
   return Number.isFinite(time) ? time : 0;
 }
 
-function messageEventSeq(message) {
-  if (message.eventSeq) return positiveNumber(message.eventSeq);
-  if (!message.createdAt) return positiveNumber(message.startRootSeq || message.rootSeq);
-  return 0;
-}
-
 function timelineItem(type, value, index) {
   const isMessage = type === 'message';
-  const runId = isMessage ? value.runId : value.rootRunId || value.runId;
-  const eventSeq = isMessage
-    ? messageEventSeq(value)
-    : positiveNumber(value.startedSeq || value.rootSeq);
+  const runId = value.runId;
+  const eventSeq = positiveNumber(value.runSeq);
   const createdAt = isMessage
     ? value.createdAt
     : value.startedAt || value.createdAt;

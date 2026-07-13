@@ -540,7 +540,8 @@ textarea:focus-visible {
 .brand span,
 .panel-header span,
 .session-item span,
-.subagent-item span {
+.worker-item span,
+.worker-assignment span {
   color: var(--color-text-muted);
   display: block;
   font-size: 12px;
@@ -944,7 +945,7 @@ textarea:focus-visible {
 }
 
 .session-list,
-.subagent-list {
+.worker-list {
   display: grid;
   gap: 2px;
 }
@@ -2609,7 +2610,7 @@ textarea:focus-visible {
 
 .activity-panel-content,
 .memory-panel-content,
-.subagent-panel-content,
+.worker-panel-content,
 .workspace-panel-content {
   display: flex;
   flex: 1;
@@ -2633,7 +2634,8 @@ textarea:focus-visible {
   justify-content: space-between;
 }
 
-.subagent-item {
+.worker-item,
+.worker-assignment {
   align-items: center;
   background: var(--color-surface-subtle);
   border: 1px solid transparent;
@@ -2644,13 +2646,14 @@ textarea:focus-visible {
   padding: 10px;
 }
 
-.subagent-item.is-running {
+.worker-item.is-running,
+.worker-assignment.is-running {
   background: var(--color-info-bg);
   border-color: var(--color-border);
   box-shadow: inset 3px 0 0 var(--color-info-text);
 }
 
-.subagent-icon {
+.worker-icon {
   align-items: center;
   color: var(--color-text-soft);
   display: inline-flex;
@@ -2659,15 +2662,15 @@ textarea:focus-visible {
   width: 22px;
 }
 
-.subagent-icon.is-active {
+.worker-icon.is-active {
   color: var(--color-info-text);
 }
 
-.subagent-spin {
+.worker-spin {
   animation: tool-spin 900ms linear infinite;
 }
 
-.subagent-main {
+.worker-main {
   background: transparent;
   border: 0;
   color: inherit;
@@ -2679,22 +2682,22 @@ textarea:focus-visible {
   text-align: left;
 }
 
-.subagent-main:disabled {
+.worker-main:disabled {
   cursor: default;
 }
 
-.subagent-main:not(:disabled):hover strong {
+.worker-main:not(:disabled):hover strong {
   color: var(--color-brand-text);
 }
 
-.subagent-heading {
+.worker-heading {
   align-items: center;
   display: flex;
   gap: 8px;
   min-width: 0;
 }
 
-.subagent-heading strong {
+.worker-heading strong {
   flex: 1 1 auto;
   font-size: 13px;
   min-width: 0;
@@ -2703,23 +2706,25 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.subagent-heading .ui-badge {
+.worker-heading .ui-badge {
   flex: 0 0 auto;
 }
 
-.subagent-meta {
+.worker-meta {
   color: var(--color-text-soft);
   font-size: 11px;
 }
 
-.subagent-actions {
+.worker-actions {
   align-items: center;
   display: inline-flex;
   gap: 2px;
 }
 
-.subagent-item em,
-.subagent-item small {
+.worker-item em,
+.worker-item small,
+.worker-assignment em,
+.worker-assignment small {
   color: var(--color-text-muted);
   display: block;
   font-size: 11px;
@@ -2729,7 +2734,7 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.subagent-root-marker {
+.worker-section-label {
   align-items: center;
   background: var(--color-surface-muted);
   border-radius: var(--radius-pill);

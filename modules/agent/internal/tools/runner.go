@@ -24,18 +24,8 @@ type TodoToolExecutor func(context.Context, methods.TodoToolExecuteParams) (meth
 type GoalToolExecutor func(context.Context, methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error)
 type ContextToolExecutor func(context.Context, methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error)
 type SkillRunExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
-type SubagentRunExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
+type WorkerToolExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
 type MCPToolExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
-
-// SubagentManager 向父代理暴露对专业子代理和进程池的控制能力。
-type SubagentManager interface {
-	List(runCtx ToolRunContext, call ptools.Call) (string, error)
-	Cancel(runCtx ToolRunContext, call ptools.Call) (string, error)
-	Reset(runCtx ToolRunContext, call ptools.Call) (string, error)
-	PoolStatus() (string, error)
-	PoolResize(call ptools.Call) (string, error)
-	PoolReset() (string, error)
-}
 
 type ToolRunner struct {
 	MemoryExecutor   MemoryToolExecutor
@@ -43,16 +33,22 @@ type ToolRunner struct {
 	GoalExecutor     GoalToolExecutor
 	ContextExecutor  ContextToolExecutor
 	SkillExecutor    SkillRunExecutor
-	SubagentExecutor SubagentRunExecutor
-	SubagentManager  SubagentManager
+	WorkerDelegate   WorkerToolExecutor
+	WorkerList       WorkerToolExecutor
+	WorkerCancel     WorkerToolExecutor
+	WorkerPoolStatus WorkerToolExecutor
+	WorkerSend       WorkerToolExecutor
+	WorkerReceive    WorkerToolExecutor
 	MCPExecutor      MCPToolExecutor
 }
 
 type ToolRunContext struct {
-	WorkingDir string
-	RunID      string
-	SessionID  string
-	Reply      *methods.ReplyParams
+	WorkingDir   string
+	RunID        string
+	SessionID    string
+	AssignmentID string
+	WorkerID     string
+	Reply        *methods.ReplyParams
 }
 
 type ToolInvocation struct {
@@ -90,7 +86,7 @@ func (ToolRunner) AvailableTools() []ptools.Definition {
 		{
 			Name:        "workspace.stats",
 			DisplayName: "Workspace stats",
-			Description: "Summarize directory structure and file counts for split planning. Root agent MUST call this before multi-area analysis. Use total_files / top_level[].files to set each subagent.run file_count or max_turns using formula max_turns = file_count + summary_turns (summary_turns is included as suggested_max_turns).",
+			Description: "Summarize directory structure and file counts for split planning. Root agent MUST call this before multi-area analysis. Use total_files / top_level[].files to set each worker.delegate file_count or max_turns using formula max_turns = file_count + summary_turns (summary_turns is included as suggested_max_turns).",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
@@ -244,88 +240,63 @@ func (ToolRunner) AvailableTools() []ptools.Definition {
 		{
 			Name:        "skill.run",
 			DisplayName: "Run skill",
-			Description: "Run a managed workspace skill in an isolated runtime-process subagent and return only its final result. Prefer names from the skills catalog injected for this conversation.",
+			Description: "Run a managed workspace skill in an isolated Worker Assignment and return only its final result. Prefer names from the skills catalog injected for this conversation.",
 			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"name": map[string]any{"type": "string", "description": "Existing managed skill name."},
-					"task": map[string]any{"type": "string", "description": "Task for the isolated skill subagent."},
+					"task": map[string]any{"type": "string", "description": "Task for the isolated skill Worker."},
 				},
 				"required": []string{"name", "task"},
 			},
 		},
 		{
-			Name:        "subagent.run",
-			DisplayName: "Run subagent",
-			Description: "Spawn a process-pool specialist and return its final report. For Goal multi-step work use phase names exactly: goal-analyst, goal-planner, goal-implementer, goal-verifier, goal-evaluator (tool policy and prompts are applied automatically). For broad codebase analysis without Goal, call workspace.stats first and set file_count/max_turns; split non-overlapping scopes; synthesize results instead of re-reading.",
+			Name:        "worker.delegate",
+			DisplayName: "Delegate work",
+			Description: "Delegate one focused task to an available Worker and return its assignment identity and final report. Delegated assignments cannot delegate again.",
 			Risk:        ptools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"task": map[string]any{"type": "string", "description": "Focused task for the subagent. Include scope, goals, and expected output."},
-					"name": map[string]any{"type": "string", "description": "Specialist id. Goal pipeline: goal-analyst|goal-planner|goal-implementer|goal-verifier|goal-evaluator. Otherwise e.g. desktop-analyst."},
-					"path": map[string]any{"type": "string", "description": "Workspace-relative directory this specialist owns. Used to count files when file_count/max_turns are omitted."},
-					"file_count": map[string]any{
-						"type":        "integer",
-						"description": "Number of files in the specialist scope from workspace.stats. When set (and max_turns omitted), max_turns becomes file_count + summary turns.",
-						"minimum":     0,
-					},
-					"max_turns": map[string]any{
-						"type":        "integer",
-						"description": "Optional explicit tool-turn budget. Prefer max_turns = file_count + summary turns from workspace.stats (suggested_max_turns). No fixed maximum.",
-						"minimum":     1,
-					},
+					"task":        map[string]any{"type": "string", "description": "Focused task with scope and expected output."},
+					"profile_key": map[string]any{"type": "string", "description": "Optional Worker Profile key."},
+					"max_turns":   map[string]any{"type": "integer", "minimum": 1, "description": "Optional tool-turn budget."},
 				},
 				"required": []string{"task"},
 			},
 		},
 		{
-			Name:        "subagent.list",
-			DisplayName: "List subagents",
-			Description: "List subagents for the current root run and show process-pool occupancy. Use this to manage specialists.",
+			Name:        "worker.list",
+			DisplayName: "List workers",
+			Description: "List Worker slots and assignments for the current run.",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"run_id":      map[string]any{"type": "string", "description": "Optional root run id. Defaults to the current run."},
-					"subagent_id": map[string]any{"type": "string", "description": "Optional subagent id filter."},
+					"worker_id":     map[string]any{"type": "string"},
+					"assignment_id": map[string]any{"type": "string"},
 				},
 			},
 		},
 		{
-			Name:        "subagent.cancel",
-			DisplayName: "Cancel subagent",
-			Description: "Cancel a running subagent managed by the parent agent.",
+			Name:        "worker.cancel",
+			DisplayName: "Cancel assignment",
+			Description: "Cancel an assignment belonging to the current run.",
 			Risk:        ptools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"subagent_id": map[string]any{"type": "string", "description": "Subagent id to cancel."},
-					"run_id":      map[string]any{"type": "string", "description": "Optional root run id. Defaults to the current run."},
+					"assignment_id": map[string]any{"type": "string"},
+					"reason":        map[string]any{"type": "string"},
 				},
-				"required": []string{"subagent_id"},
+				"required": []string{"assignment_id"},
 			},
 		},
 		{
-			Name:        "subagent.reset",
-			DisplayName: "Reset subagent",
-			Description: "Cancel a subagent if it is still running, mark it reset, and remove it from the active registry so a fresh specialist can be started. Optionally also reset idle process-pool workers.",
-			Risk:        ptools.RiskMedium,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"subagent_id": map[string]any{"type": "string", "description": "Subagent id to reset."},
-					"run_id":      map[string]any{"type": "string", "description": "Optional root run id. Defaults to the current run."},
-					"reset_pool":  map[string]any{"type": "boolean", "description": "If true, also discard idle process-pool workers."},
-				},
-				"required": []string{"subagent_id"},
-			},
-		},
-		{
-			Name:        "subagent.pool_status",
-			DisplayName: "Subagent pool status",
-			Description: "Inspect the subagent process pool: limit, active workers, idle workers, and in-use count.",
+			Name:        "worker.pool_status",
+			DisplayName: "Worker pool status",
+			Description: "Inspect Worker capacity, health, and active Assignment counts.",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type":       "object",
@@ -333,23 +304,26 @@ func (ToolRunner) AvailableTools() []ptools.Definition {
 			},
 		},
 		{
-			Name:        "subagent.pool_resize",
-			DisplayName: "Resize subagent pool",
-			Description: "Change the subagent process pool size (1-8). Excess idle workers are closed immediately.",
-			Risk:        ptools.RiskMedium,
+			Name:        "worker.send",
+			DisplayName: "Send Worker message",
+			Description: "Send a message to an active Worker Assignment in the current run.",
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"size": map[string]any{"type": "integer", "description": "Desired pool size between 1 and 8."},
+					"to_worker_id":     map[string]any{"type": "string"},
+					"to_assignment_id": map[string]any{"type": "string"},
+					"kind":             map[string]any{"type": "string", "enum": []string{"request", "update", "result", "control"}},
+					"payload":          map[string]any{"description": "JSON-compatible message payload."},
 				},
-				"required": []string{"size"},
+				"required": []string{"to_worker_id", "kind", "payload"},
 			},
 		},
 		{
-			Name:        "subagent.pool_reset",
-			DisplayName: "Reset subagent pool",
-			Description: "Discard all idle process-pool workers so the next subagent.run creates fresh processes. In-use workers are left running until completion.",
-			Risk:        ptools.RiskMedium,
+			Name:        "worker.receive",
+			DisplayName: "Receive Worker message",
+			Description: "Wait for the next message addressed to the current active Assignment.",
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -777,10 +751,10 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 }
 
 // toolTimeoutFor 返回工具的硬性时限；工具已自行管理期限时返回 0，
-// 例如 shell、web、subagent 和 skill。
+// 例如 shell、web、Worker 和 skill。
 func toolTimeoutFor(name string) time.Duration {
 	switch name {
-	case "shell.exec", "web.search", "web.fetch", "skill.run", "subagent.run":
+	case "shell.exec", "web.search", "web.fetch", "skill.run", "worker.delegate", "worker.delegate":
 		return 0
 	case "memory.list", "memory.create", "memory.update", "memory.delete",
 		"todo.write", "todo_write", "todo.list",
@@ -866,44 +840,39 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 		return skill.RunDelete(runCtx.WorkingDir, StringArg(call.Arguments, "name"))
 	case "skill.run":
 		if runner.SkillExecutor == nil {
-			return "", fmt.Errorf("skill subagent executor is not available")
+			return "", fmt.Errorf("skill Worker executor is not available")
 		}
 		return runner.SkillExecutor(ctx, runCtx, call)
-	case "subagent.run":
-		if runner.SubagentExecutor == nil {
-			return "", fmt.Errorf("subagent executor is not available")
+	case "worker.delegate":
+		if runner.WorkerDelegate == nil {
+			return "", fmt.Errorf("worker delegate executor is not available")
 		}
-		return runner.SubagentExecutor(ctx, runCtx, call)
-	case "subagent.list":
-		if runner.SubagentManager == nil {
-			return "", fmt.Errorf("subagent manager is not available")
+		return runner.WorkerDelegate(ctx, runCtx, call)
+	case "worker.list":
+		if runner.WorkerList == nil {
+			return "", fmt.Errorf("worker list executor is not available")
 		}
-		return runner.SubagentManager.List(runCtx, call)
-	case "subagent.cancel":
-		if runner.SubagentManager == nil {
-			return "", fmt.Errorf("subagent manager is not available")
+		return runner.WorkerList(ctx, runCtx, call)
+	case "worker.cancel":
+		if runner.WorkerCancel == nil {
+			return "", fmt.Errorf("worker cancel executor is not available")
 		}
-		return runner.SubagentManager.Cancel(runCtx, call)
-	case "subagent.reset":
-		if runner.SubagentManager == nil {
-			return "", fmt.Errorf("subagent manager is not available")
+		return runner.WorkerCancel(ctx, runCtx, call)
+	case "worker.pool_status":
+		if runner.WorkerPoolStatus == nil {
+			return "", fmt.Errorf("worker pool status executor is not available")
 		}
-		return runner.SubagentManager.Reset(runCtx, call)
-	case "subagent.pool_status":
-		if runner.SubagentManager == nil {
-			return "", fmt.Errorf("subagent manager is not available")
+		return runner.WorkerPoolStatus(ctx, runCtx, call)
+	case "worker.send":
+		if runner.WorkerSend == nil {
+			return "", fmt.Errorf("worker send executor is not available")
 		}
-		return runner.SubagentManager.PoolStatus()
-	case "subagent.pool_resize":
-		if runner.SubagentManager == nil {
-			return "", fmt.Errorf("subagent manager is not available")
+		return runner.WorkerSend(ctx, runCtx, call)
+	case "worker.receive":
+		if runner.WorkerReceive == nil {
+			return "", fmt.Errorf("worker receive executor is not available")
 		}
-		return runner.SubagentManager.PoolResize(call)
-	case "subagent.pool_reset":
-		if runner.SubagentManager == nil {
-			return "", fmt.Errorf("subagent manager is not available")
-		}
-		return runner.SubagentManager.PoolReset()
+		return runner.WorkerReceive(ctx, runCtx, call)
 	case "todo.write", "todo_write", "todo.list":
 		return runner.runTodoTool(ctx, runCtx, call)
 	case "goal.write", "goal.update", "goal.checkpoint", "goal.complete", "goal.list":

@@ -62,7 +62,7 @@ function respondToLatest(socket, payload = {}) {
   return request;
 }
 
-test('reconnect resumes each run from the highest observed root sequence', async () => {
+test('reconnect resumes each run from the highest observed run sequence', async () => {
   const previousWebSocket = globalThis.WebSocket;
   const previousWindow = globalThis.window;
   globalThis.WebSocket = FakeWebSocket;
@@ -93,7 +93,7 @@ test('reconnect resumes each run from the highest observed root sequence', async
     first.receive({
       type: 'event',
       method: 'run.event',
-      payload: { root_run_id: 'run_1', root_seq: 7, type: 'message_delta' },
+      payload: { run_id: 'run_1', run_seq: 7, type: 'message_delta' },
     });
     first.disconnect();
 

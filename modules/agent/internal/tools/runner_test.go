@@ -349,6 +349,45 @@ func TestStateStoreToolDescriptionsClarifyBoundaries(t *testing.T) {
 	}
 }
 
+func TestWorkerToolsAreDefinedAndReceiveTrustedAssignmentContext(t *testing.T) {
+	definitions := map[string]ptools.Definition{}
+	for _, definition := range (ToolRunner{}).AvailableTools() {
+		definitions[definition.Name] = definition
+	}
+	for _, name := range []string{"worker.delegate", "worker.list", "worker.cancel", "worker.pool_status", "worker.send", "worker.receive"} {
+		if _, ok := definitions[name]; !ok {
+			t.Fatalf("missing Worker tool %s", name)
+		}
+	}
+
+	var captured ToolRunContext
+	runner := ToolRunner{WorkerDelegate: func(_ context.Context, runCtx ToolRunContext, _ ptools.Call) (string, error) {
+		captured = runCtx
+		return `{"assignment_id":"assignment-2","worker_id":"worker-02"}`, nil
+	}}
+	invocation, err := runner.InvocationFromCall("run-worker", 0, ptools.Call{
+		Name:      "worker.delegate",
+		Arguments: map[string]any{"task": "inspect runtime"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _ := runner.RunWithContext(context.Background(), ToolRunContext{
+		RunID:        "run-worker",
+		AssignmentID: "assignment-1",
+		WorkerID:     "worker-01",
+	}, invocation)
+	if result.Status != ptools.CallStatusCompleted {
+		t.Fatalf("worker.delegate result = %#v", result)
+	}
+	if captured.AssignmentID != "assignment-1" {
+		t.Fatalf("assignment context = %q, want assignment-1", captured.AssignmentID)
+	}
+	if captured.WorkerID != "worker-01" {
+		t.Fatalf("Worker context = %q, want worker-01", captured.WorkerID)
+	}
+}
+
 func TestToolRunnerMemoryToolsUseExecutor(t *testing.T) {
 	var captured methods.MemoryToolExecuteParams
 	runner := ToolRunner{

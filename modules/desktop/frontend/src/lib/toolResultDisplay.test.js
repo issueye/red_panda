@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   buildToolOutputSummary,
   displayToolOutput,
-  isSubagentToolFallback,
+  isWorkerToolFallback,
 } from './toolResultDisplay.js';
 
 function envelope(overrides = {}) {
@@ -29,8 +29,9 @@ test('displayToolOutput does not repeat a standardized failure error', () => {
   assert.equal(displayToolOutput(output, 'file not found'), '');
 });
 
-test('isSubagentToolFallback only compacts subagent recovery messages', () => {
+test('isWorkerToolFallback only compacts public Assignment recovery messages', () => {
   const text = '根据工具执行结果整理如下：\n\n### Read file\nlarge output';
-  assert.equal(isSubagentToolFallback({ role: 'assistant', agentRole: 'subagent', text }), true);
-  assert.equal(isSubagentToolFallback({ role: 'assistant', agent: 'root', text }), false);
+  assert.equal(isWorkerToolFallback({ role: 'assistant', assignmentId: 'assignment_1', workerId: 'worker-01', text }), true);
+  assert.equal(isWorkerToolFallback({ role: 'assistant', workerId: 'worker-01', visibility: 'worker_private', text }), false);
+  assert.equal(isWorkerToolFallback({ role: 'assistant', text }), false);
 });

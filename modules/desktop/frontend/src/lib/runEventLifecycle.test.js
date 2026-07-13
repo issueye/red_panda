@@ -1,41 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isRootTerminalRunEvent } from './runEventLifecycle.js';
+import { isRunTerminalEvent } from './runEventLifecycle.js';
 
-test('root finish and error are terminal', () => {
-  assert.equal(isRootTerminalRunEvent({ type: 'finish', agent: { role: 'root' } }), true);
-  assert.equal(isRootTerminalRunEvent({ type: 'error', agent: { role: 'root' } }), true);
+const envelope = (type) => ({ protocol_version: '2026-07-13', run_id: 'run_1', type });
+
+test('v0.2 finish and error terminate a Run', () => {
+  assert.equal(isRunTerminalEvent(envelope('finish')), true);
+  assert.equal(isRunTerminalEvent(envelope('error')), true);
+  assert.equal(isRunTerminalEvent(envelope('message_delta')), false);
 });
 
-test('subagent error does not terminate the root run', () => {
-  assert.equal(isRootTerminalRunEvent({
-    type: 'error',
-    agent: { role: 'subagent', subagent_id: 'worker_1' },
+test('legacy and Assignment lifecycle events never terminate a Run', () => {
+  assert.equal(isRunTerminalEvent({ type: 'finish', root_run_id: 'run_1' }), false);
+  assert.equal(isRunTerminalEvent({
+    ...envelope('worker_assignment_updated'),
+    assignment_id: 'assignment_1',
     payload: { status: 'failed' },
-  }), false);
-  assert.equal(isRootTerminalRunEvent({
-    type: 'error',
-    payload: { subagent_id: 'worker_1', status: 'failed' },
-  }), false);
-});
-
-// A6: only root terminals should trigger Goal hydrate / strip refresh.
-test('goal hydrate trigger is root-only for finish and error', () => {
-  assert.equal(isRootTerminalRunEvent({
-    type: 'finish',
-    agent: { role: 'root' },
-    session_id: 's1',
-    payload: { status: 'completed', loop_end_reason: 'max_turns' },
-  }), true);
-  assert.equal(isRootTerminalRunEvent({
-    type: 'finish',
-    agent: { role: 'subagent', subagent_id: 'analyst_1' },
-    session_id: 's1',
-    payload: { status: 'completed' },
-  }), false);
-  assert.equal(isRootTerminalRunEvent({
-    type: 'message_delta',
-    agent: { role: 'root' },
-    session_id: 's1',
   }), false);
 });

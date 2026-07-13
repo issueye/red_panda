@@ -103,22 +103,22 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 		{Name: "skill.create"},
 		{Name: "skill.update"},
 		{Name: "skill.delete"},
-		{Name: "subagent.run"},
-		{Name: "subagent.pool_status"},
-		{Name: "subagent.pool_resize"},
-		{Name: "subagent.pool_reset"},
+		{Name: "worker.delegate"},
+		{Name: "worker.pool_status"},
+		{Name: "worker.pool_resize"},
+		{Name: "worker.pool_reset"},
 	}
 	filtered := AvailableToolsForOptions(definitions, methods.ReplyOptions{})
 	names := map[string]bool{}
 	for _, d := range filtered {
 		names[d.Name] = true
 	}
-	for _, keep := range []string{"workspace.read_file", "skill.run", "subagent.run"} {
+	for _, keep := range []string{"workspace.read_file", "skill.run", "worker.delegate"} {
 		if !names[keep] {
 			t.Fatalf("expected %s in default tools: %#v", keep, names)
 		}
 	}
-	for _, hide := range []string{"skill.create", "skill.update", "skill.delete", "subagent.pool_status", "subagent.pool_resize", "subagent.pool_reset"} {
+	for _, hide := range []string{"skill.create", "skill.update", "skill.delete", "worker.pool_status", "worker.pool_resize", "worker.pool_reset"} {
 		if names[hide] {
 			t.Fatalf("ops tool %s should be hidden by default: %#v", hide, names)
 		}
@@ -163,7 +163,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 		{Name: "shell.exec"},
 		{Name: "goal.write"},
 		{Name: "context.read"},
-		{Name: "subagent.run"},
+		{Name: "worker.delegate"},
 		{Name: "memory.create"},
 		{Name: "skill.run"},
 		{Name: "skill.create"},
@@ -177,7 +177,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	for _, d := range filtered {
 		names[d.Name] = true
 	}
-	for _, keep := range []string{"workspace.read_file", "shell.exec", "goal.write", "context.read", "subagent.run", "skill.run", "web.search"} {
+	for _, keep := range []string{"workspace.read_file", "shell.exec", "goal.write", "context.read", "worker.delegate", "skill.run", "web.search"} {
 		if !names[keep] {
 			t.Fatalf("goal mode should keep %s: %#v", keep, names)
 		}

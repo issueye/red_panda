@@ -20,7 +20,7 @@ func NewPermissionRequestRepository(db *gorm.DB) PermissionRequestRepository {
 	return PermissionRequestRepository{db: db}
 }
 
-func (r PermissionRequestRepository) ProjectRequired(event events.Envelope) error {
+func (r PermissionRequestRepository) ProjectRequired(event events.EnvelopeV2) error {
 	if event.Type != events.EventPermissionRequest {
 		return nil
 	}
@@ -35,7 +35,7 @@ func (r PermissionRequestRepository) ProjectRequired(event events.Envelope) erro
 	}
 	row := model.PermissionRequest{
 		ID:            permissionID,
-		RunID:         firstNonEmpty(stringPayload(event.Payload, "run_id"), event.RootRunID),
+		RunID:         firstNonEmpty(stringPayload(event.Payload, "run_id"), event.RunID),
 		SessionID:     event.SessionID,
 		ToolCallID:    stringPayload(event.Payload, "tool_call_id"),
 		ToolName:      stringPayload(event.Payload, "tool_name"),
@@ -44,7 +44,7 @@ func (r PermissionRequestRepository) ProjectRequired(event events.Envelope) erro
 		Detail:        stringPayload(event.Payload, "detail"),
 		ArgumentsJSON: string(argsRaw),
 		Status:        "pending",
-		RootSeq:       event.RootSeq,
+		RunSeq:        event.RunSeq,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -60,7 +60,7 @@ func (r PermissionRequestRepository) ProjectRequired(event events.Envelope) erro
 			"detail":         row.Detail,
 			"arguments_json": row.ArgumentsJSON,
 			"status":         row.Status,
-			"root_seq":       row.RootSeq,
+			"run_seq":        row.RunSeq,
 			"created_at":     row.CreatedAt,
 			"updated_at":     row.UpdatedAt,
 		}),

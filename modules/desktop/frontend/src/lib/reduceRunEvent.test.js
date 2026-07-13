@@ -1,153 +1,95 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
 import { createEmptySessionRuntime } from './sessionRuntime.js';
-import { appendAgentText, reduceRunEvent } from './reduceRunEvent.js';
+import { appendWorkerText, reduceRunEvent, WORKER_PROTOCOL_VERSION } from './reduceRunEvent.js';
 
-test('reduceRunEvent tool_started projects tool card and run counters', () => {
-  const base = createEmptySessionRuntime({
-    runs: [{ id: 'run_1', status: 'running', toolCount: 0 }],
-  });
-  const { runtime, effects } = reduceRunEvent(base, {
-    type: 'tool_started',
-    root_run_id: 'run_1',
-    root_seq: 3,
-    payload: {
-      tool_call_id: 't1',
-      tool_name: 'workspace.read_file',
-      display_name: 'Read',
-      risk: 'low',
-      arguments: { path: 'README.md' },
-    },
-  });
-  assert.equal(effects.length, 0);
-  assert.equal(runtime.tools.length, 1);
-  assert.equal(runtime.tools[0].name, 'workspace.read_file');
-  assert.equal(runtime.tools[0].status, 'running');
-  assert.equal(runtime.runs[0].toolCount, 1);
-  assert.equal(runtime.rootSeq, 3);
+const event = (type, runSeq, payload = {}) => ({
+  protocol_version: WORKER_PROTOCOL_VERSION,
+  event_id: `evt_${runSeq}`,
+  run_id: 'run_1',
+  session_id: 'session_1',
+  assignment_id: 'assignment_1',
+  run_seq: runSeq,
+  worker_seq: runSeq,
+  worker: { id: 'worker-01', profile_key: 'general' },
+  type,
+  payload,
 });
 
-test('reduceRunEvent permission_required emits global permission effects', () => {
-  const base = createEmptySessionRuntime({
-    runs: [{ id: 'run_1', status: 'running' }],
-  });
-  const { runtime, effects } = reduceRunEvent(base, {
-    type: 'permission_required',
-    root_run_id: 'run_1',
-    session_id: 'sess_1',
-    root_seq: 4,
-    payload: {
-      permission_id: 'perm_1',
-      run_id: 'run_1',
-      summary: '运行 shell',
-      tool_name: 'shell.exec',
-      risk: 'high',
-    },
-  });
-  assert.equal(runtime.permissions.length, 1);
-  assert.equal(runtime.permissions[0].id, 'perm_1');
-  assert.equal(runtime.runs[0].status, 'waiting_permission');
-  assert.ok(effects.some((e) => e.type === 'upsert_global_permission'));
-  assert.ok(effects.some((e) => e.type === 'select_activity_tab'));
+test('rejects legacy live event envelopes', () => {
+  const base = createEmptySessionRuntime();
+  const { runtime, effects } = reduceRunEvent(base, { root_run_id: 'run_1', root_seq: 1, type: 'finish' });
+  assert.equal(runtime, base);
+  assert.equal(effects[0].type, 'ignore_incompatible_event');
 });
 
-test('reduceRunEvent root finish clears run and pending permissions effect', () => {
+test('rejects incomplete v0.2 envelopes', () => {
+  const base = createEmptySessionRuntime();
+  const incomplete = event('message_delta', 1, { delta: 'ignored' });
+  delete incomplete.worker;
+  const { runtime, effects } = reduceRunEvent(base, incomplete);
+  assert.equal(runtime, base);
+  assert.equal(effects[0].type, 'ignore_incompatible_event');
+});
+
+test('projects tool and permission with Worker identity', () => {
+  const base = createEmptySessionRuntime({ runs: [{ id: 'run_1', status: 'running' }] });
+  const tool = reduceRunEvent(base, event('tool_started', 1, {
+    tool_call_id: 'tool_1', tool_name: 'workspace.read_file', arguments: { path: 'README.md' },
+  })).runtime;
+  assert.equal(tool.tools[0].workerId, 'worker-01');
+  assert.equal(tool.tools[0].assignmentId, 'assignment_1');
+  const permission = reduceRunEvent(tool, event('permission_required', 2, {
+    permission_id: 'permission_1', summary: 'Allow read', tool_name: 'workspace.read_file',
+  }));
+  assert.equal(permission.runtime.permissions[0].assignmentId, 'assignment_1');
+  assert.ok(permission.effects.some((item) => item.type === 'upsert_global_permission'));
+});
+
+test('assignment terminal state is irreversible', () => {
+  const base = createEmptySessionRuntime();
+  const completed = reduceRunEvent(base, event('worker_assignment_updated', 1, { status: 'completed' })).runtime;
+  const late = reduceRunEvent(completed, event('worker_assignment_updated', 2, { status: 'running' })).runtime;
+  assert.equal(late.assignmentsById.assignment_1.status, 'completed');
+  assert.deepEqual(late.assignmentOrder, ['assignment_1']);
+});
+
+test('worker private text never enters main conversation', () => {
+  const base = createEmptySessionRuntime();
+  const next = reduceRunEvent(base, event('message_delta', 1, {
+    delta: 'private report', visibility: 'worker_private',
+  })).runtime;
+  assert.equal(next.messages.length, 0);
+});
+
+test('finish closes run and pending permission', () => {
   const base = createEmptySessionRuntime({
-    running: true,
-    currentRunId: 'run_1',
-    permissions: [{ id: 'p1', runId: 'run_1', status: 'pending' }],
+    running: true, currentRunId: 'run_1',
     runs: [{ id: 'run_1', status: 'running' }],
-    runEventsByRun: { run_1: [{ id: 'e1' }] },
+    permissions: [{ id: 'permission_1', runId: 'run_1', status: 'pending' }],
   });
-  const { runtime, effects } = reduceRunEvent(base, {
-    type: 'finish',
-    root_run_id: 'run_1',
-    root_seq: 9,
-    agent: { role: 'root', name: 'root' },
-    payload: { status: 'completed' },
-  });
+  const { runtime, effects } = reduceRunEvent(base, event('finish', 3, { status: 'completed' }));
   assert.equal(runtime.running, false);
-  assert.equal(runtime.currentRunId, '');
   assert.equal(runtime.runs[0].status, 'completed');
   assert.equal(runtime.permissions[0].status, 'closed');
-  assert.equal(runtime.runEventsByRun.run_1, undefined);
   assert.deepEqual(effects, [{ type: 'clear_global_permissions_for_run', runId: 'run_1' }]);
 });
 
-test('reduceRunEvent todo_updated auto-expands once when open count rises', () => {
-  const base = createEmptySessionRuntime({ todoOpenCount: 0 });
-  const { runtime } = reduceRunEvent(base, {
-    type: 'todo_updated',
-    root_run_id: 'run_1',
-    root_seq: 2,
-    payload: {
-      items: [{ id: '1', content: 'step', status: 'pending' }],
-      open_count: 1,
-    },
-  });
-  assert.equal(runtime.todoOpenCount, 1);
-  assert.equal(runtime.todosExpanded, true);
-  assert.equal(runtime.todosAutoExpandedOnce, true);
-});
-
-test('reduceRunEvent goal_updated focuses active goal', () => {
-  const base = createEmptySessionRuntime();
-  const { runtime } = reduceRunEvent(base, {
-    type: 'goal_updated',
-    root_run_id: 'run_1',
-    root_seq: 5,
-    payload: {
-      goal: {
-        id: 'g1',
-        status: 'active',
-        objective: 'ship feature',
-        pipeline_phase: 'execute',
-      },
-    },
-  });
-  assert.equal(runtime.goal?.id, 'g1');
-  assert.equal(runtime.goalExpanded, true);
-  assert.equal(runtime.goals.length, 1);
-});
-
-test('appendAgentText merges consecutive message_delta on same stream', () => {
-  const first = appendAgentText([], {
-    type: 'message_delta',
-    root_run_id: 'run_1',
-    run_id: 'run_1',
-    root_seq: 1,
-    event_id: 'e1',
-    agent: { role: 'root', name: 'root' },
-    payload: { delta: 'Hello' },
-  }, 'Hello');
-  const second = appendAgentText(first, {
-    type: 'message_delta',
-    root_run_id: 'run_1',
-    run_id: 'run_1',
-    root_seq: 2,
-    agent: { role: 'root', name: 'root' },
-    payload: { delta: ' world' },
-  }, ' world');
-  assert.equal(second.length, 1);
-  assert.equal(second[0].text, 'Hello world');
-});
-
-test('subagent finish does not terminate root run via reduceRunEvent path', () => {
+test('terminal Run state is irreversible', () => {
   const base = createEmptySessionRuntime({
     running: true,
     currentRunId: 'run_1',
-    runs: [{ id: 'run_1', status: 'running' }],
   });
-  const { runtime, effects } = reduceRunEvent(base, {
-    type: 'finish',
-    root_run_id: 'run_1',
-    root_seq: 8,
-    agent: { role: 'subagent', name: 'worker', subagent_id: 's1' },
-    payload: { status: 'completed' },
-  });
-  // Subagent finish is not a root terminal event — root run stays active.
-  assert.equal(runtime.running, true);
-  assert.equal(runtime.currentRunId, 'run_1');
-  assert.equal(effects.length, 0);
+  const finished = reduceRunEvent(base, event('finish', 1, { status: 'completed' })).runtime;
+  const late = reduceRunEvent(finished, event('message_delta', 2, { delta: 'late' })).runtime;
+  assert.equal(late, finished);
+  assert.equal(late.running, false);
+  assert.equal(late.messages.length, 0);
+});
+
+test('appendWorkerText merges consecutive deltas for one assignment', () => {
+  const first = appendWorkerText([], event('message_delta', 1, { delta: 'Hello' }), 'Hello');
+  const second = appendWorkerText(first, event('message_delta', 2, { delta: ' world' }), ' world');
+  assert.equal(second.length, 1);
+  assert.equal(second[0].text, 'Hello world');
 });

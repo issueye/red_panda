@@ -1,63 +1,48 @@
-/**
- * Pure reduction of Gateway run events onto a session runtime projection.
- * Side effects (global pending permissions, UI tab switches) are returned as
- * effect descriptors for the caller (checklist R7b).
- */
-
-import { extractAgentScope } from './conversationScope.js';
-import { displayStatus } from './displayLabels.js';
 import { goalFromUpdatedEvent, pickFocusGoal } from './goals.js';
-import { isRootTerminalRunEvent } from './runEventLifecycle.js';
 import { createEmptySessionRuntime } from './sessionRuntime.js';
-import { resolveSubAgentLifecycleStatus } from './subagentStatus.js';
 import { todosFromToolFinishedPayload, todosFromUpdatedEvent } from './todos.js';
 
-export function appendAgentText(items, payload, text) {
-  const scope = extractAgentScope(payload);
-  const agentName = scope.agentName || 'agent';
-  const runId = payload.run_id || payload.root_run_id || '';
-  const eventSeq = Number(payload.root_seq) || 0;
+export const WORKER_PROTOCOL_VERSION = '2026-07-13';
+const TERMINAL_ASSIGNMENT_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+export function appendWorkerText(items, event, text) {
   const previous = items[items.length - 1];
-  const canAppend = payload.type === 'message_delta'
+  const canAppend = event.type === 'message_delta'
     && previous?.role === 'assistant'
-    && previous.agent === agentName
-    && previous.runId === runId
-    && (previous.subagentId || '') === (scope.subagentId || '')
+    && previous.runId === event.run_id
+    && previous.assignmentId === event.assignment_id
+    && previous.workerId === event.worker?.id
     && previous.eventSeq > 0
-    && eventSeq === previous.eventSeq + 1;
-
+    && Number(event.run_seq) === previous.eventSeq + 1;
   if (canAppend) {
-    return [
-      ...items.slice(0, -1),
-      {
-        ...previous,
-        eventSeq,
-        rootSeq: eventSeq,
-        text: `${previous.text}${text}`,
-      },
-    ];
+    return [...items.slice(0, -1), {
+      ...previous,
+      eventSeq: Number(event.run_seq),
+      runSeq: Number(event.run_seq),
+      text: `${previous.text}${text}`,
+    }];
   }
-
-  return [
-    ...items,
-    {
-      id: payload.event_id || payload.id || `evt_${Date.now()}`,
-      role: 'assistant',
-      agent: agentName,
-      agentRole: scope.agentRole || '',
-      subagentId: scope.subagentId || '',
-      runId,
-      eventSeq,
-      rootSeq: eventSeq,
-      createdAt: payload.created_at || new Date().toISOString(),
-      text,
-    },
-  ];
+  return [...items, {
+    id: event.event_id || `evt_${Date.now()}`,
+    role: 'assistant',
+    runId: event.run_id || '',
+    assignmentId: event.assignment_id || '',
+    workerId: event.worker?.id || '',
+    profileKey: event.worker?.profile_key || '',
+    eventSeq: Number(event.run_seq) || 0,
+    runSeq: Number(event.run_seq) || 0,
+    visibility: event.payload?.visibility || 'run_public',
+    createdAt: event.created_at || new Date().toISOString(),
+    text,
+  }];
 }
+
+export const appendAgentText = appendWorkerText;
 
 export function countToolsForRun(items, runId) {
   if (!Array.isArray(items) || !runId) return 0;
-  return items.filter((item) => item.rootRunId === runId).length;
+  return items.filter((item) => item.runId === runId).length;
 }
 
 export function updateRunByID(items, runId, patch) {
@@ -67,325 +52,227 @@ export function updateRunByID(items, runId, patch) {
     found = true;
     return { ...item, ...patch };
   });
-  return found ? next : items;
+  return found ? next : [...items, { id: runId, ...patch }];
 }
 
 export function upsertByID(items, nextItem) {
-  return [
-    ...items.filter((item) => item.id !== nextItem.id),
-    nextItem,
-  ];
+  return [...items.filter((item) => item.id !== nextItem.id), nextItem];
 }
 
-/**
- * @param {ReturnType<typeof createEmptySessionRuntime>} runtime
- * @param {object} payload Gateway agent event envelope
- * @returns {{ runtime: object, effects: Array<{ type: string, [key: string]: any }> }}
- */
-export function reduceRunEvent(runtime, payload) {
+function updateTodos(next, body) {
+  const parsed = todosFromUpdatedEvent(body);
+  const shouldAutoExpand = parsed.openCount > 0
+    && (next.todoOpenCount || 0) === 0
+    && !next.todosAutoExpandedOnce;
+  return {
+    ...next,
+    todos: parsed.items,
+    todoOpenCount: parsed.openCount,
+    todosVersion: (next.todosVersion || 0) + 1,
+    todosHydrated: true,
+    todosExpanded: shouldAutoExpand || next.todosExpanded,
+    todosAutoExpandedOnce: shouldAutoExpand || next.todosAutoExpandedOnce,
+  };
+}
+
+function assignmentFromEvent(event, current) {
+  const body = event.payload?.assignment || event.payload || {};
+  const status = body.status || current?.status || 'running';
+  if (current && TERMINAL_ASSIGNMENT_STATUSES.has(current.status)
+    && !TERMINAL_ASSIGNMENT_STATUSES.has(status)) {
+    return current;
+  }
+  return {
+    id: body.id || event.assignment_id,
+    runId: body.run_id || event.run_id,
+    workerId: body.worker_id || event.worker?.id || current?.workerId || '',
+    originWorkerId: body.origin_worker_id || current?.originWorkerId || '',
+    profileKey: body.profile_key || event.worker?.profile_key || current?.profileKey || '',
+    task: body.task || current?.task || '',
+    status,
+    result: body.result || current?.result || '',
+    error: body.error || current?.error || '',
+    summary: body.summary || event.payload?.summary || current?.summary || '',
+    createdAt: body.created_at || current?.createdAt || event.created_at,
+    startedAt: body.started_at || current?.startedAt,
+    finishedAt: body.finished_at || current?.finishedAt,
+    workerSeq: Number(event.worker_seq) || current?.workerSeq || 0,
+  };
+}
+
+function upsertAssignment(runtime, assignment) {
+  const exists = Boolean(runtime.assignmentsById?.[assignment.id]);
+  return {
+    ...runtime,
+    assignmentsById: { ...(runtime.assignmentsById || {}), [assignment.id]: assignment },
+    assignmentOrder: exists
+      ? (runtime.assignmentOrder || [])
+      : [...(runtime.assignmentOrder || []), assignment.id],
+  };
+}
+
+export function reduceRunEvent(runtime, event) {
   const prev = runtime || createEmptySessionRuntime();
   const effects = [];
+  if (event?.protocol_version !== WORKER_PROTOCOL_VERSION
+    || !event.run_id || !event.session_id || !event.assignment_id || !event.worker?.id
+    || !Number.isFinite(Number(event.run_seq)) || Number(event.run_seq) <= 0
+    || !Number.isFinite(Number(event.worker_seq)) || Number(event.worker_seq) <= 0) {
+    return { runtime: prev, effects: [{ type: 'ignore_incompatible_event', event }] };
+  }
+  const runId = event.run_id;
+  const runSeq = Number(event.run_seq) || 0;
+  const currentRun = prev.runs.find((item) => item.id === runId);
+  if (currentRun && TERMINAL_RUN_STATUSES.has(currentRun.status)) {
+    return { runtime: prev, effects };
+  }
+  if (runSeq > 0 && runSeq <= Number(prev.runSeq || 0) && event.event_id) {
+    return { runtime: prev, effects };
+  }
   let next = {
     ...prev,
-    rootSeq: Math.max(prev.rootSeq || 1, payload.root_seq || 0),
-    running: prev.running || Boolean(payload.root_run_id),
-    currentRunId: prev.currentRunId || payload.root_run_id || '',
+    runSeq: Math.max(Number(prev.runSeq) || 0, runSeq),
+    running: prev.running || event.type !== 'finish',
+    currentRunId: prev.currentRunId || runId,
     hydrated: true,
   };
 
-  const agent = payload.agent || {};
-  if (agent.role === 'subagent' || payload.type === 'subagent_update') {
-    const id = agent.subagent_id || payload.payload?.subagent_id || agent.agent_id;
-    if (id) {
-      const current = next.subAgents.find((item) => item.id === id);
-      const nextStatus = resolveSubAgentLifecycleStatus(
-        payload.type,
-        payload.payload,
-        current?.status,
-      );
-      const nextSummary = payload.type === 'subagent_update'
-        ? (payload.payload?.summary || current?.summary || '')
-        : (current?.summary || payload.payload?.summary || '');
-      const sub = {
-        id,
-        role: 'subagent',
-        name: payload.payload?.name || agent.name || current?.name || id,
-        status: nextStatus,
-        backend: payload.payload?.backend || current?.backend || 'in_process',
-        rootRunId: payload.root_run_id || current?.rootRunId || '',
-        runId: payload.run_id || current?.runId || '',
-        parentRunId: payload.parent_run_id || current?.parentRunId || '',
-        summary: nextSummary,
-        seq: payload.agent_seq || current?.seq || 0,
-      };
-      next = {
-        ...next,
-        subAgents: current
-          ? next.subAgents.map((item) => (item.id === id ? sub : item))
-          : [...next.subAgents, sub],
-        conversationTabs: next.conversationTabs.map((tab) => (
-          tab.subagentId === id
-            ? {
-                ...tab,
-                title: sub.name || tab.title,
-                status: sub.status,
-                statusLabel: displayStatus(sub.status),
-                runId: sub.runId || tab.runId,
-              }
-            : tab
-        )),
-      };
-    }
+  if (event.type === 'worker_assignment_updated') {
+    const current = next.assignmentsById?.[event.assignment_id];
+    const assignment = assignmentFromEvent(event, current);
+    next = upsertAssignment(next, assignment);
+    effects.push({ type: 'upsert_worker_assignment', assignment, worker: event.worker });
+    return { runtime: next, effects };
   }
 
-  if (payload.type === 'permission_required') {
-    const permissionID = payload.payload?.permission_id || `perm_${Date.now()}`;
-    const scope = extractAgentScope(payload);
-    const nextPermission = {
-      id: permissionID,
-      runId: payload.payload?.run_id || payload.root_run_id,
-      sessionId: payload.session_id || '',
+  if (event.type === 'permission_required') {
+    const permission = {
+      id: event.payload?.permission_id || `perm_${Date.now()}`,
+      runId,
+      sessionId: event.session_id,
+      assignmentId: event.assignment_id,
+      workerId: event.worker?.id || '',
+      profileKey: event.worker?.profile_key || '',
       status: 'pending',
-      summary: payload.payload?.summary || '需要授权',
-      detail: payload.payload?.detail || payload.payload?.tool_name || '系统正在等待处理决定。',
-      risk: payload.payload?.risk,
-      toolName: payload.payload?.tool_name,
-      arguments: payload.payload?.arguments || {},
-      rootSeq: payload.root_seq,
-      agent: scope.agentName,
-      agentRole: scope.agentRole,
-      subagentId: scope.subagentId,
-      createdAt: payload.created_at || new Date().toISOString(),
+      summary: event.payload?.summary || '需要授权',
+      detail: event.payload?.detail || event.payload?.tool_name || '系统正在等待处理决定。',
+      risk: event.payload?.risk,
+      toolName: event.payload?.tool_name,
+      arguments: event.payload?.arguments || {},
+      runSeq,
+      createdAt: event.created_at || new Date().toISOString(),
     };
     next = {
       ...next,
-      permissions: upsertByID(next.permissions, nextPermission),
-      runs: next.runs.map((item) => (
-        item.id === (payload.payload?.run_id || payload.root_run_id)
-          ? {
-              ...item,
-              status: 'waiting_permission',
-              lastEventType: payload.type,
-              lastRootSeq: payload.root_seq,
-              updatedAt: new Date().toISOString(),
-            }
-          : item
-      )),
+      permissions: upsertByID(next.permissions, permission),
+      runs: updateRunByID(next.runs, runId, {
+        status: 'waiting_permission', lastEventType: event.type, lastRunSeq: runSeq,
+      }),
     };
-    effects.push({ type: 'upsert_global_permission', permission: nextPermission });
+    effects.push({ type: 'upsert_global_permission', permission });
     effects.push({ type: 'select_activity_tab' });
     return { runtime: next, effects };
   }
 
-  if (payload.type === 'tool_started') {
-    const toolID = payload.payload?.tool_call_id || payload.event_id;
-    const scope = extractAgentScope(payload);
-    const nextTool = {
-      id: toolID,
-      rootRunId: payload.root_run_id,
-      runId: payload.run_id || payload.root_run_id || '',
-      name: payload.payload?.tool_name || 'tool',
-      displayName: payload.payload?.display_name || payload.payload?.tool_name || '工具',
-      risk: payload.payload?.risk || 'low',
-      arguments: payload.payload?.arguments || {},
-      status: payload.payload?.status || 'running',
-      output: '',
-      error: '',
-      startedSeq: payload.root_seq,
-      rootSeq: payload.root_seq,
-      startedAt: payload.created_at || new Date().toISOString(),
-      agent: scope.agentName,
-      agentRole: scope.agentRole,
-      subagentId: scope.subagentId,
+  if (event.type === 'tool_started') {
+    const tool = {
+      id: event.payload?.tool_call_id || event.event_id,
+      runId,
+      assignmentId: event.assignment_id,
+      workerId: event.worker?.id || '',
+      profileKey: event.worker?.profile_key || '',
+      name: event.payload?.tool_name || 'tool',
+      displayName: event.payload?.display_name || event.payload?.tool_name || '工具',
+      risk: event.payload?.risk || 'low',
+      arguments: event.payload?.arguments || {},
+      status: event.payload?.status || 'running',
+      output: '', error: '', startedSeq: runSeq, runSeq,
+      startedAt: event.created_at || new Date().toISOString(),
     };
-    const nextTools = [...next.tools.filter((item) => item.id !== toolID), nextTool];
+    const tools = upsertByID(next.tools, tool);
     next = {
       ...next,
-      tools: nextTools,
-      runs: updateRunByID(next.runs, payload.root_run_id, {
-        lastEventType: payload.type,
-        lastRootSeq: payload.root_seq,
-        toolCount: countToolsForRun(nextTools, payload.root_run_id),
-        updatedAt: new Date().toISOString(),
+      tools,
+      runs: updateRunByID(next.runs, runId, {
+        lastEventType: event.type, lastRunSeq: runSeq,
+        toolCount: countToolsForRun(tools, runId),
       }),
     };
     return { runtime: next, effects };
   }
 
-  if (payload.type === 'tool_output') {
-    const toolID = payload.payload?.tool_call_id;
-    next = {
-      ...next,
-      tools: next.tools.map((item) => (
-        item.id === toolID
-          ? { ...item, output: `${item.output || ''}${payload.payload?.delta || ''}`, rootSeq: payload.root_seq }
-          : item
-      )),
-    };
+  if (event.type === 'tool_output') {
+    next = { ...next, tools: next.tools.map((item) => item.id === event.payload?.tool_call_id
+      ? { ...item, output: `${item.output || ''}${event.payload?.delta || ''}`, runSeq }
+      : item) };
     return { runtime: next, effects };
   }
 
-  if (payload.type === 'todo_updated') {
-    const body = payload.payload || {};
-    const parsed = todosFromUpdatedEvent(body);
-    const prevOpen = next.todoOpenCount || 0;
-    const shouldAutoExpand =
-      parsed.openCount > 0 && prevOpen === 0 && !next.todosAutoExpandedOnce;
-    next = {
-      ...next,
-      todos: parsed.items,
-      todoOpenCount: parsed.openCount,
-      todosVersion: (next.todosVersion || 0) + 1,
-      todosHydrated: true,
-      todosExpanded: shouldAutoExpand ? true : next.todosExpanded,
-      todosAutoExpandedOnce: shouldAutoExpand ? true : next.todosAutoExpandedOnce,
-    };
-    return { runtime: next, effects };
-  }
+  if (event.type === 'todo_updated') return { runtime: updateTodos(next, event.payload || {}), effects };
 
-  if (payload.type === 'goal_updated') {
-    const body = payload.payload || {};
-    const updated = goalFromUpdatedEvent(body);
+  if (event.type === 'goal_updated') {
+    const updated = goalFromUpdatedEvent(event.payload || {});
     if (updated) {
-      const goals = Array.isArray(next.goals) ? [...next.goals] : [];
-      const idx = goals.findIndex((g) => g.id === updated.id);
-      if (idx >= 0) goals[idx] = updated;
-      else goals.unshift(updated);
-      const focus = pickFocusGoal(goals);
-      next = {
-        ...next,
-        goals,
-        goal: focus,
-        goalHydrated: true,
-        goalExpanded: focus && (focus.status === 'active' || focus.status === 'paused')
-          ? true
-          : next.goalExpanded,
-      };
+      const goals = [...(next.goals || [])];
+      const index = goals.findIndex((goal) => goal.id === updated.id);
+      if (index >= 0) goals[index] = updated; else goals.unshift(updated);
+      const goal = pickFocusGoal(goals);
+      next = { ...next, goals, goal, goalHydrated: true,
+        goalExpanded: Boolean(goal && ['active', 'paused'].includes(goal.status)) || next.goalExpanded };
     }
     return { runtime: next, effects };
   }
 
-  if (payload.type === 'tool_finished' || payload.type === 'tool_failed') {
-    const toolID = payload.payload?.tool_call_id;
+  if (event.type === 'tool_finished' || event.type === 'tool_failed') {
     next = {
       ...next,
-      tools: next.tools.map((item) => (
-        item.id === toolID
-          ? {
-              ...item,
-              status: payload.payload?.status || (payload.type === 'tool_failed' ? 'failed' : 'completed'),
-              output: payload.payload?.output || item.output,
-              error: payload.payload?.error || item.error,
-              durationMs: payload.payload?.duration_ms,
-              rootSeq: payload.root_seq,
-            }
-          : item
-      )),
-      runs: next.runs.map((item) => (
-        item.id === payload.root_run_id
-          ? {
-              ...item,
-              lastEventType: payload.type,
-              lastRootSeq: payload.root_seq,
-              updatedAt: new Date().toISOString(),
-            }
-          : item
-      )),
+      tools: next.tools.map((item) => item.id === event.payload?.tool_call_id ? {
+        ...item,
+        status: event.payload?.status || (event.type === 'tool_failed' ? 'failed' : 'completed'),
+        output: event.payload?.output || item.output,
+        error: event.payload?.error || item.error,
+        durationMs: event.payload?.duration_ms,
+        runSeq,
+      } : item),
+      runs: updateRunByID(next.runs, runId, { lastEventType: event.type, lastRunSeq: runSeq }),
     };
-    if (payload.type === 'tool_finished') {
-      const parsed = todosFromToolFinishedPayload(payload.payload || {});
-      if (parsed) {
-        const prevOpen = next.todoOpenCount || 0;
-        const shouldAutoExpand =
-          parsed.openCount > 0 && prevOpen === 0 && !next.todosAutoExpandedOnce;
-        next = {
-          ...next,
-          todos: parsed.items,
-          todoOpenCount: parsed.openCount,
-          todosVersion: (next.todosVersion || 0) + 1,
-          todosHydrated: true,
-          todosExpanded: shouldAutoExpand ? true : next.todosExpanded,
-          todosAutoExpandedOnce: shouldAutoExpand ? true : next.todosAutoExpandedOnce,
-        };
-      }
+    if (event.type === 'tool_finished') {
+      const parsed = todosFromToolFinishedPayload(event.payload || {});
+      if (parsed) next = updateTodos(next, { items: parsed.items, open_count: parsed.openCount });
     }
     return { runtime: next, effects };
   }
 
-  if (payload.type === 'subagent_update') {
-    return { runtime: next, effects };
-  }
-
-  if (isRootTerminalRunEvent(payload)) {
+  if (event.type === 'finish' || event.type === 'error') {
     const runEventsByRun = { ...next.runEventsByRun };
-    delete runEventsByRun[payload.root_run_id];
+    delete runEventsByRun[runId];
     next = {
       ...next,
       running: false,
-      currentRunId: next.currentRunId === payload.root_run_id ? '' : next.currentRunId,
+      currentRunId: next.currentRunId === runId ? '' : next.currentRunId,
       runEventsByRun,
-      runEventsError: { ...next.runEventsError, [payload.root_run_id]: '' },
-      permissions: next.permissions.map((item) => (
-        item.runId === payload.root_run_id && (item.status === 'pending' || !item.status)
-          ? { ...item, status: 'closed', rootSeq: payload.root_seq }
-          : item
-      )),
-      runs: next.runs.map((item) => (
-        item.id === payload.root_run_id
-          ? {
-              ...item,
-              status: payload.payload?.status || (payload.type === 'error' ? 'failed' : 'completed'),
-              lastEventType: payload.type,
-              lastRootSeq: payload.root_seq,
-              error: payload.payload?.error || item.error,
-              finishedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            }
-          : item
-      )),
+      permissions: next.permissions.map((item) => item.runId === runId && item.status === 'pending'
+        ? { ...item, status: 'closed', runSeq } : item),
+      runs: updateRunByID(next.runs, runId, {
+        status: event.payload?.status || (event.type === 'error' ? 'failed' : 'completed'),
+        lastEventType: event.type, lastRunSeq: runSeq,
+        error: event.payload?.error || event.payload?.message || '',
+        finishedAt: event.created_at || new Date().toISOString(),
+      }),
     };
-    effects.push({ type: 'clear_global_permissions_for_run', runId: payload.root_run_id });
-    if (payload.type === 'finish' && payload.payload?.status === 'cancelled') {
-      next = {
-        ...next,
-        messages: [
-          ...next.messages,
-          {
-            id: payload.event_id || `cancelled_${Date.now()}`,
-            role: 'assistant',
-            agent: payload.agent?.name || 'runtime',
-            rootSeq: payload.root_seq,
-            text: '运行已取消。',
-          },
-        ],
-      };
-    }
+    effects.push({ type: 'clear_global_permissions_for_run', runId });
     return { runtime: next, effects };
   }
 
-  if (payload.type === 'skills_injected') {
-    return { runtime: next, effects };
-  }
-
-  const text = payload.payload?.delta || payload.payload?.message || '';
-  if (!text) {
-    return { runtime: next, effects };
-  }
-
+  const text = event.payload?.delta || event.payload?.message || '';
+  if (!text || event.payload?.visibility === 'worker_private') return { runtime: next, effects };
   next = {
     ...next,
-    messages: appendAgentText(next.messages, payload, text),
-    runs: next.runs.map((item) => (
-      item.id === payload.root_run_id
-        ? {
-            ...item,
-            lastEventType: payload.type,
-            lastRootSeq: payload.root_seq,
-            messageCount: (item.messageCount || 0) + 1,
-            updatedAt: new Date().toISOString(),
-          }
-        : item
-    )),
+    messages: appendWorkerText(next.messages, event, text),
+    runs: updateRunByID(next.runs, runId, {
+      lastEventType: event.type, lastRunSeq: runSeq,
+      messageCount: ((next.runs.find((item) => item.id === runId)?.messageCount) || 0) + 1,
+    }),
   };
   return { runtime: next, effects };
 }

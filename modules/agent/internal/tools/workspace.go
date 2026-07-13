@@ -18,7 +18,7 @@ import (
 
 const maxGrepFileBytes = 2 * 1024 * 1024
 const defaultListDepth = 3
-const subagentSummaryTurns = 8
+const WorkerSummaryTurns = 8
 const maxListEntries = 500
 const defaultGrepMatches = 100
 const maxPatchBytes = 256 * 1024
@@ -218,7 +218,7 @@ func runWorkspaceStats(root string, relPath string, maxDepth int) (string, error
 	return string(raw), nil
 }
 
-// computeWorkspaceStats 返回供 workspace.stats 和 subagent.run 预算使用的结构化统计值。
+// computeWorkspaceStats 返回供 workspace.stats 和 worker.delegate 预算使用的结构化统计值。
 func ComputeWorkspaceStats(root string, relPath string, maxDepth int) (workspaceStatsResult, error) {
 	if strings.TrimSpace(relPath) == "" {
 		relPath = "."
@@ -245,14 +245,14 @@ func ComputeWorkspaceStats(root string, relPath string, maxDepth int) (workspace
 		Root:         cleanRoot,
 		Path:         displayRoot,
 		MaxDepth:     maxDepth,
-		SummaryTurns: subagentSummaryTurns,
-		TurnsFormula: fmt.Sprintf("max_turns = file_count + %d (analysis summary)", subagentSummaryTurns),
+		SummaryTurns: WorkerSummaryTurns,
+		TurnsFormula: fmt.Sprintf("max_turns = file_count + %d (analysis summary)", WorkerSummaryTurns),
 	}
 	if !info.IsDir() {
 		result.TotalFiles = 1
 		result.SuggestedSplits = 1
 		result.SplitGuidance = "single_file"
-		result.SuggestedMaxTurns = recommendedSubagentTurns(1)
+		result.SuggestedMaxTurns = recommendedWorkerTurns(1)
 		return result, nil
 	}
 
@@ -328,21 +328,21 @@ func ComputeWorkspaceStats(root string, relPath string, maxDepth int) (workspace
 	sort.Strings(keys)
 	for _, key := range keys {
 		item := *topLevel[key]
-		item.RecommendedMaxTurns = recommendedSubagentTurns(item.Files)
+		item.RecommendedMaxTurns = recommendedWorkerTurns(item.Files)
 		result.TopLevel = append(result.TopLevel, item)
 	}
 
-	result.SuggestedMaxTurns = recommendedSubagentTurns(result.TotalFiles)
+	result.SuggestedMaxTurns = recommendedWorkerTurns(result.TotalFiles)
 	switch {
 	case result.TotalFiles <= 40:
 		result.SuggestedSplits = 1
-		result.SplitGuidance = "small_tree_use_root_or_one_subagent"
+		result.SplitGuidance = "small_tree_use_root_or_one_Worker"
 	case result.TotalFiles <= 150:
 		result.SuggestedSplits = minInt(3, maxInt(2, len(result.TopLevel)))
 		result.SplitGuidance = "medium_tree_split_by_top_level_dirs_use_each_recommended_max_turns"
 	default:
 		result.SuggestedSplits = minInt(6, maxInt(3, countNonEmptyTopDirs(result.TopLevel)))
-		result.SplitGuidance = "large_tree_spawn_multiple_subagents_in_parallel_with_file_count_budgets"
+		result.SplitGuidance = "large_tree_spawn_multiple_Workers_in_parallel_with_file_count_budgets"
 	}
 	return result, nil
 }
@@ -999,9 +999,9 @@ func splitContentLines(content string) []string {
 	return lines
 }
 
-func recommendedSubagentTurns(fileCount int) int {
+func recommendedWorkerTurns(fileCount int) int {
 	if fileCount < 0 {
 		fileCount = 0
 	}
-	return fileCount + subagentSummaryTurns
+	return fileCount + WorkerSummaryTurns
 }

@@ -25,7 +25,7 @@ type PermissionRequestDTO struct {
 	Status     string         `json:"status"`
 	Decision   string         `json:"decision,omitempty"`
 	Reason     string         `json:"reason,omitempty"`
-	RootSeq    uint64         `json:"root_seq,omitempty"`
+	RunSeq     uint64         `json:"run_seq,omitempty"`
 	CreatedAt  time.Time      `json:"created_at"`
 	ResolvedAt *time.Time     `json:"resolved_at,omitempty"`
 	UpdatedAt  time.Time      `json:"updated_at"`
@@ -99,7 +99,7 @@ func permissionDTO(row model.PermissionRequest) (PermissionRequestDTO, error) {
 		Status:     row.Status,
 		Decision:   row.Decision,
 		Reason:     row.Reason,
-		RootSeq:    row.RootSeq,
+		RunSeq:     row.RunSeq,
 		CreatedAt:  row.CreatedAt,
 		ResolvedAt: row.ResolvedAt,
 		UpdatedAt:  row.UpdatedAt,

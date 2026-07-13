@@ -86,7 +86,7 @@ test('toolItemFromMessageSegment builds card payload', () => {
       arguments: { path: 'a.md' },
       complete: true,
     },
-    { id: 'msg_1', agent: 'planner', runId: 'run_1' },
+    { id: 'msg_1', runId: 'run_1', assignmentId: 'assignment_1', workerId: 'worker-01', runSeq: 7 },
     0,
   );
   assert.equal(item.id, 'msg_1_inline_tool_0');
@@ -94,5 +94,14 @@ test('toolItemFromMessageSegment builds card payload', () => {
   assert.equal(item.name, 'workspace.read_file');
   assert.equal(item.status, 'completed');
   assert.equal(item.arguments.path, 'a.md');
+  assert.equal(item.assignmentId, 'assignment_1');
+  assert.equal(item.workerId, 'worker-01');
+  assert.equal(item.runSeq, 7);
   assert.equal(toolDisplayName('workspace.list'), 'List files');
+});
+
+test('Worker communication tools have readable labels', () => {
+  assert.equal(toolDisplayName('worker.delegate'), 'Delegate work');
+  assert.equal(toolDisplayName('worker.send'), 'Send to Worker');
+  assert.equal(toolDisplayName('worker.receive'), 'Receive from Worker');
 });

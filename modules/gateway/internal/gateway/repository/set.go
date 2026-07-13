@@ -3,43 +3,43 @@ package repository
 import "gorm.io/gorm"
 
 type Set struct {
-	DB          *gorm.DB
-	Runs        RunRecordRepository
-	RunEvents   RunEventRepository
-	Workspaces  WorkspaceRepository
-	Sessions    SessionRepository
-	Lineage     SessionLineageRepository
-	Compactions SessionCompactionRepository
-	Memory      MemoryRepository
-	Todos       TodoRepository
-	Messages    MessageRepository
-	ToolCalls   ToolCallRepository
-	Permissions PermissionRequestRepository
-	Providers   ProviderProfileRepository
-	MCPServers  MCPServerConfigRepository
-	Agents      AgentDefinitionRepository
-	Goals       GoalRepository
-	Contexts    ContextRepository
+	DB             *gorm.DB
+	Runs           RunRecordRepository
+	RunEvents      RunEventRepository
+	Workspaces     WorkspaceRepository
+	Sessions       SessionRepository
+	Lineage        SessionLineageRepository
+	Compactions    SessionCompactionRepository
+	Memory         MemoryRepository
+	Todos          TodoRepository
+	Messages       MessageRepository
+	ToolCalls      ToolCallRepository
+	Permissions    PermissionRequestRepository
+	Providers      ProviderProfileRepository
+	MCPServers     MCPServerConfigRepository
+	WorkerProfiles WorkerProfileRepository
+	Goals          GoalRepository
+	Contexts       ContextRepository
 }
 
 func NewSet(db *gorm.DB) Set {
 	return Set{
-		DB:          db,
-		Runs:        NewRunRecordRepository(db),
-		RunEvents:   NewRunEventRepository(db),
-		Workspaces:  NewWorkspaceRepository(db),
-		Sessions:    NewSessionRepository(db),
-		Lineage:    NewSessionLineageRepository(db),
-		Compactions: NewSessionCompactionRepository(db),
-		Memory:      NewMemoryRepository(db),
-		Todos:       NewTodoRepository(db),
-		Messages:    NewMessageRepository(db),
-		ToolCalls:   NewToolCallRepository(db),
-		Permissions: NewPermissionRequestRepository(db),
-		Providers:   NewProviderProfileRepository(db),
-		MCPServers:  NewMCPServerConfigRepository(db),
-		Agents:      NewAgentDefinitionRepository(db),
-		Goals:       NewGoalRepository(db),
-		Contexts:    NewContextRepository(db),
+		DB:             db,
+		Runs:           NewRunRecordRepository(db),
+		RunEvents:      NewRunEventRepository(db),
+		Workspaces:     NewWorkspaceRepository(db),
+		Sessions:       NewSessionRepository(db),
+		Lineage:        NewSessionLineageRepository(db),
+		Compactions:    NewSessionCompactionRepository(db),
+		Memory:         NewMemoryRepository(db),
+		Todos:          NewTodoRepository(db),
+		Messages:       NewMessageRepository(db),
+		ToolCalls:      NewToolCallRepository(db),
+		Permissions:    NewPermissionRequestRepository(db),
+		Providers:      NewProviderProfileRepository(db),
+		MCPServers:     NewMCPServerConfigRepository(db),
+		WorkerProfiles: NewWorkerProfileRepository(db),
+		Goals:          NewGoalRepository(db),
+		Contexts:       NewContextRepository(db),
 	}
 }

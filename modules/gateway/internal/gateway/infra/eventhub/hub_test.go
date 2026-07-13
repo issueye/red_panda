@@ -12,11 +12,11 @@ func TestHubPublishesToRunSubscribers(t *testing.T) {
 	ch, cancel := hub.Subscribe("run_1")
 	defer cancel()
 
-	hub.Publish(events.Envelope{
-		EventID:   "evt_1",
-		RootRunID: "run_1",
-		RootSeq:   1,
-		Type:      events.EventMessageDelta,
+	hub.Publish(events.EnvelopeV2{
+		EventID: "evt_1",
+		RunID:   "run_1",
+		RunSeq:  1,
+		Type:    events.EventMessageDelta,
 	})
 
 	select {
@@ -34,11 +34,11 @@ func TestHubDoesNotPublishToOtherRuns(t *testing.T) {
 	ch, cancel := hub.Subscribe("run_1")
 	defer cancel()
 
-	hub.Publish(events.Envelope{
-		EventID:   "evt_2",
-		RootRunID: "run_2",
-		RootSeq:   1,
-		Type:      events.EventMessageDelta,
+	hub.Publish(events.EnvelopeV2{
+		EventID: "evt_2",
+		RunID:   "run_2",
+		RunSeq:  1,
+		Type:    events.EventMessageDelta,
 	})
 
 	select {

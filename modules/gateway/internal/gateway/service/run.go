@@ -39,12 +39,12 @@ type RunService struct {
 }
 
 type StartRunResult struct {
-	RunID        string `json:"run_id"`
-	SessionID    string `json:"session_id"`
-	Accepted     bool   `json:"accepted"`
-	Subscribed   bool   `json:"subscribed"`
-	RuntimeMode  string `json:"runtime_mode"`
-	RootSequence uint64 `json:"root_seq"`
+	RunID       string `json:"run_id"`
+	SessionID   string `json:"session_id"`
+	Accepted    bool   `json:"accepted"`
+	Subscribed  bool   `json:"subscribed"`
+	RuntimeMode string `json:"runtime_mode"`
+	RunSequence uint64 `json:"run_seq"`
 }
 
 type RunRecordDTO struct {
@@ -55,7 +55,7 @@ type RunRecordDTO struct {
 	Status        string     `json:"status"`
 	Input         string     `json:"input,omitempty"`
 	LastEventType string     `json:"last_event_type,omitempty"`
-	LastRootSeq   uint64     `json:"last_root_seq"`
+	LastRunSeq    uint64     `json:"last_run_seq"`
 	MessageCount  int        `json:"message_count"`
 	ToolCount     int        `json:"tool_count"`
 	Error         string     `json:"error,omitempty"`
@@ -65,20 +65,18 @@ type RunRecordDTO struct {
 }
 
 type RunEventDTO struct {
-	ID          string         `json:"id"`
-	Type        string         `json:"type"`
-	RootRunID   string         `json:"root_run_id"`
-	RunID       string         `json:"run_id"`
-	ParentRunID string         `json:"parent_run_id,omitempty"`
-	SessionID   string         `json:"session_id"`
-	RootSeq     uint64         `json:"root_seq"`
-	AgentSeq    uint64         `json:"agent_seq"`
-	AgentID     string         `json:"agent_id"`
-	AgentRole   string         `json:"agent_role"`
-	AgentName   string         `json:"agent_name,omitempty"`
-	StreamKind  string         `json:"stream_kind,omitempty"`
-	Payload     map[string]any `json:"payload,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
+	ID           string         `json:"id"`
+	Type         string         `json:"type"`
+	RunID        string         `json:"run_id"`
+	SessionID    string         `json:"session_id"`
+	AssignmentID string         `json:"assignment_id"`
+	RunSeq       uint64         `json:"run_seq"`
+	WorkerSeq    uint64         `json:"worker_seq"`
+	WorkerID     string         `json:"worker_id"`
+	ProfileKey   string         `json:"profile_key,omitempty"`
+	StreamKind   string         `json:"stream_kind,omitempty"`
+	Payload      map[string]any `json:"payload,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
 }
 
 func NewRunService(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclient.Client) RunService {
@@ -248,7 +246,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		return StartRunResult{}, err
 	}
 
-	params := methods.ReplyParams{
+	params := methods.RunExecuteParams{
 		RunID: runID,
 		Session: methods.ReplySession{
 			ID:           session.ID,
@@ -259,7 +257,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		Input: methods.ReplyInput{
 			Text: inputText,
 		},
-		Options: methods.ReplyOptions{
+		Options: methods.RunExecuteOptions{
 			ProviderProfileID:   stringOption(payload.Options, "provider_profile_id"),
 			Model:               stringOption(payload.Options, "model"),
 			PermissionMode:      stringOption(payload.Options, "permission_mode"),
@@ -268,8 +266,6 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			ToolDenylist:        stringSliceOption(payload.Options, "tool_denylist"),
 			EmitToolEvents:      true,
 			RequirePermission:   boolOption(payload.Options, "require_permission"),
-			SpawnSubAgents:      boolOption(payload.Options, "spawn_subagents"),
-			SubAgentBackend:     stringOption(payload.Options, "subagent_backend"),
 			WebSearchMaxResults: intOption(payload.Options, "web_search_max_results"),
 			WebFetchMaxBytes:    intOption(payload.Options, "web_fetch_max_bytes"),
 			WebSearchProvider:   stringOption(payload.Options, "web_search_provider"),
@@ -301,7 +297,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 	}
 	// From this point the Goal may be active and bound to runID. Any later
 	// admission failure must pause the Goal so it is not left stuck active.
-	if err := r.applyAgentDefinitions(&params); err != nil {
+	if err := r.applyWorkerProfiles(&params); err != nil {
 		_ = NewGoalService(r.repos).PauseByRun(runID, "run_failed")
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
@@ -312,7 +308,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		return StartRunResult{}, err
 	}
 
-	accepted, err := r.runtime.ReplyWithMode(ctx, runtimeMode, params)
+	accepted, err := r.runtime.ExecuteWithMode(ctx, runtimeMode, params)
 	if err != nil {
 		_ = NewGoalService(r.repos).PauseByRun(runID, "run_failed")
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
@@ -379,7 +375,7 @@ func (r RunService) buildRunConversation(sessionID string) ([]methods.Message, e
 	return conversation, nil
 }
 
-func (r RunService) applyMemoryContext(params *methods.ReplyParams) error {
+func (r RunService) applyMemoryContext(params *methods.RunExecuteParams) error {
 	preview, err := NewMemoryService(r.repos).PreviewRun(MemoryPreviewRunRequest{
 		SessionID:     params.Session.ID,
 		WorkspaceRoot: params.Session.WorkingDir,
@@ -408,7 +404,7 @@ func (r RunService) applyMemoryContext(params *methods.ReplyParams) error {
 	return nil
 }
 
-func (r RunService) applyTodoContext(params *methods.ReplyParams) error {
+func (r RunService) applyTodoContext(params *methods.RunExecuteParams) error {
 	ctx, err := NewTodoService(r.repos).FormatTodoContext(params.Session.ID)
 	if err != nil {
 		return err
@@ -423,7 +419,7 @@ func (r RunService) applyTodoContext(params *methods.ReplyParams) error {
 // applyMCPServers attaches enabled MCP server configs (with secrets) so Runtime
 // can discover tools and execute tools/call (docs/36 D2). Gateway never starts
 // MCP processes itself.
-func (r RunService) applyMCPServers(params *methods.ReplyParams) error {
+func (r RunService) applyMCPServers(params *methods.RunExecuteParams) error {
 	if params == nil {
 		return nil
 	}
@@ -445,37 +441,42 @@ func (r RunService) applyMCPServers(params *methods.ReplyParams) error {
 	return nil
 }
 
-// applyAgentDefinitions attaches enabled Gateway agent profiles so Runtime can
-// treat managed system prompts / default turns as the execution source of truth
-// for goal specialists (builtin hardcode remains fallback only).
-func (r RunService) applyAgentDefinitions(params *methods.ReplyParams) error {
+// applyWorkerProfiles attaches the enabled Gateway profile snapshot. Runtime
+// must not consult the legacy agent_definitions table for v0.2 executions.
+func (r RunService) applyWorkerProfiles(params *methods.RunExecuteParams) error {
 	if params == nil {
 		return nil
 	}
-	defs, err := NewAgentDefinitionService(r.repos).ListEnabled()
+	profiles, err := NewWorkerProfileService(r.repos).ListEnabled()
 	if err != nil {
 		return err
 	}
-	if len(defs) == 0 {
+	if len(profiles) == 0 {
 		return nil
 	}
-	out := make([]methods.AgentDefinitionRef, 0, len(defs))
-	for _, d := range defs {
-		out = append(out, methods.AgentDefinitionRef{
-			Key:             d.Key,
-			Name:            d.Name,
-			NameZH:          d.NameZH,
-			Phase:           d.Phase,
-			SystemPrompt:    d.SystemPrompt,
-			DefaultMaxTurns: d.DefaultMaxTurns,
-			Enabled:         d.Enabled,
+	out := make([]methods.WorkerProfileRef, 0, len(profiles))
+	for _, profile := range profiles {
+		out = append(out, methods.WorkerProfileRef{
+			Key:             profile.Key,
+			Name:            profile.Name,
+			NameZH:          profile.NameZH,
+			Description:     profile.Description,
+			Phase:           profile.Phase,
+			SystemPrompt:    profile.SystemPrompt,
+			ProviderName:    profile.Provider,
+			Model:           profile.Model,
+			ToolPolicy:      "risk_based",
+			ToolAllowlist:   append([]string(nil), profile.ToolAllowlist...),
+			ToolDenylist:    append([]string(nil), profile.ToolDenylist...),
+			DefaultMaxTurns: profile.DefaultMaxTurns,
+			Enabled:         profile.Enabled,
 		})
 	}
-	params.Options.AgentDefinitions = out
+	params.Options.WorkerProfiles = out
 	return nil
 }
 
-func (r RunService) applyProviderProfile(params *methods.ReplyParams) error {
+func (r RunService) applyProviderProfile(params *methods.RunExecuteParams) error {
 	profileID := params.Options.ProviderProfileID
 	if profileID == "" {
 		return nil
@@ -506,7 +507,8 @@ func (r RunService) Cancel(ctx context.Context, runID string, reason string) err
 		pauseReason = "session_compact"
 	}
 	_ = NewGoalService(r.repos).PauseByRun(runID, pauseReason)
-	return r.runtime.Cancel(ctx, methods.CancelParams{RunID: runID, Reason: reason})
+	_, err := r.runtime.CancelRun(ctx, methods.RunCancelParams{RunID: runID, Reason: reason})
+	return err
 }
 
 // StartGoal creates a user-initiated Goal and starts a bound run (slash /goal …).
@@ -632,7 +634,7 @@ func (r RunService) ContinueGoal(ctx context.Context, sessionID, goalID, extraTe
 	})
 }
 
-func (r RunService) applyGoalBindingAndContext(params *methods.ReplyParams, options map[string]any) error {
+func (r RunService) applyGoalBindingAndContext(params *methods.RunExecuteParams, options map[string]any) error {
 	goalSvc := NewGoalService(r.repos)
 	_ = goalSvc.RepairStaleActive(params.Session.ID)
 
@@ -714,18 +716,18 @@ func clampClientMaxToolTurns(clientMax int, bound methods.GoalDTO) int {
 	return clientMax
 }
 
-func (r RunService) SubAgents(ctx context.Context, params methods.SubAgentsParams) (methods.SubAgentsResult, error) {
+func (r RunService) Workers(ctx context.Context, params methods.WorkerListParams) (methods.WorkerListResult, error) {
 	if r.runtime == nil {
-		return methods.SubAgentsResult{}, fmt.Errorf("runtime client not configured")
+		return methods.WorkerListResult{}, fmt.Errorf("runtime client not configured")
 	}
-	return r.runtime.SubAgents(ctx, params)
+	return r.runtime.Workers(ctx, params)
 }
 
-func (r RunService) CancelSubAgent(ctx context.Context, params methods.SubAgentCancelParams) (methods.SubAgentCancelResult, error) {
+func (r RunService) CancelAssignment(ctx context.Context, params methods.WorkerAssignmentCancelParams) (methods.WorkerAssignmentCancelResult, error) {
 	if r.runtime == nil {
-		return methods.SubAgentCancelResult{}, fmt.Errorf("runtime client not configured")
+		return methods.WorkerAssignmentCancelResult{}, fmt.Errorf("runtime client not configured")
 	}
-	return r.runtime.CancelSubAgent(ctx, params)
+	return r.runtime.CancelAssignment(ctx, params)
 }
 
 func (r RunService) ResolvePermission(ctx context.Context, params permission.ResolveParams) (permission.ResolveResult, error) {
@@ -740,16 +742,16 @@ func (r RunService) ResolvePermission(ctx context.Context, params permission.Res
 	return result, nil
 }
 
-func (r RunService) Subscribe(rootRunID string) (<-chan events.Envelope, func()) {
-	return r.hub.Subscribe(rootRunID)
+func (r RunService) Subscribe(runID string) (<-chan events.EnvelopeV2, func()) {
+	return r.hub.Subscribe(runID)
 }
 
-func (r RunService) Replay(rootRunID string, afterSeq uint64) ([]events.Envelope, error) {
-	return r.repos.RunEvents.ListAfter(rootRunID, afterSeq, 500)
+func (r RunService) Replay(runID string, afterSeq uint64) ([]events.EnvelopeV2, error) {
+	return r.repos.RunEvents.ListAfter(runID, afterSeq, 500)
 }
 
-func (r RunService) HandleRuntimeEvent(event events.Envelope) {
-	if event.EventID == "" || event.RootRunID == "" {
+func (r RunService) HandleRuntimeEvent(event events.EnvelopeV2) {
+	if event.EventID == "" || event.RunID == "" {
 		return
 	}
 	_ = r.repos.Runs.ProjectEvent(event)
@@ -758,10 +760,10 @@ func (r RunService) HandleRuntimeEvent(event events.Envelope) {
 	}
 	if isToolEvent(event.Type) {
 		_ = r.repos.ToolCalls.Project(event)
-		_ = r.repos.Runs.RefreshToolCount(event.RootRunID)
+		_ = r.repos.Runs.RefreshToolCount(event.RunID)
 	}
 	if event.Type == events.EventFinish || event.Type == events.EventError {
-		_ = r.repos.Permissions.ClosePendingByRun(event.RootRunID, "closed", "run finished")
+		_ = r.repos.Permissions.ClosePendingByRun(event.RunID, "closed", "run finished")
 		status := "completed"
 		if event.Type == events.EventError {
 			status = "failed"
@@ -771,16 +773,12 @@ func (r RunService) HandleRuntimeEvent(event events.Envelope) {
 		if reason, _ := event.Payload["loop_end_reason"].(string); reason == "budget_exhausted" {
 			status = "budget_exhausted"
 		}
-		_ = NewGoalService(r.repos).OnRootRunTerminal(event.RootRunID, event.SessionID, status)
+		_ = NewGoalService(r.repos).OnRootRunTerminal(event.RunID, event.SessionID, status)
 	}
 	_ = r.repos.RunEvents.Save(event)
-	if event.Type == events.EventMessageDelta || event.Type == events.EventReasoningDelta {
+	if (event.Type == events.EventMessageDelta || event.Type == events.EventReasoningDelta) && payloadString(event.Payload, "visibility") != "worker_private" {
 		if delta, ok := event.Payload["delta"].(string); ok && delta != "" {
-			role := "assistant"
-			if event.Agent.Role == events.AgentRoleSubAgent {
-				role = "subagent"
-			}
-			_, _ = r.repos.Messages.AddOrAppend(event.SessionID, role, delta, event.RootRunID)
+			_, _ = r.repos.Messages.AddOrAppend(event.SessionID, "assistant", delta, event.RunID)
 			_ = r.repos.Sessions.Touch(event.SessionID)
 		}
 	}
@@ -799,6 +797,11 @@ func stringInput(input map[string]any, key string) string {
 		return ""
 	}
 	value, _ := input[key].(string)
+	return value
+}
+
+func payloadString(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
 	return value
 }
 
@@ -898,7 +901,7 @@ func runRecordDTO(row model.RunRecord) RunRecordDTO {
 		Status:        row.Status,
 		Input:         row.Input,
 		LastEventType: row.LastEventType,
-		LastRootSeq:   row.LastRootSeq,
+		LastRunSeq:    row.LastRootSeq,
 		MessageCount:  row.MessageCount,
 		ToolCount:     row.ToolCount,
 		Error:         row.Error,
@@ -908,25 +911,23 @@ func runRecordDTO(row model.RunRecord) RunRecordDTO {
 	}
 }
 
-func runEventDTO(event events.Envelope) RunEventDTO {
+func runEventDTO(event events.EnvelopeV2) RunEventDTO {
 	streamKind := ""
 	if event.Stream != nil {
 		streamKind = string(event.Stream.Kind)
 	}
 	return RunEventDTO{
-		ID:          event.EventID,
-		Type:        string(event.Type),
-		RootRunID:   event.RootRunID,
-		RunID:       event.RunID,
-		ParentRunID: event.ParentRunID,
-		SessionID:   event.SessionID,
-		RootSeq:     event.RootSeq,
-		AgentSeq:    event.AgentSeq,
-		AgentID:     event.Agent.AgentID,
-		AgentRole:   string(event.Agent.Role),
-		AgentName:   event.Agent.Name,
-		StreamKind:  streamKind,
-		Payload:     event.Payload,
-		CreatedAt:   event.CreatedAt,
+		ID:           event.EventID,
+		Type:         string(event.Type),
+		RunID:        event.RunID,
+		SessionID:    event.SessionID,
+		AssignmentID: event.AssignmentID,
+		RunSeq:       event.RunSeq,
+		WorkerSeq:    event.WorkerSeq,
+		WorkerID:     event.Worker.ID,
+		ProfileKey:   event.Worker.ProfileKey,
+		StreamKind:   streamKind,
+		Payload:      event.Payload,
+		CreatedAt:    event.CreatedAt,
 	}
 }

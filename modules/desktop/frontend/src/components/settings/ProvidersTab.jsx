@@ -1,6 +1,6 @@
 // Split from SettingsPanel.jsx (checklist R7c)
-import { emptyProfileDraft } from '../../lib/providerProfiles.js';
-import { Plus, RefreshCw } from 'lucide-react';
+import { emptyProfileDraft, profileDraftFrom } from '../../lib/providerProfiles.js';
+import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/button.jsx';
 import { ErrorMessage } from '../ui/feedback.jsx';
 import { Field } from '../ui/field.jsx';

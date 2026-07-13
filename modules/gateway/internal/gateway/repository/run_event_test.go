@@ -28,22 +28,18 @@ func TestRunEventRepositoryListAfter(t *testing.T) {
 
 	repo := NewRunEventRepository(db)
 	for i := uint64(1); i <= 3; i++ {
-		if err := repo.Save(events.Envelope{
-			ProtocolVersion: events.ProtocolVersion,
+		if err := repo.Save(events.EnvelopeV2{
+			ProtocolVersion: events.ProtocolVersionV2,
 			EventID:         "evt_" + string(rune('0'+i)),
-			RootRunID:       "run_1",
 			RunID:           "run_1",
 			SessionID:       "session_1",
-			RootSeq:         i,
-			AgentSeq:        i,
-			Agent: events.AgentRef{
-				AgentID: "root",
-				Role:    events.AgentRoleRoot,
-				Path:    []string{"root"},
-			},
-			Type:      events.EventMessageDelta,
-			Payload:   map[string]any{"delta": "x"},
-			CreatedAt: time.Now().UTC(),
+			AssignmentID:    "assignment_1",
+			RunSeq:          i,
+			WorkerSeq:       i,
+			Worker:          events.EventWorkerRef{ID: "worker-01"},
+			Type:            events.EventMessageDelta,
+			Payload:         map[string]any{"delta": "x"},
+			CreatedAt:       time.Now().UTC(),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -56,7 +52,7 @@ func TestRunEventRepositoryListAfter(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("len(items) = %d, want 2", len(items))
 	}
-	if items[0].RootSeq != 2 || items[1].RootSeq != 3 {
-		t.Fatalf("root seqs = %d,%d; want 2,3", items[0].RootSeq, items[1].RootSeq)
+	if items[0].RunSeq != 2 || items[1].RunSeq != 3 {
+		t.Fatalf("run seqs = %d,%d; want 2,3", items[0].RunSeq, items[1].RunSeq)
 	}
 }

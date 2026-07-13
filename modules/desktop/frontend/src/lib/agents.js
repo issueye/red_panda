@@ -1,5 +1,5 @@
 /**
- * Managed agent / specialist definitions (Gateway /api/v1/agents).
+ * Managed Worker Profile definitions (Gateway /api/v1/worker-profiles).
  */
 
 export const AGENT_PHASE_LABELS = {

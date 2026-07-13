@@ -1,6 +1,11 @@
 package methods
 
-import protocolmcp "redpanda/protocol/mcp"
+import (
+	"encoding/json"
+	"time"
+
+	protocolmcp "redpanda/protocol/mcp"
+)
 
 const (
 	CoreInitialize      = "core.initialize"
@@ -27,7 +32,242 @@ const (
 	TodoToolExecute    = "todo.tool.execute"
 	GoalToolExecute    = "goal.tool.execute"
 	ContextToolExecute = "context.tool.execute"
+
+	RunExecute             = "run.execute"
+	RunCancel              = "run.cancel"
+	RunEvent               = "run.event"
+	WorkerList             = "worker.list"
+	WorkerAssignmentCancel = "worker.assignment.cancel"
+	WorkerMessageSend      = "worker.message.send"
+	WorkerMessageReceive   = "worker.message.receive"
+	WorkerPoolStatus       = "worker.pool.status"
 )
+
+type WorkerState string
+
+const (
+	WorkerStateReady     WorkerState = "ready"
+	WorkerStateBusy      WorkerState = "busy"
+	WorkerStateDraining  WorkerState = "draining"
+	WorkerStateUnhealthy WorkerState = "unhealthy"
+	WorkerStateStopped   WorkerState = "stopped"
+)
+
+type AssignmentStatus string
+
+const (
+	AssignmentStatusQueued            AssignmentStatus = "queued"
+	AssignmentStatusRunning           AssignmentStatus = "running"
+	AssignmentStatusWaitingPermission AssignmentStatus = "waiting_permission"
+	AssignmentStatusCompleted         AssignmentStatus = "completed"
+	AssignmentStatusFailed            AssignmentStatus = "failed"
+	AssignmentStatusCancelled         AssignmentStatus = "cancelled"
+)
+
+type MessageKind string
+
+const (
+	MessageKindRequest MessageKind = "request"
+	MessageKindUpdate  MessageKind = "update"
+	MessageKindResult  MessageKind = "result"
+	MessageKindControl MessageKind = "control"
+)
+
+// WorkerRef describes a stable Worker slot. ProfileKey is assignment-scoped;
+// it is empty while the Worker is idle.
+type WorkerRef struct {
+	ID                  string      `json:"id"`
+	State               WorkerState `json:"state,omitempty"`
+	CurrentAssignmentID string      `json:"current_assignment_id,omitempty"`
+	ProfileKey          string      `json:"profile_key,omitempty"`
+	MailboxDepth        int         `json:"mailbox_depth,omitempty"`
+	MailboxCapacity     int         `json:"mailbox_capacity,omitempty"`
+	Healthy             bool        `json:"healthy"`
+}
+
+type AssignmentRecord struct {
+	ID             string           `json:"id"`
+	RunID          string           `json:"run_id"`
+	WorkerID       string           `json:"worker_id"`
+	OriginWorkerID string           `json:"origin_worker_id,omitempty"`
+	ProfileKey     string           `json:"profile_key,omitempty"`
+	Task           string           `json:"task"`
+	Status         AssignmentStatus `json:"status"`
+	Result         string           `json:"result,omitempty"`
+	Error          string           `json:"error,omitempty"`
+	CreatedAt      time.Time        `json:"created_at"`
+	StartedAt      *time.Time       `json:"started_at,omitempty"`
+	FinishedAt     *time.Time       `json:"finished_at,omitempty"`
+}
+
+type PoolSnapshot struct {
+	Configured        int                `json:"configured"`
+	Ready             int                `json:"ready"`
+	Busy              int                `json:"busy"`
+	Draining          int                `json:"draining"`
+	Unhealthy         int                `json:"unhealthy"`
+	Stopped           int                `json:"stopped"`
+	Queued            int                `json:"queued"`
+	Running           int                `json:"running"`
+	WaitingPermission int                `json:"waiting_permission"`
+	Workers           []WorkerRef        `json:"workers"`
+	Assignments       []AssignmentRecord `json:"assignments"`
+}
+
+type WorkerMessage struct {
+	ID               string          `json:"id"`
+	RunID            string          `json:"run_id"`
+	FromWorkerID     string          `json:"from_worker_id"`
+	FromAssignmentID string          `json:"from_assignment_id"`
+	ToWorkerID       string          `json:"to_worker_id"`
+	ToAssignmentID   string          `json:"to_assignment_id"`
+	Kind             MessageKind     `json:"kind"`
+	CorrelationID    string          `json:"correlation_id,omitempty"`
+	ReplyTo          string          `json:"reply_to,omitempty"`
+	Payload          json.RawMessage `json:"payload"`
+	CreatedAt        time.Time       `json:"created_at"`
+	ExpiresAt        time.Time       `json:"expires_at"`
+}
+
+// RunExecuteParams starts one top-level Run. Session and Input reuse neutral
+// value objects, while RunExecuteOptions excludes all v0.1 SubAgent controls.
+type RunExecuteParams struct {
+	RunID   string            `json:"run_id"`
+	Session ReplySession      `json:"session"`
+	Input   ReplyInput        `json:"input"`
+	Options RunExecuteOptions `json:"options"`
+}
+
+type RunExecuteOptions struct {
+	ProviderProfileID   string                        `json:"provider_profile_id,omitempty"`
+	ProviderName        string                        `json:"provider_name,omitempty"`
+	ProviderBaseURL     string                        `json:"provider_base_url,omitempty"`
+	ProviderAPIKey      string                        `json:"provider_api_key,omitempty"`
+	Model               string                        `json:"model,omitempty"`
+	PermissionMode      string                        `json:"permission_mode,omitempty"`
+	ToolPolicy          string                        `json:"tool_policy,omitempty"`
+	ToolAllowlist       []string                      `json:"tool_allowlist,omitempty"`
+	ToolDenylist        []string                      `json:"tool_denylist,omitempty"`
+	EmitToolEvents      bool                          `json:"emit_tool_events"`
+	RequirePermission   bool                          `json:"require_permission,omitempty"`
+	MemoryContext       *MemoryContext                `json:"memory_context,omitempty"`
+	TodoContext         *TodoContext                  `json:"todo_context,omitempty"`
+	GoalContext         *GoalContext                  `json:"goal_context,omitempty"`
+	GoalsEnabled        *bool                         `json:"goals_enabled,omitempty"`
+	GoalID              string                        `json:"goal_id,omitempty"`
+	ContinueGoal        bool                          `json:"continue_goal,omitempty"`
+	SkillsContext       *SkillsContext                `json:"skills_context,omitempty"`
+	WebSearchMaxResults int                           `json:"web_search_max_results,omitempty"`
+	WebFetchMaxBytes    int                           `json:"web_fetch_max_bytes,omitempty"`
+	WebSearchProvider   string                        `json:"web_search_provider,omitempty"`
+	WebTavilyAPIKey     string                        `json:"web_tavily_api_key,omitempty"`
+	WebHTTPProxy        string                        `json:"web_http_proxy,omitempty"`
+	MaxToolTurns        int                           `json:"max_tool_turns,omitempty"`
+	LogLLMRequests      bool                          `json:"log_llm_requests,omitempty"`
+	WorkerProfiles      []WorkerProfileRef            `json:"worker_profiles,omitempty"`
+	WorkerContext       *WorkerExecutionContext       `json:"worker_context,omitempty"`
+	DebugTools          bool                          `json:"debug_tools,omitempty"`
+	MCPServers          []protocolmcp.MCPServerConfig `json:"mcp_servers,omitempty"`
+}
+
+// WorkerExecutionContext is trusted Runtime-to-Runtime execution metadata.
+// It is transported over IPC and must never be populated from model tool args.
+type WorkerExecutionContext struct {
+	WorkerID      string `json:"worker_id"`
+	AssignmentID  string `json:"assignment_id"`
+	RunID         string `json:"run_id"`
+	ProxyMessages bool   `json:"proxy_messages"`
+}
+
+// WorkerProfileRef is an execution policy attached to a Run. It is
+// configuration only and never identifies a Worker slot.
+type WorkerProfileRef struct {
+	Key               string   `json:"key"`
+	Name              string   `json:"name,omitempty"`
+	NameZH            string   `json:"name_zh,omitempty"`
+	Description       string   `json:"description,omitempty"`
+	Phase             string   `json:"phase,omitempty"`
+	SystemPrompt      string   `json:"system_prompt,omitempty"`
+	ProviderProfileID string   `json:"provider_profile_id,omitempty"`
+	ProviderName      string   `json:"provider_name,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	ToolPolicy        string   `json:"tool_policy,omitempty"`
+	ToolAllowlist     []string `json:"tool_allowlist,omitempty"`
+	ToolDenylist      []string `json:"tool_denylist,omitempty"`
+	DefaultMaxTurns   int      `json:"default_max_turns,omitempty"`
+	Enabled           bool     `json:"enabled"`
+}
+
+type RunExecuteResult struct {
+	Accepted     bool   `json:"accepted"`
+	RunID        string `json:"run_id"`
+	AssignmentID string `json:"assignment_id"`
+	WorkerID     string `json:"worker_id"`
+}
+
+type RunCancelParams struct {
+	RunID  string `json:"run_id"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type RunCancelResult struct {
+	Accepted  bool   `json:"accepted"`
+	RunID     string `json:"run_id"`
+	Cancelled int    `json:"cancelled"`
+}
+
+type WorkerListParams struct {
+	RunID        string `json:"run_id,omitempty"`
+	WorkerID     string `json:"worker_id,omitempty"`
+	AssignmentID string `json:"assignment_id,omitempty"`
+}
+
+type WorkerListResult struct {
+	Workers     []WorkerRef        `json:"workers"`
+	Assignments []AssignmentRecord `json:"assignments"`
+}
+
+type WorkerAssignmentCancelParams struct {
+	RunID        string `json:"run_id"`
+	AssignmentID string `json:"assignment_id"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type WorkerAssignmentCancelResult struct {
+	Accepted     bool   `json:"accepted"`
+	RunID        string `json:"run_id"`
+	AssignmentID string `json:"assignment_id"`
+	Cancelled    bool   `json:"cancelled"`
+}
+
+type WorkerMessageSendParams struct {
+	ToWorkerID     string          `json:"to_worker_id"`
+	ToAssignmentID string          `json:"to_assignment_id"`
+	Kind           MessageKind     `json:"kind"`
+	CorrelationID  string          `json:"correlation_id,omitempty"`
+	ReplyTo        string          `json:"reply_to,omitempty"`
+	Payload        json.RawMessage `json:"payload"`
+}
+
+type WorkerMessageSendResult struct {
+	Accepted bool          `json:"accepted"`
+	Message  WorkerMessage `json:"message"`
+}
+
+type WorkerMessageReceiveParams struct {
+	TimeoutMS int `json:"timeout_ms,omitempty"`
+}
+
+type WorkerMessageReceiveResult struct {
+	Found   bool          `json:"found"`
+	Message WorkerMessage `json:"message"`
+}
+
+type WorkerPoolStatusParams struct{}
+
+type WorkerPoolStatusResult struct {
+	Pool PoolSnapshot `json:"pool"`
+}
 
 type PeerInfo struct {
 	Name    string `json:"name"`
@@ -137,12 +377,18 @@ type ReplyOptions struct {
 	// Runtime merges SystemPrompt / DefaultMaxTurns / Phase / NameZH over builtin
 	// goal specialists so Settings edits are the execution source of truth.
 	AgentDefinitions []AgentDefinitionRef `json:"agent_definitions,omitempty"`
+	// WorkerProfiles is the v0.2 execution-policy snapshot. Runtime keeps it
+	// internally after decoding run.execute so delegated Assignments can apply
+	// provider/model/tool policy without consulting Gateway again.
+	WorkerProfiles []WorkerProfileRef `json:"worker_profiles,omitempty"`
 	// DebugTools exposes ops-only tools (subagent.pool_*, skill.create/update/delete)
 	// to the provider. Can also be enabled via RED_PANDA_DEBUG_TOOLS=1.
 	DebugTools bool `json:"debug_tools,omitempty"`
 	// SpecialistContext is role/brief system text for subagents, goal specialists,
 	// and skill runners. It is NOT long-term memory — use MemoryContext for that.
 	SpecialistContext *SpecialistContext `json:"specialist_context,omitempty"`
+	// WorkerContext is trusted IPC metadata used by delegated Runtime processes.
+	WorkerContext *WorkerExecutionContext `json:"worker_context,omitempty"`
 	// MCPServers is the Gateway-enabled MCP config snapshot for this reply (docs/36 D2).
 	// Runtime discovers tools and dispatches tools/call; Gateway never starts MCP processes.
 	MCPServers []protocolmcp.MCPServerConfig `json:"mcp_servers,omitempty"`
@@ -308,9 +554,9 @@ type GoalToolExecuteParams struct {
 
 // GoalToolExecuteResult is Gateway -> Runtime for goal tools.
 type GoalToolExecuteResult struct {
-	Status string   `json:"status"`
-	Output string   `json:"output,omitempty"`
-	Goal   *GoalDTO `json:"goal,omitempty"`
+	Status string    `json:"status"`
+	Output string    `json:"output,omitempty"`
+	Goal   *GoalDTO  `json:"goal,omitempty"`
 	Goals  []GoalDTO `json:"goals,omitempty"`
 	// CancelRunID is set when a goal tool terminalized an active Goal that had a
 	// bound run. Gateway cancels that run after the tool response is returned
@@ -330,8 +576,8 @@ type ContextToolExecuteParams struct {
 
 // ContextToolExecuteResult is Gateway -> Runtime for context tools.
 type ContextToolExecuteResult struct {
-	Status string       `json:"status"`
-	Output string       `json:"output,omitempty"`
+	Status string        `json:"status"`
+	Output string        `json:"output,omitempty"`
 	Notes  []GoalNoteDTO `json:"notes,omitempty"`
 }
 

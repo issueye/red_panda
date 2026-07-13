@@ -60,11 +60,14 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		}
 	}
 
+	assignment := assignmentFromContext(ctx)
 	result, output := r.tools.RunWithContext(ctx, agenttools.ToolRunContext{
-		WorkingDir: params.Session.WorkingDir,
-		RunID:      params.RunID,
-		SessionID:  params.Session.ID,
-		Reply:      &params,
+		WorkingDir:   params.Session.WorkingDir,
+		RunID:        params.RunID,
+		SessionID:    params.Session.ID,
+		AssignmentID: string(assignment.AssignmentID),
+		WorkerID:     string(assignment.WorkerID),
+		Reply:        &params,
 	}, invocation)
 	if output != "" {
 		streamKind := events.StreamToolStdout

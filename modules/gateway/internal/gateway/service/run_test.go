@@ -47,6 +47,10 @@ func TestRunServiceStartPassesExistingConversationToRuntime(t *testing.T) {
 	result, err := service.Start(context.Background(), protows.RunStartPayload{
 		SessionID: session.ID,
 		Input:     map[string]any{"text": "follow-up question"},
+		Options: map[string]any{
+			"spawn_subagents":  true,
+			"subagent_backend": "runtime_process",
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -59,9 +63,16 @@ func TestRunServiceStartPassesExistingConversationToRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var params methods.ReplyParams
+	var params methods.RunExecuteParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "spawn_subagents") || strings.Contains(string(raw), "subagent_backend") ||
+		strings.Contains(string(raw), "agent_definitions") {
+		t.Fatalf("v0.2 run request contains legacy agent fields: %s", raw)
+	}
+	if len(params.Options.WorkerProfiles) == 0 {
+		t.Fatal("run request did not include enabled worker profiles")
 	}
 	if params.Input.Text != "follow-up question" {
 		t.Fatalf("input text = %q, want follow-up question", params.Input.Text)
@@ -109,7 +120,7 @@ func TestRunServiceStartEnablesGoalsOnlyWhenExplicitlyRequested(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var params methods.ReplyParams
+	var params methods.RunExecuteParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +189,7 @@ func TestRunServiceStartClampsMaxToolTurnsToGoalSegment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var params methods.ReplyParams
+	var params methods.RunExecuteParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +228,7 @@ func TestRunServiceStartPassesLatestConversationWindowToRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var params methods.ReplyParams
+	var params methods.RunExecuteParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +439,7 @@ func TestRunServiceRuntimeHelperProcess(t *testing.T) {
 		switch request.Method {
 		case methods.CoreInitialize:
 			response, err := jsonrpc.NewResult(request.ID, methods.InitializeResult{
-				ProtocolVersion: events.ProtocolVersion,
+				ProtocolVersion: events.ProtocolVersionV2,
 				Server:          methods.PeerInfo{Name: "test-runtime", Version: "test"},
 			})
 			if err != nil {
@@ -437,17 +448,39 @@ func TestRunServiceRuntimeHelperProcess(t *testing.T) {
 			if err := encoder.Encode(response); err != nil {
 				t.Fatal(err)
 			}
-		case methods.AgentReply:
+		case methods.RunExecute:
 			if err := os.WriteFile(os.Getenv("RED_PANDA_RUNTIME_CAPTURE"), request.Params, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			var params methods.ReplyParams
+			var params methods.RunExecuteParams
 			if err := json.Unmarshal(request.Params, &params); err != nil {
 				t.Fatal(err)
 			}
-			response, err := jsonrpc.NewResult(request.ID, methods.ReplyAccepted{
-				Accepted: true,
-				RunID:    params.RunID,
+			response, err := jsonrpc.NewResult(request.ID, methods.RunExecuteResult{
+				Accepted:     true,
+				RunID:        params.RunID,
+				AssignmentID: "assignment_entry",
+				WorkerID:     "worker_1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := encoder.Encode(response); err != nil {
+				t.Fatal(err)
+			}
+			return
+		case methods.RunCancel:
+			if err := os.WriteFile(os.Getenv("RED_PANDA_RUNTIME_CAPTURE"), request.Params, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var params methods.RunCancelParams
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			response, err := jsonrpc.NewResult(request.ID, methods.RunCancelResult{
+				Accepted:  true,
+				RunID:     params.RunID,
+				Cancelled: 1,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -480,19 +513,15 @@ func TestRunServiceProjectsPermissionRequired(t *testing.T) {
 
 	repos := repository.NewSet(db)
 	service := NewRunService(repos, eventhub.New(), nil)
-	service.HandleRuntimeEvent(events.Envelope{
-		EventID:   "evt_perm",
-		RootRunID: "run_1",
-		RunID:     "run_1",
-		SessionID: "session_1",
-		RootSeq:   1,
-		AgentSeq:  1,
-		Agent: events.AgentRef{
-			AgentID: "root",
-			Role:    events.AgentRoleRoot,
-			Path:    []string{"root"},
-		},
-		Type: events.EventPermissionRequest,
+	service.HandleRuntimeEvent(events.EnvelopeV2{
+		EventID:      "evt_perm",
+		RunID:        "run_1",
+		SessionID:    "session_1",
+		AssignmentID: "assignment_1",
+		RunSeq:       1,
+		WorkerSeq:    1,
+		Worker:       events.EventWorkerRef{ID: "worker-01"},
+		Type:         events.EventPermissionRequest,
 		Payload: map[string]any{
 			"permission_id": "perm_1",
 			"run_id":        "run_1",
@@ -513,29 +542,27 @@ func TestRunServiceProjectsPermissionRequired(t *testing.T) {
 	}
 }
 
-func TestRunServiceAggregatesMessageDeltasByRunAndRole(t *testing.T) {
+func TestRunServiceAggregatesConversationMessagesAndHidesWorkerPrivateDeltas(t *testing.T) {
 	repos, service := newRunServiceTestFixture(t)
 	if _, err := repos.Messages.Add("session_1", "user", "prompt", "run_1"); err != nil {
 		t.Fatal(err)
 	}
 
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_1", "run_1", "session_1", 1, events.AgentRoleRoot, "hello "))
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_2", "run_1", "session_1", 2, events.AgentRoleRoot, "world"))
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_3", "run_2", "session_1", 1, events.AgentRoleRoot, "new run"))
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_4", "run_2", "session_1", 2, events.AgentRoleSubAgent, "plan "))
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_5", "run_2", "session_1", 3, events.AgentRoleSubAgent, "step"))
+	service.HandleRuntimeEvent(messageDeltaEvent("evt_1", "run_1", "session_1", 1, false, "hello "))
+	service.HandleRuntimeEvent(messageDeltaEvent("evt_2", "run_1", "session_1", 2, false, "world"))
+	service.HandleRuntimeEvent(messageDeltaEvent("evt_3", "run_2", "session_1", 1, false, "new run"))
+	service.HandleRuntimeEvent(messageDeltaEvent("evt_4", "run_2", "session_1", 2, true, "private plan"))
 
 	rows, err := repos.Messages.List("session_1", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 4 {
-		t.Fatalf("len(rows) = %d, want 4", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("len(rows) = %d, want 3", len(rows))
 	}
 	assertServiceMessage(t, rows[0], "user", "run_1", "prompt")
 	assertServiceMessage(t, rows[1], "assistant", "run_1", "hello world")
 	assertServiceMessage(t, rows[2], "assistant", "run_2", "new run")
-	assertServiceMessage(t, rows[3], "subagent", "run_2", "plan step")
 }
 
 func TestRunServiceApplyProviderProfile(t *testing.T) {
@@ -552,8 +579,8 @@ func TestRunServiceApplyProviderProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	params := methods.ReplyParams{
-		Options: methods.ReplyOptions{
+	params := methods.RunExecuteParams{
+		Options: methods.RunExecuteOptions{
 			ProviderProfileID: profile.ID,
 		},
 	}
@@ -576,45 +603,57 @@ func TestRunServiceApplyProviderProfile(t *testing.T) {
 	}
 }
 
-func TestRunServiceApplyAgentDefinitions(t *testing.T) {
+func TestRunServiceApplyWorkerProfilesUsesWorkerProfileSourceOfTruth(t *testing.T) {
 	repos, service := newRunServiceTestFixture(t)
-	// Seed builtins then override analyst prompt through the managed API path.
-	agentSvc := NewAgentDefinitionService(repos)
-	if err := agentSvc.EnsureBuiltins(); err != nil {
+	workerSvc := NewWorkerProfileService(repos)
+	if err := workerSvc.EnsureBuiltins(); err != nil {
 		t.Fatal(err)
 	}
-	row, err := repos.Agents.GetByKey("goal-analyst")
+	row, err := repos.WorkerProfiles.GetByKey("goal-analyst")
 	if err != nil {
 		t.Fatal(err)
 	}
-	row.SystemPrompt = "GATEWAY AUTHORITATIVE PROMPT"
+	row.SystemPrompt = "WORKER PROFILE AUTHORITATIVE PROMPT"
 	row.DefaultMaxTurns = 9
-	if _, err := repos.Agents.Update(row); err != nil {
+	row.Provider = "openai_compatible"
+	row.Model = "worker-model"
+	row.ToolAllowlist = []string{"workspace.read_file"}
+	row.ToolDenylist = []string{"shell.exec"}
+	if _, err := repos.WorkerProfiles.Update(row); err != nil {
 		t.Fatal(err)
 	}
-
-	params := methods.ReplyParams{Session: methods.ReplySession{ID: "sess_agents"}}
-	if err := service.applyAgentDefinitions(&params); err != nil {
+	params := methods.RunExecuteParams{Session: methods.ReplySession{ID: "sess_workers"}}
+	if err := service.applyWorkerProfiles(&params); err != nil {
 		t.Fatal(err)
 	}
-	if len(params.Options.AgentDefinitions) < 5 {
-		t.Fatalf("expected builtin specialists, got %d", len(params.Options.AgentDefinitions))
+	if len(params.Options.WorkerProfiles) < 5 {
+		t.Fatalf("expected builtin worker profiles, got %d", len(params.Options.WorkerProfiles))
 	}
-	var found *methods.AgentDefinitionRef
-	for i := range params.Options.AgentDefinitions {
-		if params.Options.AgentDefinitions[i].Key == "goal-analyst" {
-			found = &params.Options.AgentDefinitions[i]
+	var found *methods.WorkerProfileRef
+	for i := range params.Options.WorkerProfiles {
+		if params.Options.WorkerProfiles[i].Key == "goal-analyst" {
+			found = &params.Options.WorkerProfiles[i]
 			break
 		}
 	}
 	if found == nil {
-		t.Fatal("goal-analyst missing from reply options")
+		t.Fatal("goal-analyst missing from run options")
 	}
-	if found.SystemPrompt != "GATEWAY AUTHORITATIVE PROMPT" || found.DefaultMaxTurns != 9 {
-		t.Fatalf("definition not attached: %#v", found)
+	if found.SystemPrompt != "WORKER PROFILE AUTHORITATIVE PROMPT" || found.DefaultMaxTurns != 9 {
+		t.Fatalf("worker profile not attached: %#v", found)
 	}
-	if !found.Enabled {
-		t.Fatal("expected enabled definition")
+	if found.ProviderName != "openai_compatible" || found.Model != "worker-model" || found.ToolPolicy != "risk_based" {
+		t.Fatalf("worker execution policy mismatch: %#v", found)
+	}
+	denyHasShell := false
+	for _, tool := range found.ToolDenylist {
+		denyHasShell = denyHasShell || tool == "shell.exec"
+	}
+	if len(found.ToolAllowlist) != 1 || found.ToolAllowlist[0] != "workspace.read_file" || !denyHasShell {
+		t.Fatalf("worker tool policy lists mismatch: %#v", found)
+	}
+	if strings.Contains(found.SystemPrompt, "LEGACY AGENT") {
+		t.Fatalf("legacy agent definition leaked into worker profile: %#v", found)
 	}
 }
 
@@ -657,7 +696,7 @@ func TestRunServiceApplyMemoryContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	params := methods.ReplyParams{
+	params := methods.RunExecuteParams{
 		Session: methods.ReplySession{
 			ID:         "session_memory",
 			WorkingDir: "D:/workspace",
@@ -689,19 +728,15 @@ func TestRunServiceApplyMemoryContext(t *testing.T) {
 
 func TestRunServicePersistsMemoryInjectedEvent(t *testing.T) {
 	_, service := newRunServiceTestFixture(t)
-	service.HandleRuntimeEvent(events.Envelope{
-		EventID:   "evt_memory",
-		RootRunID: "run_memory",
-		RunID:     "run_memory",
-		SessionID: "session_memory",
-		RootSeq:   1,
-		AgentSeq:  1,
-		Agent: events.AgentRef{
-			AgentID: "root",
-			Role:    events.AgentRoleRoot,
-			Path:    []string{"root"},
-		},
-		Type: events.EventMemoryInjected,
+	service.HandleRuntimeEvent(events.EnvelopeV2{
+		EventID:      "evt_memory",
+		RunID:        "run_memory",
+		SessionID:    "session_memory",
+		AssignmentID: "assignment_memory",
+		RunSeq:       1,
+		WorkerSeq:    1,
+		Worker:       events.EventWorkerRef{ID: "worker-01"},
+		Type:         events.EventMemoryInjected,
 		Payload: map[string]any{
 			"memory_ids": []any{"mem_1"},
 			"count":      1,
@@ -721,19 +756,14 @@ func TestRunServicePersistsMemoryInjectedEvent(t *testing.T) {
 func TestRunServiceEventsReturnsEventTimeline(t *testing.T) {
 	repos, service := newRunServiceTestFixture(t)
 	now := time.Now().UTC()
-	if err := repos.RunEvents.Save(events.Envelope{
-		EventID:   "evt_1",
-		RootRunID: "run_events",
-		RunID:     "run_events",
-		SessionID: "session_1",
-		RootSeq:   1,
-		AgentSeq:  1,
-		Agent: events.AgentRef{
-			AgentID: "root",
-			Role:    events.AgentRoleRoot,
-			Name:    "root",
-			Path:    []string{"root"},
-		},
+	if err := repos.RunEvents.Save(events.EnvelopeV2{
+		EventID:      "evt_1",
+		RunID:        "run_events",
+		SessionID:    "session_1",
+		AssignmentID: "assignment_1",
+		RunSeq:       1,
+		WorkerSeq:    1,
+		Worker:       events.EventWorkerRef{ID: "worker-01", ProfileKey: "general"},
 		Stream: &events.StreamRef{
 			StreamID: "stream_1",
 			Kind:     events.StreamMessage,
@@ -752,7 +782,7 @@ func TestRunServiceEventsReturnsEventTimeline(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("len(items) = %d, want 1", len(items))
 	}
-	if items[0].ID != "evt_1" || items[0].RootSeq != 1 || items[0].AgentRole != "root" || items[0].StreamKind != "message" {
+	if items[0].ID != "evt_1" || items[0].RunSeq != 1 || items[0].WorkerID != "worker-01" || items[0].AssignmentID != "assignment_1" || items[0].StreamKind != "message" {
 		t.Fatalf("event dto mismatch: %#v", items[0])
 	}
 	if items[0].Payload["delta"] != "hello" {
@@ -795,28 +825,24 @@ func useStdioRuntimeHelper(t *testing.T, capturePath string) *runtimeclient.Clie
 	return runtimeclient.New(os.Args[0], []string{"-test.run=TestRunServiceRuntimeHelperProcess"}, "test", nil, nil)
 }
 
-func messageDeltaEvent(eventID string, runID string, sessionID string, rootSeq uint64, role events.AgentRole, delta string) events.Envelope {
-	agentID := "root"
-	path := []string{"root"}
-	if role == events.AgentRoleSubAgent {
-		agentID = "subagent_1"
-		path = []string{"root", "subagent_1"}
+func messageDeltaEvent(eventID string, runID string, sessionID string, runSeq uint64, workerPrivate bool, delta string) events.EnvelopeV2 {
+	payload := map[string]any{"delta": delta}
+	profileKey := ""
+	if workerPrivate {
+		payload["visibility"] = "worker_private"
+		profileKey = "planner"
 	}
-	return events.Envelope{
-		EventID:   eventID,
-		RootRunID: runID,
-		RunID:     runID,
-		SessionID: sessionID,
-		RootSeq:   rootSeq,
-		AgentSeq:  rootSeq,
-		Agent: events.AgentRef{
-			AgentID: agentID,
-			Role:    role,
-			Path:    path,
-		},
-		Type:      events.EventMessageDelta,
-		Payload:   map[string]any{"delta": delta},
-		CreatedAt: time.Now().UTC(),
+	return events.EnvelopeV2{
+		EventID:      eventID,
+		RunID:        runID,
+		SessionID:    sessionID,
+		AssignmentID: "assignment_" + eventID,
+		RunSeq:       runSeq,
+		WorkerSeq:    runSeq,
+		Worker:       events.EventWorkerRef{ID: "worker-01", ProfileKey: profileKey},
+		Type:         events.EventMessageDelta,
+		Payload:      payload,
+		CreatedAt:    time.Now().UTC(),
 	}
 }
 

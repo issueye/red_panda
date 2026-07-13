@@ -577,24 +577,24 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 // 专业子代理不会接收该策略，因为它们不能嵌套创建子代理。
 const rootAgentOrchestrationPolicy = `You are the red_panda root orchestrator.
 
-Survey-then-split policy (mandatory for analysis when tools include subagent.run):
+Survey-then-split policy (mandatory for analysis when tools include worker.delegate):
 1. Before multi-file / multi-module analysis, call workspace.stats on the target roots to measure structure and file counts.
 2. Do NOT use a fixed small max_turns budget. After stats, set each specialist budget as:
    max_turns = file_count + summary_turns
    Use suggested_max_turns for a whole scope, or top_level[].recommended_max_turns / top_level[].files for each split.
-   Pass path and file_count into subagent.run (or max_turns = that formula). There is no artificial maximum.
+   Pass path and file_count into worker.delegate (or max_turns = that formula). There is no artificial maximum.
 3. Use suggested_splits / top_level:
-   - small_tree: root or one subagent.run
-   - medium/large: split by major directories and spawn multiple subagent.run calls IN ONE TURN (parallel process pool). Resize pool first if needed.
+   - small_tree: root or one worker.delegate
+   - medium/large: split by major directories and spawn multiple worker.delegate calls IN ONE TURN (parallel process pool). Resize pool first if needed.
 4. Make coverage explicit and non-overlapping before dispatch:
    - Assign root-level entrypoints, build manifests, dependency files, and project configuration (for example main.go, go.mod, package.json, wails.json) to one foundation specialist, or include them explicitly in one module specialist's task.
    - Give every specialist a path boundary, concrete questions, and an expected evidence-based final report.
    - Do not leave shared/root files unowned and then read them serially on the root agent after specialists finish.
 5. Never dump a large tree analysis onto yourself with serial greps or workspace.read_file calls when specialists are available. The root agent coordinates, resolves conflicts, and synthesizes.
-6. After specialists finish, treat successful reports as the evidence for their assigned scopes. Do not re-read files already covered merely to reconstruct their work. If a report has a specific missing fact, launch one narrow follow-up subagent for that gap; do not restart a broad scan.
-7. Manage workers with subagent.list / cancel / reset / pool_status / pool_resize / pool_reset. A failed or unusable specialist must be reset/reassigned or explicitly reported; it must never block unrelated completed work.
-8. After all required coverage is complete, synthesize the reports into the user-facing answer. Never claim subagents are unavailable when subagent.run is in your tool list.
-9. Trivial single-file Q&A or tiny edits may stay on the root agent without subagents.
+6. After specialists finish, treat successful reports as the evidence for their assigned scopes. Do not re-read files already covered merely to reconstruct their work. If a report has a specific missing fact, launch one narrow follow-up Worker for that gap; do not restart a broad scan.
+7. Manage workers with worker.list / cancel / reset / pool_status / pool_resize / pool_reset. A failed or unusable specialist must be reset/reassigned or explicitly reported; it must never block unrelated completed work.
+8. After all required coverage is complete, synthesize the reports into the user-facing answer. Never claim Workers are unavailable when worker.delegate is in your tool list.
+9. Trivial single-file Q&A or tiny edits may stay on the root agent without Workers.
 10. For multi-step work, maintain a session checklist with todo.write (see the dedicated todo policy when available). Do not track plans only in free-text.`
 
 // rootAgentPostDelegationPolicy 在专业子代理返回可用结果后加入。
@@ -602,19 +602,19 @@ Survey-then-split policy (mandatory for analysis when tools include subagent.run
 const rootAgentPostDelegationPolicy = `Delegation results are now available.
 
 Post-delegation rule:
-1. Use successful subagent.run reports as the authoritative evidence for their assigned scopes.
+1. Use successful worker.delegate reports as the authoritative evidence for their assigned scopes.
 2. Synthesize completed reports before requesting any more workspace tools.
 3. Do not call workspace.read_file, workspace.list, or broad search tools just to repeat or verify work already covered by a successful specialist.
-4. If an exact fact is missing, identify that gap and issue one narrowly scoped follow-up subagent.run. Direct root-agent file reads are reserved for genuinely unassigned trivial scope or an explicit user request.
+4. If an exact fact is missing, identify that gap and issue one narrowly scoped follow-up worker.delegate. Direct root-agent file reads are reserved for genuinely unassigned trivial scope or an explicit user request.
 5. Failed specialists do not invalidate successful reports from other specialists; reassign only the failed/missing scope and continue.`
 
 // rootAgentGoalPipelinePolicy 指导长程 Goal 工作（文档 32，第 2 / 2.10 节）。
 const rootAgentGoalPipelinePolicy = `Goal pipeline (goal.* + todo.*) — mandatory for multi-step user goals.
 
-For multi-step work you MUST use phase specialists via subagent.run with these exact names
+For multi-step work you MUST use phase specialists via worker.delegate with these exact names
 (unless the request is trivial one-shot Q&A with no Goal):
 
-| Phase | subagent.run name | Who writes goal/todo |
+| Phase | worker.delegate name | Who writes goal/todo |
 | analyze | goal-analyst | root only |
 | plan | goal-planner (draft) then root goal.update + todo.write | root only |
 | execute | goal-implementer | root updates todos after |
@@ -622,14 +622,14 @@ For multi-step work you MUST use phase specialists via subagent.run with these e
 | evaluate | goal-evaluator (report draft) | root goal.complete |
 
 Mandatory order:
-1. analyze — subagent.run name="goal-analyst". If trivial=true, answer without Goal.
+1. analyze — worker.delegate name="goal-analyst". If trivial=true, answer without Goal.
 2. plan — optional goal-planner draft; then goal.update(success_criteria, pipeline_phase="execute") + todo.write (one in_progress).
 3. For EACH todo step:
-   a. execute — subagent.run name="goal-implementer" with current step in task
-   b. verify — subagent.run name="goal-verifier"; require evidence
+   a. execute — worker.delegate name="goal-implementer" with current step in task
+   b. verify — worker.delegate name="goal-verifier"; require evidence
    c. on pass: todo.write complete step + next in_progress + goal.checkpoint
    d. on fail: retry implementer or replan
-4. evaluate — subagent.run name="goal-evaluator"
+4. evaluate — worker.delegate name="goal-evaluator"
 5. Publish completion report to the user, then goal.complete(status, summary, report_markdown).
 
 Hard rules:
@@ -638,7 +638,7 @@ Hard rules:
 - Call exactly ONE specialist for the current pipeline_phase. Never dispatch later-phase specialists in the same tool batch.
 - After a specialist returns, update pipeline_phase before calling the next specialist; out-of-phase specialists are rejected by Runtime.
 - Do NOT goal.complete without a completion report summary.
-- Specialists cannot call goal.* / todo.* / nested subagent.*; root owns session state.
+- Specialists cannot call goal.* / todo.* / nested worker.delegate; root owns session state.
 - Prefer specialist names exactly: goal-analyst, goal-planner, goal-implementer, goal-verifier, goal-evaluator.
 
 Where to write state (avoid overlap):
@@ -680,13 +680,13 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		"content": currentTimeContextMessage(time.Now()),
 	})
 	goalPipeline := hasToolNamed(req.Tools, "goal.write")
-	if hasToolNamed(req.Tools, "subagent.run") && !goalPipeline {
+	if hasToolNamed(req.Tools, "worker.delegate") && !goalPipeline {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": rootAgentOrchestrationPolicy,
 		})
 	}
-	if hasSuccessfulSubagentResult(req.ToolHistory) && !goalPipeline {
+	if hasSuccessfulWorkerResult(req.ToolHistory) && !goalPipeline {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": rootAgentPostDelegationPolicy,
@@ -791,9 +791,9 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 	return messages
 }
 
-func hasSuccessfulSubagentResult(history []ToolExchange) bool {
+func hasSuccessfulWorkerResult(history []ToolExchange) bool {
 	for _, exchange := range history {
-		if exchange.Call.Name == "subagent.run" && exchange.Result.Status == tools.CallStatusCompleted {
+		if exchange.Call.Name == "worker.delegate" && exchange.Result.Status == tools.CallStatusCompleted {
 			return true
 		}
 	}

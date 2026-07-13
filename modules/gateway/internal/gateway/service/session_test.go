@@ -2,9 +2,11 @@ package service
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -33,6 +35,48 @@ func TestSummarizeMessagesExcludesSubagentContent(t *testing.T) {
 	}
 	if strings.Contains(summary.Summary, "PRIVATE_SUBAGENT_SENTINEL") {
 		t.Fatalf("summary leaked subagent content: %q", summary.Summary)
+	}
+}
+
+func TestPauseSessionForCompactCallsRunCancelDirectly(t *testing.T) {
+	repos, _ := newSessionServiceTestFixture(t)
+	session, err := repos.Sessions.Create("compact active run", "D:\\workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Runs.Start(model.RunRecord{
+		ID:        "run_compact_v2",
+		SessionID: session.ID,
+		Status:    "running",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	capturePath := filepath.Join(t.TempDir(), "run-cancel-params.json")
+	runtime := useStdioRuntimeHelper(t, capturePath)
+	service := NewSessionService(repos, runtime)
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = repos.Runs.Finish("run_compact_v2", "cancelled", "session compact")
+	}()
+	paused, err := service.pauseSessionForCompact(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paused != 1 {
+		t.Fatalf("paused = %d, want 1", paused)
+	}
+	raw, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var params methods.RunCancelParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params.RunID != "run_compact_v2" || params.Reason != "session compact pause" {
+		t.Fatalf("run.cancel params = %#v", params)
 	}
 }
 
