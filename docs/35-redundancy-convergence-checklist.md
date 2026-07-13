@@ -1,7 +1,7 @@
 # 代码冗余与功能过度实现 — 收敛清单
 
 Updated: 2026-07-13  
-Status: in progress (Wave 0 started)  
+Status: in progress (Wave 0 done; Wave 1 R1a/R1c done)  
 依据：全项目评估 + Goal 上下文共享后审计（结构冗余 / 语义重叠 / 过度实现）
 
 ## 使用方式
@@ -61,9 +61,9 @@ go test ./modules/gateway/internal/gateway/service/ -count=1 -run "Context|Goal|
 
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **R1a** | Runtime 统一 gateway tool 转发 | 结构冗余 | L | todo | `runtime.go` 中 `executeMemory/Todo/Goal/ContextTool` 收敛为共享 helper（marshal/call/unmarshal/timeout）；保留 4 个 method 名兼容 | 行为不变；现有 memory/todo/goal/context 测全绿 | — |
+| **R1a** | Runtime 统一 gateway tool 转发 | 结构冗余 | L | done | `callGatewayResult` 统一 unmarshal；`executeMemory/Todo/Goal/ContextTool` 共用；4 个 method 名不变 | memory/todo/goal/context 转发行为不变；round-trip 测绿 | — |
 | **R1b** | Protocol 参数形状去重（非 BREAKING） | 结构冗余 | L | todo | 抽取公共字段注释/嵌入 struct（若 Go JSON 兼容）或仅文档化公共约定；**不改 wire 字段名** | 旧客户端仍可解析；`protocol` 测试绿 | R1a 可并行 |
-| **R1c** | Gateway `ExecuteRuntimeTool` 公共校验 | 结构冗余 | L | todo | `run_id/session_id/tool_call_id/session exists` 抽 `validateRuntimeToolMeta`；四 Service 复用 | 校验错误文案一致；service 测绿 | — |
+| **R1c** | Gateway `ExecuteRuntimeTool` 公共校验 | 结构冗余 | L | done | `validateRuntimeToolMeta`（`runtime_tool_meta.go`）；memory 不强制 session；todo/goal/context 强制 session | 文案一致；meta 单测 + 四域 Execute 测绿 | — |
 | **R4** | Specialist brief 不再滥用 MemoryContext | 语义冗余 | M | todo | 新增 `SpecialistContext` 或 `ReplyOptions.SystemExtra`；specialist role+notes 不再写入 `MemoryContext`；Memory 仍只表示记忆 | provider 消息顺序单测；specialist 仍能看到 brief；真实 memory 注入不被覆盖 | R1a 可后 |
 
 **建议提交：**
@@ -226,13 +226,13 @@ L / M / H — <why>
 | Wave | 条目 | todo | in_progress | done | wontfix |
 | --- | --- | --- | --- | --- | --- |
 | 0 | R3, R2, R2a | 0 | 0 | 2 | 1 |
-| 1 | R1a, R1b, R1c, R4 | 4 | 0 | 0 | 0 |
+| 1 | R1a, R1b, R1c, R4 | 2 | 0 | 2 | 0 |
 | 2 | O1, O3, O8, O5a, R6 | 5 | 0 | 0 | 0 |
 | 3 | O2, O4, O2b | 3 | 0 | 0 | 0 |
 | 4 | R5, R5b, O5b | 3 | 0 | 0 | 0 |
 | 5 | R7a, R7b, R7c, O7, O6 | 5 | 0 | 0 | 0 |
 | 6 | S1, S2, S3 | 3 | 0 | 0 | 0 |
-| **合计** | **26** | **23** | **0** | **2** | **1** |
+| **合计** | **26** | **21** | **0** | **4** | **1** |
 
 ---
 

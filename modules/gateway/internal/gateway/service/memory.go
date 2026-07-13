@@ -153,11 +153,9 @@ func (s MemoryService) Delete(id string) (MemoryDTO, error) {
 }
 
 func (s MemoryService) ExecuteRuntimeTool(params methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error) {
-	if strings.TrimSpace(params.RunID) == "" {
-		return methods.MemoryToolExecuteResult{}, fmt.Errorf("run_id is required")
-	}
-	if strings.TrimSpace(params.ToolCallID) == "" {
-		return methods.MemoryToolExecuteResult{}, fmt.Errorf("tool_call_id is required")
+	// Memory ownership is checked per-record / workspace; session is optional.
+	if err := validateRuntimeToolMeta(s.repos, params.RunID, params.SessionID, params.ToolCallID, false); err != nil {
+		return methods.MemoryToolExecuteResult{}, err
 	}
 	switch strings.TrimSpace(params.ToolName) {
 	case "memory.list":

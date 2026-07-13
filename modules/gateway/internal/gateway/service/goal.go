@@ -92,17 +92,8 @@ func (s GoalService) CancelGoal(sessionID, goalID string) (methods.GoalDTO, erro
 }
 
 func (s GoalService) ExecuteRuntimeTool(params methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
-	if strings.TrimSpace(params.RunID) == "" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("run_id is required")
-	}
-	if strings.TrimSpace(params.SessionID) == "" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("session_id is required")
-	}
-	if strings.TrimSpace(params.ToolCallID) == "" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("tool_call_id is required")
-	}
-	if _, err := s.repos.Sessions.Get(params.SessionID); err != nil {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("session not found")
+	if err := validateRuntimeToolMeta(s.repos, params.RunID, params.SessionID, params.ToolCallID, true); err != nil {
+		return methods.GoalToolExecuteResult{}, err
 	}
 	name := strings.TrimSpace(params.ToolName)
 	switch name {

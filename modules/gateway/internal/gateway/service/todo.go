@@ -66,17 +66,8 @@ func (s TodoService) ListBySession(sessionID string) (TodoListHTTPResult, error)
 }
 
 func (s TodoService) ExecuteRuntimeTool(params methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error) {
-	if strings.TrimSpace(params.RunID) == "" {
-		return methods.TodoToolExecuteResult{}, fmt.Errorf("run_id is required")
-	}
-	if strings.TrimSpace(params.SessionID) == "" {
-		return methods.TodoToolExecuteResult{}, fmt.Errorf("session_id is required")
-	}
-	if strings.TrimSpace(params.ToolCallID) == "" {
-		return methods.TodoToolExecuteResult{}, fmt.Errorf("tool_call_id is required")
-	}
-	if _, err := s.repos.Sessions.Get(params.SessionID); err != nil {
-		return methods.TodoToolExecuteResult{}, fmt.Errorf("session not found")
+	if err := validateRuntimeToolMeta(s.repos, params.RunID, params.SessionID, params.ToolCallID, true); err != nil {
+		return methods.TodoToolExecuteResult{}, err
 	}
 	name := strings.TrimSpace(params.ToolName)
 	switch name {

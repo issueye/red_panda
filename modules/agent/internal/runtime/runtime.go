@@ -1482,13 +1482,23 @@ func todoStatusCounts(items []methods.TodoItemDTO) (open, completed, cancelled i
 	return
 }
 
-func (r *Runtime) executeMemoryTool(ctx context.Context, req methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error) {
-	raw, err := r.callGateway(ctx, methods.MemoryToolExecute, req)
+// callGatewayResult forwards a gateway-backed tool/state RPC and unmarshals the
+// typed result. Memory/todo/goal/context all share this path so wire method
+// names stay stable while the call boilerplate lives once.
+func (r *Runtime) callGatewayResult(ctx context.Context, method string, params any, out any) error {
+	raw, err := r.callGateway(ctx, method, params)
 	if err != nil {
-		return methods.MemoryToolExecuteResult{}, err
+		return err
 	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *Runtime) executeMemoryTool(ctx context.Context, req methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error) {
 	var result methods.MemoryToolExecuteResult
-	if err := json.Unmarshal(raw, &result); err != nil {
+	if err := r.callGatewayResult(ctx, methods.MemoryToolExecute, req, &result); err != nil {
 		return methods.MemoryToolExecuteResult{}, err
 	}
 	return result, nil
@@ -1507,12 +1517,8 @@ func (r *Runtime) todoExecutor(ctx context.Context, req methods.TodoToolExecuteP
 }
 
 func (r *Runtime) executeTodoTool(ctx context.Context, req methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error) {
-	raw, err := r.callGateway(ctx, methods.TodoToolExecute, req)
-	if err != nil {
-		return methods.TodoToolExecuteResult{}, err
-	}
 	var result methods.TodoToolExecuteResult
-	if err := json.Unmarshal(raw, &result); err != nil {
+	if err := r.callGatewayResult(ctx, methods.TodoToolExecute, req, &result); err != nil {
 		return methods.TodoToolExecuteResult{}, err
 	}
 	return result, nil
@@ -1533,12 +1539,8 @@ func (r *Runtime) goalExecutor(ctx context.Context, req methods.GoalToolExecuteP
 }
 
 func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
-	raw, err := r.callGateway(ctx, methods.GoalToolExecute, req)
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
 	var result methods.GoalToolExecuteResult
-	if err := json.Unmarshal(raw, &result); err != nil {
+	if err := r.callGatewayResult(ctx, methods.GoalToolExecute, req, &result); err != nil {
 		return methods.GoalToolExecuteResult{}, err
 	}
 	return result, nil
@@ -1548,12 +1550,8 @@ func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecu
 // Gateway. It is available to both the root run and specialist children because
 // context.* is intentionally absent from subagentRunDenylist.
 func (r *Runtime) executeContextTool(ctx context.Context, req methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
-	raw, err := r.callGateway(ctx, methods.ContextToolExecute, req)
-	if err != nil {
-		return methods.ContextToolExecuteResult{}, err
-	}
 	var result methods.ContextToolExecuteResult
-	if err := json.Unmarshal(raw, &result); err != nil {
+	if err := r.callGatewayResult(ctx, methods.ContextToolExecute, req, &result); err != nil {
 		return methods.ContextToolExecuteResult{}, err
 	}
 	return result, nil
