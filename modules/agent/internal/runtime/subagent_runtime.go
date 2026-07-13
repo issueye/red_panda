@@ -16,14 +16,24 @@ func (r *Runtime) startPlannerSubAgent(parentCtx context.Context, params methods
 	subAgentID := "planner_" + params.RunID
 	ctx, cancel := context.WithCancel(parentCtx)
 	backend := normalizedSubAgentBackend(params.Options.SubAgentBackend)
-	r.registerSubAgent(params, subAgentID, "planner", backend, cancel)
+	r.subagents.Register(subagent.Registration{
+		SubAgentID:      subAgentID,
+		Name:            "planner",
+		Backend:         backend,
+		RootRunID:       params.RunID,
+		ParentRunID:     params.RunID,
+		ParentSessionID: params.Session.ID,
+		ChildRunID:      params.RunID + ":subagent:" + subAgentID,
+		Summary:         "planner subagent started",
+		Cancel:          cancel,
+	})
 	go func() {
 		defer close(done)
 		if backend == "runtime_process" || backend == "process_pool" {
 			r.runProcessPlannerSubAgent(ctx, params, subAgentID, backend)
 			return
 		}
-		defer r.finishSubAgent(params.RunID, subAgentID, "completed", "planner subagent completed", "")
+		defer r.subagents.Finish(params.RunID, subAgentID, "completed", "planner subagent completed", "")
 		r.emitPlannerSubAgent(ctx, params, subAgentID, backend)
 	}()
 	return done
@@ -86,7 +96,7 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 	})
 	child, release, err := r.acquireProcessSubAgent(ctx, params, subAgentID, backend)
 	if err != nil {
-		r.finishSubAgent(params.RunID, subAgentID, "failed", backend+" planner subagent failed", err.Error())
+		r.subagents.Finish(params.RunID, subAgentID, "failed", backend+" planner subagent failed", err.Error())
 		_ = r.emitAgentEvent(context.Background(), params, agent, events.EventSubAgentUpdate, nil, map[string]any{
 			"subagent_id": subAgentID,
 			"name":        "planner",
@@ -120,7 +130,7 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 			r.markSubAgentCancelledWithBackend(params, subAgentID, backend)
 			return
 		}
-		r.finishSubAgent(params.RunID, subAgentID, "failed", backend+" planner subagent failed", err.Error())
+		r.subagents.Finish(params.RunID, subAgentID, "failed", backend+" planner subagent failed", err.Error())
 		_ = r.emitAgentEvent(context.Background(), params, agent, events.EventSubAgentUpdate, nil, map[string]any{
 			"subagent_id": subAgentID,
 			"name":        "planner",
@@ -136,7 +146,7 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 		return
 	}
 	reusable = true
-	r.finishSubAgent(params.RunID, subAgentID, "completed", backend+" planner subagent completed", "")
+	r.subagents.Finish(params.RunID, subAgentID, "completed", backend+" planner subagent completed", "")
 	_ = r.emitAgentEvent(context.Background(), params, agent, events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id": subAgentID,
 		"name":        "planner",
@@ -178,30 +188,12 @@ func (r *Runtime) bridgeProcessSubAgentEvent(ctx context.Context, params methods
 	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, agentName), child.Type, stream, payload)
 }
 
-func (r *Runtime) registerSubAgent(params methods.ReplyParams, subAgentID string, name string, backend string, cancel context.CancelFunc) {
-	r.subagents.Register(subagent.Registration{
-		SubAgentID:      subAgentID,
-		Name:            name,
-		Backend:         backend,
-		RootRunID:       params.RunID,
-		ParentRunID:     params.RunID,
-		ParentSessionID: params.Session.ID,
-		ChildRunID:      params.RunID + ":subagent:" + subAgentID,
-		Summary:         name + " subagent started",
-		Cancel:          cancel,
-	})
-}
-
-func (r *Runtime) finishSubAgent(rootRunID string, subAgentID string, status string, summary string, errText string) {
-	r.subagents.Finish(rootRunID, subAgentID, status, summary, errText)
-}
-
 func (r *Runtime) markSubAgentCancelled(params methods.ReplyParams, subAgentID string) {
 	r.markSubAgentCancelledWithBackend(params, subAgentID, "in_process")
 }
 
 func (r *Runtime) markSubAgentCancelledWithBackend(params methods.ReplyParams, subAgentID string, backend string) {
-	r.finishSubAgent(params.RunID, subAgentID, "cancelled", "planner subagent cancelled", "")
+	r.subagents.Finish(params.RunID, subAgentID, "cancelled", "planner subagent cancelled", "")
 	_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, "planner"), events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id": subAgentID,
 		"name":        "planner",
@@ -218,7 +210,7 @@ func (r *Runtime) handleSubAgents(req jsonrpc.Request) error {
 			return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
 		}
 	}
-	resp, err := jsonrpc.NewResult(req.ID, methods.SubAgentsResult{Items: r.subAgentRecords(params)})
+	resp, err := jsonrpc.NewResult(req.ID, methods.SubAgentsResult{Items: r.subagents.List(params)})
 	if err != nil {
 		return err
 	}
@@ -233,7 +225,7 @@ func (r *Runtime) handleSubAgentCancel(req jsonrpc.Request) error {
 	if params.RunID == "" || params.SubAgentID == "" {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "missing run_id or subagent_id"))
 	}
-	cancelled := r.cancelSubAgent(params.RunID, params.SubAgentID)
+	cancelled := r.subagents.Cancel(params.RunID, params.SubAgentID)
 	resp, err := jsonrpc.NewResult(req.ID, methods.SubAgentCancelResult{
 		Accepted:   true,
 		RunID:      params.RunID,
@@ -244,14 +236,6 @@ func (r *Runtime) handleSubAgentCancel(req jsonrpc.Request) error {
 		return err
 	}
 	return r.writeResponse(resp)
-}
-
-func (r *Runtime) subAgentRecords(params methods.SubAgentsParams) []methods.SubAgentRecord {
-	return r.subagents.List(params)
-}
-
-func (r *Runtime) cancelSubAgent(rootRunID string, subAgentID string) bool {
-	return r.subagents.Cancel(rootRunID, subAgentID)
 }
 
 func subAgentRef(subAgentID string, name string) events.AgentRef {

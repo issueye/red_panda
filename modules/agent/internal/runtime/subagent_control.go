@@ -19,7 +19,7 @@ func (r *Runtime) executeSubagentList(runCtx agenttools.ToolRunContext, call too
 		runID = runCtx.Reply.RunID
 	}
 	subAgentID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "subagent_id"))
-	items := r.subAgentRecords(methods.SubAgentsParams{
+	items := r.subagents.List(methods.SubAgentsParams{
 		RunID:      runID,
 		SubAgentID: subAgentID,
 	})
@@ -43,17 +43,17 @@ func (r *Runtime) executeSubagentCancel(runCtx agenttools.ToolRunContext, call t
 	if runID == "" {
 		return "", fmt.Errorf("run_id is required")
 	}
-	record := r.lookupSubAgentRecord(runID, subAgentID)
-	cancelled := r.cancelSubAgent(runID, subAgentID)
+	record, found := r.subagents.Lookup(runID, subAgentID)
+	cancelled := r.subagents.Cancel(runID, subAgentID)
 	if cancelled {
-		r.finishSubAgent(runID, subAgentID, "cancelled", "subagent cancelled by parent", "")
+		r.subagents.Finish(runID, subAgentID, "cancelled", "subagent cancelled by parent", "")
 		if runCtx.Reply != nil {
 			name := subAgentID
-			if record != nil && record.Name != "" {
+			if found && record.Name != "" {
 				name = record.Name
 			}
 			backend := "process_pool"
-			if record != nil && record.Backend != "" {
+			if found && record.Backend != "" {
 				backend = record.Backend
 			}
 			_ = r.emitAgentEvent(context.Background(), *runCtx.Reply, subAgentRef(subAgentID, name), events.EventSubAgentUpdate, nil, map[string]any{
@@ -87,15 +87,15 @@ func (r *Runtime) executeSubagentReset(runCtx agenttools.ToolRunContext, call to
 		return "", fmt.Errorf("run_id is required")
 	}
 
-	record := r.lookupSubAgentRecord(runID, subAgentID)
-	if record == nil {
+	record, found := r.subagents.Lookup(runID, subAgentID)
+	if !found {
 		return "", fmt.Errorf("subagent %s not found", subAgentID)
 	}
-	cancelled := r.cancelSubAgent(runID, subAgentID)
+	cancelled := r.subagents.Cancel(runID, subAgentID)
 	// 即使子代理已完成或失败，也强制写入终止状态。
-	r.forceFinishSubAgent(runID, subAgentID, "reset", "subagent reset by parent", "")
+	r.subagents.ForceFinish(runID, subAgentID, "reset", "subagent reset by parent", "")
 	// 清理注册表，使后续专家可使用新 ID 干净启动。
-	r.removeSubAgent(runID, subAgentID)
+	r.subagents.Remove(runID, subAgentID)
 
 	if runCtx.Reply != nil {
 		name := record.Name
@@ -158,22 +158,6 @@ func (r *Runtime) executeSubagentPoolReset() (string, error) {
 		"reset": true,
 		"pool":  status,
 	})
-}
-
-func (r *Runtime) lookupSubAgentRecord(rootRunID string, subAgentID string) *methods.SubAgentRecord {
-	record, ok := r.subagents.Lookup(rootRunID, subAgentID)
-	if !ok {
-		return nil
-	}
-	return &record
-}
-
-func (r *Runtime) removeSubAgent(rootRunID string, subAgentID string) {
-	r.subagents.Remove(rootRunID, subAgentID)
-}
-
-func (r *Runtime) forceFinishSubAgent(rootRunID string, subAgentID string, status string, summary string, errText string) {
-	r.subagents.ForceFinish(rootRunID, subAgentID, status, summary, errText)
 }
 
 func marshalToolJSON(value any) (string, error) {

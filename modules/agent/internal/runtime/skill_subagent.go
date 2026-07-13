@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"redpanda/agent/internal/skill"
+	"redpanda/agent/internal/subagent"
 	agenttools "redpanda/agent/internal/tools"
 	"strings"
 
@@ -56,7 +57,17 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx agenttools.ToolRun
 	childRunID := params.RunID + ":subagent:" + subAgentID
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	r.registerSubAgent(params, subAgentID, agentName, "runtime_process", cancel)
+	r.subagents.Register(subagent.Registration{
+		SubAgentID:      subAgentID,
+		Name:            agentName,
+		Backend:         "runtime_process",
+		RootRunID:       params.RunID,
+		ParentRunID:     params.RunID,
+		ParentSessionID: params.Session.ID,
+		ChildRunID:      childRunID,
+		Summary:         agentName + " subagent started",
+		Cancel:          cancel,
+	})
 	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id": subAgentID,
 		"name":        agentName,
@@ -105,7 +116,7 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx agenttools.ToolRun
 	})
 	if err != nil {
 		if childCtx.Err() != nil {
-			r.finishSubAgent(params.RunID, subAgentID, "cancelled", "isolated skill subagent cancelled", childCtx.Err().Error())
+			r.subagents.Finish(params.RunID, subAgentID, "cancelled", "isolated skill subagent cancelled", childCtx.Err().Error())
 			return "", childCtx.Err()
 		}
 		r.failSkillSubAgent(params, subAgentID, agentName, name, err)
@@ -122,7 +133,7 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx agenttools.ToolRun
 		r.failSkillSubAgent(params, subAgentID, agentName, name, err)
 		return "", err
 	}
-	r.finishSubAgent(params.RunID, subAgentID, "completed", "isolated skill subagent completed", "")
+	r.subagents.Finish(params.RunID, subAgentID, "completed", "isolated skill subagent completed", "")
 	_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id": subAgentID,
 		"name":        agentName,
@@ -154,7 +165,7 @@ func loadManagedSkillLocal(workspaceRoot string, name string) (string, error) {
 }
 
 func (r *Runtime) failSkillSubAgent(params methods.ReplyParams, subAgentID string, agentName string, skillName string, err error) {
-	r.finishSubAgent(params.RunID, subAgentID, "failed", "isolated skill subagent failed", err.Error())
+	r.subagents.Finish(params.RunID, subAgentID, "failed", "isolated skill subagent failed", err.Error())
 	_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id": subAgentID,
 		"name":        agentName,
