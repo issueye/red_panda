@@ -85,8 +85,8 @@
 | --- | --- | --- | --- | --- |
 | **A1** | 终态 CAS：checkpoint/complete/cancel 条件更新；未绑定 run 不可变 | `gateway/service/goal.go`、repo | M | — ✅ 已落地（含 tool cancel 连带 cancel run、bind 后 admission 失败 pause） |
 | **A2** | 每会话至多一个 active（DB + service）；stale active 修复后再 bind | model/migrate、goal service | M | A1 可并行启动 ✅ 已落地（partial unique + RepairStaleActive + service 门闩） |
-| **A3** | Segment ledger 幂等 `(goal_id, run_id, segment_index)`；计数与 ledger 同事务 | `GoalSegment`、goal service | M | A1 |
-| **A4** | 预算权威：Goal 下压 client `max_tool_turns`；wall-time 进 Runtime deadline | run.go、goal_loop、ReplyOptions | M | A3 |
+| **A3** | Segment ledger 幂等 `(goal_id, run_id, segment_index)`；计数与 ledger 同事务 | `GoalSegment`、goal service | M | A1 ✅ 已落地（终态冻结新 segment、绑定 run 校验、幂等 replay） |
+| **A4** | 预算权威：Goal 下压 client `max_tool_turns`；wall-time 进 Runtime deadline | run.go、goal_loop、ReplyOptions | M | A3 ✅ 已落地（clamp + remaining total 收紧；wall deadline 已在 goal_loop） |
 | **A5** | 流式语义：中间 segment 禁止 root `final=true`；仅一次 root Finish | runtime loop、provider 消费 | H | A4 |
 | **A6** | 生命周期可观测：pause/cancel/budget 必有 `goal_updated` 或强制 hydrate | gateway + App hydrate | L | A1–A5 |
 

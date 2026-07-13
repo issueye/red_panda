@@ -775,13 +775,26 @@ func (s GoalService) executeSegmentEnd(params methods.GoalToolExecuteParams) (me
 	if err != nil {
 		return methods.GoalToolExecuteResult{}, err
 	}
+	// Active goals may only be accounted by the bound run (A1/A3).
+	if row.Status == "active" && row.ActiveRunID != "" && row.ActiveRunID != params.RunID {
+		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is not bound to this run")
+	}
 	delta := intArgFromMap(params.Arguments, "delta_tool_turns", 0)
 	segmentIndex := intArgFromMap(params.Arguments, "segment_index", -1)
 	if delta < 0 {
 		delta = 0
 	}
+	budgetFlag := boolArgFromMap(params.Arguments, "budget_exhausted", false)
 	recorded := false
-	if delta > 0 || !boolArgFromMap(params.Arguments, "budget_exhausted", false) {
+	// Record ledger when there is work to account, or a non-budget boundary
+	// needs a zero-delta segment marker. budget_exhausted-only reports may skip
+	// ledger insert (segment_index may be absent).
+	if delta > 0 || !budgetFlag {
+		if segmentIndex < 0 {
+			return methods.GoalToolExecuteResult{}, fmt.Errorf("segment_index is required")
+		}
+		// Terminal goals: allow idempotent replay of an already-recorded segment;
+		// reject brand-new segment keys (enforced inside RecordSegment).
 		recorded, err = s.repos.Goals.RecordSegment(row.ID, params.RunID, segmentIndex, delta)
 		if err != nil {
 			return methods.GoalToolExecuteResult{}, err
@@ -792,10 +805,18 @@ func (s GoalService) executeSegmentEnd(params methods.GoalToolExecuteParams) (me
 		return methods.GoalToolExecuteResult{}, err
 	}
 	budgetExhausted := row.MaxTotalToolTurns > 0 && row.UsedToolTurns >= row.MaxTotalToolTurns
-	budgetExhausted = budgetExhausted || boolArgFromMap(params.Arguments, "budget_exhausted", false)
+	budgetExhausted = budgetExhausted || budgetFlag
 	if budgetExhausted && row.Status == "active" {
+		// Prefer CAS against the calling run when it owns the goal; if ActiveRunID
+		// was already cleared, TransitionStatus with empty filter still works.
+		activeRunFilter := params.RunID
+		if row.ActiveRunID == "" {
+			activeRunFilter = ""
+		} else if row.ActiveRunID != params.RunID {
+			return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is not bound to this run")
+		}
 		now := time.Now().UTC()
-		_, err = s.repos.Goals.TransitionStatus(row.ID, params.SessionID, []string{"active"}, params.RunID, map[string]any{
+		_, err = s.repos.Goals.TransitionStatus(row.ID, params.SessionID, []string{"active"}, activeRunFilter, map[string]any{
 			"status": "failed", "fail_reason": "budget_exhausted", "active_run_id": "", "last_run_id": params.RunID, "finished_at": &now,
 		})
 		if err != nil {

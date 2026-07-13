@@ -276,8 +276,22 @@ func (r *Runtime) runWithGoalLoop(
 			params.Options.GoalContext = ctxGoal
 		}
 
-		if state := r.getRunGoal(params.RunID); state != nil && state.Goal.MaxToolTurnsSeg > 0 {
-			params.Options.MaxToolTurns = state.Goal.MaxToolTurnsSeg
+		// Goal segment budget is authoritative each segment; remaining total
+		// tool turns can only tighten further (never raise client options).
+		if state := r.getRunGoal(params.RunID); state != nil {
+			limit := state.Goal.MaxToolTurnsSeg
+			if state.Goal.MaxTotalToolTurns > 0 {
+				remaining := state.Goal.MaxTotalToolTurns - state.Goal.UsedToolTurns
+				if remaining < 1 {
+					remaining = 1
+				}
+				if limit <= 0 || remaining < limit {
+					limit = remaining
+				}
+			}
+			if limit > 0 {
+				params.Options.MaxToolTurns = limit
+			}
 		}
 		last = r.runProviderLoopSegment(loopCtx, params, segmentInput, seedHistory, messageID, streamID, streamSeq)
 

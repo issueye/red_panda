@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"redpanda/gateway/internal/gateway/model"
 )
@@ -155,13 +154,35 @@ func (r GoalRepository) AddToolTurns(id string, delta int) error {
 }
 
 // RecordSegment inserts one accounting record and increments Goal counters in
-// the same transaction. Replaying the same segment is a successful no-op.
+// the same transaction. Replaying the same (goal_id, run_id, segment_index) is a
+// successful no-op that does not change counters. New segments are rejected once
+// the Goal is terminal so late retries cannot inflate budgets.
 func (r GoalRepository) RecordSegment(goalID, runID string, segmentIndex, delta int) (bool, error) {
 	if strings.TrimSpace(goalID) == "" || strings.TrimSpace(runID) == "" || segmentIndex < 0 || delta < 0 {
 		return false, fmt.Errorf("invalid goal segment")
 	}
 	recorded := false
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var existing model.GoalSegment
+		findErr := tx.Where("goal_id = ? AND run_id = ? AND segment_index = ?", goalID, runID, segmentIndex).
+			First(&existing).Error
+		if findErr == nil {
+			// Idempotent replay.
+			return nil
+		}
+		if findErr != gorm.ErrRecordNotFound {
+			return findErr
+		}
+
+		var goal model.Goal
+		if err := tx.First(&goal, "id = ?", goalID).Error; err != nil {
+			return err
+		}
+		switch goal.Status {
+		case "succeeded", "failed", "cancelled":
+			return fmt.Errorf("goal is terminal; cannot record new segments")
+		}
+
 		row := model.GoalSegment{
 			ID:           fmt.Sprintf("goal_segment_%s_%s_%d", goalID, runID, segmentIndex),
 			GoalID:       goalID,
@@ -170,12 +191,14 @@ func (r GoalRepository) RecordSegment(goalID, runID string, segmentIndex, delta 
 			ToolTurns:    delta,
 			CreatedAt:    time.Now().UTC(),
 		}
-		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return nil
+		if err := tx.Create(&row).Error; err != nil {
+			// Unique race: another writer inserted the same segment key.
+			var again model.GoalSegment
+			if tx.Where("goal_id = ? AND run_id = ? AND segment_index = ?", goalID, runID, segmentIndex).
+				First(&again).Error == nil {
+				return nil
+			}
+			return err
 		}
 		recorded = true
 		return tx.Model(&model.Goal{}).Where("id = ?", goalID).Updates(map[string]any{
@@ -185,6 +208,15 @@ func (r GoalRepository) RecordSegment(goalID, runID string, segmentIndex, delta 
 		}).Error
 	})
 	return recorded, err
+}
+
+// CountSegmentsForRun returns how many ledger rows exist for a goal run pair.
+func (r GoalRepository) CountSegmentsForRun(goalID, runID string) (int64, error) {
+	var n int64
+	err := r.db.Model(&model.GoalSegment{}).
+		Where("goal_id = ? AND run_id = ?", goalID, runID).
+		Count(&n).Error
+	return n, err
 }
 
 // TransitionStatus applies a terminal/pause transition only from one of the

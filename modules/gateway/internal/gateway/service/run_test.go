@@ -118,6 +118,78 @@ func TestRunServiceStartEnablesGoalsOnlyWhenExplicitlyRequested(t *testing.T) {
 	}
 }
 
+func TestClampClientMaxToolTurnsNeverRaisesGoalBudget(t *testing.T) {
+	bound := methods.GoalDTO{MaxToolTurnsSeg: 12, MaxTotalToolTurns: 96, UsedToolTurns: 0}
+	if got := clampClientMaxToolTurns(48, bound); got != 12 {
+		t.Fatalf("client 48 clamped to %d, want 12", got)
+	}
+	if got := clampClientMaxToolTurns(0, bound); got != 12 {
+		t.Fatalf("client 0 filled to %d, want 12", got)
+	}
+	if got := clampClientMaxToolTurns(6, bound); got != 6 {
+		t.Fatalf("client tighten 6 became %d", got)
+	}
+	// Remaining total budget is tighter than segment default.
+	bound.UsedToolTurns = 90
+	if got := clampClientMaxToolTurns(48, bound); got != 6 {
+		t.Fatalf("remaining total clamp = %d, want 6", got)
+	}
+}
+
+func TestRunServiceStartClampsMaxToolTurnsToGoalSegment(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_goal_clamp", "Goal clamp", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalSvc := NewGoalService(repos)
+	created, err := goalSvc.CreateUserInitiated(session.ID, "clamp budget", "clamp", "done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Force a known segment budget of 12 (defaults) and ensure client 48 is clamped.
+	row, err := repos.Goals.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.MaxToolTurnsPerSegment = 12
+	row.MaxTotalToolTurns = 96
+	if _, err := repos.Goals.Update(row); err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params-clamp.json")
+	runtime := useStdioRuntimeHelper(t, capturePath)
+	service := NewRunService(repos, eventhub.New(), runtime)
+
+	if _, err := service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "work on goal"},
+		Options: map[string]any{
+			"goals_enabled":  true,
+			"goal_id":        created.ID,
+			"max_tool_turns": 48,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var params methods.ReplyParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params.Options.MaxToolTurns != 12 {
+		t.Fatalf("MaxToolTurns = %d, want Goal segment limit 12", params.Options.MaxToolTurns)
+	}
+	if params.Options.GoalID != created.ID {
+		t.Fatalf("GoalID = %q, want %q", params.Options.GoalID, created.ID)
+	}
+}
+
 func TestRunServiceStartPassesLatestConversationWindowToRuntime(t *testing.T) {
 	repos, _ := newRunServiceTestFixture(t)
 	session, err := repos.Sessions.Ensure("session_long_context", "Long context", "D:/workspace")

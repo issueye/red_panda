@@ -647,13 +647,40 @@ func (r RunService) applyGoalBindingAndContext(params *methods.ReplyParams, opti
 			return err
 		}
 		params.Options.GoalContext = ctx
-		if bound.MaxToolTurnsSeg > 0 && (params.Options.MaxToolTurns <= 0 || params.Options.MaxToolTurns > bound.MaxToolTurnsSeg) {
-			params.Options.MaxToolTurns = bound.MaxToolTurnsSeg
-		}
+		// Goal budgets are authoritative: client max_tool_turns may only tighten.
+		params.Options.MaxToolTurns = clampClientMaxToolTurns(params.Options.MaxToolTurns, bound)
 		return nil
 	}
 	// No default bind: only inject context if options already carried a goal_id from client.
 	return nil
+}
+
+// clampClientMaxToolTurns forces the Runtime segment loop budget to the Goal
+// segment limit (and remaining total turns), never allowing a client option to
+// raise the effective ceiling above the Goal configuration.
+func clampClientMaxToolTurns(clientMax int, bound methods.GoalDTO) int {
+	limit := bound.MaxToolTurnsSeg
+	if bound.MaxTotalToolTurns > 0 {
+		remaining := bound.MaxTotalToolTurns - bound.UsedToolTurns
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining == 0 {
+			// Exhausted total budget: keep a 1-turn ceiling so Runtime can
+			// emit a controlled finish rather than unbounded tool loops.
+			remaining = 1
+		}
+		if limit <= 0 || remaining < limit {
+			limit = remaining
+		}
+	}
+	if limit <= 0 {
+		return clientMax
+	}
+	if clientMax <= 0 || clientMax > limit {
+		return limit
+	}
+	return clientMax
 }
 
 func (r RunService) SubAgents(ctx context.Context, params methods.SubAgentsParams) (methods.SubAgentsResult, error) {

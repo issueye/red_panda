@@ -220,9 +220,15 @@ func TestGoalSegmentEndIsIdempotent(t *testing.T) {
 		RunID: "run_seg", SessionID: sessionID, ToolCallID: "segment-0", ToolName: "segment_end",
 		Arguments: map[string]any{"goal_id": write.Goal.ID, "segment_index": 0, "delta_tool_turns": 3},
 	}
-	if _, err := svc.ExecuteRuntimeTool(params); err != nil {
+	first, err := svc.ExecuteRuntimeTool(params)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if first.Goal == nil || first.Goal.UsedToolTurns != 3 {
+		t.Fatalf("first segment: %#v", first.Goal)
+	}
+	// Same tool call id / same segment key replay must not double-count.
+	params.ToolCallID = "segment-0-retry"
 	if _, err := svc.ExecuteRuntimeTool(params); err != nil {
 		t.Fatal(err)
 	}
@@ -232,6 +238,77 @@ func TestGoalSegmentEndIsIdempotent(t *testing.T) {
 	}
 	if got.UsedToolTurns != 3 || got.UsedSegments != 1 {
 		t.Fatalf("duplicate segment counted: %#v", got)
+	}
+	n, err := svc.repos.Goals.CountSegmentsForRun(write.Goal.ID, "run_seg")
+	if err != nil || n != 1 {
+		t.Fatalf("ledger rows = %d err=%v", n, err)
+	}
+}
+
+func TestSegmentEndRejectsUnboundRunAndTerminalNewSegment(t *testing.T) {
+	svc, sessionID := newGoalTestService(t)
+	write, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_owner_seg", SessionID: sessionID, ToolCallID: "t1", ToolName: "goal.write",
+		Arguments: map[string]any{"objective": "x", "success_criteria": "y", "activate": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_other_seg", SessionID: sessionID, ToolCallID: "bad", ToolName: "segment_end",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "segment_index": 0, "delta_tool_turns": 2},
+	}); err == nil {
+		t.Fatal("unbound run should not record segment")
+	}
+	// Record once then complete; new segment index must fail, replay of old is OK.
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_owner_seg", SessionID: sessionID, ToolCallID: "s0", ToolName: "segment_end",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "segment_index": 0, "delta_tool_turns": 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_owner_seg", SessionID: sessionID, ToolCallID: "done", ToolName: "goal.complete",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "status": "succeeded", "summary": "done"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_owner_seg", SessionID: sessionID, ToolCallID: "late-new", ToolName: "segment_end",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "segment_index": 1, "delta_tool_turns": 4},
+	}); err == nil {
+		t.Fatal("new segment on terminal goal should fail")
+	}
+	// Idempotent replay of segment 0 after terminal is allowed and must not change counters.
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_owner_seg", SessionID: sessionID, ToolCallID: "late-replay", ToolName: "segment_end",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "segment_index": 0, "delta_tool_turns": 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Get(sessionID, write.Goal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "succeeded" || got.UsedToolTurns != 2 || got.UsedSegments != 1 {
+		t.Fatalf("terminal counters mutated: %#v", got)
+	}
+}
+
+func TestSegmentEndRequiresSegmentIndex(t *testing.T) {
+	svc, sessionID := newGoalTestService(t)
+	write, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_idx", SessionID: sessionID, ToolCallID: "t1", ToolName: "goal.write",
+		Arguments: map[string]any{"objective": "x", "success_criteria": "y", "activate": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_idx", SessionID: sessionID, ToolCallID: "no-idx", ToolName: "segment_end",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "delta_tool_turns": 1},
+	}); err == nil {
+		t.Fatal("missing segment_index should fail")
 	}
 }
 
