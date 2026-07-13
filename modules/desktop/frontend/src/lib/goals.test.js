@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   formatGoalBudget,
+  formatGoalBudgetAdvanced,
   goalCanCancel,
   goalCanContinue,
   goalShouldAutoContinue,
@@ -48,5 +49,17 @@ describe('goals helpers', () => {
     assert.equal(goal.id, 'g1');
     assert.equal(formatGoalBudget(goal), '3/96 轮');
     assert.equal(goalDisplayTitle(goal), 'x');
+  });
+
+  it('keeps advanced budget details out of the compact bar', () => {
+    const goal = normalizeGoal({
+      used_tool_turns: 4,
+      max_total_tool_turns: 48,
+      used_segments: 2,
+      max_segments_per_run: 3,
+      max_tool_turns_per_segment: 12,
+    });
+    assert.equal(formatGoalBudget(goal), '4/48 轮');
+    assert.equal(formatGoalBudgetAdvanced(goal), '段 2/3 · 每段≤12 轮');
   });
 });

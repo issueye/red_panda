@@ -20,6 +20,8 @@ export async function startGateway(options = {}) {
       RED_PANDA_GATEWAY_ADDR: gatewayAddr,
       RED_PANDA_DATABASE: databasePath,
       RED_PANDA_AGENT_COMMAND: agentExe,
+      // e2e still uses Temporary Triggers like /read README.md
+      RED_PANDA_SLASH_TOOLS: '1',
       ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

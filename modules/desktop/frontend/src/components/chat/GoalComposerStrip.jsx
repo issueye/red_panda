@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Play, Square } from 'lucide-react';
 import {
   formatGoalBudget,
+  formatGoalBudgetAdvanced,
   goalCanCancel,
   goalCanContinue,
   goalDisplayTitle,
@@ -114,6 +115,12 @@ export function GoalComposerStrip({
               <p className="goal-composer-block">
                 <strong>进度</strong>
                 <span>{goal.progressNote}</span>
+              </p>
+            ) : null}
+            {formatGoalBudgetAdvanced(goal) ? (
+              <p className="goal-composer-block" data-testid="goal-budget-advanced">
+                <strong>高级预算</strong>
+                <span>{formatGoalBudgetAdvanced(goal)}</span>
               </p>
             ) : null}
             {goal.reportMarkdown ? (

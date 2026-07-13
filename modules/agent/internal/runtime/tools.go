@@ -376,7 +376,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "todo.write",
 			DisplayName: "Update todos",
-			Description: "REQUIRED for multi-step work: create/update the session checklist shown to the user above the chat input. Call at plan start and whenever a step starts/finishes/changes. Prefer the full list each time. todos[].id = your short key (\"1\",\"2\") or a prior Gateway id. status: pending|in_progress|completed|cancelled (at most one in_progress). merge defaults true (omitted items kept). Do NOT use memory.create for a work queue. Skip only for trivial one-shot Q&A.",
+			Description: "Session checklist only (this chat). REQUIRED for multi-step work: plan steps shown above the chat input. Prefer full list each call; at most one in_progress. Do NOT use for durable preferences (memory.*) or long-horizon Goal findings (context.* / goal.checkpoint). Skip only for trivial one-shot Q&A.",
 			Risk:        tools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
@@ -405,7 +405,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "goal.write",
 			DisplayName: "Create goal",
-			Description: "Create a session Goal after analyzing the user request. Provide objective; set activate=true with success_criteria to start long-horizon work. Then write steps with todo.write. Do not skip analysis.",
+			Description: "Create a long-horizon Goal (objective + budgets + pipeline). Use after analysis when work spans multiple segments/runs. Then use todo.write for micro-steps and context.write for findings. Not for short checklists alone.",
 			Risk:        tools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
@@ -442,7 +442,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "goal.checkpoint",
 			DisplayName: "Goal checkpoint",
-			Description: "Save progress summary after verifying a step. Required for durable recovery across continues.",
+			Description: "Save a short progress snapshot on the Goal (status recovery across continues). Prefer one concise summary. Structured findings belong in context.write (kind=finding|decision|handoff); durable user preferences belong in memory.create.",
 			Risk:        tools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
@@ -486,7 +486,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "todo.list",
 			DisplayName: "List todos",
-			Description: "Read the current session checklist. Prefer relying on injected Todo context after writes; call this if you need an explicit refresh. Not for durable memory.",
+			Description: "Read the current session checklist (todo.*). Prefer injected Todo context after writes. Not durable memory and not Goal scratchpad notes.",
 			Risk:        tools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
@@ -499,7 +499,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "memory.list",
 			DisplayName: "List memory",
-			Description: "List active or disabled project/session memory visible to the current run.",
+			Description: "List durable project/session preferences and facts (cross-goal). Not for the live work checklist (todo.*) or Goal execution notes (context.*).",
 			Risk:        tools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
@@ -513,7 +513,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "memory.create",
 			DisplayName: "Create memory",
-			Description: "Create a project or session memory record for future runs.",
+			Description: "Create durable project/session knowledge for future runs (preferences, standing facts). Do NOT use as a task queue (todo.write) or to store Goal-only findings (context.write).",
 			Risk:        tools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
@@ -589,7 +589,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "context.read",
 			DisplayName: "Read goal notes",
-			Description: "Read shared scratchpad notes for the active goal (pinned first, then most recent). Findings persist across segments, runs, and specialist subagents.",
+			Description: "Read this Goal's shared scratchpad (findings/decisions/handoffs). Scoped to one goal; shared across segments, continues, and specialists. Not durable user preferences (memory.*) and not the step checklist (todo.*).",
 			Risk:        tools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
@@ -621,7 +621,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 		{
 			Name:        "context.write",
 			DisplayName: "Write goal note",
-			Description: "Append a shared scratchpad note to the active goal. Notes persist across segments, runs, and specialist subagents, enabling context sharing.",
+			Description: "Append a structured note on the active Goal scratchpad (finding/decision/risk/fact/handoff). Survives segment boundaries and specialist handoffs. Use goal.checkpoint for a short progress snapshot; use memory.create only for lasting preferences across goals.",
 			Risk:        tools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",

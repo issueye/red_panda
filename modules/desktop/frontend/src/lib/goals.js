@@ -130,6 +130,7 @@ export function goalFromUpdatedEvent(body = {}) {
   return normalizeGoal(raw);
 }
 
+/** Compact bar label: tool-turn budget only (O5a keeps advanced counters collapsed). */
 export function formatGoalBudget(goal) {
   if (!goal) return '';
   const used = goal.usedToolTurns || 0;
@@ -137,4 +138,23 @@ export function formatGoalBudget(goal) {
   if (max > 0) return `${used}/${max} 轮`;
   if (used > 0) return `${used} 轮`;
   return '';
+}
+
+/**
+ * Expanded-only budget details (segments / per-segment caps).
+ * Auto-continue and wall-time knobs stay out of the default strip.
+ */
+export function formatGoalBudgetAdvanced(goal) {
+  if (!goal) return '';
+  const parts = [];
+  const segUsed = goal.usedSegments || 0;
+  const segMax = goal.maxSegmentsPerRun || 0;
+  if (segMax > 0 || segUsed > 0) {
+    parts.push(segMax > 0 ? `段 ${segUsed}/${segMax}` : `段 ${segUsed}`);
+  }
+  const perSeg = goal.maxToolTurnsSeg || 0;
+  if (perSeg > 0) {
+    parts.push(`每段≤${perSeg} 轮`);
+  }
+  return parts.join(' · ');
 }

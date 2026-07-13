@@ -634,7 +634,13 @@ Hard rules:
 - After a specialist returns, update pipeline_phase before calling the next specialist; out-of-phase specialists are rejected by Runtime.
 - Do NOT goal.complete without a completion report summary.
 - Specialists cannot call goal.* / todo.* / nested subagent.*; root owns session state.
-- Prefer specialist names exactly: goal-analyst, goal-planner, goal-implementer, goal-verifier, goal-evaluator.`
+- Prefer specialist names exactly: goal-analyst, goal-planner, goal-implementer, goal-verifier, goal-evaluator.
+
+Where to write state (avoid overlap):
+- todo.write — live session checklist (micro-steps for this chat)
+- context.write — this Goal's shared findings/decisions/handoffs (across segments/specialists)
+- goal.checkpoint — short recovery summary only (not a findings dump)
+- memory.create — durable preferences/facts that should outlive this Goal`
 
 // rootAgentTodoPolicy is injected for root runs that expose todo.write.
 // Guides models to use the structured checklist instead of free-text plans or memory.kind=task.

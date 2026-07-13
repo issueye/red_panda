@@ -253,6 +253,8 @@ function Start-SmokeProvider {
 Remove-SmokeDatabase
 $env:RED_PANDA_GATEWAY_ADDR = $Addr
 $env:RED_PANDA_DATABASE = $Database
+# Smoke scripts still use /read Temporary Triggers (debug slash tools).
+$env:RED_PANDA_SLASH_TOOLS = "1"
 $gateway = Start-Process -FilePath $GatewayExe -WorkingDirectory $Root -PassThru -WindowStyle Hidden
 
 try {

@@ -185,6 +185,8 @@ function Start-CompatProvider {
 Remove-CompatDatabase
 $env:RED_PANDA_GATEWAY_ADDR = $Addr
 $env:RED_PANDA_DATABASE = $Database
+# Compat script uses /read Temporary Triggers (debug slash tools).
+$env:RED_PANDA_SLASH_TOOLS = "1"
 $previousSubAgentCommand = $env:RED_PANDA_SUBAGENT_COMMAND
 $env:RED_PANDA_SUBAGENT_COMMAND = $MissingSubAgentExe
 

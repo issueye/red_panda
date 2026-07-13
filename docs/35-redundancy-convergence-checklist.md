@@ -1,7 +1,7 @@
 # 代码冗余与功能过度实现 — 收敛清单
 
 Updated: 2026-07-13  
-Status: in progress (Waves 0–2 core + O2/O4 done; O5a/R1b/Wave4+ remaining)  
+Status: in progress (through Wave 4 R5 + O5a; remaining R1b/O2b/R5b/O5b/Wave5+)  
 依据：全项目评估 + Goal 上下文共享后审计（结构冗余 / 语义重叠 / 过度实现）
 
 ## 使用方式
@@ -90,7 +90,7 @@ go test ./modules/protocol/... ./modules/agent/... ./modules/gateway/...
 | **O1** | 默认隐藏 subagent 运维工具 | 过度暴露 | M | done | `opsOnlyTools` + `availableToolsForOptions`/`EvaluateToolPolicy`；`subagent.pool_*` 默认隐藏；`RED_PANDA_DEBUG_TOOLS` / `DebugTools` / allowlist 可开 | 默认 schema 无 pool_*；debug/allowlist 可开；policy 测绿 | — |
 | **O3** | Skill 管理工具移出默认主循环 | 过度暴露 | M | done | `skill.create/update/delete` 列入 ops-only；`skill.list`/`skill.run` 仍默认暴露；HTTP/Desktop CRUD 不受影响 | 默认 schema 无 create/update/delete；debug 下仍可测 skill.create | — |
 | **O8** | Goal 模式默认工具白名单 | 选择税 | M | done | `goalModeDefaultAllowlist` + `effectiveToolAllowlist`；goals_enabled/bound goal 时默认收紧；客户端 allowlist 取交集 | Goal 隐藏 memory/ops；非 Goal 不变；policy 测绿 | O1/O3 |
-| **O5a** | Goal 设置面隐藏未稳预算 | 过度 | L | todo | Desktop：`max_auto_continues` 等未完全关门的项默认折叠/高级区；文案标明实验性 | 默认 UI 更短；高级仍可配 | — |
+| **O5a** | Goal 设置面隐藏未稳预算 | 过度 | L | done | 条目标签仅显示工具轮次；段预算等放展开区「高级预算」；无独立 auto_continue 设置暴露 | 紧凑条无段计数；展开可见 advanced | — |
 | **R6** | Slash 命令降级 | 入口冗余 | L | done | `Parse` 默认关闭；`RED_PANDA_SLASH_TOOLS=1` 开启 | 默认 `/list` 不解析；env 开启后测仍绿 | — |
 
 **建议提交：**
@@ -126,7 +126,7 @@ go test ./modules/agent/internal/runtime/ -run "AvailableTools|Policy|Goal|Speci
 
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **R5** | Checkpoint vs GoalNote 职责文档 + policy 文案 | 语义重叠 | L | todo | 工具 description / GoalContext header 写清：checkpoint=进度快照；context.*=结构化发现；memory=跨 goal 偏好 | 描述可测（字符串断言或文档单测可选）；不改存储 | R3 |
+| **R5** | Checkpoint vs GoalNote 职责文档 + policy 文案 | 语义重叠 | L | done | memory/todo/goal/context 工具 description + GoalContext header + goal pipeline policy 写清四层职责 | `TestStateStoreToolDescriptionsClarifyBoundaries` 绿 | R3 |
 | **R5b** |（可选）弱化扁平字段写入 | 语义重叠 | M | todo | 引导模型少写 `progress_note` 重复内容；或 checkpoint 时自动抽一条 handoff note | 无双写风暴；兼容旧字段读取 | R5 |
 | **O5b** | Specialist 阶段简化（产品决策） | 过度 | H | todo | **需产品拍板**：v1 保留 5 专家 vs 收成 3（analyze/execute/verify）。若收成 3：phase 枚举、builtin seed、UI 同步 | 决策记录进 docs；实现与测一致 | R2 |
 
@@ -227,12 +227,12 @@ L / M / H — <why>
 | --- | --- | --- | --- | --- | --- |
 | 0 | R3, R2, R2a | 0 | 0 | 2 | 1 |
 | 1 | R1a, R1b, R1c, R4 | 1 | 0 | 3 | 0 |
-| 2 | O1, O3, O8, O5a, R6 | 1 | 0 | 4 | 0 |
+| 2 | O1, O3, O8, O5a, R6 | 0 | 0 | 5 | 0 |
 | 3 | O2, O4, O2b | 1 | 0 | 2 | 0 |
-| 4 | R5, R5b, O5b | 3 | 0 | 0 | 0 |
+| 4 | R5, R5b, O5b | 2 | 0 | 1 | 0 |
 | 5 | R7a, R7b, R7c, O7, O6 | 5 | 0 | 0 | 0 |
 | 6 | S1, S2, S3 | 3 | 0 | 0 | 0 |
-| **合计** | **26** | **14** | **0** | **11** | **1** |
+| **合计** | **26** | **12** | **0** | **13** | **1** |
 
 ---
 

@@ -325,6 +325,30 @@ func TestToolRunnerSlashParseDisabledByDefault(t *testing.T) {
 	}
 }
 
+func TestStateStoreToolDescriptionsClarifyBoundaries(t *testing.T) {
+	byName := map[string]string{}
+	for _, def := range (ToolRunner{}).AvailableTools() {
+		byName[def.Name] = def.Description
+	}
+	checks := map[string][]string{
+		"memory.create":   {"durable", "todo.write", "context.write"},
+		"todo.write":      {"Session checklist", "memory", "context"},
+		"goal.checkpoint": {"context.write", "memory.create"},
+		"context.write":   {"scratchpad", "goal.checkpoint", "memory.create"},
+	}
+	for name, needles := range checks {
+		desc := byName[name]
+		if desc == "" {
+			t.Fatalf("missing tool %s", name)
+		}
+		for _, n := range needles {
+			if !strings.Contains(desc, n) {
+				t.Fatalf("%s description missing %q: %s", name, n, desc)
+			}
+		}
+	}
+}
+
 func TestToolRunnerMemoryToolsUseExecutor(t *testing.T) {
 	var captured methods.MemoryToolExecuteParams
 	runner := ToolRunner{

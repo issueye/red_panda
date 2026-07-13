@@ -186,7 +186,7 @@ func goalDTOToContext(g methods.GoalDTO) *methods.GoalContext {
 
 func formatGoalContextFromDTO(g methods.GoalDTO) string {
 	var b strings.Builder
-	b.WriteString("Active goal (update via goal.checkpoint / goal.complete; steps via todo.write):\n")
+	b.WriteString("Active goal (lifecycle: goal.checkpoint / goal.complete; micro-steps: todo.write; findings: context.write):\n")
 	b.WriteString(fmt.Sprintf("- id: %s\n", g.ID))
 	b.WriteString(fmt.Sprintf("- status: %s phase: %s\n", g.Status, g.PipelinePhase))
 	b.WriteString(fmt.Sprintf("- objective: %s\n", g.Objective))
@@ -198,6 +198,7 @@ func formatGoalContextFromDTO(g methods.GoalDTO) string {
 	}
 	b.WriteString(fmt.Sprintf("- budget: %d/%d root tool turns, segments used %d (max %d/run)\n",
 		g.UsedToolTurns, g.MaxTotalToolTurns, g.UsedSegments, g.MaxSegmentsPerRun))
+	b.WriteString("- stores: todo.*=session checklist; context.*=this goal's scratchpad; memory.*=durable prefs across goals; goal.checkpoint=short recovery summary\n")
 	return b.String()
 }
 
