@@ -66,14 +66,16 @@ type Runtime struct {
 	permissions        map[string]chan permission.ResolveParams
 	activeRuns         map[string]context.CancelFunc
 	subagents          map[string]*runtimeSubAgent
-	provider           Provider
-	tools              ToolRunner
-	processPool        *ProcessPool
-	mcp                *MCPManager
+	provider           provider.Provider
+	tools              agenttools.ToolRunner
+	processPool        *subagent.ProcessPool
+	mcp                *agentmcp.Manager
 	runTodos           map[string][]methods.TodoItemDTO
 	runGoals           map[string]*runGoalState
-	newProcessSubAgent func(context.Context, methods.ReplyParams, string) (ProcessSubAgent, error)
+	newProcessSubAgent func(context.Context, methods.ReplyParams, string) (subagent.Process, error)
 }
+
+var _ agenttools.SubagentManager = (*Runtime)(nil)
 
 func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 	rt := &Runtime{
@@ -354,7 +356,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 	}
 
 	providerInput := params.Input.Text
-	var toolHistory []ToolExchange
+	var toolHistory []provider.ToolExchange
 	if invocation, ok := r.tools.Parse(params.Input.Text, params.RunID); ok {
 		result, output, ok := r.executeTool(ctx, params, invocation)
 		if !ok {
@@ -374,7 +376,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 			return
 		}
 		providerInput = fmt.Sprintf("User request:\n%s\n\nTool %s result:\n%s", params.Input.Text, result.Name, output)
-		toolHistory = append(toolHistory, ToolExchange{Call: invocation.Call, Result: result})
+		toolHistory = append(toolHistory, provider.ToolExchange{Call: invocation.Call, Result: result})
 	}
 
 	var subAgentDone <-chan struct{}

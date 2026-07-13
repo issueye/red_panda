@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"redpanda/agent/internal/provider"
 	"redpanda/protocol/methods"
 )
 
@@ -209,7 +210,7 @@ func (r *Runtime) runWithGoalLoop(
 	ctx context.Context,
 	params methods.ReplyParams,
 	input string,
-	history []ToolExchange,
+	history []provider.ToolExchange,
 	messageID string,
 	streamID string,
 	streamSeq *uint64,
@@ -247,7 +248,7 @@ func (r *Runtime) runWithGoalLoop(
 		maxSeg = goalRunSegmentLimit(state.Goal, 0)
 	}
 
-	seedHistory := append([]ToolExchange(nil), history...)
+	seedHistory := append([]provider.ToolExchange(nil), history...)
 	var last providerSegmentResult
 	segmentInput := input
 

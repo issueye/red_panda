@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/jsonrpc"
 	protomcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
@@ -52,6 +53,6 @@ func (r *Runtime) mcpDefinitionsForRun(runID string) []tools.Definition {
 	return r.mcp.DefinitionsForRun(runID)
 }
 
-func (r *Runtime) executeMCPTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+func (r *Runtime) executeMCPTool(ctx context.Context, runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
 	return r.mcp.ExecuteTool(ctx, runCtx.RunID, runCtx.WorkingDir, call)
 }

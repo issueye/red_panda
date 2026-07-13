@@ -13,7 +13,7 @@ import (
 	"redpanda/protocol/tools"
 )
 
-func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
 	if runCtx.Reply == nil {
 		return "", fmt.Errorf("subagent requires reply context")
 	}

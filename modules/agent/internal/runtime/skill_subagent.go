@@ -36,7 +36,7 @@ var skillSubagentDenylist = []string{
 	"skill.run",
 }
 
-func (r *Runtime) executeSkillRun(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+func (r *Runtime) executeSkillRun(ctx context.Context, runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
 	if runCtx.Reply == nil {
 		return "", fmt.Errorf("skill subagent requires reply context")
 	}

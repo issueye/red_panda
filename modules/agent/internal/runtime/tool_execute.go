@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"strings"
 
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
 	"redpanda/protocol/tools"
 )
 
-func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, invocation ToolInvocation) (tools.Result, string, bool) {
+func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, invocation agenttools.ToolInvocation) (tools.Result, string, bool) {
 	call := invocation.Call
-	decision := EvaluateToolPolicy(params.Options, call)
+	decision := agenttools.EvaluateToolPolicy(params.Options, call)
 	_ = r.emitEvent(ctx, params, events.EventToolStarted, nil, map[string]any{
 		"tool_call_id":  call.ID,
 		"tool_name":     call.Name,
@@ -25,7 +26,7 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		"policy_reason": decision.Reason,
 	})
 
-	if decision.Action == ToolDecisionDeny {
+	if decision.Action == agenttools.ToolDecisionDeny {
 		result := tools.Result{
 			ToolCallID: call.ID,
 			Name:       call.Name,
@@ -36,7 +37,7 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		return result, "", false
 	}
 
-	if decision.Action == ToolDecisionRequirePermission {
+	if decision.Action == agenttools.ToolDecisionRequirePermission {
 		decision, ok := r.requestPermission(ctx, params, permission.RequestPayload{
 			PermissionID: "perm_" + call.ID,
 			RunID:        params.RunID,
@@ -59,7 +60,7 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		}
 	}
 
-	result, output := r.tools.RunWithContext(ctx, ToolRunContext{
+	result, output := r.tools.RunWithContext(ctx, agenttools.ToolRunContext{
 		WorkingDir: params.Session.WorkingDir,
 		RunID:      params.RunID,
 		SessionID:  params.Session.ID,

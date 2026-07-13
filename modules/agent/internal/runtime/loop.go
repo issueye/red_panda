@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"redpanda/agent/internal/provider"
 	"redpanda/agent/internal/subagent"
 	agenttools "redpanda/agent/internal/tools"
 	"strings"
@@ -30,7 +31,7 @@ type providerSegmentResult struct {
 	Reason    loopEndReason
 	ToolTurns int
 	// History is the accumulated tool exchanges for carry_summarized / next segment.
-	History []ToolExchange
+	History []provider.ToolExchange
 }
 
 func finishStatusFromLoopEnd(reason loopEndReason) string {
@@ -85,7 +86,7 @@ func (r *Runtime) emitSkillsInjected(ctx context.Context, params methods.ReplyPa
 
 // runProviderLoop is a thin wrapper kept for call sites/tests that only need
 // the legacy string status. Prefer runProviderLoopSegment for new code.
-func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParams, input string, history []ToolExchange, messageID string, streamID string, streamSeq *uint64) string {
+func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParams, input string, history []provider.ToolExchange, messageID string, streamID string, streamSeq *uint64) string {
 	seg := r.runProviderLoopSegment(ctx, params, input, history, messageID, streamID, streamSeq)
 	return finishStatusFromLoopEnd(seg.Reason)
 }
@@ -93,12 +94,12 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 // runProviderLoopSegment runs one provider↔tool budget segment.
 // It does NOT clear run snapshots and does NOT emit EventFinish — the outer
 // emitRun / Goal multi-segment controller owns terminal cleanup and finish.
-func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.ReplyParams, input string, history []ToolExchange, messageID string, streamID string, streamSeq *uint64) providerSegmentResult {
+func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.ReplyParams, input string, history []provider.ToolExchange, messageID string, streamID string, streamSeq *uint64) providerSegmentResult {
 	maxTurns := effectiveProviderToolTurns(params.Options)
-	var rounds [][]ToolExchange
+	var rounds [][]provider.ToolExchange
 	if len(history) > 0 {
 		// Initial pre-loop tools (if any) are treated as one round.
-		rounds = append(rounds, append([]ToolExchange(nil), history...))
+		rounds = append(rounds, append([]provider.ToolExchange(nil), history...))
 	}
 	turnsUsed := 0
 	for turn := 0; turn < maxTurns; turn++ {
@@ -112,15 +113,15 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		var requestedCalls []tools.Call
 		emittedText := false
 		flatHistory := flattenToolRounds(rounds)
-		err := r.provider.Complete(ctx, ProviderRequest{
+		err := r.provider.Complete(ctx, provider.ProviderRequest{
 			RunID:       params.RunID,
 			Session:     params.Session,
 			Input:       methods.ReplyInput{Text: input},
 			Options:     params.Options,
-			Tools:       availableToolsForOptions(r.toolsForReply(ctx, params), params.Options),
+			Tools:       agenttools.AvailableToolsForOptions(r.toolsForReply(ctx, params), params.Options),
 			ToolHistory: flatHistory,
 			ToolRounds:  rounds,
-		}, func(chunk ProviderChunk) error {
+		}, func(chunk provider.ProviderChunk) error {
 			return r.consumeProviderChunk(ctx, params, chunk, messageID, streamID, streamSeq, &requestedCalls, &emittedText)
 		})
 		turnsUsed++
@@ -201,7 +202,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 
 // carrySummarizedHistory compresses tool exchanges for the next Goal segment.
 // K most recent exchanges keep truncated outputs (rule-only, no LLM).
-func carrySummarizedHistory(history []ToolExchange, k int, maxRunes int) []ToolExchange {
+func carrySummarizedHistory(history []provider.ToolExchange, k int, maxRunes int) []provider.ToolExchange {
 	if k <= 0 || len(history) == 0 {
 		return nil
 	}
@@ -212,7 +213,7 @@ func carrySummarizedHistory(history []ToolExchange, k int, maxRunes int) []ToolE
 	if len(history) > k {
 		start = len(history) - k
 	}
-	out := make([]ToolExchange, 0, len(history)-start)
+	out := make([]provider.ToolExchange, 0, len(history)-start)
 	for _, ex := range history[start:] {
 		cp := ex
 		if len(cp.Result.Output) > maxRunes {
@@ -230,7 +231,7 @@ func carrySummarizedHistory(history []ToolExchange, k int, maxRunes int) []ToolE
 func (r *Runtime) consumeProviderChunk(
 	ctx context.Context,
 	params methods.ReplyParams,
-	chunk ProviderChunk,
+	chunk provider.ProviderChunk,
 	messageID string,
 	streamID string,
 	streamSeq *uint64,
@@ -289,7 +290,7 @@ func (r *Runtime) retryFinalAnswer(
 	ctx context.Context,
 	params methods.ReplyParams,
 	input string,
-	rounds [][]ToolExchange,
+	rounds [][]provider.ToolExchange,
 	messageID string,
 	streamID string,
 	streamSeq *uint64,
@@ -303,7 +304,7 @@ func (r *Runtime) retryFinalAnswer(
 		"If some tools failed, still summarize what succeeded and what is known."
 	var answer strings.Builder
 	returnedToolCalls := false
-	err := r.provider.Complete(ctx, ProviderRequest{
+	err := r.provider.Complete(ctx, provider.ProviderRequest{
 		RunID:   params.RunID,
 		Session: params.Session,
 		Input:   methods.ReplyInput{Text: recoveryPrompt},
@@ -312,7 +313,7 @@ func (r *Runtime) retryFinalAnswer(
 		Tools:       nil,
 		ToolHistory: flattenToolRounds(rounds),
 		ToolRounds:  rounds,
-	}, func(chunk ProviderChunk) error {
+	}, func(chunk provider.ProviderChunk) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -341,7 +342,7 @@ func (r *Runtime) retryFinalAnswer(
 	return err == nil
 }
 
-func flattenToolRounds(rounds [][]ToolExchange) []ToolExchange {
+func flattenToolRounds(rounds [][]provider.ToolExchange) []provider.ToolExchange {
 	if len(rounds) == 0 {
 		return nil
 	}
@@ -349,7 +350,7 @@ func flattenToolRounds(rounds [][]ToolExchange) []ToolExchange {
 	for _, round := range rounds {
 		total += len(round)
 	}
-	out := make([]ToolExchange, 0, total)
+	out := make([]provider.ToolExchange, 0, total)
 	for _, round := range rounds {
 		out = append(out, round...)
 	}
@@ -359,7 +360,7 @@ func flattenToolRounds(rounds [][]ToolExchange) []ToolExchange {
 // synthesizeToolAnswer builds a visible user-facing summary when the provider
 // ends a tool loop without emitting any natural-language reply.
 // Prefer standardized tool envelopes (text/data) — never silently drop results.
-func synthesizeToolAnswer(history []ToolExchange) string {
+func synthesizeToolAnswer(history []provider.ToolExchange) string {
 	if len(history) == 0 {
 		return "工具已执行，但模型未生成最终回复。请重试一次。"
 	}
@@ -399,7 +400,7 @@ func synthesizeToolAnswer(history []ToolExchange) string {
 	return strings.TrimSpace(b.String())
 }
 
-func recoveryAnswerForRun(params methods.ReplyParams, history []ToolExchange) string {
+func recoveryAnswerForRun(params methods.ReplyParams, history []provider.ToolExchange) string {
 	if strings.Contains(params.RunID, ":subagent:") {
 		return "子代理已完成工具调用，但未生成可用的最终报告。工具结果已保留在工具卡片中。"
 	}

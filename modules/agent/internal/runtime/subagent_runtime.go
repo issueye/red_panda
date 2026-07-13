@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"redpanda/agent/internal/subagent"
 	"redpanda/protocol/events"
 	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
@@ -145,7 +146,7 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 	})
 }
 
-func (r *Runtime) acquireProcessSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string, backend string) (ProcessSubAgent, func(bool), error) {
+func (r *Runtime) acquireProcessSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string, backend string) (subagent.Process, func(bool), error) {
 	if backend == "process_pool" {
 		return r.processPool.Acquire(ctx, params, subAgentID)
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"redpanda/agent/internal/provider"
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -12,14 +14,14 @@ import (
 type toolBatchItem struct {
 	index      int
 	call       tools.Call
-	invocation ToolInvocation
+	invocation agenttools.ToolInvocation
 	result     tools.Result
 	ok         bool
 }
 
 // executeToolBatch runs non-subagent tools sequentially, then runs all
 // subagent.run tools in parallel so multi-area analysis can proceed concurrently.
-func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyParams, calls []tools.Call) ([]ToolExchange, bool) {
+func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyParams, calls []tools.Call) ([]provider.ToolExchange, bool) {
 	items := make([]toolBatchItem, len(calls))
 	var serial []int
 	var parallel []int
@@ -82,8 +84,8 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 	return batchToHistory(items), ctx.Err() != nil
 }
 
-func batchToHistory(items []toolBatchItem) []ToolExchange {
-	history := make([]ToolExchange, 0, len(items))
+func batchToHistory(items []toolBatchItem) []provider.ToolExchange {
+	history := make([]provider.ToolExchange, 0, len(items))
 	for _, item := range items {
 		call := item.call
 		if item.invocation.Call.ID != "" {
@@ -104,7 +106,7 @@ func batchToHistory(items []toolBatchItem) []ToolExchange {
 				}
 			}
 		}
-		history = append(history, ToolExchange{Call: call, Result: item.result})
+		history = append(history, provider.ToolExchange{Call: call, Result: item.result})
 	}
 	return history
 }

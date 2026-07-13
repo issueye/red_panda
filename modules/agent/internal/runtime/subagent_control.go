@@ -14,7 +14,7 @@ import (
 	"redpanda/protocol/tools"
 )
 
-func (r *Runtime) executeSubagentList(runCtx ToolRunContext, call tools.Call) (string, error) {
+func (r *Runtime) executeSubagentList(runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
 	runID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "run_id"))
 	if runID == "" && runCtx.Reply != nil {
 		runID = runCtx.Reply.RunID
@@ -32,7 +32,7 @@ func (r *Runtime) executeSubagentList(runCtx ToolRunContext, call tools.Call) (s
 	return marshalToolJSON(payload)
 }
 
-func (r *Runtime) executeSubagentCancel(runCtx ToolRunContext, call tools.Call) (string, error) {
+func (r *Runtime) executeSubagentCancel(runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
 	subAgentID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "subagent_id"))
 	if subAgentID == "" {
 		return "", fmt.Errorf("subagent_id is required")
@@ -75,7 +75,7 @@ func (r *Runtime) executeSubagentCancel(runCtx ToolRunContext, call tools.Call) 
 
 // executeSubagentReset cancels a running subagent (if any) and marks it reset so
 // the parent can start a fresh specialist without leaving a stuck running state.
-func (r *Runtime) executeSubagentReset(runCtx ToolRunContext, call tools.Call) (string, error) {
+func (r *Runtime) executeSubagentReset(runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
 	subAgentID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "subagent_id"))
 	if subAgentID == "" {
 		return "", fmt.Errorf("subagent_id is required")

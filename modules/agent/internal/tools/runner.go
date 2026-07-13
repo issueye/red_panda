@@ -12,8 +12,6 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-const maxToolOutputBytes = 64 * 1024
-
 // defaultLocalToolTimeout is a hard upper bound for local FS/RPC tools that do not
 // manage their own deadline. Normal reads fail in milliseconds; this only prevents
 // stuck network mounts, pathological trees, or hung gateway RPCs from freezing a run.
@@ -654,7 +652,7 @@ func (ToolRunner) AvailableTools() []ptools.Definition {
 	}
 }
 
-// slashToolsEnabled gates Temporary Triggers (/read, /shell, 鈥?. Default off
+// slashToolsEnabled gates temporary triggers such as /read and /shell. Default off
 // so plain chat text is never parsed as tools (checklist R6). Enable with
 // RED_PANDA_SLASH_TOOLS=1 for local smoke scripts and unit tests.
 func slashToolsEnabled() bool {
@@ -943,66 +941,4 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 		}
 		return "", fmt.Errorf("unknown tool %s", call.Name)
 	}
-}
-
-func TruncateToolOutput(value string) string {
-	if len(value) <= maxToolOutputBytes {
-		return value
-	}
-	return value[:maxToolOutputBytes] + "\n[truncated]"
-}
-func clampInt(value int, min int, max int) int {
-	if value < min {
-		return min
-	}
-	if value > max {
-		return max
-	}
-	return value
-}
-
-func StringArg(args map[string]any, key string) string {
-	value, _ := args[key].(string)
-	return value
-}
-
-func StringArgDefault(args map[string]any, key string, fallback string) string {
-	value := strings.TrimSpace(StringArg(args, key))
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func IntArg(args map[string]any, key string, fallback int) int {
-	switch value := args[key].(type) {
-	case int:
-		return value
-	case int64:
-		return int(value)
-	case float64:
-		return int(value)
-	case jsonNumber:
-		if parsed, err := value.Int64(); err == nil {
-			return int(parsed)
-		}
-	}
-	return fallback
-}
-
-func BoolArg(args map[string]any, key string, fallback bool) bool {
-	value, ok := args[key].(bool)
-	if !ok {
-		return fallback
-	}
-	return value
-}
-
-func stringArgPresent(args map[string]any, key string) (string, bool) {
-	value, ok := args[key].(string)
-	return value, ok
-}
-
-type jsonNumber interface {
-	Int64() (int64, error)
 }
