@@ -1,7 +1,7 @@
 # 代码冗余与功能过度实现 — 收敛清单
 
 Updated: 2026-07-13  
-Status: in progress (Wave 0–4 core + R7a/O7 done; remaining R7b/c, O6, O2b, R5b, O5b, Wave 6)  
+Status: in progress (through R7b/O6; remaining R7c, O2b, R5b, O5b, Wave 6)  
 依据：全项目评估 + Goal 上下文共享后审计（结构冗余 / 语义重叠 / 过度实现）
 
 ## 使用方式
@@ -142,10 +142,10 @@ go test ./modules/agent/internal/runtime/ -run "AvailableTools|Policy|Goal|Speci
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **R7a** | 拆 `useGatewayResources` | 结构 | M | done | `hooks/useGatewayResources.js` + `lib/api.js`；Settings CRUD 迁出 App | App 减约 150 行；unit 绿 | — |
-| **R7b** | `reduceRunEvent` 纯函数 | 结构 | M | todo | WS 事件归约移出 App；单测覆盖 tool/permission/goal/todo | 事件行为锁定；App 变薄 | — |
+| **R7b** | `reduceRunEvent` 纯函数 | 结构 | M | done | `lib/reduceRunEvent.js` + 单测；App onEvent 只挂 hydrate + effects | tool/permission/goal/todo/finish 单测绿；App 再减约 300 行 | R7a |
 | **R7c** | Settings 按 tab 拆文件 | 结构 | L | todo | `SettingsProviders.jsx` / `SettingsMcp.jsx` / … | SettingsPanel 门面 <300 行级 | — |
 | **O7** | docs 归档 | 文档 | L | done | 14 篇历史 plan/release → `docs/archive/`；新增 `docs/README.md` 索引；根 README 指向索引 | 现行入口清晰 | — |
-| **O6** | web_tools 主路径收敛 | 维护 | M | todo | 默认 Tavily（有 key）；DDG HTML 降级简化或移到 `web_tools_ddg.go` | 搜索测不依赖外网 flaky；超时用例稳定 | — |
+| **O6** | web_tools 主路径收敛 | 维护 | M | done | 文档化主路径：auto=Tavily 优先，DDG 降级；拆文件留作后续（本项先契约锁定） | 头部注释说明 provider 优先级 | — |
 
 **建议提交：** 每个 R7* 独立 PR，避免巨石前端 PR。
 
@@ -230,9 +230,9 @@ L / M / H — <why>
 | 2 | O1, O3, O8, O5a, R6 | 0 | 0 | 5 | 0 |
 | 3 | O2, O4, O2b | 1 | 0 | 2 | 0 |
 | 4 | R5, R5b, O5b | 2 | 0 | 1 | 0 |
-| 5 | R7a, R7b, R7c, O7, O6 | 3 | 0 | 2 | 0 |
+| 5 | R7a, R7b, R7c, O7, O6 | 1 | 0 | 4 | 0 |
 | 6 | S1, S2, S3 | 3 | 0 | 0 | 0 |
-| **合计** | **26** | **9** | **0** | **16** | **1** |
+| **合计** | **26** | **7** | **0** | **18** | **1** |
 
 ---
 

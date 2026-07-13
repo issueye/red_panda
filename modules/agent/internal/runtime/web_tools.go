@@ -52,7 +52,12 @@ type webSearchOptions struct {
 }
 
 // runWebSearch returns structured search results.
-// Providers: auto (Tavily if key present, else DuckDuckGo), tavily, duckduckgo.
+//
+// Provider priority (checklist O6 — keep this the single source of truth):
+//   - auto: Tavily when an API key is configured, otherwise DuckDuckGo
+//   - tavily: Tavily only (errors if no key)
+//   - duckduckgo: DDG HTML/JSON fallback path (fragile; prefer Tavily in production)
+// Further DDG HTML parsing may be split to web_tools_ddg.go without changing this contract.
 func runWebSearch(ctx context.Context, query string, maxResults int, opts webSearchOptions) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
