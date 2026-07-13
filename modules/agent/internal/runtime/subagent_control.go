@@ -7,7 +7,6 @@ import (
 	"redpanda/agent/internal/subagent"
 	agenttools "redpanda/agent/internal/tools"
 	"strings"
-	"time"
 
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
@@ -162,41 +161,19 @@ func (r *Runtime) executeSubagentPoolReset() (string, error) {
 }
 
 func (r *Runtime) lookupSubAgentRecord(rootRunID string, subAgentID string) *methods.SubAgentRecord {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	state := r.subagents[subAgentID]
-	if state == nil || state.record.RootRunID != rootRunID {
+	record, ok := r.subagents.Lookup(rootRunID, subAgentID)
+	if !ok {
 		return nil
 	}
-	record := state.record
 	return &record
 }
 
 func (r *Runtime) removeSubAgent(rootRunID string, subAgentID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	state := r.subagents[subAgentID]
-	if state == nil || state.record.RootRunID != rootRunID {
-		return
-	}
-	delete(r.subagents, subAgentID)
+	r.subagents.Remove(rootRunID, subAgentID)
 }
 
 func (r *Runtime) forceFinishSubAgent(rootRunID string, subAgentID string, status string, summary string, errText string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	state := r.subagents[subAgentID]
-	if state == nil || state.record.RootRunID != rootRunID {
-		return
-	}
-	state.record.Status = status
-	state.record.Summary = summary
-	state.record.Error = errText
-	state.record.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	if state.cancel != nil {
-		// 重置后保持 cancel 为 nil，使后续取消操作成为空操作。
-		state.cancel = nil
-	}
+	r.subagents.ForceFinish(rootRunID, subAgentID, status, summary, errText)
 }
 
 func marshalToolJSON(value any) (string, error) {

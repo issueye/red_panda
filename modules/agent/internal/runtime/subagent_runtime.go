@@ -179,44 +179,21 @@ func (r *Runtime) bridgeProcessSubAgentEvent(ctx context.Context, params methods
 }
 
 func (r *Runtime) registerSubAgent(params methods.ReplyParams, subAgentID string, name string, backend string, cancel context.CancelFunc) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	record := methods.SubAgentRecord{
+	r.subagents.Register(subagent.Registration{
 		SubAgentID:      subAgentID,
 		Name:            name,
 		Backend:         backend,
-		Status:          "running",
 		RootRunID:       params.RunID,
 		ParentRunID:     params.RunID,
 		ParentSessionID: params.Session.ID,
 		ChildRunID:      params.RunID + ":subagent:" + subAgentID,
 		Summary:         name + " subagent started",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	r.mu.Lock()
-	r.subagents[subAgentID] = &runtimeSubAgent{record: record, cancel: cancel}
-	r.mu.Unlock()
+		Cancel:          cancel,
+	})
 }
 
 func (r *Runtime) finishSubAgent(rootRunID string, subAgentID string, status string, summary string, errText string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	state := r.subagents[subAgentID]
-	if state == nil {
-		return
-	}
-	if state.record.RootRunID != rootRunID {
-		return
-	}
-	switch state.record.Status {
-	case "cancelled", "failed", "completed":
-		return
-	}
-	state.record.Status = status
-	state.record.Summary = summary
-	state.record.Error = errText
-	state.record.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	state.cancel = nil
+	r.subagents.Finish(rootRunID, subAgentID, status, summary, errText)
 }
 
 func (r *Runtime) markSubAgentCancelled(params methods.ReplyParams, subAgentID string) {
@@ -270,32 +247,11 @@ func (r *Runtime) handleSubAgentCancel(req jsonrpc.Request) error {
 }
 
 func (r *Runtime) subAgentRecords(params methods.SubAgentsParams) []methods.SubAgentRecord {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	items := make([]methods.SubAgentRecord, 0, len(r.subagents))
-	for _, state := range r.subagents {
-		if params.RunID != "" && state.record.RootRunID != params.RunID {
-			continue
-		}
-		if params.SubAgentID != "" && state.record.SubAgentID != params.SubAgentID {
-			continue
-		}
-		items = append(items, state.record)
-	}
-	return items
+	return r.subagents.List(params)
 }
 
 func (r *Runtime) cancelSubAgent(rootRunID string, subAgentID string) bool {
-	r.mu.Lock()
-	state := r.subagents[subAgentID]
-	if state == nil || state.record.RootRunID != rootRunID || state.cancel == nil {
-		r.mu.Unlock()
-		return false
-	}
-	cancel := state.cancel
-	r.mu.Unlock()
-	cancel()
-	return true
+	return r.subagents.Cancel(rootRunID, subAgentID)
 }
 
 func subAgentRef(subAgentID string, name string) events.AgentRef {

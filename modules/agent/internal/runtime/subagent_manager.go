@@ -9,11 +9,6 @@ import (
 	"redpanda/protocol/tools"
 )
 
-type runtimeSubAgent struct {
-	record methods.SubAgentRecord
-	cancel context.CancelFunc
-}
-
 func (r *Runtime) createProcessSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string) (subagent.Process, error) {
 	return subagent.NewProcessWithRequestHandler(ctx, params, subAgentID, r.callGateway)
 }

@@ -65,7 +65,7 @@ type Runtime struct {
 	nextGatewayID      uint64
 	permissions        map[string]chan permission.ResolveParams
 	activeRuns         map[string]context.CancelFunc
-	subagents          map[string]*runtimeSubAgent
+	subagents          *subagent.Registry
 	provider           provider.Provider
 	tools              agenttools.ToolRunner
 	processPool        *subagent.ProcessPool
@@ -88,7 +88,7 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 		gatewayPending: map[jsonrpc.ID]chan jsonrpc.Response{},
 		permissions:    map[string]chan permission.ResolveParams{},
 		activeRuns:     map[string]context.CancelFunc{},
-		subagents:      map[string]*runtimeSubAgent{},
+		subagents:      subagent.NewRegistry(),
 		mcp:            agentmcp.NewManager(version, log),
 		runTodos:       map[string][]methods.TodoItemDTO{},
 		runGoals:       map[string]*runGoalState{},
@@ -554,19 +554,12 @@ func (r *Runtime) unregisterRun(runID string) {
 func (r *Runtime) cancelRun(runID string) bool {
 	r.mu.Lock()
 	cancel := r.activeRuns[runID]
-	// 取消父运行前暂停绑定到该根运行的全部子代理，
-	// 使进程池工作进程能及时停止，而非只依赖共享上下文。
-	var subCancels []context.CancelFunc
-	for _, state := range r.subagents {
-		if state == nil || state.record.RootRunID != runID || state.cancel == nil {
-			continue
-		}
-		subCancels = append(subCancels, state.cancel)
-	}
 	r.mu.Unlock()
 
-	for _, subCancel := range subCancels {
-		subCancel()
+	// 取消父运行前暂停绑定到该根运行的全部子代理，
+	// 使进程池工作进程能及时停止，而非只依赖共享上下文。
+	for _, record := range r.subagents.List(methods.SubAgentsParams{RunID: runID}) {
+		r.subagents.Cancel(runID, record.SubAgentID)
 	}
 	if cancel == nil {
 		return false
