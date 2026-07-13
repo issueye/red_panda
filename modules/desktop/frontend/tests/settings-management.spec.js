@@ -1,19 +1,62 @@
 import { expect, test } from '@playwright/test';
 
+let skillRecords;
+
 test.beforeEach(async ({ page }) => {
+  skillRecords = [];
+  await page.route('**/api/v1/app/bootstrap', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          gateway: { api_version: 'v1', ws_url: '/api/v1/ws' },
+          agent_runtime: { available: false },
+          workspace: { id: 'workspace_fixture', root_path: 'C:\\workspace' },
+          recent_workspaces: [],
+          sessions: [],
+          active_runs: [],
+        },
+      }),
+    });
+  });
+  await page.route('**/api/v1/skills**', async (route) => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      const body = request.postDataJSON();
+      skillRecords.push({
+        name: body.name,
+        description: body.description,
+        instructions: body.instructions,
+        path: `C:\\workspace\\.codex\\skills\\${body.name}\\SKILL.md`,
+        has_instructions: true,
+      });
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, data: skillRecords.at(-1) }),
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data: { items: skillRecords } }),
+    });
+  });
   await page.goto('/');
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
   await page.getByRole('button', { name: '设置' }).click();
 });
 
-test('settings exposes five keyboard-accessible management modules', async ({ page }) => {
+test('settings exposes six keyboard-accessible management modules', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: '设置' });
   const tabs = dialog.getByRole('tab');
-  await expect(tabs).toHaveCount(5);
+  await expect(tabs).toHaveCount(6);
   await expect(dialog.getByRole('tab', { name: '供应商' })).toHaveAttribute('aria-selected', 'true');
 
   await dialog.getByRole('tab', { name: '供应商' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(dialog.getByRole('tab', { name: '智能体' })).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expect(dialog.getByRole('tab', { name: '技能' })).toBeFocused();
   await expect(dialog.getByRole('tabpanel', { name: '技能管理' })).toBeVisible();
@@ -27,20 +70,20 @@ test('settings exposes five keyboard-accessible management modules', async ({ pa
   await expect(dialog.getByRole('tabpanel', { name: '其他设置' })).toContainText('运行与代理');
 });
 
-test('skill configs can be managed and persist locally', async ({ page }) => {
+test('managed skills use the active workspace and survive reload', async ({ page }) => {
   await page.getByRole('tab', { name: '技能' }).click();
   await page.getByRole('button', { name: '新建技能' }).click();
-  await page.getByLabel('名称').fill('代码审查');
-  await page.getByLabel('路径').fill('C:\\skills\\review');
-  await page.getByLabel('描述').fill('检查代码质量与风险');
+  await page.getByPlaceholder('code-review').fill('code-review');
+  await page.getByPlaceholder('用于选择该技能的简短说明').fill('检查代码质量与风险');
+  await page.getByPlaceholder('完整 Markdown 指令').fill('检查行为回归、安全风险和缺失测试。');
   await page.getByRole('button', { name: '保存技能' }).click();
-  await expect(page.getByTestId('settings-skill-list')).toContainText('代码审查');
+  await expect(page.getByTestId('settings-skill-list')).toContainText('code-review');
 
-  await page.getByRole('button', { name: '关闭设置' }).click();
+  await page.keyboard.press('Escape');
   await page.reload();
   await page.getByRole('button', { name: '设置' }).click();
   await page.getByRole('tab', { name: '技能' }).click();
-  await expect(page.getByTestId('settings-skill-list')).toContainText('代码审查');
+  await expect(page.getByTestId('settings-skill-list')).toContainText('code-review');
 });
 
 test('settings management layout remains usable on compact screens', async ({ page }) => {

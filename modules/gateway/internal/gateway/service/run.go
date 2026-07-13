@@ -26,15 +26,21 @@ const (
 	defaultMaxConcurrentRuns = 3
 	maxConcurrentRunsCap     = 16
 	// defaultRuntimeMode isolates multi-session concurrent runs in dedicated agent processes.
-	defaultRuntimeMode = "per_run_process"
+	defaultRuntimeMode     = "per_run_process"
+	defaultWorkerMaxTurns  = 48
+	defaultWorkerMaxWallMS = 10 * 60 * 1000
+	defaultWorkerMaxFanOut = 8
 )
 
 type RunService struct {
-	repos   repository.Set
-	hub     *eventhub.Hub
-	runtime *runtimeclient.Client
+	repos          repository.Set
+	hub            *eventhub.Hub
+	runtime        *runtimeclient.Client
+	budget         *ResourceBudget
+	providerBudget *ResourceBudget
 	// startMu serializes admission so concurrent budget checks and slot reservation are atomic.
-	startMu *sync.Mutex
+	startMu      *sync.Mutex
+	runtimeOwner string
 }
 
 type StartRunResult struct {
@@ -51,6 +57,7 @@ type RunRecordDTO struct {
 	SessionID     string     `json:"session_id"`
 	WorkspaceRoot string     `json:"workspace_root,omitempty"`
 	RuntimeMode   string     `json:"runtime_mode"`
+	RuntimeOwner  string     `json:"runtime_owner,omitempty"`
 	Status        string     `json:"status"`
 	Input         string     `json:"input,omitempty"`
 	LastEventType string     `json:"last_event_type,omitempty"`
@@ -80,8 +87,21 @@ type RunEventDTO struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
-func NewRunService(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclient.Client) RunService {
-	return RunService{repos: repos, hub: hub, runtime: runtime, startMu: &sync.Mutex{}}
+func NewRunService(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclient.Client, budgets ...*ResourceBudget) RunService {
+	var budget *ResourceBudget
+	if len(budgets) > 0 {
+		budget = budgets[0]
+	}
+	var providerBudget *ResourceBudget
+	if len(budgets) > 1 {
+		providerBudget = budgets[1]
+	}
+	return RunService{
+		repos: repos, hub: hub, runtime: runtime,
+		budget: budget, providerBudget: providerBudget,
+		startMu:      &sync.Mutex{},
+		runtimeOwner: fmt.Sprintf("gateway-%d-%d", os.Getpid(), time.Now().UnixNano()),
+	}
 }
 
 func (r RunService) RuntimeStatus() map[string]any {
@@ -92,7 +112,10 @@ func (r RunService) RuntimeStatus() map[string]any {
 		"max_concurrent_runs":  defaultMaxConcurrentRuns,
 		"active_runs":          int64(0),
 		"isolation":            "per_run_process",
+		"runtime_owner":        r.runtimeOwner,
 	}
+	status["worker_budget"] = r.budget.Status()
+	status["provider_budget"] = r.providerBudget.Status()
 	if active, err := r.repos.Runs.CountActive(); err == nil {
 		status["active_runs"] = active
 	}
@@ -110,14 +133,32 @@ func (r RunService) RuntimeStatus() map[string]any {
 	return status
 }
 
-// resolveMaxConcurrentRuns prefers per-run option, then env, then default.
-func resolveMaxConcurrentRuns(options map[string]any) int {
-	if n := intOption(options, "max_concurrent_runs"); n > 0 {
-		if n > maxConcurrentRunsCap {
-			return maxConcurrentRunsCap
-		}
-		return n
+// ReconcileStaleRuns terminalizes persisted active records on Gateway startup.
+// Runtime transports are process-local and cannot be reattached after restart.
+func (r RunService) ReconcileStaleRuns() error {
+	active, err := r.repos.Runs.ListActive(200)
+	if err != nil {
+		return err
 	}
+	for _, run := range active {
+		if run.RuntimeOwner != "" && run.RuntimeOwner == r.runtimeOwner {
+			continue
+		}
+		_ = r.repos.Runs.Finish(run.ID, "failed", "gateway restarted before runtime completion")
+		_ = NewGoalService(r.repos).PauseByRun(run.ID, "gateway_restart")
+		if r.budget != nil {
+			r.budget.ReleaseRun(run.ID)
+		}
+		if r.providerBudget != nil {
+			r.providerBudget.ReleaseRun(run.ID)
+		}
+	}
+	return nil
+}
+
+// resolveMaxConcurrentRuns is Gateway-owned. Client options cannot raise or
+// lower the server admission ceiling for an individual request.
+func resolveMaxConcurrentRuns(options map[string]any) int {
 	if env := strings.TrimSpace(os.Getenv("RED_PANDA_MAX_CONCURRENT_RUNS")); env != "" {
 		if parsed, err := strconv.Atoi(env); err == nil && parsed > 0 {
 			if parsed > maxConcurrentRunsCap {
@@ -224,6 +265,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		SessionID:     session.ID,
 		WorkspaceRoot: session.WorkspaceRoot,
 		RuntimeMode:   runtimeMode,
+		RuntimeOwner:  r.runtimeOwner,
 		Status:        "running",
 		Input:         inputText,
 		StartedAt:     time.Now().UTC(),
@@ -259,24 +301,33 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			Text: inputText,
 		},
 		Options: methods.ReplyOptions{
-			ProviderProfileID:   stringOption(payload.Options, "provider_profile_id"),
-			Model:               stringOption(payload.Options, "model"),
-			PermissionMode:      stringOption(payload.Options, "permission_mode"),
-			ToolPolicy:          stringOption(payload.Options, "tool_policy"),
-			ToolAllowlist:       stringSliceOption(payload.Options, "tool_allowlist"),
-			ToolDenylist:        stringSliceOption(payload.Options, "tool_denylist"),
-			EmitToolEvents:      true,
-			RequirePermission:   boolOption(payload.Options, "require_permission"),
-			SpawnSubAgents:      boolOption(payload.Options, "spawn_subagents"),
-			SubAgentBackend:     stringOption(payload.Options, "subagent_backend"),
-			WebSearchMaxResults: intOption(payload.Options, "web_search_max_results"),
-			WebFetchMaxBytes:    intOption(payload.Options, "web_fetch_max_bytes"),
-			WebSearchProvider:   stringOption(payload.Options, "web_search_provider"),
-			WebTavilyAPIKey:     stringOption(payload.Options, "web_tavily_api_key"),
-			WebHTTPProxy:        stringOption(payload.Options, "web_http_proxy"),
-			MaxToolTurns:        intOption(payload.Options, "max_tool_turns"),
-			LogLLMRequests:      boolOption(payload.Options, "log_llm_requests"),
+			ProviderProfileID:      stringOption(payload.Options, "provider_profile_id"),
+			Model:                  stringOption(payload.Options, "model"),
+			PermissionMode:         stringOption(payload.Options, "permission_mode"),
+			ToolPolicy:             stringOption(payload.Options, "tool_policy"),
+			ToolAllowlist:          stringSliceOption(payload.Options, "tool_allowlist"),
+			ToolDenylist:           stringSliceOption(payload.Options, "tool_denylist"),
+			EmitToolEvents:         true,
+			RequirePermission:      boolOption(payload.Options, "require_permission"),
+			SpawnSubAgents:         boolOption(payload.Options, "spawn_subagents"),
+			SubAgentBackend:        stringOption(payload.Options, "subagent_backend"),
+			WebSearchMaxResults:    intOption(payload.Options, "web_search_max_results"),
+			WebFetchMaxBytes:       intOption(payload.Options, "web_fetch_max_bytes"),
+			WebSearchProvider:      stringOption(payload.Options, "web_search_provider"),
+			WebTavilyAPIKey:        stringOption(payload.Options, "web_tavily_api_key"),
+			WebHTTPProxy:           stringOption(payload.Options, "web_http_proxy"),
+			MaxToolTurns:           intOption(payload.Options, "max_tool_turns"),
+			LogLLMRequests:         boolOption(payload.Options, "log_llm_requests"),
+			WorkerPermitRequired:   true,
+			ProviderPermitRequired: true,
+			WorkerMaxTurns:         envBoundedInt("RED_PANDA_WORKER_MAX_TURNS", defaultWorkerMaxTurns, 1, 128),
+			WorkerMaxWallMS:        envBoundedInt("RED_PANDA_WORKER_MAX_WALL_MS", defaultWorkerMaxWallMS, 1000, 60*60*1000),
+			WorkerMaxFanOut:        envBoundedInt("RED_PANDA_WORKER_MAX_FAN_OUT", defaultWorkerMaxFanOut, 1, 64),
 		},
+	}
+	if err := r.applyAgentDefinitions(&params); err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
+		return StartRunResult{}, err
 	}
 	// Goal execution is opt-in. A missing option represents a regular
 	// conversation and must not expose Goal tools or pipeline instructions.
@@ -313,6 +364,41 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		Subscribed:  payload.Subscribe,
 		RuntimeMode: runtimeMode,
 	}, nil
+}
+
+func (r RunService) applyAgentDefinitions(params *methods.ReplyParams) error {
+	items, err := NewAgentDefinitionService(r.repos).List()
+	if err != nil {
+		return fmt.Errorf("load agent definitions: %w", err)
+	}
+	params.Options.AgentDefinitions = make([]methods.AgentDefinitionSnapshot, 0, len(items))
+	for _, item := range items {
+		params.Options.AgentDefinitions = append(params.Options.AgentDefinitions, methods.AgentDefinitionSnapshot{
+			Key:             item.Key,
+			Name:            item.Name,
+			NameZH:          item.NameZH,
+			Phase:           item.Phase,
+			SystemPrompt:    item.SystemPrompt,
+			ToolAllowlist:   append([]string(nil), item.ToolAllowlist...),
+			ToolDenylist:    append([]string(nil), item.ToolDenylist...),
+			DefaultMaxTurns: item.DefaultMaxTurns,
+			Enabled:         item.Enabled,
+			Builtin:         item.Builtin,
+		})
+	}
+	return nil
+}
+
+func envBoundedInt(name string, fallback int, min int, max int) int {
+	value := strings.TrimSpace(os.Getenv(name))
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < min {
+		return fallback
+	}
+	if parsed > max {
+		return max
+	}
+	return parsed
 }
 
 func (r RunService) buildRunConversation(sessionID string) ([]methods.Message, error) {
@@ -657,6 +743,10 @@ func (r RunService) HandleRuntimeEvent(event events.Envelope) {
 	if event.EventID == "" || event.RootRunID == "" {
 		return
 	}
+	saved, err := r.repos.RunEvents.SaveOnce(event)
+	if err != nil || !saved {
+		return
+	}
 	_ = r.repos.Runs.ProjectEvent(event)
 	if event.Type == events.EventPermissionRequest {
 		_ = r.repos.Permissions.ProjectRequired(event)
@@ -666,6 +756,12 @@ func (r RunService) HandleRuntimeEvent(event events.Envelope) {
 		_ = r.repos.Runs.RefreshToolCount(event.RootRunID)
 	}
 	if event.Type == events.EventFinish || event.Type == events.EventError {
+		if r.budget != nil {
+			r.budget.ReleaseRun(event.RootRunID)
+		}
+		if r.providerBudget != nil {
+			r.providerBudget.ReleaseRun(event.RootRunID)
+		}
 		_ = r.repos.Permissions.ClosePendingByRun(event.RootRunID, "closed", "run finished")
 		status := "completed"
 		if event.Type == events.EventError {
@@ -678,7 +774,6 @@ func (r RunService) HandleRuntimeEvent(event events.Envelope) {
 		}
 		_ = NewGoalService(r.repos).OnRootRunTerminal(event.RootRunID, event.SessionID, status)
 	}
-	_ = r.repos.RunEvents.Save(event)
 	if event.Type == events.EventMessageDelta || event.Type == events.EventReasoningDelta {
 		if delta, ok := event.Payload["delta"].(string); ok && delta != "" {
 			role := "assistant"
@@ -800,6 +895,7 @@ func runRecordDTO(row model.RunRecord) RunRecordDTO {
 		SessionID:     row.SessionID,
 		WorkspaceRoot: row.WorkspaceRoot,
 		RuntimeMode:   row.RuntimeMode,
+		RuntimeOwner:  row.RuntimeOwner,
 		Status:        row.Status,
 		Input:         row.Input,
 		LastEventType: row.LastEventType,

@@ -1,6 +1,6 @@
 # Current Development Status
 
-Updated: 2026-07-11
+Updated: 2026-07-14
 
 ## Overall Status
 
@@ -14,6 +14,12 @@ Updated: 2026-07-11
 - Root agent and subagents share one root run WebSocket channel using `root_seq`, `agent_seq`, and stream metadata.
 - `subagent_backend=runtime_process` runs a subagent through an independent child `red-panda-agent` process and bridges child `agent.event` output back to the parent root run channel.
 - `subagent_backend=process_pool` runs a subagent through a reusable child `red-panda-agent` process from the parent Runtime pool.
+- Worker scheduling preserves provider order: only adjacent `subagent.run` calls execute concurrently, while ordinary tools are ordering barriers.
+- Process-pool admission is FIFO and cancellable, with `queued`, `starting`, `running`, and terminal lifecycle states plus queue/wait/active/idle metrics.
+- Gateway owns global root-run, worker, and provider-request budgets. Desktop clients cannot raise the server concurrency ceiling.
+- Run records persist a Gateway Runtime owner. Startup reconciles prior-owner active runs, unexpected Runtime exits write failed terminal records with `finished_at`, terminal events release residual worker/provider permits, and pooled workers are health-checked before reuse with one cold retry.
+- Worker event delivery is backpressure-safe for cancellation, and graceful cancel/shutdown have bounded force-kill escalation.
+- General workers have enforced turn, wall-time, 64 KiB captured-output, and fan-out limits. Gateway-snapshotted Agent definitions are enforced by Runtime, including disabled state, custom prompts, tool allow/deny lists, and default turns.
 - Gateway root runs support `runtime_mode=per_run_process` in `run.start` options. `single_core` remains the default. Per-run process events enter the same WebSocket/projection stream, and Gateway shuts down and removes the per-run Runtime client after run finish.
 - Gateway provider profile backend is complete: CRUD APIs live under `/api/v1/provider-profiles`, profiles store OpenAI-compatible provider settings with masked API key state, and `run.start` can pass `provider_profile_id`.
 - Gateway exposes persisted run event timeline queries through `GET /api/v1/runs/:id/events` with `after_seq` and `limit`.
@@ -32,6 +38,7 @@ Updated: 2026-07-11
 - `scripts/protocol-compat.ps1` covers public WebSocket/API failed tool and failed subagent paths: denied `shell.exec` produces `tool_failed` plus denied projections, and invalid `RED_PANDA_SUBAGENT_COMMAND` produces failed `subagent_update` events in persisted timeline.
 - Gateway-backed Playwright teardown now snapshots `red-panda-gateway` / `red-panda-agent` processes before each test and fails if newly created processes remain after teardown.
 - Gateway-backed Playwright e2e covers user-visible subagent cancellation over the real Gateway/Runtime/Desktop chain using `RED_PANDA_PLANNER_DRAFT_DELAY_MS` to keep the planner subagent cancellable without relying on a narrow timing window.
+- Gateway-backed Playwright e2e also saturates a one-slot process pool to prove queued worker visibility and queued -> starting -> running transitions, kills a real Runtime process to prove failed terminal projection, and uses a local OpenAI-compatible provider to prove custom/disabled Agent definitions alter the real child Runtime.
 - Gateway session fork/context-summary backend is implemented: forks create derived sessions, while summary apply stores an in-place snapshot and assembles future model context from summary plus recent original messages.
 - Desktop exposes Fork and Summary controls; summary updates keep the same selected session and preserve the complete visible message history.
 - Memory/history design is documented in `docs/14-memory-history-design.md`.
@@ -275,24 +282,26 @@ Desktop or WebSocket client inputs:
 
 ## Verification
 
-Current combined M0 and MCP configuration gate status: Pass on 2026-07-11. Agent/Gateway binaries were rebuilt, the full protocol-compat suite (including skill CRUD) passes, and no test Gateway/Agent processes remained after verification.
+Current combined worker optimization and existing M0/MCP configuration gate status: Pass on 2026-07-14. Agent/Gateway binaries were rebuilt, the protocol and WebSocket smoke suites pass, and no test Gateway/Agent processes remained after verification.
 
 | Check | Result |
 | --- | --- |
 | `go test ./modules/protocol/...` | Pass |
-| `go test ./modules/agent/...` | Pass, includes process subagent success, cancellation, reuse, and failure-path coverage |
-| `go test ./modules/gateway/...` | Pass |
+| `go test ./modules/agent/...` | Pass, includes ordered worker scheduling, FIFO pool, cancellation, reuse, health checks, limits, Agent definitions, and failure paths |
+| `go test ./modules/gateway/...` | Pass, includes global budgets, stale-run recovery, and Runtime exit handling |
 | `go test ./modules/desktop/...` | Pass |
 | `go test ./modules/cli/...` | Pass |
 | `go test ./modules/gateway/internal/gateway/repository ./modules/gateway/internal/gateway/service` | Pass |
-| `npm test` in `modules/desktop/frontend` | Pass, includes reconnect resume cursor coverage |
-| `npm run test:ui` in `modules/desktop/frontend` | Pass, 24 tests, includes Activity, Workflow, Memory, Settings management, responsive/accessibility fixtures, and Gateway-backed workflows |
-| `npm run test:ui -- --grep @gateway-backed` in `modules/desktop/frontend` | Pass, 11 tests, includes `/read README.md`, MCP config CRUD/enable-disable, inactive provider profile UI failure, denied permission/tool rendering, cancellation, subagent failure/cancel, session fork/compact, Desktop memory preview/injection visibility, reconnect/resume coverage, and process leak assertions during teardown |
+| `go test -race ./internal/runtime` in `modules/agent` | Pass |
+| Gateway service/runtime-client/repository race checks | Pass |
+| `npm test` in `modules/desktop/frontend` | Pass, 97 tests |
+| `npm run test:ui` in `modules/desktop/frontend` | Pass, 29 tests, includes Activity, Workflow, Memory, Settings management, responsive/accessibility fixtures, and Gateway-backed workflows |
+| `npm run test:ui -- --grep @gateway-backed` in `modules/desktop/frontend` | Pass, 14 tests, including queue visibility, real Runtime crash recovery, Agent-definition enforcement, cancellation, failure paths, session fork/compact, memory, reconnect/resume, and process leak assertions |
 | `npm run build` in `modules/desktop/frontend` | Pass |
 | `CGO_ENABLED=0 go build` agent | Pass |
 | `CGO_ENABLED=0 go build` gateway | Pass |
-| `powershell -ExecutionPolicy Bypass -File scripts/ws-smoke.ps1` | Pass |
-| `powershell -ExecutionPolicy Bypass -File scripts/protocol-compat.ps1` | Pass, includes failed tool/subagent, session fork/compact, memory CRUD/preview, Runtime memory tool paths, provider profiles, MCP config CRUD/redaction, skill create/list/load/update/delete CRUD, and a run timeline with `memory_injected` |
+| `powershell -ExecutionPolicy Bypass -File scripts/ws-smoke.ps1` | Pass, including runtime-process and FIFO process-pool worker lifecycle |
+| `powershell -ExecutionPolicy Bypass -File scripts/protocol-compat.ps1` | Pass, includes failed tool/subagent, in-place session compact, memory CRUD/preview, Runtime memory tool paths, provider profiles, MCP config CRUD/redaction, skill CRUD, and run replay |
 | Temporary real-provider Gateway/Runtime smoke | Pass with StepFun `step-3.7-flash`; returned `REAL_CHAIN_OK`, finished `completed`, then removed the temporary profile/database |
 | `wails3 build` | Pass, with Windows template warnings for missing Unix tools |
 

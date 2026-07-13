@@ -6,7 +6,7 @@ import { IconButton } from './ui/button.jsx';
 import { PanelHeader } from './ui/panel.jsx';
 
 function isActiveStatus(status) {
-  return status === 'running' || status === 'cancelling' || status === 'waiting_permission';
+  return ['queued', 'starting', 'running', 'cancelling', 'waiting_permission'].includes(status);
 }
 
 export function SubAgentPanel({ agents, onCancelSubAgent, onOpenSubagentConversation }) {
@@ -18,7 +18,7 @@ export function SubAgentPanel({ agents, onCancelSubAgent, onOpenSubagentConversa
           const isSubAgent = agent.role === 'subagent';
           const status = agent.status || (isSubAgent ? 'running' : 'idle');
           const active = isActiveStatus(status);
-          const canCancel = isSubAgent && status === 'running' && agent.rootRunId;
+          const canCancel = isSubAgent && isActiveStatus(status) && status !== 'cancelling' && agent.rootRunId;
           return (
             <article
               className={classNames('subagent-item', active && 'is-running', `status-${status}`)}

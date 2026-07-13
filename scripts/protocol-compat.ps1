@@ -727,9 +727,9 @@ try {
       }
       Assert-True ($memoryDenyPermissionID -ne "") "memory deny permission_required was not emitted"
       Assert-True ($memoryDenyResolve.type -eq "response" -and $memoryDenyResolve.payload.accepted) "memory deny resolve mismatch"
-      Assert-EventTypes $memoryDenyEvents @("tool_started", "permission_required", "tool_failed", "error", "finish")
+      Assert-EventTypes $memoryDenyEvents @("tool_started", "permission_required", "tool_failed", "finish")
       $memoryDenyFinish = @($memoryDenyEvents | Where-Object { $_.type -eq "finish" })[-1]
-      Assert-True ($memoryDenyFinish.payload.status -eq "denied") "memory deny run finish mismatch"
+      Assert-True ($memoryDenyFinish.payload.status -eq "completed") "memory deny run finish mismatch"
       $memoryDenyRecords = @(Invoke-Api "GET" "/api/v1/memory?scope=session&session_id=$($session.id)")
       Assert-True (@($memoryDenyRecords | Where-Object { $_.content -eq "Protocol compat denied memory" }).Count -eq 0) "denied memory tool persisted a record"
       $memoryDenyCalls = @(Invoke-Api "GET" "/api/v1/runs/$memoryDenyRunID/tools")
@@ -757,18 +757,20 @@ try {
       keep_tail_messages = 1
     }
     Assert-True ($compactPreview.preview.source_session_id -eq $session.id) "compact preview source mismatch"
-    Assert-True ($compactPreview.preview.summary.summary -like "Compacted session messages*") "compact preview summary mismatch"
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$compactPreview.preview.summary.summary)) "compact preview summary mismatch"
 
     $compact = Invoke-Api "POST" "/api/v1/sessions/$($session.id)/compact" @{
       name = "compat compact"
       keep_tail_messages = 1
       summary = $compactPreview.preview.summary
     }
-    Assert-True ($compact.session.parent_id -eq $session.id -and $compact.session.kind -eq "compact") "compact session metadata mismatch"
-    Assert-True ($compact.lineage.operation -eq "compact" -and $compact.compaction.status -eq "applied") "compact lineage/record mismatch"
+    Assert-True ($compact.session.id -eq $session.id -and $compact.session.kind -eq "normal") "compact session metadata mismatch"
+    Assert-True ($compact.compaction.status -eq "applied" -and $compact.compaction.target_session_id -eq $session.id) "compact record mismatch"
     $compactHistory = @(Invoke-Api "GET" "/api/v1/sessions/$($compact.session.id)/history")
-    Assert-True ($compactHistory.Count -ge 1) "compact history missing"
-    Assert-True ($compactHistory[0].content[0].text -like "Compacted session messages*") "compact summary history mismatch"
+    Assert-True ($compactHistory.Count -eq $sourceHistory.Count) "compact mutated source history"
+    $compactState = Invoke-Api "GET" "/api/v1/sessions/$($session.id)/compact"
+    Assert-True ($compactState.active -and $compactState.compaction.id -eq $compact.compaction.id) "compact state mismatch"
+    Assert-True ($compactState.summary.summary -eq $compactPreview.preview.summary.summary) "compact summary state mismatch"
 
     $resumeWs = New-WsClient
     try {

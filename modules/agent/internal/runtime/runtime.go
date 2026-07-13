@@ -70,6 +70,7 @@ type Runtime struct {
 	mcpProcesses       map[*mcpProcess]struct{}
 	runTodos           map[string][]methods.TodoItemDTO
 	runGoals           map[string]*runGoalState
+	runWorkerCount     map[string]int
 	newProcessSubAgent func(context.Context, methods.ReplyParams, string) (processSubAgent, error)
 }
 
@@ -99,6 +100,7 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 		mcpProcesses:   map[*mcpProcess]struct{}{},
 		runTodos:       map[string][]methods.TodoItemDTO{},
 		runGoals:       map[string]*runGoalState{},
+		runWorkerCount: map[string]int{},
 		provider:       newProviderFromEnv(log),
 		tools:          ToolRunner{},
 	}
@@ -574,6 +576,13 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		var requestedCalls []tools.Call
 		emittedText := false
 		flatHistory := flattenToolRounds(rounds)
+		releaseProvider, permitErr := r.acquireProviderPermit(ctx, params)
+		if permitErr != nil {
+			_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
+				"message": permitErr.Error(), "status": "failed",
+			})
+			return providerSegmentResult{Reason: loopEndFailed, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+		}
 		err := r.provider.Complete(ctx, ProviderRequest{
 			RunID:       params.RunID,
 			Session:     params.Session,
@@ -585,6 +594,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		}, func(chunk ProviderChunk) error {
 			return r.consumeProviderChunk(ctx, params, chunk, messageID, streamID, streamSeq, &requestedCalls, &emittedText)
 		})
+		releaseProvider()
 		turnsUsed++
 		if err != nil {
 			if ctx.Err() != nil {
@@ -748,6 +758,10 @@ func (r *Runtime) retryFinalAnswer(
 		"If some tools failed, still summarize what succeeded and what is known."
 	var answer strings.Builder
 	returnedToolCalls := false
+	releaseProvider, permitErr := r.acquireProviderPermit(ctx, params)
+	if permitErr != nil {
+		return false
+	}
 	err := r.provider.Complete(ctx, ProviderRequest{
 		RunID:   params.RunID,
 		Session: params.Session,
@@ -767,6 +781,7 @@ func (r *Runtime) retryFinalAnswer(
 		answer.WriteString(chunk.Delta)
 		return nil
 	})
+	releaseProvider()
 	text := strings.TrimSpace(answer.String())
 	if err != nil || returnedToolCalls || !isUsableFinalText(text) {
 		return false
@@ -992,14 +1007,44 @@ func (r *Runtime) emitPlannerSubAgent(ctx context.Context, params methods.ReplyP
 
 func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string, backend string) {
 	agent := subAgentRef(subAgentID, "planner")
+	initialStatus := "starting"
+	initialSummary := backend + " planner subagent starting"
+	if backend == "process_pool" {
+		initialStatus = "queued"
+		initialSummary = backend + " planner subagent queued"
+	}
 	_ = r.emitAgentEvent(ctx, params, agent, events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id": subAgentID,
 		"name":        "planner",
-		"status":      "running",
-		"summary":     backend + " planner subagent started",
+		"status":      initialStatus,
+		"summary":     initialSummary,
 		"backend":     backend,
 	})
-	child, release, err := r.acquireProcessSubAgent(ctx, params, subAgentID, backend)
+	releasePermit, err := r.acquireWorkerPermit(ctx, params, subAgentID)
+	if err != nil {
+		r.finishSubAgent(params.RunID, subAgentID, "failed", backend+" planner worker permit failed", err.Error())
+		_ = r.emitAgentEvent(context.Background(), params, agent, events.EventSubAgentUpdate, nil, map[string]any{
+			"subagent_id": subAgentID,
+			"name":        "planner",
+			"status":      "failed",
+			"summary":     backend + " planner worker permit failed",
+			"backend":     backend,
+			"error":       err.Error(),
+		})
+		return
+	}
+	defer releasePermit()
+
+	child, release, err := r.acquireProcessSubAgent(ctx, params, subAgentID, backend, func() {
+		r.setSubAgentStatus(params.RunID, subAgentID, "starting", backend+" planner subagent starting")
+		_ = r.emitAgentEvent(context.Background(), params, agent, events.EventSubAgentUpdate, nil, map[string]any{
+			"subagent_id": subAgentID,
+			"name":        "planner",
+			"status":      "starting",
+			"summary":     backend + " planner subagent starting",
+			"backend":     backend,
+		})
+	})
 	if err != nil {
 		r.finishSubAgent(params.RunID, subAgentID, "failed", backend+" planner subagent failed", err.Error())
 		_ = r.emitAgentEvent(context.Background(), params, agent, events.EventSubAgentUpdate, nil, map[string]any{
@@ -1018,6 +1063,14 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 			release(reusable)
 		}
 	}()
+	r.setSubAgentStatus(params.RunID, subAgentID, "running", backend+" planner subagent running")
+	_ = r.emitAgentEvent(context.Background(), params, agent, events.EventSubAgentUpdate, nil, map[string]any{
+		"subagent_id": subAgentID,
+		"name":        "planner",
+		"status":      "running",
+		"summary":     backend + " planner subagent running",
+		"backend":     backend,
+	})
 
 	childRunID := params.RunID + ":subagent:" + subAgentID
 	childParams := params
@@ -1061,9 +1114,82 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 	})
 }
 
-func (r *Runtime) acquireProcessSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string, backend string) (processSubAgent, func(bool), error) {
+func (r *Runtime) acquireWorkerPermit(ctx context.Context, params methods.ReplyParams, subAgentID string) (func(), error) {
+	if !params.Options.WorkerPermitRequired {
+		return func() {}, nil
+	}
+	permit := methods.WorkerPermitParams{
+		PermitID:  params.RunID + ":" + subAgentID,
+		RootRunID: params.RunID,
+		WorkerID:  subAgentID,
+	}
+	raw, err := r.callGateway(ctx, methods.WorkerPermitAcquire, permit)
+	if err != nil {
+		return nil, err
+	}
+	var result methods.WorkerPermitResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("decode worker permit: %w", err)
+	}
+	if !result.Granted {
+		return nil, fmt.Errorf("worker permit was not granted")
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = r.callGateway(releaseCtx, methods.WorkerPermitRelease, permit)
+		})
+	}, nil
+}
+
+func (r *Runtime) acquireProviderPermit(ctx context.Context, params methods.ReplyParams) (func(), error) {
+	if !params.Options.ProviderPermitRequired {
+		return func() {}, nil
+	}
+	rootRunID := params.RunID
+	if index := strings.Index(rootRunID, ":subagent:"); index > 0 {
+		rootRunID = rootRunID[:index]
+	}
+	permit := methods.WorkerPermitParams{
+		PermitID:  fmt.Sprintf("%s:provider:%d", params.RunID, time.Now().UnixNano()),
+		RootRunID: rootRunID,
+		WorkerID:  params.RunID,
+	}
+	raw, err := r.callGateway(ctx, methods.ProviderPermitAcquire, permit)
+	if err != nil {
+		return nil, err
+	}
+	var result methods.WorkerPermitResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("decode provider permit: %w", err)
+	}
+	if !result.Granted {
+		return nil, fmt.Errorf("provider permit was not granted")
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = r.callGateway(releaseCtx, methods.ProviderPermitRelease, permit)
+		})
+	}, nil
+}
+
+func (r *Runtime) acquireProcessSubAgent(
+	ctx context.Context,
+	params methods.ReplyParams,
+	subAgentID string,
+	backend string,
+	onStarting func(),
+) (processSubAgent, func(bool), error) {
 	if backend == "process_pool" {
-		return r.processPool.Acquire(ctx, params, subAgentID)
+		return r.processPool.AcquireWithStart(ctx, params, subAgentID, onStarting)
+	}
+	if onStarting != nil {
+		onStarting()
 	}
 	child, err := r.newProcessSubAgent(ctx, params, subAgentID)
 	if err != nil {
@@ -1095,22 +1221,47 @@ func (r *Runtime) bridgeProcessSubAgentEvent(ctx context.Context, params methods
 
 func (r *Runtime) registerSubAgent(params methods.ReplyParams, subAgentID string, name string, backend string, cancel context.CancelFunc) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	status := "running"
+	summary := name + " subagent started"
+	if backend == "process_pool" {
+		status = "queued"
+		summary = name + " subagent queued"
+	} else if backend == "runtime_process" {
+		status = "starting"
+		summary = name + " subagent starting"
+	}
 	record := methods.SubAgentRecord{
 		SubAgentID:      subAgentID,
 		Name:            name,
 		Backend:         backend,
-		Status:          "running",
+		Status:          status,
 		RootRunID:       params.RunID,
 		ParentRunID:     params.RunID,
 		ParentSessionID: params.Session.ID,
 		ChildRunID:      params.RunID + ":subagent:" + subAgentID,
-		Summary:         name + " subagent started",
+		Summary:         summary,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
 	r.mu.Lock()
 	r.subagents[subAgentID] = &runtimeSubAgent{record: record, cancel: cancel}
 	r.mu.Unlock()
+}
+
+func (r *Runtime) setSubAgentStatus(rootRunID string, subAgentID string, status string, summary string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	state := r.subagents[subAgentID]
+	if state == nil || state.record.RootRunID != rootRunID {
+		return
+	}
+	switch state.record.Status {
+	case "cancelled", "failed", "completed":
+		return
+	}
+	state.record.Status = status
+	state.record.Summary = summary
+	state.record.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 }
 
 func (r *Runtime) finishSubAgent(rootRunID string, subAgentID string, status string, summary string, errText string) {
@@ -1269,20 +1420,13 @@ type toolBatchItem struct {
 	ok         bool
 }
 
-// executeToolBatch runs non-subagent tools sequentially, then runs all
-// subagent.run tools in parallel so multi-area analysis can proceed concurrently.
+// executeToolBatch preserves provider call order. Only adjacent subagent.run
+// calls form a parallel group; ordinary tools are ordering barriers.
 func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyParams, calls []tools.Call) ([]ToolExchange, bool) {
 	items := make([]toolBatchItem, len(calls))
-	var serial []int
-	var parallel []int
 
 	for index, call := range calls {
 		items[index] = toolBatchItem{index: index, call: call}
-		if call.Name == "subagent.run" {
-			parallel = append(parallel, index)
-		} else {
-			serial = append(serial, index)
-		}
 	}
 
 	runOne := func(index int) {
@@ -1306,16 +1450,22 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 		items[index].ok = ok
 	}
 
-	for _, index := range serial {
+	for index := 0; index < len(items); {
 		if ctx.Err() != nil {
 			return batchToHistory(items), true
 		}
-		runOne(index)
-	}
+		if items[index].call.Name != "subagent.run" {
+			runOne(index)
+			index++
+			continue
+		}
 
-	if len(parallel) > 0 {
+		end := index + 1
+		for end < len(items) && items[end].call.Name == "subagent.run" {
+			end++
+		}
 		var wg sync.WaitGroup
-		for _, index := range parallel {
+		for workerIndex := index; workerIndex < end; workerIndex++ {
 			if ctx.Err() != nil {
 				break
 			}
@@ -1326,9 +1476,10 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 					return
 				}
 				runOne(i)
-			}(index)
+			}(workerIndex)
 		}
 		wg.Wait()
+		index = end
 	}
 
 	return batchToHistory(items), ctx.Err() != nil
@@ -1806,6 +1957,20 @@ func (r *Runtime) unregisterRun(runID string) {
 	delete(r.activeRuns, runID)
 	delete(r.nextSeq, runID)
 	delete(r.agentSeq, runID)
+	delete(r.runWorkerCount, runID)
+}
+
+func (r *Runtime) reserveWorkerFanOut(runID string, limit int) bool {
+	if limit <= 0 {
+		limit = 8
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.runWorkerCount[runID] >= limit {
+		return false
+	}
+	r.runWorkerCount[runID]++
+	return true
 }
 
 func (r *Runtime) cancelRun(runID string) bool {

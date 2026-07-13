@@ -107,6 +107,7 @@ type RunRecord struct {
 	SessionID     string `gorm:"index"`
 	WorkspaceRoot string
 	RuntimeMode   string
+	RuntimeOwner  string `gorm:"index"`
 	Status        string `gorm:"index"`
 	Input         string
 	GoalID        string `gorm:"index"`

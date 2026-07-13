@@ -39,7 +39,7 @@ test('settings dialog manages focus and closes with Escape', async ({ page }) =>
   await expect(page.getByRole('button', { name: '关闭设置' })).toBeFocused();
 
   await page.keyboard.press('Shift+Tab');
-  await expect(page.getByRole('button', { name: '关闭', exact: true })).toBeFocused();
+  await expect(dialog.getByRole('button', { name: '关闭', exact: true })).toBeFocused();
 
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: '关闭设置' })).toBeFocused();

@@ -576,7 +576,7 @@ Survey-then-split policy (mandatory for analysis when tools include subagent.run
 2. Do NOT use a fixed small max_turns budget. After stats, set each specialist budget as:
    max_turns = file_count + summary_turns
    Use suggested_max_turns for a whole scope, or top_level[].recommended_max_turns / top_level[].files for each split.
-   Pass path and file_count into subagent.run (or max_turns = that formula). There is no artificial maximum.
+   Pass path and file_count into subagent.run (or max_turns = that formula). Runtime clamps the result to the Gateway-owned worker turn limit; never assume file count can raise that hard ceiling.
 3. Use suggested_splits / top_level:
    - small_tree: root or one subagent.run
    - medium/large: split by major directories and spawn multiple subagent.run calls IN ONE TURN (parallel process pool). Resize pool first if needed.

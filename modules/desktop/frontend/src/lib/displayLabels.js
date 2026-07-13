@@ -18,6 +18,8 @@ const statusLabel = {
   pending: '待处理',
   reset: '已重置',
   resolved: '已处理',
+  queued: '排队中',
+  starting: '启动中',
   running: '运行中',
   unknown: '未知',
   waiting_permission: '等待授权',

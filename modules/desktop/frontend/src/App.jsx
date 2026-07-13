@@ -288,6 +288,10 @@ function latestActiveRun(runs) {
     .sort((a, b) => new Date(b.updated_at || b.started_at || 0) - new Date(a.updated_at || a.started_at || 0))[0] || null;
 }
 
+function isActiveSubAgentStatus(status) {
+  return ['queued', 'starting', 'running', 'waiting_permission', 'cancelling'].includes(status);
+}
+
 function latestRootSeq(runs, fallback) {
   if (!Array.isArray(runs)) return fallback;
   return runs.reduce((max, item) => Math.max(max, item.last_root_seq || 0), fallback);
@@ -1410,7 +1414,7 @@ export function App() {
     const rt = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
     const runId = rt.currentRunId || '';
     const activeSubs = (rt.subAgents || []).filter((item) => (
-      item?.status === 'running' || item?.status === 'waiting_permission' || item?.status === 'cancelling'
+      isActiveSubAgentStatus(item?.status)
     ));
 
     if (!runId && activeSubs.length === 0 && !rt.running) {
@@ -1433,7 +1437,7 @@ export function App() {
       compacting: true,
       running: false,
       subAgents: (prev.subAgents || []).map((item) => (
-        item.status === 'running' || item.status === 'waiting_permission'
+        isActiveSubAgentStatus(item.status)
           ? { ...item, status: 'cancelling', summary: '摘要前暂停' }
           : item
       )),
@@ -1459,7 +1463,7 @@ export function App() {
       const latest = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
       const stillRunning = latest.running;
       const stillActiveSubs = (latest.subAgents || []).some((item) => (
-        item?.status === 'running' || item?.status === 'waiting_permission' || item?.status === 'cancelling'
+        isActiveSubAgentStatus(item?.status)
       ));
       if (!stillRunning && !stillActiveSubs) break;
       await new Promise((resolve) => window.setTimeout(resolve, 120));
@@ -1471,7 +1475,7 @@ export function App() {
       currentRunId: '',
       compacting: true,
       subAgents: (prev.subAgents || []).map((item) => (
-        item.status === 'running' || item.status === 'waiting_permission' || item.status === 'cancelling'
+        isActiveSubAgentStatus(item.status)
           ? { ...item, status: 'cancelled', summary: '已为上下文摘要暂停' }
           : item
       )),
@@ -1871,7 +1875,7 @@ export function App() {
   }
 
   async function cancelSubAgent(agent) {
-    if (!agent?.id || !agent.rootRunId || agent.status !== 'running') {
+    if (!agent?.id || !agent.rootRunId || !isActiveSubAgentStatus(agent.status) || agent.status === 'cancelling') {
       return;
     }
     setSubAgents((items) => items.map((item) => (

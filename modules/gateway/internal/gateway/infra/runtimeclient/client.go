@@ -34,15 +34,19 @@ type Client struct {
 	onEvent   EventHandler
 	onRequest RequestHandler
 
-	mu        sync.Mutex
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	ipcCloser io.Closer // session listener when transport is IPC
-	pending   map[jsonrpc.ID]chan jsonrpc.Response
-	nextID    uint64
-	running   bool
-	perRuns   map[string]*Client
-	transport string // "stdio" or "ipc"
+	mu           sync.Mutex
+	cmd          *exec.Cmd
+	stdin        io.WriteCloser
+	ipcCloser    io.Closer // session listener when transport is IPC
+	pending      map[jsonrpc.ID]chan jsonrpc.Response
+	nextID       uint64
+	running      bool
+	perRuns      map[string]*Client
+	transport    string // "stdio" or "ipc"
+	runID        string
+	sessionID    string
+	terminalSeen bool
+	lastRootSeq  uint64
 }
 
 func New(command string, args []string, version string, onEvent EventHandler, onRequest RequestHandler) *Client {
@@ -331,6 +335,8 @@ func (c *Client) replyPerRun(ctx context.Context, params methods.ReplyParams) (m
 			go c.releasePerRun(params.RunID, child)
 		}
 	}, c.onRequest)
+	child.runID = params.RunID
+	child.sessionID = params.Session.ID
 	c.mu.Lock()
 	if _, exists := c.perRuns[params.RunID]; exists {
 		c.mu.Unlock()
@@ -646,6 +652,14 @@ func (c *Client) handleNotification(line []byte, method string) {
 	if err := json.Unmarshal(note.Params, &event); err != nil {
 		return
 	}
+	c.mu.Lock()
+	if event.RootSeq > c.lastRootSeq {
+		c.lastRootSeq = event.RootSeq
+	}
+	if event.Agent.Role != events.AgentRoleSubAgent && (event.Type == events.EventFinish || event.Type == events.EventError) {
+		c.terminalSeen = true
+	}
+	c.mu.Unlock()
 	c.onEvent(event)
 }
 
@@ -656,7 +670,7 @@ func (c *Client) drainStderr(stderr io.Reader) {
 func (c *Client) wait(cmd *exec.Cmd) {
 	_ = cmd.Wait()
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var unexpected *events.Envelope
 	if c.cmd == cmd {
 		c.running = false
 		c.cmd = nil
@@ -669,5 +683,35 @@ func (c *Client) wait(cmd *exec.Cmd) {
 			delete(c.pending, id)
 			close(ch)
 		}
+		if c.runID != "" && !c.terminalSeen && c.onEvent != nil {
+			now := time.Now().UTC()
+			nextSeq := c.lastRootSeq + 1
+			unexpected = &events.Envelope{
+				ProtocolVersion: events.ProtocolVersion,
+				EventID:         fmt.Sprintf("evt_%s_runtime_exit_%d", c.runID, now.UnixNano()),
+				RootRunID:       c.runID,
+				RunID:           c.runID,
+				SessionID:       c.sessionID,
+				RootSeq:         nextSeq,
+				AgentSeq:        nextSeq,
+				Agent: events.AgentRef{
+					AgentID: "root",
+					Role:    events.AgentRoleRoot,
+					Path:    []string{"root"},
+					Name:    "root",
+				},
+				Type: events.EventError,
+				Payload: map[string]any{
+					"status":  "failed",
+					"message": "agent runtime process exited unexpectedly",
+				},
+				CreatedAt: now,
+			}
+			c.terminalSeen = true
+		}
+	}
+	c.mu.Unlock()
+	if unexpected != nil {
+		c.onEvent(*unexpected)
 	}
 }

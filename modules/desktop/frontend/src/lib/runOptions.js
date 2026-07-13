@@ -15,7 +15,6 @@ export const defaultRunSettings = {
   webTavilyApiKey: '',
   webHttpProxy: '',
   maxToolTurns: 12,
-  maxConcurrentRuns: 3,
   // When true, Agent Runtime writes each LLM request payload to local diagnostic logs.
   logLlmRequests: false,
 };
@@ -67,9 +66,6 @@ export function buildRunStartOptions(settings, workspace, text, overrides = {}) 
     web_http_proxy: String(current.webHttpProxy || '').trim(),
     max_tool_turns: Number.isFinite(Number(current.maxToolTurns))
       ? Number(current.maxToolTurns)
-      : 0,
-    max_concurrent_runs: Number.isFinite(Number(current.maxConcurrentRuns))
-      ? Number(current.maxConcurrentRuns)
       : 0,
     log_llm_requests: Boolean(current.logLlmRequests),
     require_permission: requirePermission,

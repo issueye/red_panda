@@ -188,11 +188,11 @@ func TestEffectiveSubagentToolTurnsUsesFileCountFormula(t *testing.T) {
 	if got := effectiveSubagentToolTurns(0, 0); got != defaultSubagentToolTurns {
 		t.Fatalf("empty inputs = %d, want default %d", got, defaultSubagentToolTurns)
 	}
-	if got := effectiveSubagentToolTurns(0, 120); got != 120+subagentSummaryTurns {
-		t.Fatalf("file_count formula = %d, want %d", got, 120+subagentSummaryTurns)
+	if got := effectiveSubagentToolTurns(0, 120); got != defaultSubagentMaxTurns {
+		t.Fatalf("file_count formula = %d, want hard cap %d", got, defaultSubagentMaxTurns)
 	}
-	if got := effectiveSubagentToolTurns(200, 120); got != 200 {
-		t.Fatalf("explicit max_turns should win, got %d", got)
+	if got := effectiveSubagentToolTurns(200, 120); got != defaultSubagentMaxTurns {
+		t.Fatalf("explicit max_turns = %d, want hard cap %d", got, defaultSubagentMaxTurns)
 	}
 	if got := recommendedSubagentTurns(1); got != 1+subagentSummaryTurns {
 		t.Fatalf("single file formula = %d", got)

@@ -31,6 +31,7 @@ func TestRunRecordProjectionDoesNotOverwriteStartMetadata(t *testing.T) {
 		SessionID:     "session_1",
 		WorkspaceRoot: "D:/workspace",
 		RuntimeMode:   "per_run_process",
+		RuntimeOwner:  "gateway-test-owner",
 		Status:        "running",
 		Input:         "/read README.md",
 		StartedAt:     started.Add(time.Millisecond),
@@ -52,7 +53,7 @@ func TestRunRecordProjectionDoesNotOverwriteStartMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.RuntimeMode != "per_run_process" || row.WorkspaceRoot != "D:/workspace" || row.Input != "/read README.md" {
+	if row.RuntimeMode != "per_run_process" || row.RuntimeOwner != "gateway-test-owner" || row.WorkspaceRoot != "D:/workspace" || row.Input != "/read README.md" {
 		t.Fatalf("start metadata was overwritten: %#v", row)
 	}
 	if row.Status != "completed" || row.LastRootSeq != 2 {

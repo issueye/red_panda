@@ -7,10 +7,12 @@ import (
 )
 
 type Options struct {
-	Version       string
-	Repos         repository.Set
-	Hub           *eventhub.Hub
-	RuntimeClient *runtimeclient.Client
+	Version        string
+	Repos          repository.Set
+	Hub            *eventhub.Hub
+	RuntimeClient  *runtimeclient.Client
+	ResourceBudget *ResourceBudget
+	ProviderBudget *ResourceBudget
 }
 
 type Set struct {
@@ -36,7 +38,7 @@ type AppService struct {
 func NewSet(opts Options) Set {
 	return Set{
 		App:        AppService{Version: opts.Version},
-		Run:        NewRunService(opts.Repos, opts.Hub, opts.RuntimeClient),
+		Run:        NewRunService(opts.Repos, opts.Hub, opts.RuntimeClient, opts.ResourceBudget, opts.ProviderBudget),
 		Workspace:  NewWorkspaceService(opts.Repos),
 		Session:    NewSessionService(opts.Repos, opts.RuntimeClient),
 		Memory:     NewMemoryService(opts.Repos),

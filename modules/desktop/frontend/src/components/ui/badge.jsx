@@ -23,7 +23,9 @@ const statusTone = {
   failed: 'danger',
   cancelled: 'danger',
   pending: 'warning',
+  queued: 'warning',
   running: 'info',
+  starting: 'info',
   resolved: 'success',
   waiting_permission: 'warning',
 };

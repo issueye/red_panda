@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -15,6 +17,39 @@ import (
 	protocolmcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 )
+
+func TestRuntimeClientHelperProcess(t *testing.T) {
+	if os.Getenv("RED_PANDA_RUNTIMECLIENT_HELPER") != "1" {
+		return
+	}
+	os.Exit(7)
+}
+
+func TestClientSynthesizesTerminalEventOnUnexpectedProcessExit(t *testing.T) {
+	received := make(chan events.Envelope, 1)
+	client := New("", nil, "test", func(event events.Envelope) {
+		received <- event
+	}, nil)
+	cmd := exec.Command(os.Args[0], "-test.run=TestRuntimeClientHelperProcess")
+	cmd.Env = append(os.Environ(), "RED_PANDA_RUNTIMECLIENT_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	client.cmd = cmd
+	client.running = true
+	client.runID = "run_crashed"
+	client.sessionID = "session_crashed"
+	client.wait(cmd)
+
+	select {
+	case event := <-received:
+		if event.Type != events.EventError || event.RootRunID != "run_crashed" || event.Payload["status"] != "failed" {
+			t.Fatalf("unexpected synthetic event: %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unexpected process exit did not emit a terminal event")
+	}
+}
 
 func TestClientReadStdoutAcceptsLargeToolEvent(t *testing.T) {
 	reader, writer := io.Pipe()

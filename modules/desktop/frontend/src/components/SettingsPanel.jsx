@@ -1328,14 +1328,6 @@ export function SettingsPanel({
             }
           />
           <SettingTextInput
-            label="最大并发会话运行数"
-            placeholder="3"
-            settings={settings}
-            settingKey="maxConcurrentRuns"
-            onUpdate={updateSetting}
-            tooltip="限制同时进行的会话任务数量（默认 3，上限 16）。同一会话内任务仍串行。"
-          />
-          <SettingTextInput
             label="工具允许列表"
             placeholder="workspace.read_file, workspace.list"
             settings={settings}

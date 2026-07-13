@@ -34,6 +34,7 @@ func (r RunRecordRepository) Start(run model.RunRecord) error {
 			"session_id":     run.SessionID,
 			"workspace_root": run.WorkspaceRoot,
 			"runtime_mode":   run.RuntimeMode,
+			"runtime_owner":  run.RuntimeOwner,
 			"status":         run.Status,
 			"input":          run.Input,
 			"started_at":     run.StartedAt,
@@ -98,6 +99,7 @@ func applyRunEventProjection(row *model.RunRecord, event events.Envelope, now ti
 	if event.Type == events.EventError && event.Agent.Role != events.AgentRoleSubAgent {
 		row.Status = firstNonEmpty(stringPayload(event.Payload, "status"), "failed")
 		row.Error = firstNonEmpty(stringPayload(event.Payload, "message"), row.Error)
+		row.FinishedAt = &now
 	}
 	if event.Type == events.EventFinish && event.Agent.Role != events.AgentRoleSubAgent {
 		row.Status = firstNonEmpty(stringPayload(event.Payload, "status"), "completed")

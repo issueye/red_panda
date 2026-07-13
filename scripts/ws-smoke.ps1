@@ -792,6 +792,16 @@ try {
     $poolSubAgentEvents = Wait-RunEvents $poolSubAgentWs { param($event) } "process pool subagent"
     Assert-ContainsSequence "process pool subagent" $poolSubAgentEvents @("subagent_update", "message_delta", "subagent_update", "finish")
     Assert-StrictlyIncreasingRootSeq "process pool subagent" $poolSubAgentEvents
+    $poolStatuses = @($poolSubAgentEvents | Where-Object {
+      $_.type -eq "subagent_update" -and $_.payload.backend -eq "process_pool"
+    } | ForEach-Object { [string]$_.payload.status })
+    $queuedIndex = [Array]::IndexOf($poolStatuses, "queued")
+    $startingIndex = [Array]::IndexOf($poolStatuses, "starting")
+    $runningIndex = [Array]::IndexOf($poolStatuses, "running")
+    $completedIndex = [Array]::IndexOf($poolStatuses, "completed")
+    if ($queuedIndex -lt 0 -or $startingIndex -le $queuedIndex -or $runningIndex -le $startingIndex -or $completedIndex -le $runningIndex) {
+      throw "process pool subagent lifecycle expected queued -> starting -> running -> completed, actual=$($poolStatuses -join ',')"
+    }
     $poolRunning = @($poolSubAgentEvents | Where-Object {
       $_.type -eq "subagent_update" -and $_.payload.status -eq "running" -and $_.payload.backend -eq "process_pool"
     })[0]

@@ -233,20 +233,132 @@ func TestResolveMaxConcurrentRuns(t *testing.T) {
 	if got := resolveMaxConcurrentRuns(nil); got != defaultMaxConcurrentRuns {
 		t.Fatalf("default = %d, want %d", got, defaultMaxConcurrentRuns)
 	}
-	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 5}); got != 5 {
-		t.Fatalf("option = %d, want 5", got)
+	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 5}); got != defaultMaxConcurrentRuns {
+		t.Fatalf("client option changed server limit: got %d, want %d", got, defaultMaxConcurrentRuns)
 	}
-	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 99}); got != maxConcurrentRunsCap {
-		t.Fatalf("capped option = %d, want %d", got, maxConcurrentRunsCap)
+	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 99}); got != defaultMaxConcurrentRuns {
+		t.Fatalf("client option bypassed server cap: got %d, want %d", got, defaultMaxConcurrentRuns)
 	}
 
 	t.Setenv("RED_PANDA_MAX_CONCURRENT_RUNS", "7")
 	if got := resolveMaxConcurrentRuns(nil); got != 7 {
 		t.Fatalf("env = %d, want 7", got)
 	}
-	// Per-run option still wins over env.
-	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 2}); got != 2 {
-		t.Fatalf("option over env = %d, want 2", got)
+	if got := resolveMaxConcurrentRuns(map[string]any{"max_concurrent_runs": 2}); got != 7 {
+		t.Fatalf("server env should override client option: got %d, want 7", got)
+	}
+}
+
+func TestRunServiceReconcilesStaleRunsOnStartup(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	now := time.Now().UTC()
+	if err := repos.Runs.Start(model.RunRecord{
+		ID: "run_stale", SessionID: "session_stale", RuntimeOwner: "gateway-previous", Status: "running", StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	budget := &ResourceBudget{
+		limit:  1,
+		active: map[string]string{"permit_stale": "run_stale"},
+	}
+	service := NewRunService(repos, eventhub.New(), nil, budget)
+	if err := repos.Runs.Start(model.RunRecord{
+		ID: "run_current", SessionID: "session_current", RuntimeOwner: service.runtimeOwner, Status: "running", StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ReconcileStaleRuns(); err != nil {
+		t.Fatal(err)
+	}
+	run, err := repos.Runs.Get("run_stale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "failed" || run.FinishedAt == nil || !strings.Contains(run.Error, "gateway restarted") {
+		t.Fatalf("stale run was not terminalized: %#v", run)
+	}
+	if active := budget.Status()["active"]; active != 0 {
+		t.Fatalf("stale worker permits remain active: %v", active)
+	}
+	current, err := repos.Runs.Get("run_current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != "running" {
+		t.Fatalf("current owner run was incorrectly reconciled: %#v", current)
+	}
+}
+
+func TestRunServiceTerminalEventReleasesRootResourcePermits(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	if err := repos.Runs.Start(model.RunRecord{
+		ID: "run_terminal_release", SessionID: "session_terminal_release", Status: "running", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	workerBudget := &ResourceBudget{limit: 2, active: map[string]string{"worker": "run_terminal_release"}}
+	providerBudget := &ResourceBudget{limit: 2, active: map[string]string{"provider": "run_terminal_release"}}
+	service := NewRunService(repos, eventhub.New(), nil, workerBudget, providerBudget)
+	event := events.Envelope{
+		EventID: "evt_runtime_exit", RootRunID: "run_terminal_release", RunID: "run_terminal_release",
+		SessionID: "session_terminal_release", RootSeq: 1,
+		Agent: events.AgentRef{AgentID: "root", Role: events.AgentRoleRoot},
+		Type:  events.EventError, Payload: map[string]any{"status": "failed", "message": "runtime exited"},
+		CreatedAt: time.Now().UTC(),
+	}
+	service.HandleRuntimeEvent(event)
+	service.HandleRuntimeEvent(event)
+	if workerBudget.Status()["active"] != 0 || providerBudget.Status()["active"] != 0 {
+		t.Fatalf("terminal event leaked permits: worker=%v provider=%v", workerBudget.Status(), providerBudget.Status())
+	}
+	run, err := repos.Runs.Get("run_terminal_release")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "failed" || run.FinishedAt == nil {
+		t.Fatalf("terminal event did not finish run: %#v", run)
+	}
+	active, err := repos.Runs.CountActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatalf("terminal Runtime exit did not release root admission slot: %d", active)
+	}
+	timeline, err := repos.RunEvents.ListAfter("run_terminal_release", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(timeline) != 1 {
+		t.Fatalf("terminal event persisted more than once: %d", len(timeline))
+	}
+}
+
+func TestRunServiceSnapshotsEnabledAndDisabledAgentDefinitions(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	agents := NewAgentDefinitionService(repos)
+	disabled := false
+	created, err := agents.Create(AgentDefinitionCreate{
+		Key: "custom-reviewer", Name: "Reviewer", SystemPrompt: "Review carefully",
+		ToolAllowlist: []string{"workspace.read_file"}, DefaultMaxTurns: 9, Enabled: &disabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := methods.ReplyParams{}
+	service := NewRunService(repos, eventhub.New(), nil)
+	if err := service.applyAgentDefinitions(&params); err != nil {
+		t.Fatal(err)
+	}
+	var found *methods.AgentDefinitionSnapshot
+	for index := range params.Options.AgentDefinitions {
+		if params.Options.AgentDefinitions[index].Key == created.Key {
+			found = &params.Options.AgentDefinitions[index]
+			break
+		}
+	}
+	if found == nil || found.Enabled || found.SystemPrompt != "Review carefully" || found.DefaultMaxTurns != 9 {
+		t.Fatalf("agent snapshot mismatch: %#v", found)
 	}
 }
 
@@ -323,7 +435,10 @@ func TestRunServiceStartRejectsWhenGlobalConcurrentLimitReached(t *testing.T) {
 }
 
 func TestRunServiceRuntimeStatusIncludesActiveRuns(t *testing.T) {
-	repos, service := newRunServiceTestFixture(t)
+	repos, _ := newRunServiceTestFixture(t)
+	workerBudget := newResourceBudget(6)
+	providerBudget := newResourceBudget(4)
+	service := NewRunService(repos, eventhub.New(), nil, workerBudget, providerBudget)
 	if err := repos.Runs.Start(model.RunRecord{
 		ID:        "run_status_1",
 		SessionID: "session_status",
@@ -338,6 +453,17 @@ func TestRunServiceRuntimeStatusIncludesActiveRuns(t *testing.T) {
 	}
 	if status["active_runs"] != int64(1) {
 		t.Fatalf("active_runs = %#v, want 1", status["active_runs"])
+	}
+	workerStatus, ok := status["worker_budget"].(map[string]any)
+	if !ok || workerStatus["limit"] != 6 || workerStatus["active"] != 0 {
+		t.Fatalf("worker budget status = %#v", status["worker_budget"])
+	}
+	providerStatus, ok := status["provider_budget"].(map[string]any)
+	if !ok || providerStatus["limit"] != 4 || providerStatus["active"] != 0 {
+		t.Fatalf("provider budget status = %#v", status["provider_budget"])
+	}
+	if status["runtime_owner"] != service.runtimeOwner || service.runtimeOwner == "" {
+		t.Fatalf("runtime owner status = %#v", status["runtime_owner"])
 	}
 }
 

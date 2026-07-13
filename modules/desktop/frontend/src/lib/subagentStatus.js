@@ -1,5 +1,7 @@
 /** Lifecycle statuses for subagents — never take tool call statuses (e.g. tool completed). */
 export const SUBAGENT_LIFECYCLE_STATUSES = new Set([
+  'queued',
+  'starting',
   'running',
   'completed',
   'failed',

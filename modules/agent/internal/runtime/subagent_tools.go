@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -18,6 +19,8 @@ const (
 	subagentSummaryTurns = 8
 	// Fallback only when neither max_turns nor file_count/path is provided.
 	defaultSubagentToolTurns = 16
+	defaultSubagentMaxTurns  = 48
+	defaultSubagentWallTime  = 10 * time.Minute
 )
 
 var subagentRunDenylist = []string{
@@ -54,13 +57,16 @@ func recommendedSubagentTurns(fileCount int) int {
 // Priority: explicit max_turns > file_count formula > default.
 // No hard maximum cap: turns scale with files being analyzed.
 func effectiveSubagentToolTurns(explicit int, fileCount int) int {
+	turns := defaultSubagentToolTurns
 	if explicit > 0 {
-		return explicit
+		turns = explicit
+	} else if fileCount > 0 {
+		turns = recommendedSubagentTurns(fileCount)
 	}
-	if fileCount > 0 {
-		return recommendedSubagentTurns(fileCount)
+	if turns > defaultSubagentMaxTurns {
+		return defaultSubagentMaxTurns
 	}
-	return defaultSubagentToolTurns
+	return turns
 }
 
 func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
@@ -77,7 +83,20 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	}
 	name = sanitizeSubagentName(name)
 	specialist, isSpecialist := lookupGoalSpecialist(name)
+	agentDefinition, hasAgentDefinition := agentDefinitionFor(paramsOptions(runCtx), name)
+	if hasAgentDefinition && !agentDefinition.Enabled {
+		return "", fmt.Errorf("agent %s is disabled", name)
+	}
+	if isSpecialist && len(paramsOptions(runCtx).AgentDefinitions) > 0 && !hasAgentDefinition {
+		return "", fmt.Errorf("goal specialist %s is disabled or unavailable", name)
+	}
+	if isSpecialist && hasAgentDefinition {
+		specialist = overrideGoalSpecialist(specialist, agentDefinition)
+	}
 	displayName := goalSpecialistDisplayName(name)
+	if hasAgentDefinition && strings.TrimSpace(agentDefinition.NameZH) != "" {
+		displayName = strings.TrimSpace(agentDefinition.NameZH)
+	}
 	if isSpecialist {
 		if err := r.validateGoalSpecialistPhase(runCtx.Reply.RunID, specialist); err != nil {
 			return "", err
@@ -95,17 +114,39 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	}
 	explicitTurns := intArg(call.Arguments, "max_turns", 0)
 	maxTurns := effectiveSubagentToolTurns(explicitTurns, fileCount)
+	if hasAgentDefinition && explicitTurns <= 0 && fileCount <= 0 && agentDefinition.DefaultMaxTurns > 0 {
+		maxTurns = agentDefinition.DefaultMaxTurns
+	}
 	// Goal phase specialists use role defaults when parent omitted budget.
 	if isSpecialist && explicitTurns <= 0 && fileCount <= 0 {
 		maxTurns = specialist.DefaultMaxTurns
 	}
+	if isSpecialist && specialist.CapMaxTurns > 0 && maxTurns > specialist.CapMaxTurns {
+		maxTurns = specialist.CapMaxTurns
+	}
+	workerMaxTurns := paramsOptions(runCtx).WorkerMaxTurns
+	if workerMaxTurns <= 0 {
+		workerMaxTurns = defaultSubagentMaxTurns
+	}
+	if maxTurns > workerMaxTurns {
+		maxTurns = workerMaxTurns
+	}
 
 	params := *runCtx.Reply
+	if !r.reserveWorkerFanOut(params.RunID, params.Options.WorkerMaxFanOut) {
+		return "", fmt.Errorf("worker fan-out limit %d reached", firstPositive(params.Options.WorkerMaxFanOut, 8))
+	}
 	subAgentID := fmt.Sprintf("worker_%s_%d", name, time.Now().UnixNano())
 	agentName := name
 	childRunID := params.RunID + ":subagent:" + subAgentID
-	childCtx, cancel := context.WithCancel(ctx)
+	wallTime := defaultSubagentWallTime
+	if params.Options.WorkerMaxWallMS > 0 {
+		wallTime = time.Duration(params.Options.WorkerMaxWallMS) * time.Millisecond
+	}
+	childCtx, cancel := context.WithTimeout(ctx, wallTime)
 	defer cancel()
+	startedAt := time.Now()
+	runningAt := startedAt
 
 	// Specialist workers always use the process pool so workers can be reused and reset.
 	backend := "process_pool"
@@ -115,15 +156,24 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	}
 
 	r.registerSubAgent(params, subAgentID, agentName, backend, cancel)
-	startSummary := "subagent started: " + truncateSummary(task, 80)
+	initialStatus := "starting"
+	startSummary := "subagent starting: " + truncateSummary(task, 80)
+	if backend == "process_pool" {
+		initialStatus = "queued"
+		startSummary = "subagent queued: " + truncateSummary(task, 80)
+	}
 	if isSpecialist {
-		startSummary = displayName + " 已启动: " + truncateSummary(task, 60)
+		if initialStatus == "queued" {
+			startSummary = displayName + " 已排队: " + truncateSummary(task, 60)
+		} else {
+			startSummary = displayName + " 正在启动: " + truncateSummary(task, 60)
+		}
 	}
 	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id":     subAgentID,
 		"name":            agentName,
 		"display_name":    displayName,
-		"status":          "running",
+		"status":          initialStatus,
 		"summary":         startSummary,
 		"backend":         backend,
 		"task":            task,
@@ -134,7 +184,31 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 		"goal_phase":      specialist.Phase,
 	})
 
-	child, release, err := r.acquireProcessSubAgent(childCtx, params, subAgentID, backend)
+	releasePermit, err := r.acquireWorkerPermit(childCtx, params, subAgentID)
+	if err != nil {
+		r.failWorkerSubAgent(params, subAgentID, agentName, backend, err)
+		return "", err
+	}
+	defer releasePermit()
+
+	child, release, err := r.acquireProcessSubAgent(childCtx, params, subAgentID, backend, func() {
+		startingSummary := "subagent starting: " + truncateSummary(task, 80)
+		if isSpecialist {
+			startingSummary = displayName + " 正在启动: " + truncateSummary(task, 60)
+		}
+		r.setSubAgentStatus(params.RunID, subAgentID, "starting", startingSummary)
+		_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
+			"subagent_id":     subAgentID,
+			"name":            agentName,
+			"display_name":    displayName,
+			"status":          "starting",
+			"summary":         startingSummary,
+			"backend":         backend,
+			"goal_specialist": isSpecialist,
+			"goal_phase":      specialist.Phase,
+			"queue_wait_ms":   time.Since(startedAt).Milliseconds(),
+		})
+	})
 	if err != nil {
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, err)
 		return "", err
@@ -145,6 +219,23 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 			release(reusable)
 		}
 	}()
+	runningSummary := "subagent running: " + truncateSummary(task, 80)
+	if isSpecialist {
+		runningSummary = displayName + " 正在执行: " + truncateSummary(task, 60)
+	}
+	r.setSubAgentStatus(params.RunID, subAgentID, "running", runningSummary)
+	runningAt = time.Now()
+	_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
+		"subagent_id":     subAgentID,
+		"name":            agentName,
+		"display_name":    displayName,
+		"status":          "running",
+		"summary":         runningSummary,
+		"backend":         backend,
+		"goal_specialist": isSpecialist,
+		"goal_phase":      specialist.Phase,
+		"queue_wait_ms":   runningAt.Sub(startedAt).Milliseconds(),
+	})
 
 	childTask := task
 	if scopePath != "" && !strings.Contains(strings.ToLower(task), strings.ToLower(scopePath)) {
@@ -172,11 +263,18 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	childParams.Options.SpawnSubAgents = false
 	childParams.Options.SubAgentBackend = ""
 	childParams.Options.ToolDenylist = appendUniqueStrings(childParams.Options.ToolDenylist, subagentRunDenylist...)
-	// Budget scales with directory file count; no artificial maximum (unless specialist cap).
+	// The file-derived budget is always clamped by the Gateway-owned worker cap.
 	childParams.Options.MaxToolTurns = maxTurns
+	if hasAgentDefinition && !isSpecialist {
+		maxTurns = applyAgentDefinition(&childParams, agentDefinition, task, maxTurns)
+	}
 
 	if isSpecialist {
 		maxTurns = applyGoalSpecialist(&childParams, specialist, task, maxTurns)
+	}
+	if maxTurns > workerMaxTurns {
+		maxTurns = workerMaxTurns
+		childParams.Options.MaxToolTurns = maxTurns
 	}
 
 	capture := &subagentRunCapture{
@@ -193,6 +291,11 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	})
 	if err != nil {
 		if childCtx.Err() != nil {
+			if errors.Is(childCtx.Err(), context.DeadlineExceeded) {
+				detail := fmt.Errorf("subagent wall-time budget exhausted after %s", wallTime)
+				r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
+				return "", detail
+			}
 			r.finishSubAgent(params.RunID, subAgentID, "cancelled", "subagent cancelled", childCtx.Err().Error())
 			_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
 				"subagent_id": subAgentID,
@@ -213,7 +316,10 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 		return "", detail
 	}
 
-	result := strings.TrimSpace(truncateToolOutput(capture.FinalText()))
+	result := strings.TrimSpace(capture.FinalText())
+	if capture.OutputTruncated {
+		result += "\n[truncated]"
+	}
 	if result == "" {
 		detail := capture.FailureError("subagent returned an empty final report")
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
@@ -237,16 +343,93 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 		doneSummary = displayName + " 已完成: " + truncateSummary(task, 60)
 	}
 	_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
-		"subagent_id":     subAgentID,
-		"name":            agentName,
-		"display_name":    displayName,
-		"status":          "completed",
-		"summary":         doneSummary,
-		"backend":         backend,
-		"goal_specialist": isSpecialist,
-		"goal_phase":      specialist.Phase,
+		"subagent_id":      subAgentID,
+		"name":             agentName,
+		"display_name":     displayName,
+		"status":           "completed",
+		"summary":          doneSummary,
+		"backend":          backend,
+		"goal_specialist":  isSpecialist,
+		"goal_phase":       specialist.Phase,
+		"elapsed_ms":       time.Since(startedAt).Milliseconds(),
+		"queue_wait_ms":    runningAt.Sub(startedAt).Milliseconds(),
+		"execution_ms":     time.Since(runningAt).Milliseconds(),
+		"max_turns":        maxTurns,
+		"tool_calls":       capture.ToolStarted,
+		"tool_finished":    capture.ToolFinished,
+		"tool_failed":      capture.ToolFailed,
+		"output_bytes":     capture.OutputBytes,
+		"output_truncated": capture.OutputTruncated,
 	})
 	return result, nil
+}
+
+func paramsOptions(runCtx ToolRunContext) methods.ReplyOptions {
+	if runCtx.Reply == nil {
+		return methods.ReplyOptions{}
+	}
+	return runCtx.Reply.Options
+}
+
+func agentDefinitionFor(options methods.ReplyOptions, name string) (methods.AgentDefinitionSnapshot, bool) {
+	key := normalizeGoalSpecialistKey(name)
+	for _, item := range options.AgentDefinitions {
+		if normalizeGoalSpecialistKey(item.Key) == key {
+			return item, true
+		}
+	}
+	return methods.AgentDefinitionSnapshot{}, false
+}
+
+func overrideGoalSpecialist(spec goalSpecialist, definition methods.AgentDefinitionSnapshot) goalSpecialist {
+	if strings.TrimSpace(definition.NameZH) != "" {
+		spec.NameZH = strings.TrimSpace(definition.NameZH)
+	}
+	if strings.TrimSpace(definition.Phase) != "" {
+		spec.Phase = strings.TrimSpace(definition.Phase)
+	}
+	if strings.TrimSpace(definition.SystemPrompt) != "" {
+		spec.SystemPrompt = strings.TrimSpace(definition.SystemPrompt)
+	}
+	if definition.DefaultMaxTurns > 0 {
+		spec.DefaultMaxTurns = definition.DefaultMaxTurns
+	}
+	if definition.ToolAllowlist != nil {
+		spec.Allowlist = append([]string(nil), definition.ToolAllowlist...)
+	}
+	if definition.ToolDenylist != nil {
+		spec.ExtraDenylist = append([]string(nil), definition.ToolDenylist...)
+	}
+	return spec
+}
+
+func applyAgentDefinition(child *methods.ReplyParams, definition methods.AgentDefinitionSnapshot, task string, maxTurns int) int {
+	if child == nil {
+		return maxTurns
+	}
+	if definition.DefaultMaxTurns > 0 && maxTurns <= 0 {
+		maxTurns = definition.DefaultMaxTurns
+	}
+	if maxTurns < 1 {
+		maxTurns = 1
+	}
+	child.Options.MaxToolTurns = maxTurns
+	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, definition.ToolDenylist...)
+	if len(definition.ToolAllowlist) > 0 {
+		if len(child.Options.ToolAllowlist) > 0 {
+			child.Options.ToolAllowlist = intersectStrings(child.Options.ToolAllowlist, definition.ToolAllowlist)
+		} else {
+			child.Options.ToolAllowlist = append([]string(nil), definition.ToolAllowlist...)
+		}
+	}
+	prompt := strings.TrimSpace(definition.SystemPrompt)
+	if prompt == "" {
+		prompt = fmt.Sprintf("You are a focused agent named %q.", definition.Key)
+	}
+	child.Options.MemoryContext = &methods.MemoryContext{
+		Context: fmt.Sprintf("%s\n\nAssigned task:\n%s\n\nTool-turn budget=%d. Return one final report.", prompt, task, maxTurns),
+	}
+	return maxTurns
 }
 
 // isUsableFinalText rejects provider fallback output that contains only
@@ -305,6 +488,8 @@ type subagentRunCapture struct {
 	ToolFinished      int
 	ToolFailed        int
 	RecoveredFallback bool
+	OutputBytes       int
+	OutputTruncated   bool
 
 	startedTools []string
 	failedTools  []string
@@ -344,14 +529,14 @@ func (c *subagentRunCapture) Observe(event events.Envelope) {
 		if recovered, _ := event.Payload["recovered"].(bool); recovered {
 			c.RecoveredFallback = true
 		}
-		c.message.WriteString(delta)
+		c.appendMessage(delta)
 	case events.EventMessage:
 		if text, ok := event.Payload["text"].(string); ok && text != "" {
 			c.MessageDeltas++
-			c.message.WriteString(text)
+			c.appendMessage(text)
 		} else if text, ok := event.Payload["message"].(string); ok && text != "" {
 			c.MessageDeltas++
-			c.message.WriteString(text)
+			c.appendMessage(text)
 		}
 	case events.EventReasoningDelta:
 		if delta, ok := event.Payload["delta"].(string); ok && delta != "" {
@@ -399,9 +584,27 @@ func (c *subagentRunCapture) Observe(event events.Envelope) {
 		}
 		// Some providers only put the final answer on finish.
 		if text, ok := event.Payload["text"].(string); ok && text != "" && c.message.Len() == 0 {
-			c.message.WriteString(text)
+			c.appendMessage(text)
 		}
 	}
+}
+
+func (c *subagentRunCapture) appendMessage(text string) {
+	if c == nil || text == "" {
+		return
+	}
+	c.OutputBytes += len(text)
+	remaining := maxToolOutputBytes - c.message.Len()
+	if remaining <= 0 {
+		c.OutputTruncated = true
+		return
+	}
+	if len(text) > remaining {
+		c.message.WriteString(text[:remaining])
+		c.OutputTruncated = true
+		return
+	}
+	c.message.WriteString(text)
 }
 
 func (c *subagentRunCapture) FinalText() string {

@@ -42,9 +42,15 @@ func Run(ctx context.Context, cfg Config) error {
 
 	hub := eventhub.New()
 	repos := repository.NewSet(db)
+	resourceBudget := service.NewResourceBudget()
+	providerBudget := service.NewProviderBudget()
 	var services service.Set
 	runtime := runtimeclient.New(agentCommand(cfg.AgentCommand), cfg.AgentArgs, cfg.Version, func(event events.Envelope) {
 		services.Run.HandleRuntimeEvent(event)
+		if event.Agent.Role != events.AgentRoleSubAgent && (event.Type == events.EventFinish || event.Type == events.EventError) {
+			resourceBudget.ReleaseRun(event.RootRunID)
+			providerBudget.ReleaseRun(event.RootRunID)
+		}
 	}, func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		switch method {
 		case methods.MemoryToolExecute:
@@ -65,16 +71,45 @@ func Run(ctx context.Context, cfg Config) error {
 				return nil, fmt.Errorf("invalid goal tool params")
 			}
 			return services.Goal.ExecuteRuntimeTool(req)
+		case methods.WorkerPermitAcquire:
+			var req methods.WorkerPermitParams
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, fmt.Errorf("invalid worker permit params")
+			}
+			return resourceBudget.Acquire(ctx, req)
+		case methods.WorkerPermitRelease:
+			var req methods.WorkerPermitParams
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, fmt.Errorf("invalid worker permit params")
+			}
+			return resourceBudget.Release(req), nil
+		case methods.ProviderPermitAcquire:
+			var req methods.WorkerPermitParams
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, fmt.Errorf("invalid provider permit params")
+			}
+			return providerBudget.Acquire(ctx, req)
+		case methods.ProviderPermitRelease:
+			var req methods.WorkerPermitParams
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, fmt.Errorf("invalid provider permit params")
+			}
+			return providerBudget.Release(req), nil
 		default:
 			return nil, fmt.Errorf("method not found: %s", method)
 		}
 	})
 	services = service.NewSet(service.Options{
-		Version:       cfg.Version,
-		Repos:         repos,
-		Hub:           hub,
-		RuntimeClient: runtime,
+		Version:        cfg.Version,
+		Repos:          repos,
+		Hub:            hub,
+		RuntimeClient:  runtime,
+		ResourceBudget: resourceBudget,
+		ProviderBudget: providerBudget,
 	})
+	if err := services.Run.ReconcileStaleRuns(); err != nil {
+		return fmt.Errorf("reconcile stale runs: %w", err)
+	}
 	controllers := controller.NewSet(services, hub)
 
 	router := NewRouter(cfg, controllers)

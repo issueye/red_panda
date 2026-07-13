@@ -90,12 +90,15 @@ func TestSubAgentProcessProxiesGatewayRequestAndReturnsResponse(t *testing.T) {
 	}
 }
 
-func TestSubAgentProcessCriticalEventWaitsForQueueSpace(t *testing.T) {
+func TestSubAgentProcessCriticalEventDoesNotBlockRPCReader(t *testing.T) {
 	process := &subAgentProcess{
 		events: make(chan events.Envelope, 1),
 		done:   make(chan struct{}),
 	}
-	process.events <- events.Envelope{Type: events.EventReasoningDelta}
+	process.startEventDispatcher()
+	for i := 0; i < cap(process.events); i++ {
+		process.events <- events.Envelope{Type: events.EventReasoningDelta}
+	}
 
 	delivered := make(chan struct{})
 	go func() {
@@ -105,19 +108,62 @@ func TestSubAgentProcessCriticalEventWaitsForQueueSpace(t *testing.T) {
 
 	select {
 	case <-delivered:
-		t.Fatal("critical event was dropped instead of waiting for queue space")
-	case <-time.After(20 * time.Millisecond):
+	case <-time.After(time.Second):
+		t.Fatal("critical event blocked the RPC reader")
 	}
 
 	<-process.events
-	select {
-	case <-delivered:
-	case <-time.After(time.Second):
-		t.Fatal("critical event was not delivered after queue space became available")
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		event := <-process.events
+		if event.Type == events.EventToolFinished {
+			select {
+			case duplicate := <-process.events:
+				if duplicate.Type == events.EventToolFinished {
+					t.Fatal("critical event was delivered more than once")
+				}
+			case <-time.After(20 * time.Millisecond):
+			}
+			return
+		}
 	}
-	if event := <-process.events; event.Type != events.EventToolFinished {
-		t.Fatalf("event type = %s, want tool_finished", event.Type)
+	t.Fatal("critical event was not delivered after queue space became available")
+}
+
+func TestSubAgentProcessCancelDeadlineIgnoresSaturatedEventQueue(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	go func() {
+		_, _ = io.Copy(io.Discard, reader)
+	}()
+	process := &subAgentProcess{
+		running: true,
+		stdin:   writer,
+		pending: map[jsonrpc.ID]chan jsonrpc.Response{},
+		events:  make(chan events.Envelope, 1),
+		done:    make(chan struct{}),
 	}
+	process.startEventDispatcher()
+	process.events <- events.Envelope{Type: events.EventReasoningDelta}
+	process.enqueueEvent(events.Envelope{Type: events.EventFinish})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := process.Cancel(ctx, "run_cancel_deadline", "test")
+	if err == nil {
+		t.Fatal("cancel unexpectedly succeeded without a Runtime response")
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("cancel exceeded bounded deadline: %s", elapsed)
+	}
+	process.mu.Lock()
+	running := process.running
+	process.mu.Unlock()
+	if running {
+		t.Fatal("timed-out cancel did not force the worker transport closed")
+	}
+	close(process.done)
 }
 
 func TestSubAgentProcessDropsOnlyHighFrequencyOptionalEvents(t *testing.T) {

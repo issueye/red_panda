@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/protocol/events"
@@ -18,18 +19,26 @@ func NewRunEventRepository(db *gorm.DB) RunEventRepository {
 }
 
 func (r RunEventRepository) Save(event events.Envelope) error {
+	_, err := r.SaveOnce(event)
+	return err
+}
+
+// SaveOnce persists one event ID and reports whether this call inserted it.
+// Duplicate transport delivery must not repeat projections or broadcasts.
+func (r RunEventRepository) SaveOnce(event events.Envelope) (bool, error) {
 	raw, err := json.Marshal(event)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return r.db.Create(&model.RunEvent{
+	result := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.RunEvent{
 		ID:          event.EventID,
 		RootRunID:   event.RootRunID,
 		RootSeq:     event.RootSeq,
 		Type:        string(event.Type),
 		PayloadJSON: string(raw),
 		CreatedAt:   event.CreatedAt,
-	}).Error
+	})
+	return result.RowsAffected == 1, result.Error
 }
 
 func (r RunEventRepository) ListAfter(rootRunID string, afterSeq uint64, limit int) ([]events.Envelope, error) {

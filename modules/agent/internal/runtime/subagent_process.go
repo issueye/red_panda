@@ -33,6 +33,10 @@ type subAgentProcess struct {
 	pending   map[jsonrpc.ID]chan jsonrpc.Response
 	nextID    uint64
 	events    chan events.Envelope
+	eventMu   sync.Mutex
+	eventOnce sync.Once
+	eventWake chan struct{}
+	eventQ    []events.Envelope
 	done      chan struct{}
 	running   bool
 }
@@ -59,8 +63,10 @@ func newSubAgentProcessWithRequestHandler(
 		onRequest: onRequest,
 		pending:   map[jsonrpc.ID]chan jsonrpc.Response{},
 		events:    make(chan events.Envelope, 256),
+		eventWake: make(chan struct{}, 1),
 		done:      make(chan struct{}),
 	}
+	child.startEventDispatcher()
 	if err := child.start(ctx); err != nil {
 		return nil, err
 	}
@@ -124,12 +130,29 @@ func (c *subAgentProcess) Start(ctx context.Context, childParams methods.ReplyPa
 }
 
 func (c *subAgentProcess) Cancel(ctx context.Context, runID string, reason string) error {
-	_, err := c.call(ctx, methods.AgentCancel, methods.CancelParams{RunID: runID, Reason: reason})
+	cancelCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	_, err := c.call(cancelCtx, methods.AgentCancel, methods.CancelParams{RunID: runID, Reason: reason})
+	if err != nil {
+		c.forceKill()
+	}
+	return err
+}
+
+func (c *subAgentProcess) Ping(ctx context.Context) error {
+	_, err := c.call(ctx, methods.CorePing, methods.PingParams{Nonce: "worker-health"})
 	return err
 }
 
 func (c *subAgentProcess) Close(ctx context.Context) error {
-	_, _ = c.call(ctx, methods.CoreShutdown, map[string]any{})
+	shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	_, _ = c.call(shutdownCtx, methods.CoreShutdown, map[string]any{})
+	cancel()
+	c.forceKill()
+	return nil
+}
+
+func (c *subAgentProcess) forceKill() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stdin != nil {
@@ -144,7 +167,6 @@ func (c *subAgentProcess) Close(ctx context.Context) error {
 		_ = c.cmd.Process.Kill()
 	}
 	c.running = false
-	return nil
 }
 
 // subAgentTransport mirrors gateway default: IPC unless explicitly forced to stdio.
@@ -375,19 +397,62 @@ func (c *subAgentProcess) handleNotification(line []byte, method string) {
 }
 
 func (c *subAgentProcess) enqueueEvent(event events.Envelope) {
-	if isDroppableSubAgentEvent(event.Type) {
-		select {
-		case c.events <- event:
-		default:
-		}
+	c.startEventDispatcher()
+	c.eventMu.Lock()
+	// Keep the stdout/RPC reader independent from event consumers. High-volume
+	// optional events may be dropped once the internal queue is saturated;
+	// lifecycle, tool terminal, error, and finish events are always retained.
+	if isDroppableSubAgentEvent(event.Type) && len(c.eventQ) >= 256 {
+		c.eventMu.Unlock()
 		return
 	}
-
-	// Lifecycle and final-message events must never disappear. Losing a
-	// tool_finished/tool_failed event leaves the parent UI permanently running.
+	c.eventQ = append(c.eventQ, event)
+	c.eventMu.Unlock()
 	select {
-	case c.events <- event:
-	case <-c.done:
+	case c.eventWake <- struct{}{}:
+	default:
+	}
+}
+
+func (c *subAgentProcess) startEventDispatcher() {
+	c.eventOnce.Do(func() {
+		if c.events == nil {
+			c.events = make(chan events.Envelope, 256)
+		}
+		if c.eventWake == nil {
+			c.eventWake = make(chan struct{}, 1)
+		}
+		if c.done == nil {
+			c.done = make(chan struct{})
+		}
+		go c.dispatchEvents()
+	})
+}
+
+func (c *subAgentProcess) dispatchEvents() {
+	for {
+		select {
+		case <-c.eventWake:
+		case <-c.done:
+			return
+		}
+		for {
+			c.eventMu.Lock()
+			if len(c.eventQ) == 0 {
+				c.eventMu.Unlock()
+				break
+			}
+			event := c.eventQ[0]
+			copy(c.eventQ, c.eventQ[1:])
+			c.eventQ[len(c.eventQ)-1] = events.Envelope{}
+			c.eventQ = c.eventQ[:len(c.eventQ)-1]
+			c.eventMu.Unlock()
+			select {
+			case c.events <- event:
+			case <-c.done:
+				return
+			}
+		}
 	}
 }
 

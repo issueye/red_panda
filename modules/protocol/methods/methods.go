@@ -3,25 +3,29 @@ package methods
 import protocolmcp "redpanda/protocol/mcp"
 
 const (
-	CoreInitialize      = "core.initialize"
-	CorePing            = "core.ping"
-	CoreShutdown        = "core.shutdown"
-	AgentTools          = "agent.tools"
-	AgentReply          = "agent.reply"
-	AgentCancel         = "agent.cancel"
-	AgentSubAgents      = "agent.subagents"
-	AgentSubAgentCancel = "agent.subagent.cancel"
-	AgentSkills         = "agent.skills"
-	AgentSkillLoad      = "agent.skill.load"
-	AgentSkillCreate    = "agent.skill.create"
-	AgentSkillUpdate    = "agent.skill.update"
-	AgentSkillDelete    = "agent.skill.delete"
-	MCPDiscover         = "mcp.discover"
-	PermissionResolve   = "permission.resolve"
-	AgentEvent          = "agent.event"
-	MemoryToolExecute   = "memory.tool.execute"
-	TodoToolExecute     = "todo.tool.execute"
-	GoalToolExecute     = "goal.tool.execute"
+	CoreInitialize        = "core.initialize"
+	CorePing              = "core.ping"
+	CoreShutdown          = "core.shutdown"
+	AgentTools            = "agent.tools"
+	AgentReply            = "agent.reply"
+	AgentCancel           = "agent.cancel"
+	AgentSubAgents        = "agent.subagents"
+	AgentSubAgentCancel   = "agent.subagent.cancel"
+	AgentSkills           = "agent.skills"
+	AgentSkillLoad        = "agent.skill.load"
+	AgentSkillCreate      = "agent.skill.create"
+	AgentSkillUpdate      = "agent.skill.update"
+	AgentSkillDelete      = "agent.skill.delete"
+	MCPDiscover           = "mcp.discover"
+	PermissionResolve     = "permission.resolve"
+	AgentEvent            = "agent.event"
+	MemoryToolExecute     = "memory.tool.execute"
+	TodoToolExecute       = "todo.tool.execute"
+	GoalToolExecute       = "goal.tool.execute"
+	WorkerPermitAcquire   = "worker.permit.acquire"
+	WorkerPermitRelease   = "worker.permit.release"
+	ProviderPermitAcquire = "provider.permit.acquire"
+	ProviderPermitRelease = "provider.permit.release"
 )
 
 type PeerInfo struct {
@@ -128,6 +132,38 @@ type ReplyOptions struct {
 	// LogLLMRequests writes each outbound provider request body to the local
 	// diagnostic log directory (API keys are never written). Toggle from Desktop settings.
 	LogLLMRequests bool `json:"log_llm_requests,omitempty"`
+	// WorkerPermitRequired makes every process-backed subagent reserve a
+	// Gateway-owned global worker slot before acquiring a local pool process.
+	WorkerPermitRequired   bool                      `json:"worker_permit_required,omitempty"`
+	ProviderPermitRequired bool                      `json:"provider_permit_required,omitempty"`
+	WorkerMaxTurns         int                       `json:"worker_max_turns,omitempty"`
+	WorkerMaxWallMS        int                       `json:"worker_max_wall_ms,omitempty"`
+	WorkerMaxFanOut        int                       `json:"worker_max_fan_out,omitempty"`
+	AgentDefinitions       []AgentDefinitionSnapshot `json:"agent_definitions,omitempty"`
+}
+
+type AgentDefinitionSnapshot struct {
+	Key             string   `json:"key"`
+	Name            string   `json:"name,omitempty"`
+	NameZH          string   `json:"name_zh,omitempty"`
+	Phase           string   `json:"phase,omitempty"`
+	SystemPrompt    string   `json:"system_prompt,omitempty"`
+	ToolAllowlist   []string `json:"tool_allowlist,omitempty"`
+	ToolDenylist    []string `json:"tool_denylist,omitempty"`
+	DefaultMaxTurns int      `json:"default_max_turns,omitempty"`
+	Enabled         bool     `json:"enabled"`
+	Builtin         bool     `json:"builtin,omitempty"`
+}
+
+type WorkerPermitParams struct {
+	PermitID  string `json:"permit_id"`
+	RootRunID string `json:"root_run_id"`
+	WorkerID  string `json:"worker_id"`
+}
+
+type WorkerPermitResult struct {
+	Granted bool  `json:"granted"`
+	WaitMS  int64 `json:"wait_ms,omitempty"`
 }
 
 type MemoryContext struct {

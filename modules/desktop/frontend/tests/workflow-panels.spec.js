@@ -9,11 +9,13 @@ test('Restored workflow panels render permissions tools and subagent actions', a
 
   await expect(page.getByTestId('tool-card')).toHaveCount(2);
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
-  await expect(readTool).toContainText('已完成');
-  await expect(readTool).toContainText('README.md loaded');
+  await expect(readTool).toHaveClass(/tool-completed/);
+  await readTool.getByTestId('tool-card-toggle').click();
+  await readTool.locator('.tool-detail-toggle').filter({ hasText: '输出' }).click();
+  await expect(readTool.getByTestId('tool-output')).toContainText('README.md loaded');
   const failedTool = page.getByTestId('tool-card').filter({ hasText: 'shell.exec' });
   await expect(failedTool).toContainText('Shell command');
-  await expect(failedTool).toContainText('失败');
+  await expect(failedTool).toHaveClass(/tool-failed/);
   await expect(failedTool).toContainText('exit status 1');
 
   await expect(page.getByTestId('permission-card')).toHaveCount(2);

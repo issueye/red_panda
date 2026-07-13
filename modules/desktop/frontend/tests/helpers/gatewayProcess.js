@@ -36,12 +36,42 @@ export async function startGateway(options = {}) {
   return {
     baseURL: `http://${gatewayAddr}`,
     repoRoot,
+    async killRuntimeProcesses() {
+      const runtimes = (await listManagedProcesses()).filter((item) => (
+        !processBaseline.has(item.pid) && isAgentProcess(item)
+      ));
+      if (runtimes.length === 0) {
+        throw new Error('no test Agent Runtime process is running');
+      }
+      await Promise.all(runtimes.map((item) => killManagedProcess(item.pid)));
+    },
     async stop() {
       await killProcessTree(child);
       await assertNoManagedProcessLeaks(processBaseline);
       await removeDatabase();
     },
   };
+}
+
+function isAgentProcess(item) {
+  const executable = String(item.executable || '').toLowerCase();
+  const command = String(item.command || '').toLowerCase();
+  const expected = agentExe.toLowerCase();
+  return executable === expected || command.includes(path.basename(expected));
+}
+
+async function killManagedProcess(pid) {
+  if (process.platform === 'win32') {
+    await runTaskkill(pid);
+    return;
+  }
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    if (error?.code !== 'ESRCH') {
+      throw error;
+    }
+  }
 }
 
 async function captureManagedProcessBaseline() {

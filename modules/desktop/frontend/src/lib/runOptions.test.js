@@ -61,7 +61,7 @@ test('buildRunStartOptions falls back to default web tuning', () => {
   assert.equal(options.web_http_proxy, '');
   assert.equal(options.max_tool_turns, 12);
   assert.equal(options.runtime_mode, 'per_run_process');
-  assert.equal(options.max_concurrent_runs, 3);
+  assert.equal(options.max_concurrent_runs, undefined);
   assert.equal(options.log_llm_requests, false);
   assert.equal(options.goals_enabled, false);
 });
@@ -87,13 +87,6 @@ test('buildRunStartOptions passes max tool turns', () => {
     maxToolTurns: '12',
   }, { root: 'D:/ws' }, 'use many tools');
   assert.equal(options.max_tool_turns, 12);
-});
-
-test('buildRunStartOptions passes max concurrent runs', () => {
-  const options = buildRunStartOptions({
-    maxConcurrentRuns: '5',
-  }, { root: 'D:/ws' }, 'parallel sessions');
-  assert.equal(options.max_concurrent_runs, 5);
 });
 
 test('buildRunStartOptions accepts create_goal overrides from command system', () => {

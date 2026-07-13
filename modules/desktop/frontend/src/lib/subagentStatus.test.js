@@ -48,6 +48,17 @@ describe('resolveSubAgentLifecycleStatus', () => {
     );
   });
 
+  it('accepts queued and starting lifecycle updates', () => {
+    assert.equal(
+      resolveSubAgentLifecycleStatus('subagent_update', { status: 'queued' }, undefined),
+      'queued',
+    );
+    assert.equal(
+      resolveSubAgentLifecycleStatus('subagent_update', { status: 'starting' }, 'queued'),
+      'starting',
+    );
+  });
+
   it('does not revive completed agents from late tool events', () => {
     assert.equal(
       resolveSubAgentLifecycleStatus('tool_finished', { status: 'completed' }, 'completed'),

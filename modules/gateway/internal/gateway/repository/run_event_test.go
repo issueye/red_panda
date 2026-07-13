@@ -60,3 +60,39 @@ func TestRunEventRepositoryListAfter(t *testing.T) {
 		t.Fatalf("root seqs = %d,%d; want 2,3", items[0].RootSeq, items[1].RootSeq)
 	}
 }
+
+func TestRunEventRepositorySaveOnceDeduplicatesEventID(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "events-dedupe.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.RunEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	repo := NewRunEventRepository(db)
+	event := events.Envelope{
+		ProtocolVersion: events.ProtocolVersion,
+		EventID:         "evt_once", RootRunID: "run_once", RunID: "run_once", RootSeq: 1,
+		Type: events.EventFinish, Payload: map[string]any{"status": "completed"}, CreatedAt: time.Now().UTC(),
+	}
+	inserted, err := repo.SaveOnce(event)
+	if err != nil || !inserted {
+		t.Fatalf("first SaveOnce = inserted %v, err %v", inserted, err)
+	}
+	inserted, err = repo.SaveOnce(event)
+	if err != nil || inserted {
+		t.Fatalf("duplicate SaveOnce = inserted %v, err %v", inserted, err)
+	}
+	items, err := repo.ListAfter("run_once", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("persisted duplicate events: %d", len(items))
+	}
+}

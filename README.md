@@ -51,6 +51,7 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 - [v0.1.3 Development Plan](docs/24-v0.1.3-development-plan.md)
 - [v0.1.4 Development Plan](docs/25-v0.1.4-development-plan.md)
 - [v0.1.5 Development Plan](docs/26-v0.1.5-development-plan.md)
+- [Worker Mode Optimization Plan](docs/35-worker-mode-optimization-plan.md)
 
 ## Current Running Loop
 
@@ -58,7 +59,7 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 2. Gateway finds `bin/red-panda-agent.exe` by default, or uses `RED_PANDA_AGENT_COMMAND`.
 3. Desktop or an external client connects to `ws://127.0.0.1:17888/api/v1/ws`.
 4. Client sends `run.start`; options may include `runtime_mode`, `tool_policy`, `permission_mode`, `spawn_subagents`, `subagent_backend`, `model`, `provider_profile_id`, `tool_allowlist`, and `tool_denylist`.
-5. Gateway calls `agent.reply` over stdio JSON-RPC. The default `runtime_mode` is `single_core`; `runtime_mode=per_run_process` starts a dedicated `red-panda-agent` process for that root run. When `provider_profile_id` is present, Gateway resolves the profile and sends the provider, model, base URL, and API key to Runtime for that run.
+5. Gateway calls `agent.reply` over stdio JSON-RPC. The default `runtime_mode` is `per_run_process`; `single_core` remains available when explicitly selected. Gateway owns the root-run admission ceiling. When `provider_profile_id` is present, Gateway resolves the profile and sends the provider, model, base URL, and API key to Runtime for that run.
 6. Agent Runtime emits `agent.event`.
 7. Gateway writes events to SQLite and broadcasts WebSocket `run.event`.
 8. New clients can use `run.resume` and `root_seq` to replay events.
@@ -78,12 +79,12 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 - `workspace.apply_patch`: high-risk workspace-scoped unified patch application with `patch`. It uses the existing permission and tool policy flow before writing.
 - `skill.create` / `skill.update`: high-risk managed skill-definition writes under `<workspace>/.codex/skills/<name>/SKILL.md`. Create never overwrites an existing skill; update never creates a missing skill. Names, sizes, directory boundaries, and symlink escape are validated before writing.
 - `skill.run`: high-risk synchronous tool that always loads the named skill in a fresh `runtime_process` subagent. The child receives no root conversation or root memory, sees the skill as isolated system context, cannot recursively run/manage skills, and is limited to read-only workspace tools. Only its final message becomes the root tool result.
-- Skill context boundary: subagent messages remain persisted for Desktop/audit display but are excluded before the 200-message root conversation limit and ignored defensively by the Provider. Automatic skill discovery and `agent.skills` / `agent.skill.load` request handling are not implemented yet.
+- Skill context boundary: subagent messages remain persisted for Desktop/audit display but are excluded before the 200-message root conversation limit and ignored defensively by the Provider. Managed skill discovery and `agent.skills` / `agent.skill.load` / create / update / delete request handling are implemented; automatic skill selection remains out of scope.
 - Tool policy: `tool_policy`, `tool_allowlist`, `tool_denylist`, `permission_mode`.
 - Desktop SettingsPanel: exposes runtime options for `runtime_mode`, `tool_policy`, `permission_mode`, `spawn_subagents`, `subagent_backend`, `model`, `tool_allowlist`, and `tool_denylist`, and can list, select, create, update, and delete Gateway provider profiles. It keeps only masked API key state in Desktop and sends the selected `provider_profile_id` as a WebSocket `run.start` option to Gateway.
 - MCP configuration backend: protocol DTOs and Gateway CRUD APIs persist and validate server name, command, args, env, cwd, enabled state, timeouts, raw tool allowlists, and risk overrides. Responses mask sensitive environment values, and config validation never executes commands.
 - Desktop MCP configuration management: Settings can list, create, edit, enable/disable, and delete Gateway MCP server records. Arguments use one line per argv entry, normalized timeouts are retained, and partial updates do not resend omitted masked environment fields.
-- MCP execution boundary: no MCP server process is started by the current running loop; MCP initialize, `tools/list`, Runtime tool registration, permission integration, `tools/call`, cancellation, and restart handling are not implemented.
+- MCP execution boundary: read-only discovery starts an enabled MCP stdio server for `initialize` and `tools/list`, then always cleans it up. Provider-facing Runtime tool registration, permission integration, `tools/call`, cancellation, and restart handling are not implemented.
 - Gateway projections: `run_records`, `tool_calls`, `permission_requests`, and persisted run event timeline.
 - HTTP queries: session history, workspace tree/file/diff, run status, run event timeline, tool audit, permission records, global pending permissions.
 - Desktop restore: messages, tool cards, pending permissions, active run, latest `root_seq`, RunActivityPanel timeline state, and global pending approval queue.
@@ -95,6 +96,11 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 - Runtime process command override: `RED_PANDA_SUBAGENT_COMMAND` can override the child `red-panda-agent` command.
 - Runtime process pool subagent lifecycle: with `subagent_backend=process_pool`, the parent Runtime keeps a reusable pool of child `red-panda-agent` processes. Successful child runs return the child to the pool; cancelled or failed child runs close and discard that child process.
 - Runtime process pool size: `RED_PANDA_SUBAGENT_POOL_SIZE` controls the reusable child pool size. The default is `2`; values above `8` are capped at `8`.
+- Worker ordering and lifecycle: ordinary tools preserve provider order and act as barriers; only adjacent `subagent.run` calls execute concurrently. Process-pool workers use FIFO admission and publish `queued`, `starting`, `running`, and terminal states.
+- Global resource governance: Gateway owns root-run, worker-process, and provider-request limits. Client `run.start` options cannot raise those ceilings, including under `per_run_process`.
+- Worker recovery and cancellation: run records persist their Gateway Runtime owner; prior-owner active runs are reconciled at startup, unexpected Runtime exits write failed terminal records and release residual permits, pooled workers are pinged before reuse, and cancel/shutdown escalate to force-kill within bounded deadlines.
+- Worker cost policy: general workers have hard turn, wall-time, 64 KiB captured-output, and per-root fan-out limits. Completion events report queue wait, execution/elapsed time, effective turn cap, tool counts, observed output bytes, and whether output was truncated.
+- Agent definitions: Gateway snapshots all definitions at admission, and Runtime enforces disabled agents, custom prompts, tool allowlists/denylists, and default turn limits.
 - Runtime process subagent failure handling: child creation/start failures emit failed `subagent_update` events on the parent root-run stream and keep root sequencing ordered.
 - Gateway root-run runtime mode: `run.start` options can specify `runtime_mode=per_run_process` to start a dedicated `red-panda-agent` process for the root run. Events still enter the same WebSocket/projection stream, and Gateway shuts down and removes the per-run client after the run finishes. `single_core` remains the default.
 - Gateway provider profile backend: HTTP CRUD APIs under `/api/v1/provider-profiles` persist OpenAI-compatible provider profiles with name, provider, base URL, model, default flag, active flag, masked API key state, and timestamps. Create/update may accept `api_key`, but responses never return the raw key; they expose `api_key_set` and a masked value only. `run.start` can pass `provider_profile_id`, which Gateway resolves into a per-run provider override for Runtime.
@@ -165,6 +171,23 @@ powershell -ExecutionPolicy Bypass -File scripts\protocol-compat.ps1
 Frontend automation under `modules\desktop\frontend` includes focused Playwright UI fixture coverage for restore, permissions, tool cards, subagents, and Activity timeline event filters, grouped summaries, and payload inspection. It continues to run through `npm run test:ui`.
 
 Gateway-backed browser e2e coverage uses the same Playwright entry point with the `@gateway-backed` filter. The test expects `bin\red-panda-gateway.exe` and `bin\red-panda-agent.exe` to exist, starts the real Gateway/Runtime pair on an isolated test port, points the Vite frontend at the Gateway through the built-in dev proxy, sends `/read README.md` through HTTP/WebSocket from the browser, verifies the resulting message, tool card, and Activity timeline entries, verifies inactive provider profile UI failure handling, verifies denied permission/tool rendering, verifies pending permission run cancellation, verifies `runtime_process` subagent startup failure visibility, verifies running subagent cancellation, and verifies reconnect/resume after a permission-gated run finishes while the browser is disconnected. Teardown cleans up the Gateway process tree and fails if newly created Gateway/Agent processes remain.
+
+## Worker Resource Configuration
+
+Gateway and Runtime apply bounded defaults when these variables are omitted or invalid:
+
+| Variable | Default | Maximum | Purpose |
+| --- | ---: | ---: | --- |
+| `RED_PANDA_MAX_CONCURRENT_RUNS` | 3 | 16 | Gateway-wide active root-run admission |
+| `RED_PANDA_MAX_WORKERS` | 6 | 64 | Gateway-wide active worker permits |
+| `RED_PANDA_MAX_PROVIDER_REQUESTS` | 4 | 32 | Gateway-wide provider request permits |
+| `RED_PANDA_WORKER_MAX_TURNS` | 48 | 128 | Tool turns allowed for one general worker |
+| `RED_PANDA_WORKER_MAX_WALL_MS` | 600000 | 3600000 | Worker wall-time deadline in milliseconds |
+| `RED_PANDA_WORKER_MAX_FAN_OUT` | 8 | 64 | Workers admitted under one root run |
+
+`RED_PANDA_SUBAGENT_POOL_SIZE` still controls each Runtime's reusable local process pool (default 2, maximum 8), but every actual worker also requires a Gateway global permit. Desktop does not send or override server concurrency limits.
+
+Worker final-report capture has a fixed 64 KiB memory bound. Larger reports are truncated before they can accumulate unboundedly and are returned with a truncation marker.
 
 ## HTTP API Summary
 
