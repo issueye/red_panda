@@ -143,6 +143,9 @@ type ReplyOptions struct {
 	// SpecialistContext is role/brief system text for subagents, goal specialists,
 	// and skill runners. It is NOT long-term memory — use MemoryContext for that.
 	SpecialistContext *SpecialistContext `json:"specialist_context,omitempty"`
+	// MCPServers is the Gateway-enabled MCP config snapshot for this reply (docs/36 D2).
+	// Runtime discovers tools and dispatches tools/call; Gateway never starts MCP processes.
+	MCPServers []protocolmcp.MCPServerConfig `json:"mcp_servers,omitempty"`
 }
 
 // AgentDefinitionRef is a compact specialist profile attached to agent.reply.

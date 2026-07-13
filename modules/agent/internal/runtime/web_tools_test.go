@@ -359,12 +359,25 @@ func TestNewWebHTTPClientRejectsInvalidProxy(t *testing.T) {
 }
 
 func TestAnnotateWebErrorMentionsMissingProxy(t *testing.T) {
+	// proxyLabel("") peeks process env; isolate so developer proxies cannot flip the branch.
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
+		t.Setenv(key, "")
+	}
 	err := annotateWebError(fmt.Errorf(`Post "https://html.duckduckgo.com/html/": net/http: TLS handshake timeout`), "")
 	if err == nil || !strings.Contains(err.Error(), "proxy=none") {
 		t.Fatalf("expected proxy=none annotation, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "未使用代理") {
 		t.Fatalf("expected Chinese hint, got %v", err)
+	}
+}
+
+func TestAnnotateWebErrorMentionsConfiguredEnvProxy(t *testing.T) {
+	// On Windows env keys are case-insensitive; set one and do not clear aliases afterward.
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+	err := annotateWebError(fmt.Errorf(`Post "https://html.duckduckgo.com/html/": net/http: TLS handshake timeout`), "")
+	if err == nil || !strings.Contains(err.Error(), "proxy=env") {
+		t.Fatalf("expected proxy=env annotation, got %v", err)
 	}
 }
 

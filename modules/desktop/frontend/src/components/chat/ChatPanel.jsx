@@ -33,6 +33,7 @@ export function ChatPanel({
   onCloseConversationTab,
   subAgents = [],
   goal = null,
+  goalSessionId = '',
   goalExpanded = false,
   goalLoading = false,
   goalBusy = false,
@@ -136,6 +137,7 @@ export function ChatPanel({
         goalBusy={goalBusy}
         goalExpanded={goalExpanded}
         goalLoading={goalLoading}
+        goalSessionId={goalSessionId}
         messages={scoped.messages}
         onCancel={onCancel}
         onDraftChange={onDraftChange}

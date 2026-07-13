@@ -8,8 +8,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"redpanda/protocol/events"
+	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
@@ -226,5 +228,187 @@ func TestBoundGoalSuppressesProviderStreamFinal(t *testing.T) {
 	}
 	if event.Stream == nil || event.Stream.Final {
 		t.Fatalf("intermediate Goal segment closed root stream: %#v", event.Stream)
+	}
+}
+
+// TestBoundGoalMultiSegmentSingleRootFinalAndFinish locks A5 stream semantics:
+// intermediate segments must not close the root message stream; exactly one
+// root message_delta with final=true and exactly one root finish close the run.
+func TestBoundGoalMultiSegmentSingleRootFinalAndFinish(t *testing.T) {
+	provider := &stickyToolProvider{}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	// Multi-segment runs emit many notifications; keep the channel large so the
+	// producer never blocks on a full buffer before the consumer drains finish.
+	lines := make(chan []byte, 512)
+	go readJSONLines(t, reader, lines)
+
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	rt.provider = provider
+
+	runID := "run_goal_stream_final"
+	sendRequest(t, context.Background(), rt, jsonrpc.ID("reply_"+runID), methods.AgentReply, methods.ReplyParams{
+		RunID: runID,
+		Session: methods.ReplySession{
+			ID:         "session_goal_stream_final",
+			WorkingDir: t.TempDir(),
+		},
+		Input: methods.ReplyInput{Text: "long goal multi-segment"},
+		Options: methods.ReplyOptions{
+			MaxToolTurns: 1,
+			// Keep event volume low; A5 cares about message_delta.final + finish.
+			EmitToolEvents: false,
+			GoalID:         "goal_stream_final",
+			GoalContext: &methods.GoalContext{
+				GoalID:            "goal_stream_final",
+				Objective:         "exercise multi-segment final ordering",
+				SuccessCriteria:   "one root final",
+				Status:            "active",
+				MaxSegmentsPerRun: 3,
+				MaxTotalToolTurns: 3,
+				MaxToolTurnsSeg:   1,
+			},
+		},
+	})
+	waitForResponse(t, lines, jsonrpc.ID("reply_"+runID))
+	runEvents := waitForEventsUntilFinishTimeout(t, lines, 10*time.Second)
+
+	var messageFinals int
+	var finishes int
+	var sawMessageAfterFinal bool
+	var finalSeen bool
+	var streamID string
+	for _, event := range runEvents {
+		if event.Type == events.EventFinish {
+			finishes++
+			if event.RunID != runID || event.RootRunID != runID {
+				t.Fatalf("finish not scoped to root run: %#v", event)
+			}
+			continue
+		}
+		if event.Type != events.EventMessageDelta {
+			continue
+		}
+		if event.Stream == nil {
+			t.Fatalf("message_delta missing stream: %#v", event)
+		}
+		if streamID == "" {
+			streamID = event.Stream.StreamID
+		} else if event.Stream.StreamID != streamID {
+			t.Fatalf("root message stream id changed mid-run: %q -> %q", streamID, event.Stream.StreamID)
+		}
+		if finalSeen {
+			sawMessageAfterFinal = true
+		}
+		if event.Stream.Final {
+			messageFinals++
+			finalSeen = true
+		}
+	}
+	if provider.completes.Load() < 3 {
+		t.Fatalf("provider completes = %d, want multi-segment (>=3)", provider.completes.Load())
+	}
+	if messageFinals != 1 {
+		t.Fatalf("root message final count = %d, want exactly 1 across multi-segment run", messageFinals)
+	}
+	if finishes != 1 {
+		t.Fatalf("root finish count = %d, want exactly 1", finishes)
+	}
+	if sawMessageAfterFinal {
+		t.Fatal("message_delta emitted after root final=true")
+	}
+	if !finalSeen {
+		t.Fatal("expected root stream final before finish")
+	}
+}
+
+// TestUnboundRunAllowsProviderStreamFinal ensures A5 does not break normal chat:
+// unbound single-segment runs still close the message stream from the provider path.
+func TestUnboundRunAllowsProviderStreamFinal(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	lines := make(chan []byte, 32)
+	go readJSONLines(t, reader, lines)
+
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	rt.provider = &textOnlyFinalProvider{text: "hello unbound"}
+
+	runID := "run_unbound_final"
+	sendRequest(t, context.Background(), rt, jsonrpc.ID("reply_"+runID), methods.AgentReply, methods.ReplyParams{
+		RunID: runID,
+		Session: methods.ReplySession{
+			ID:         "session_unbound_final",
+			WorkingDir: t.TempDir(),
+		},
+		Input:   methods.ReplyInput{Text: "hi"},
+		Options: methods.ReplyOptions{MaxToolTurns: 1},
+	})
+	waitForResponse(t, lines, jsonrpc.ID("reply_"+runID))
+	runEvents := waitForEventsUntilFinish(t, lines)
+
+	var messageFinals int
+	for _, event := range runEvents {
+		if event.Type == events.EventMessageDelta && event.Stream != nil && event.Stream.Final {
+			messageFinals++
+		}
+	}
+	if messageFinals != 1 {
+		t.Fatalf("unbound message final count = %d, want 1", messageFinals)
+	}
+}
+
+// textOnlyFinalProvider emits a single text chunk closed with Final=true.
+type textOnlyFinalProvider struct {
+	text string
+}
+
+func (*textOnlyFinalProvider) Name() string { return "text-only-final" }
+
+func (p *textOnlyFinalProvider) Complete(_ context.Context, _ ProviderRequest, emit func(ProviderChunk) error) error {
+	_ = emit(ProviderChunk{Delta: p.text})
+	return emit(ProviderChunk{Final: true})
+}
+
+// waitForEventsUntilFinishTimeout is like waitForEventsUntilFinish but allows
+// multi-segment Goal runs that spend time on soft segment_end RPC timeouts.
+func waitForEventsUntilFinishTimeout(t *testing.T, lines <-chan []byte, timeout time.Duration) []events.Envelope {
+	t.Helper()
+	var items []events.Envelope
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-deadline:
+			types := make([]string, 0, len(items))
+			for _, event := range items {
+				types = append(types, string(event.Type))
+			}
+			t.Fatalf("timed out waiting for finish event after %s; saw %v", timeout, types)
+		case raw := <-lines:
+			var probe struct {
+				Method string `json:"method"`
+			}
+			if err := json.Unmarshal(raw, &probe); err != nil {
+				t.Fatal(err)
+			}
+			if probe.Method != methods.AgentEvent {
+				continue
+			}
+			var note jsonrpc.Notification
+			if err := json.Unmarshal(raw, &note); err != nil {
+				t.Fatal(err)
+			}
+			var event events.Envelope
+			if err := json.Unmarshal(note.Params, &event); err != nil {
+				t.Fatal(err)
+			}
+			items = append(items, event)
+			if event.Type == events.EventFinish {
+				return items
+			}
+		}
 	}
 }

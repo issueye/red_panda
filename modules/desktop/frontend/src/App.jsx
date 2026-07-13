@@ -15,18 +15,16 @@ import { WorkspacePanel } from './components/WorkspacePanel.jsx';
 import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
 import { useGatewayResources } from './hooks/useGatewayResources.js';
+import { useGoalSession } from './hooks/useGoalSession.js';
+import { useSessionActions } from './hooks/useSessionActions.js';
+import {
+  INITIAL_BOOTSTRAP_SESSION_ID,
+  useSessionBootstrap,
+} from './hooks/useSessionBootstrap.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { apiJson, gatewayBase } from './lib/api.js';
-import {
-  goalShouldAutoContinue,
-  normalizeGoalList,
-  pickFocusGoal,
-} from './lib/goals.js';
-import { selectDirectory } from './lib/desktopShell.js';
-import { displayRuntimeMode, displaySessionKind, displayStatus } from './lib/displayLabels.js';
-import { appendDiagnosticLog } from './lib/diagnosticLog.js';
-import { parseCommand } from './lib/commands.js';
-import { buildRunStartOptions, defaultRunSettings } from './lib/runOptions.js';
+import { displayRuntimeMode, displayStatus } from './lib/displayLabels.js';
+import { defaultRunSettings } from './lib/runOptions.js';
 import { isRootTerminalRunEvent } from './lib/runEventLifecycle.js';
 import { reduceRunEvent, upsertByID } from './lib/reduceRunEvent.js';
 import {
@@ -39,17 +37,9 @@ import {
   resolveEventSessionId,
 } from './lib/sessionRuntime.js';
 import {
-  countOpenTodos,
-  normalizeTodo,
-} from './lib/todos.js';
-import {
   estimateEffectiveSessionTokens,
   tokenBudgetState,
 } from './lib/tokenBudget.js';
-
-const initialSessions = [
-  { id: 'local-design', title: '架构', subtitle: '本地任务与子代理' },
-];
 
 const initialMessages = [
   {
@@ -105,130 +95,19 @@ function loadRightPanelWidth() {
   }
 }
 
-function normalizeSession(session) {
-  const kind = session.kind && session.kind !== 'normal' ? session.kind : '';
-  const workspaceRoot = session.workspace_root || session.working_dir || '';
-  const detail = workspaceRoot || displayStatus(session.status || 'active');
-  const kindLabel = displaySessionKind(kind);
-  return {
-    id: session.id,
-    title: session.title || session.name || session.id,
-    subtitle: kind ? `${kindLabel || kind} - ${detail}` : detail,
-    kind,
-    parentId: session.parent_id || '',
-    workspaceRoot,
-  };
-}
-
-function normalizeWorkspace(item) {
-  if (!item) return null;
-  return {
-    id: item.id,
-    root: item.root || item.root_path || '',
-    root_path: item.root_path || item.root || '',
-    name: item.name || '',
-    lastOpenedAt: item.last_opened_at,
-  };
-}
-
-function normalizeHistoryMessage(message) {
-  const firstText = Array.isArray(message.content)
-    ? message.content.find((item) => item.type === 'text')?.text
-    : '';
-  return {
-    id: message.id,
-    role: message.role === 'user' ? 'user' : 'assistant',
-    agent: message.role === 'subagent' ? 'subagent' : message.role,
-    messageSeq: message.seq || 0,
-    runId: message.run_id || '',
-    createdAt: message.created_at,
-    text: firstText || '',
-  };
-}
-
-function normalizeToolCall(item) {
-  return {
-    id: item.id,
-    rootRunId: item.root_run_id,
-    name: item.tool_name || 'tool',
-    displayName: item.display_name || item.tool_name || '工具',
-    risk: item.risk || 'low',
-    arguments: item.arguments || {},
-    status: item.status || 'running',
-    output: item.output || '',
-    error: item.error || '',
-    durationMs: item.duration_ms,
-    startedSeq: item.started_seq || 0,
-    rootSeq: item.finished_seq || item.started_seq || 0,
-    startedAt: item.started_at,
-  };
-}
-
-function normalizeRun(item) {
-  return {
-    id: item.id,
-    sessionId: item.session_id,
-    workspaceRoot: item.workspace_root || '',
-    runtimeMode: item.runtime_mode || 'single_core',
-    status: item.status || 'unknown',
-    input: item.input || '',
-    lastEventType: item.last_event_type || '',
-    lastRootSeq: item.last_root_seq || 0,
-    messageCount: item.message_count || 0,
-    toolCount: item.tool_count || 0,
-    error: item.error || '',
-    startedAt: item.started_at,
-    finishedAt: item.finished_at,
-    updatedAt: item.updated_at,
-  };
-}
-
-function normalizePermission(item) {
-  return {
-    id: item.id,
-    runId: item.run_id,
-    status: item.status || 'pending',
-    decision: item.decision || '',
-    summary: item.summary || '需要授权',
-    detail: item.detail || item.tool_name || '系统正在等待处理决定。',
-    risk: item.risk,
-    toolName: item.tool_name,
-    arguments: item.arguments || {},
-    rootSeq: item.root_seq || 0,
-    createdAt: item.created_at,
-  };
-}
-
 function subagentConversationTabId(subagentId) {
   return `sub:${subagentId}`;
 }
 
-function latestActiveRun(runs) {
-  if (!Array.isArray(runs)) return null;
-  return runs
-    .filter((item) => item.status === 'running' || item.status === 'waiting_permission')
-    .sort((a, b) => new Date(b.updated_at || b.started_at || 0) - new Date(a.updated_at || a.started_at || 0))[0] || null;
-}
-
-function latestRootSeq(runs, fallback) {
-  if (!Array.isArray(runs)) return fallback;
-  return runs.reduce((max, item) => Math.max(max, item.last_root_seq || 0), fallback);
-}
-
 export function App() {
   const dialog = useDialog();
-  const [sessions, setSessions] = useState(initialSessions);
-  const [currentSessionId, setCurrentSessionId] = useState('local-design');
   const [sessionRuntimes, setSessionRuntimes] = useState(() => ({
-    'local-design': createEmptySessionRuntime({
+    [INITIAL_BOOTSTRAP_SESSION_ID]: createEmptySessionRuntime({
       messages: initialMessages,
       hydrated: true,
     }),
   }));
-  const [workspace, setWorkspace] = useState(null);
-  const [recentWorkspaces, setRecentWorkspaces] = useState([]);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
-  const [globalPendingPermissions, setGlobalPendingPermissions] = useState([]);
   const [rightPanelTab, setRightPanelTab] = useState('workspace');
   const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(loadRightPanelWidth);
@@ -239,7 +118,6 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [runSettings, setRunSettings] = useState(loadRunSettings);
   const workspaceRootRef = useRef('');
-  workspaceRootRef.current = workspace?.root_path || workspace?.root || '';
   const getWorkspaceRoot = useCallback(() => workspaceRootRef.current, []);
   const {
     providerProfiles,
@@ -277,19 +155,47 @@ export function App() {
     getWorkspaceRoot,
     setRunSettings,
   });
+
+  const patchRuntime = useCallback((sessionId, updater) => {
+    if (!sessionId) return;
+    setSessionRuntimes((map) => patchSessionRuntimeMap(map, sessionId, updater));
+  }, []);
+
+  const {
+    sessions,
+    setSessions,
+    currentSessionId,
+    setCurrentSessionId,
+    workspace,
+    setWorkspace,
+    recentWorkspaces,
+    setRecentWorkspaces,
+    globalPendingPermissions,
+    setGlobalPendingPermissions,
+    loadSessionState,
+    loadGlobalPendingPermissions,
+    openWorkspaceRoot,
+    selectWorkspaceNode,
+  } = useSessionBootstrap({
+    patchRuntime,
+    workspaceRootRef,
+    loadProviderProfiles,
+    loadAgents,
+    loadMcpServers,
+    loadSkills,
+  });
+
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
   const rightPanelResizeRef = useRef(null);
-  const autoCompactBusyRef = useRef(false);
-  const autoCompactSessionRef = useRef('');
-  const autoContinuedGoalsRef = useRef(new Set());
+  const hydrateGoalsRef = useRef(async () => {});
   const currentSessionIdRef = useRef(currentSessionId);
   currentSessionIdRef.current = currentSessionId;
   const sessionRuntimesRef = useRef(sessionRuntimes);
   sessionRuntimesRef.current = sessionRuntimes;
 
   const runtime = sessionRuntimes[currentSessionId] || createEmptySessionRuntime({
-    messages: currentSessionId === 'local-design' ? initialMessages : [],
+    messages: currentSessionId === INITIAL_BOOTSTRAP_SESSION_ID ? initialMessages : [],
   });
   const {
     messages,
@@ -319,72 +225,25 @@ export function App() {
     goalBusy = false,
   } = runtime;
 
-  function patchRuntime(sessionId, updater) {
-    if (!sessionId) return;
-    setSessionRuntimes((map) => patchSessionRuntimeMap(map, sessionId, updater));
-  }
-
   function patchCurrentRuntime(updater) {
     patchRuntime(currentSessionIdRef.current, updater);
   }
 
   // UI interactions always target the focused session.
-  const setMessages = (value) => patchCurrentRuntime((rt) => ({
+  const bindRuntimeField = (key) => (value) => patchCurrentRuntime((rt) => ({
     ...rt,
-    messages: typeof value === 'function' ? value(rt.messages) : value,
+    [key]: typeof value === 'function' ? value(rt[key]) : value,
   }));
-  const setTools = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    tools: typeof value === 'function' ? value(rt.tools) : value,
-  }));
-  const setPermissions = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    permissions: typeof value === 'function' ? value(rt.permissions) : value,
-  }));
-  const setRuns = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    runs: typeof value === 'function' ? value(rt.runs) : value,
-  }));
-  const setSubAgents = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    subAgents: typeof value === 'function' ? value(rt.subAgents) : value,
-  }));
-  const setConversationTabs = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    conversationTabs: typeof value === 'function' ? value(rt.conversationTabs) : value,
-  }));
-  const setActiveConversationTab = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    activeConversationTab: typeof value === 'function' ? value(rt.activeConversationTab) : value,
-  }));
-  const setRunning = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    running: typeof value === 'function' ? value(rt.running) : value,
-  }));
-  const setCurrentRunId = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    currentRunId: typeof value === 'function' ? value(rt.currentRunId) : value,
-  }));
-  const setRootSeq = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    rootSeq: typeof value === 'function' ? value(rt.rootSeq) : value,
-  }));
-  const setRunEventsByRun = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    runEventsByRun: typeof value === 'function' ? value(rt.runEventsByRun) : value,
-  }));
-  const setRunEventsLoading = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    runEventsLoading: typeof value === 'function' ? value(rt.runEventsLoading) : value,
-  }));
-  const setRunEventsError = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    runEventsError: typeof value === 'function' ? value(rt.runEventsError) : value,
-  }));
-  const setDraft = (value) => patchCurrentRuntime((rt) => ({
-    ...rt,
-    draft: typeof value === 'function' ? value(rt.draft) : value,
-  }));
+  const setMessages = bindRuntimeField('messages');
+  const setPermissions = bindRuntimeField('permissions');
+  const setRuns = bindRuntimeField('runs');
+  const setSubAgents = bindRuntimeField('subAgents');
+  const setConversationTabs = bindRuntimeField('conversationTabs');
+  const setActiveConversationTab = bindRuntimeField('activeConversationTab');
+  const setRunEventsByRun = bindRuntimeField('runEventsByRun');
+  const setRunEventsLoading = bindRuntimeField('runEventsLoading');
+  const setRunEventsError = bindRuntimeField('runEventsError');
+  const setDraft = bindRuntimeField('draft');
 
   const agents = useMemo(() => [
     { id: 'root', name: 'root', role: 'root', status: running ? 'running' : 'idle', seq: rootSeq },
@@ -499,252 +358,9 @@ export function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [compactLayout, rightPanelDrawerOpen]);
 
-  async function loadGlobalPendingPermissions() {
-    const items = await apiJson('/api/v1/permissions/pending').catch(() => []);
-    setGlobalPendingPermissions(Array.isArray(items) ? items.map(normalizePermission) : []);
-  }
-
   function currentWorkspaceRoot() {
     return workspaceRootRef.current;
   }
-
-  async function hydrateTodos(sessionId) {
-    if (!sessionId) return;
-    try {
-      const data = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/todos`);
-      const items = Array.isArray(data?.items)
-        ? data.items.map(normalizeTodo)
-        : Array.isArray(data)
-          ? data.map(normalizeTodo)
-          : [];
-      const openCount = Number(data?.open_count ?? countOpenTodos(items));
-      patchRuntime(sessionId, (prev) => ({
-        ...prev,
-        todos: items,
-        todoOpenCount: openCount,
-        todosHydrated: true,
-        todosVersion: (prev.todosVersion || 0) + 1,
-      }));
-    } catch {
-      patchRuntime(sessionId, (prev) => ({
-        ...prev,
-        todosHydrated: true,
-      }));
-    }
-  }
-
-  async function hydrateGoals(sessionId) {
-    if (!sessionId || sessionId === 'local-design') return;
-    try {
-      const data = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`);
-      const items = normalizeGoalList(data);
-      const focus = pickFocusGoal(items);
-      patchRuntime(sessionId, (prev) => ({
-        ...prev,
-        goals: items,
-        goal: focus,
-        goalHydrated: true,
-        goalExpanded: focus && (focus.status === 'active' || focus.status === 'paused')
-          ? (prev.goalExpanded || false)
-          : prev.goalExpanded,
-      }));
-    } catch {
-      patchRuntime(sessionId, (prev) => ({
-        ...prev,
-        goalHydrated: true,
-      }));
-    }
-  }
-
-  async function continueGoal(extraText = '', optionsOverrides = {}) {
-    const sessionId = currentSessionIdRef.current;
-    const current = sessionRuntimesRef.current[sessionId]?.goal;
-    if (!sessionId || !current?.id) {
-      throw new Error('当前没有可继续的目标');
-    }
-    patchRuntime(sessionId, (prev) => ({ ...prev, goalBusy: true }));
-    try {
-      const result = await apiJson(
-        `/api/v1/sessions/${encodeURIComponent(sessionId)}/goals/${encodeURIComponent(current.id)}/continue`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            input: extraText || '',
-            options: buildRunStartOptions(runSettings, workspace, '', optionsOverrides),
-          }),
-        },
-      );
-      const nextRunId = result?.run_id || '';
-      appendDiagnosticLog('info', `已继续目标 ${current.id}`, {
-        source: 'goal',
-        detail: { sessionId, goalId: current.id, runId: nextRunId },
-      });
-      patchRuntime(sessionId, (rt) => ({
-        ...rt,
-        goalBusy: false,
-        running: true,
-        currentRunId: nextRunId || rt.currentRunId,
-        draft: '',
-      }));
-      await hydrateGoals(sessionId);
-      return result;
-    } catch (error) {
-      appendDiagnosticLog('error', `继续目标失败：${error.message}`, { source: 'goal' });
-      patchRuntime(sessionId, (prev) => ({ ...prev, goalBusy: false }));
-      throw error;
-    }
-  }
-
-  useEffect(() => {
-    if (!currentSessionId || currentSessionId === 'local-design') return;
-    if (!goalShouldAutoContinue(goal) || running || compacting || goalBusy) return;
-
-    const key = `${currentSessionId}:${goal.id}:${goal.updatedAt || goal.usedToolTurns}`;
-    if (autoContinuedGoalsRef.current.has(key)) return;
-    autoContinuedGoalsRef.current.add(key);
-    appendDiagnosticLog('info', `Goal 自动续跑 ${goal.id}`, {
-      source: 'goal',
-      detail: { sessionId: currentSessionId, goalId: goal.id, reason: goal.pauseReason },
-    });
-    continueGoal('', { goals_enabled: true }).catch(() => {
-      // The key prevents a render loop. A later server update gets a new key.
-    });
-  }, [compacting, currentSessionId, goal, goalBusy, running]);
-
-  async function cancelGoal() {
-    const sessionId = currentSessionIdRef.current;
-    const current = sessionRuntimesRef.current[sessionId]?.goal;
-    if (!sessionId || !current?.id) {
-      throw new Error('当前没有可取消的目标');
-    }
-    patchRuntime(sessionId, (prev) => ({ ...prev, goalBusy: true }));
-    try {
-      // If a run is active for this session, cancel it first (also pauses goal server-side).
-      const runId = sessionRuntimesRef.current[sessionId]?.currentRunId;
-      if (runId) {
-        await request('run.cancel', { run_id: runId, reason: 'goal cancelled' }).catch(() => null);
-      }
-      await apiJson(
-        `/api/v1/sessions/${encodeURIComponent(sessionId)}/goals/${encodeURIComponent(current.id)}/cancel`,
-        { method: 'POST', body: '{}' },
-      );
-      await hydrateGoals(sessionId);
-      patchRuntime(sessionId, (prev) => ({
-        ...prev,
-        goalBusy: false,
-        running: false,
-        currentRunId: '',
-      }));
-    } catch (error) {
-      appendDiagnosticLog('error', `取消目标失败：${error.message}`, { source: 'goal' });
-      patchRuntime(sessionId, (prev) => ({ ...prev, goalBusy: false }));
-      throw error;
-    }
-  }
-
-  async function loadSessionState(sessionId, { preserveLive = true } = {}) {
-    try {
-      const [history, serverRuns, toolCalls, permissionItems, todoData, compactionData, goalData] = await Promise.all([
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/history`),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/runs`).catch(() => []),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/tools`).catch(() => []),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/permissions`).catch(() => []),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/todos`).catch(() => null),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact`).catch(() => null),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`).catch(() => null),
-      ]);
-      const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
-      const normalizedRuns = Array.isArray(serverRuns) ? serverRuns.map(normalizeRun) : [];
-      const activeRun = latestActiveRun(serverRuns);
-      const todoItems = Array.isArray(todoData?.items)
-        ? todoData.items.map(normalizeTodo)
-        : [];
-      const todoOpen = Number(todoData?.open_count ?? countOpenTodos(todoItems));
-      const compactSummary = compactionData?.active ? (compactionData.summary || null) : null;
-      const compactEndSeq = compactionData?.active
-        ? Number(compactionData.compaction?.source_end_seq) || 0
-        : 0;
-      const goalItems = goalData ? normalizeGoalList(goalData) : [];
-      const focusGoal = goalData ? pickFocusGoal(goalItems) : null;
-      patchRuntime(sessionId, (prev) => {
-        // Keep in-memory live projection when switching back to a still-running session.
-        if (preserveLive && prev.hydrated && prev.running) {
-          return {
-            ...prev,
-            runs: normalizedRuns.length > 0 ? normalizedRuns : prev.runs,
-            todos: todoData ? todoItems : prev.todos,
-            todoOpenCount: todoData ? todoOpen : prev.todoOpenCount,
-            todosHydrated: true,
-            goals: goalData ? goalItems : prev.goals,
-            goal: goalData ? focusGoal : prev.goal,
-            goalHydrated: true,
-            contextSummary: compactSummary,
-            contextSummaryEndSeq: compactEndSeq,
-            hydrated: true,
-          };
-        }
-        return {
-          ...prev,
-          messages: normalized,
-          tools: Array.isArray(toolCalls) ? toolCalls.map(normalizeToolCall) : [],
-          permissions: Array.isArray(permissionItems)
-            ? permissionItems.map(normalizePermission)
-            : [],
-          runs: normalizedRuns,
-          running: Boolean(activeRun) || prev.running,
-          currentRunId: activeRun?.id || prev.currentRunId || '',
-          rootSeq: latestRootSeq(serverRuns, prev.rootSeq || 1),
-          todos: todoItems,
-          todoOpenCount: todoOpen,
-          todosHydrated: true,
-          todosExpanded: false,
-          todosAutoExpandedOnce: false,
-          goals: goalItems,
-          goal: focusGoal,
-          goalHydrated: true,
-          goalExpanded: false,
-          goalBusy: false,
-          contextSummary: compactSummary,
-          contextSummaryEndSeq: compactEndSeq,
-          hydrated: true,
-        };
-      });
-      loadGlobalPendingPermissions();
-    } catch {
-      patchRuntime(sessionId, () => createEmptySessionRuntime({ hydrated: true }));
-      setGlobalPendingPermissions([]);
-    }
-  }
-
-  useEffect(() => {
-    let alive = true;
-    apiJson('/api/v1/app/bootstrap')
-      .then((data) => {
-        if (!alive) return;
-        const nextWorkspace = normalizeWorkspace(data.workspace);
-        setWorkspace(nextWorkspace);
-        const recent = Array.isArray(data.recent_workspaces)
-          ? data.recent_workspaces.map(normalizeWorkspace).filter(Boolean)
-          : [];
-        setRecentWorkspaces(recent);
-        const nextSessions = Array.isArray(data.sessions) ? data.sessions.map(normalizeSession) : [];
-        if (nextSessions.length > 0) {
-          setSessions(nextSessions);
-          setCurrentSessionId(nextSessions[0].id);
-          loadSessionState(nextSessions[0].id);
-        } else {
-          loadGlobalPendingPermissions();
-        }
-        loadProviderProfiles();
-        loadAgents();
-        loadMcpServers();
-        loadSkills(nextWorkspace?.root_path || nextWorkspace?.root || '');
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (settingsOpen) {
@@ -761,8 +377,10 @@ export function App() {
     onEvent: (event) => {
       const payload = event.payload || {};
       if (isRootTerminalRunEvent(payload) && payload.session_id) {
-        // Gateway applies Goal terminal/pause hooks before publishing the event.
-        void hydrateGoals(payload.session_id);
+        // A6: Gateway OnRootRunTerminal mutates Goal (pause/fail/budget) before
+        // Publish; re-hydrate so the Goal strip matches persisted state without
+        // reopening the session. Live tool mutations still use goal_updated.
+        void hydrateGoalsRef.current(payload.session_id);
       }
       let effects = [];
       setSessionRuntimes((map) => {
@@ -789,564 +407,65 @@ export function App() {
     },
   });
 
-  async function createSession() {
-    const session = await apiJson('/api/v1/sessions', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: '新会话',
-        workspace_root: workspace?.root_path || workspace?.root || '',
-      }),
-    });
-    const normalized = normalizeSession(session);
-    setSessions((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
-    setSessionRuntimes((map) => ({
-      ...map,
-      [normalized.id]: createEmptySessionRuntime({ hydrated: true }),
-    }));
-    setCurrentSessionId(normalized.id);
-    setGlobalPendingPermissions([]);
-  }
+  const {
+    hydrateTodos,
+    hydrateGoals,
+    continueGoal,
+    cancelGoal,
+  } = useGoalSession({
+    patchRuntime,
+    currentSessionId,
+    currentSessionIdRef,
+    sessionRuntimesRef,
+    runSettings,
+    workspace,
+    request,
+    goal,
+    running,
+    compacting,
+    goalBusy,
+  });
+  hydrateGoalsRef.current = hydrateGoals;
 
-  async function openWorkspaceRoot(root) {
-    if (!root) return null;
-    const currentRoot = workspace?.root_path || workspace?.root || '';
-    if (currentRoot && currentRoot.replace(/\\/g, '/').toLowerCase() === root.replace(/\\/g, '/').toLowerCase()) {
-      return workspace;
-    }
-    const opened = await apiJson('/api/v1/workspaces/open', {
-      method: 'POST',
-      body: JSON.stringify({ root }),
-    });
-    const normalized = normalizeWorkspace(opened);
-    setWorkspace(normalized);
-    setRecentWorkspaces((items) => {
-      const next = [normalized, ...items.filter((item) => item.id !== normalized.id && item.root !== normalized.root)];
-      return next.slice(0, 20);
-    });
-    loadSkills(normalized?.root_path || normalized?.root || '');
-    return normalized;
-  }
-
-  async function selectWorkspaceNode(node) {
-    if (!node?.root) return;
-    await openWorkspaceRoot(node.root);
-  }
-
-  async function deleteSession(session) {
-    if (!session?.id) return;
-    const ok = await dialog.confirm({
-      title: '删除会话',
-      message: `确定删除会话「${session.title || session.id}」？`,
-      description: '删除后无法从侧栏恢复该会话记录。',
-      confirmLabel: '删除',
-      tone: 'danger',
-      testId: 'confirm-delete-session',
-    });
-    if (!ok) return;
-    await apiJson(`/api/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
-    const remaining = sessions.filter((item) => item.id !== session.id);
-    setSessions(remaining);
-    setSessionRuntimes((map) => {
-      const next = { ...map };
-      delete next[session.id];
-      return next;
-    });
-    if (currentSessionId === session.id) {
-      if (remaining.length > 0) {
-        selectSession(remaining[0].id);
-      } else {
-        setCurrentSessionId('');
-      }
-    }
-  }
-
-  async function deleteWorkspaceNode(node) {
-    if (!node?.id || String(node.id).startsWith('path:')) return;
-    const ok = await dialog.confirm({
-      title: '移除工作区',
-      message: `确定移除工作区「${node.name}」？`,
-      description: '将从最近列表移除，并删除其下会话记录。磁盘文件不会被删除。',
-      confirmLabel: '移除',
-      tone: 'danger',
-      testId: 'confirm-delete-workspace',
-    });
-    if (!ok) return;
-    await apiJson(`/api/v1/workspaces/${encodeURIComponent(node.id)}?delete_sessions=1`, { method: 'DELETE' });
-    const rootKey = (node.root || '').replace(/\\/g, '/').toLowerCase();
-    const remaining = sessions.filter((item) => {
-      const itemRoot = (item.workspaceRoot || '').replace(/\\/g, '/').toLowerCase();
-      return itemRoot !== rootKey;
-    });
-    setSessions(remaining);
-    const nextRecent = recentWorkspaces.filter((item) => item.id !== node.id);
-    setRecentWorkspaces(nextRecent);
-    const currentRoot = (workspace?.root_path || workspace?.root || '').replace(/\\/g, '/').toLowerCase();
-    if (currentRoot === rootKey) {
-      const nextWorkspace = nextRecent[0] || null;
-      setWorkspace(nextWorkspace);
-      loadSkills(nextWorkspace?.root_path || nextWorkspace?.root || '');
-    }
-    if (currentSessionId && !remaining.some((item) => item.id === currentSessionId)) {
-      if (remaining.length > 0) {
-        selectSession(remaining[0].id);
-      } else {
-        setCurrentSessionId('');
-      }
-    }
-    setSessionRuntimes((map) => {
-      const keep = new Set(remaining.map((item) => item.id));
-      const next = {};
-      for (const [id, runtime] of Object.entries(map)) {
-        if (keep.has(id)) next[id] = runtime;
-      }
-      return next;
-    });
-  }
-
-  async function browseWorkspaceDirectory() {
-    const path = await selectDirectory();
-    return path || '';
-  }
-
-  async function forkSession() {
-    if (!currentSessionId) return;
-    const current = sessions.find((item) => item.id === currentSessionId);
-    const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(currentSessionId)}/fork`, {
-      method: 'POST',
-      body: JSON.stringify({
-        name: `${current?.title || '会话'} 的分叉`,
-      }),
-    });
-    const normalized = normalizeSession(result.session);
-    setSessions((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
-    setCurrentSessionId(normalized.id);
-    await loadSessionState(normalized.id);
-  }
-
-  /**
-   * Pause this session's root run and all subagents before context summary.
-   * Gateway also pauses server-side; Desktop updates local projection promptly.
-   */
-  async function pauseSessionForCompact(sessionId) {
-    const rt = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
-    const runId = rt.currentRunId || '';
-    const activeSubs = (rt.subAgents || []).filter((item) => (
-      item?.status === 'running' || item?.status === 'waiting_permission' || item?.status === 'cancelling'
-    ));
-
-    if (!runId && activeSubs.length === 0 && !rt.running) {
-      return { paused: false, runId: '', subAgents: 0 };
-    }
-
-    appendDiagnosticLog('info', '摘要前暂停会话主代理与子代理', {
-      source: 'compact',
-      detail: {
-        sessionId,
-        runId,
-        subAgentCount: activeSubs.length,
-        subAgentIds: activeSubs.map((item) => item.id),
-      },
-    });
-
-    // Mark local state as paused so the UI stops accepting sends immediately.
-    patchRuntime(sessionId, (prev) => ({
-      ...prev,
-      compacting: true,
-      running: false,
-      subAgents: (prev.subAgents || []).map((item) => (
-        item.status === 'running' || item.status === 'waiting_permission'
-          ? { ...item, status: 'cancelling', summary: '摘要前暂停' }
-          : item
-      )),
-    }));
-
-    // Cancel subagents first, then the root run (mirrors gateway order).
-    await Promise.all(activeSubs.map((agent) => request('subagent.cancel', {
-      run_id: agent.rootRunId || runId,
-      subagent_id: agent.id,
-      reason: 'session compact pause',
-    }).catch(() => null)));
-
-    if (runId) {
-      await request('run.cancel', {
-        run_id: runId,
-        reason: 'session compact pause',
-      }).catch(() => null);
-    }
-
-    // Wait briefly for finish events to land so history is stable.
-    const deadline = Date.now() + 12_000;
-    while (Date.now() < deadline) {
-      const latest = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
-      const stillRunning = latest.running;
-      const stillActiveSubs = (latest.subAgents || []).some((item) => (
-        item?.status === 'running' || item?.status === 'waiting_permission' || item?.status === 'cancelling'
-      ));
-      if (!stillRunning && !stillActiveSubs) break;
-      await new Promise((resolve) => window.setTimeout(resolve, 120));
-    }
-
-    patchRuntime(sessionId, (prev) => ({
-      ...prev,
-      running: false,
-      currentRunId: '',
-      compacting: true,
-      subAgents: (prev.subAgents || []).map((item) => (
-        item.status === 'running' || item.status === 'waiting_permission' || item.status === 'cancelling'
-          ? { ...item, status: 'cancelled', summary: '已为上下文摘要暂停' }
-          : item
-      )),
-    }));
-
-    return { paused: true, runId, subAgents: activeSubs.length };
-  }
-
-  async function compactSession({ silent = false } = {}) {
-    const sessionId = currentSessionIdRef.current;
-    if (!sessionId || sessionId === 'local-design') return null;
-
-    patchRuntime(sessionId, (prev) => ({ ...prev, compacting: true }));
-    try {
-      const pauseInfo = await pauseSessionForCompact(sessionId);
-
-      // Keep recent conversation rounds verbatim for the model. Full UI history remains unchanged.
-      const compactBody = {
-        keep_tail_turns: 3,
-        mode: 'auto',
-        provider_profile_id: runSettings.providerProfileId || undefined,
-      };
-      appendDiagnosticLog('info', '开始更新会话上下文摘要（保留最近 3 轮原文）', {
-        source: 'compact',
-        detail: { ...compactBody, paused: pauseInfo },
-      });
-      const preview = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact/preview`, {
-        method: 'POST',
-        body: JSON.stringify(compactBody),
-      });
-      const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact`, {
-        method: 'POST',
-        body: JSON.stringify({
-          ...compactBody,
-          summary: preview.preview?.summary,
-        }),
-      });
-      patchRuntime(sessionId, (prev) => ({
-        ...prev,
-        compacting: false,
-        running: false,
-        contextSummary: result.summary || preview.preview?.summary || null,
-        contextSummaryEndSeq: Number(result.compaction?.source_end_seq) || 0,
-        messages: pauseInfo.paused
-          ? [
-              ...prev.messages,
-              {
-                id: `compact_pause_${Date.now()}`,
-                role: 'assistant',
-                agent: 'system',
-                text: '已暂停当前会话与子代理并完成上下文摘要。可继续发送下一条消息。',
-              },
-            ]
-          : prev.messages,
-      }));
-      appendDiagnosticLog('info', `会话上下文摘要已更新（${preview.preview?.summary_method || 'unknown'}）`, {
-        source: 'compact',
-        detail: {
-          sessionId,
-          sourceEndSeq: result.compaction?.source_end_seq,
-          keepTailTurns: preview.preview?.keep_tail_turns,
-          summaryMethod: preview.preview?.summary_method,
-          pausedRuns: result.paused_runs ?? preview.paused_runs ?? 0,
-        },
-      });
-      if (!silent) {
-        // Manual compact stays quiet; auto path can toast via caller.
-      }
-      await hydrateGoals(sessionId);
-      return result.compaction || null;
-    } catch (error) {
-      patchRuntime(sessionId, (prev) => ({ ...prev, compacting: false }));
-      throw error;
-    }
-  }
-
-  // Auto-compact when estimated context usage hits 90% of provider max_tokens.
-  // May fire mid-run: compactSession pauses the session + subagents first.
-  useEffect(() => {
-    if (!contextTokenBudget.autoCompact) return;
-    if (!currentSessionId || currentSessionId === 'local-design') return;
-    if (autoCompactBusyRef.current) return;
-    if (compacting) return;
-    // Avoid re-firing on the same session until compact succeeds and usage drops.
-    if (autoCompactSessionRef.current === currentSessionId) return;
-
-    autoCompactBusyRef.current = true;
-    autoCompactSessionRef.current = currentSessionId;
-    compactSession({ silent: true })
-      .catch(() => {
-        // Allow retry after a short cool-down if compact failed.
-        window.setTimeout(() => {
-          if (autoCompactSessionRef.current === currentSessionId) {
-            autoCompactSessionRef.current = '';
-          }
-        }, 8000);
-      })
-      .finally(() => {
-        autoCompactBusyRef.current = false;
-      });
-  }, [contextTokenBudget.autoCompact, currentSessionId, compacting]);
-
-  useEffect(() => {
-    if (!contextTokenBudget.autoCompact) {
-      autoCompactSessionRef.current = '';
-    }
-  }, [contextTokenBudget.autoCompact]);
-
-  function selectSession(id) {
-    setCurrentSessionId(id);
-    const target = sessions.find((item) => item.id === id);
-    if (target?.workspaceRoot) {
-      openWorkspaceRoot(target.workspaceRoot).catch(() => {});
-    }
-    // Do not wipe other sessions' live state — only hydrate if needed.
-    const existing = sessionRuntimes[id];
-    if (!existing?.hydrated || (!existing.running && (existing.messages || []).length === 0)) {
-      loadSessionState(id);
-    } else {
-      loadGlobalPendingPermissions();
-    }
-  }
-
-  async function sendTask() {
-    const sessionId = currentSessionIdRef.current;
-    const text = draft.trim();
-    const sessionRt = sessionRuntimes[sessionId];
-    const sessionRunning = sessionRt?.running;
-    const sessionCompacting = sessionRt?.compacting;
-    if (!text || !sessionId || sessionRunning || sessionCompacting) return;
-
-    const cmd = parseCommand(text);
-
-    // Local-only commands: help / parse errors — no Gateway run.
-    if (cmd.action === 'help' || cmd.action === 'error') {
-      patchRuntime(sessionId, (rt) => ({
-        ...rt,
-        draft: '',
-        messages: [
-          ...rt.messages,
-          { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: cmd.displayText || text },
-          {
-            id: `cmd_${Date.now()}`,
-            role: 'assistant',
-            agent: 'system',
-            createdAt: new Date().toISOString(),
-            text: cmd.message || '指令已处理',
-          },
-        ],
-      }));
-      return;
-    }
-
-    // /goal cancel — stop goal without starting a run.
-    if (cmd.action === 'cancel_goal') {
-      patchRuntime(sessionId, (rt) => ({
-        ...rt,
-        draft: '',
-        messages: [
-          ...rt.messages,
-          { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: cmd.displayText || text },
-        ],
-      }));
-      try {
-        await cancelGoal();
-        patchRuntime(sessionId, (rt) => ({
-          ...rt,
-          messages: [
-            ...rt.messages,
-            {
-              id: `cmd_${Date.now()}`,
-              role: 'assistant',
-              agent: 'system',
-              createdAt: new Date().toISOString(),
-              text: '已取消当前目标。',
-            },
-          ],
-        }));
-      } catch (error) {
-        patchRuntime(sessionId, (rt) => ({
-          ...rt,
-          messages: [
-            ...rt.messages,
-            {
-              id: `cmd_err_${Date.now()}`,
-              role: 'assistant',
-              agent: 'system',
-              text: `取消目标失败：${error.message}`,
-            },
-          ],
-        }));
-      }
-      return;
-    }
-
-    // /goal continue — reuse continue endpoint.
-    if (cmd.action === 'continue_goal') {
-      const display = cmd.displayText || text;
-      patchRuntime(sessionId, (rt) => ({
-        ...rt,
-        draft: '',
-        running: true,
-        messages: [
-          ...rt.messages,
-          { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: display },
-        ],
-      }));
-      try {
-        const result = await continueGoal(cmd.extraText || '', {
-          require_permission: cmd.requirePermission,
-          spawn_subagents: cmd.spawnSubAgents,
-        });
-        const nextRunId = result?.run_id || '';
-        patchRuntime(sessionId, (rt) => ({
-          ...rt,
-          running: true,
-          currentRunId: nextRunId || rt.currentRunId,
-        }));
-        setRightPanelTab('activity');
-        await hydrateGoals(sessionId);
-      } catch (error) {
-        patchRuntime(sessionId, (rt) => ({
-          ...rt,
-          running: false,
-          messages: [
-            ...rt.messages,
-            {
-              id: `cmd_err_${Date.now()}`,
-              role: 'assistant',
-              agent: 'system',
-              text: `继续目标失败：${error.message}`,
-            },
-          ],
-        }));
-      }
-      return;
-    }
-
-    // Normal run or /goal <objective> (start_goal via create_goal options).
-    const displayText = cmd.displayText || text;
-    const inputText = cmd.inputText || text;
-    const optionOverrides = {
-      require_permission: cmd.requirePermission,
-      spawn_subagents: cmd.spawnSubAgents,
-    };
-    if (cmd.action === 'start_goal') {
-      optionOverrides.create_goal = true;
-      optionOverrides.goal_objective = cmd.objective;
-      optionOverrides.goal_title = cmd.title;
-      optionOverrides.goal_success_criteria = cmd.successCriteria;
-      optionOverrides.goals_enabled = true;
-    }
-
-    patchRuntime(sessionId, (rt) => ({
-      ...rt,
-      draft: '',
-      running: true,
-      subAgents: [],
-      messages: [
-        ...rt.messages,
-        { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: displayText },
-      ],
-    }));
-    // Refresh settings skills list so the UI matches disk; runtime also reloads per conversation.
-    loadSkills().catch(() => {});
-
-    try {
-      const runOptions = buildRunStartOptions(runSettings, workspace, text, optionOverrides);
-      if (runOptions.log_llm_requests) {
-        appendDiagnosticLog('info', '已开启 LLM 请求记录；本次运行将写入本机诊断目录', {
-          source: 'run',
-          detail: { sessionId, log_llm_requests: true },
-        });
-      }
-      const result = await request('run.start', {
-        session_id: sessionId,
-        input: { text: inputText },
-        options: runOptions,
-        subscribe: true,
-      });
-      const nextRunId = result?.run_id || '';
-      appendDiagnosticLog(
-        'info',
-        cmd.action === 'start_goal'
-          ? `Goal 已通过指令启动 ${nextRunId || '(无 run_id)'}`
-          : `运行已启动 ${nextRunId || '(无 run_id)'}`,
-        {
-          source: cmd.action === 'start_goal' ? 'goal' : 'run',
-          detail: {
-            sessionId,
-            runId: nextRunId,
-            runtimeMode: result?.runtime_mode,
-            command: cmd.name,
-            objective: cmd.objective,
-          },
-        },
-      );
-      patchRuntime(sessionId, (rt) => ({
-        ...rt,
-        running: true,
-        currentRunId: nextRunId || rt.currentRunId,
-        runs: nextRunId
-          ? [
-              normalizeRun({
-                id: nextRunId,
-                session_id: sessionId,
-                workspace_root: workspace?.root_path || workspace?.root || '',
-                runtime_mode: result?.runtime_mode || runSettings.runtimeMode,
-                status: 'running',
-                input: displayText,
-                last_root_seq: result?.root_seq || rt.rootSeq,
-                message_count: 1,
-                tool_count: 0,
-                started_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              }),
-              ...rt.runs.filter((item) => item.id !== nextRunId),
-            ]
-          : rt.runs,
-      }));
-      if (cmd.action === 'start_goal') {
-        await hydrateGoals(sessionId);
-      }
-      setRightPanelTab('activity');
-    } catch (error) {
-      appendDiagnosticLog('error', `启动运行失败：${error.message}`, {
-        source: 'run',
-        detail: { sessionId },
-      });
-      patchRuntime(sessionId, (rt) => ({
-        ...rt,
-        running: false,
-        currentRunId: '',
-        messages: [
-          ...rt.messages,
-          {
-            id: `gateway_error_${Date.now()}`,
-            role: 'assistant',
-            agent: 'system',
-            text: `启动运行失败：${error.message}`,
-          },
-        ],
-      }));
-    }
-  }
-
-  async function cancelRun() {
-    setRunning(false);
-    const runId = currentRunId;
-    setCurrentRunId('');
-    if (runId) {
-      await request('run.cancel', { run_id: runId }).catch(() => {});
-    }
-  }
+  const {
+    createSession,
+    deleteSession,
+    deleteWorkspaceNode,
+    browseWorkspaceDirectory,
+    forkSession,
+    compactSession,
+    selectSession,
+    sendTask,
+    cancelRun,
+  } = useSessionActions({
+    dialog,
+    sessions,
+    setSessions,
+    currentSessionId,
+    setCurrentSessionId,
+    workspace,
+    setWorkspace,
+    recentWorkspaces,
+    setRecentWorkspaces,
+    setSessionRuntimes,
+    sessionRuntimes,
+    sessionRuntimesRef,
+    currentSessionIdRef,
+    patchRuntime,
+    setGlobalPendingPermissions,
+    loadSessionState,
+    loadGlobalPendingPermissions,
+    openWorkspaceRoot,
+    loadSkills,
+    runSettings,
+    request,
+    hydrateGoals,
+    continueGoal,
+    cancelGoal,
+    setRightPanelTab,
+    contextTokenBudget,
+    compacting,
+  });
 
   function openSubagentConversation(agent) {
     if (!agent?.id || agent.role !== 'subagent') return;
@@ -1642,6 +761,7 @@ export function App() {
           goalBusy={goalBusy}
           goalExpanded={goalExpanded}
           goalLoading={!goalHydrated && !goal}
+          goalSessionId={currentSessionId}
           onGoalCancel={() => { cancelGoal().catch(() => {}); }}
           onGoalContinue={() => { continueGoal().catch(() => {}); }}
           onGoalExpandToggle={() => patchCurrentRuntime((rt) => ({

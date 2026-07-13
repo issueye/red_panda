@@ -275,8 +275,39 @@ func TestMCPHelperProcess(t *testing.T) {
 			if mode == "multiple-tools" {
 				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read_file","description":"Read a file","inputSchema":{"type":"object"}},{"name":"write_file","description":"Write a file","inputSchema":{"type":"object"}}]}}`)
 			} else {
-				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read_file","description":"Read a file","inputSchema":{"type":"object"}}]}}`)
+				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read_file","description":"Read a file","inputSchema":{"type":"object","properties":{"path":{"type":"string"}}}}]}}`)
 			}
+		case "tools/call":
+			if mode == "call-timeout" {
+				continue
+			}
+			if !initialized {
+				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"not initialized"}}`)
+				continue
+			}
+			if mode == "call-error" {
+				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"permission denied by server"}],"isError":true}}`)
+				continue
+			}
+			// Echo mode for successful tools/call.
+			var full struct {
+				Params struct {
+					Name      string         `json:"name"`
+					Arguments map[string]any `json:"arguments"`
+				} `json:"params"`
+			}
+			_ = json.Unmarshal(scanner.Bytes(), &full)
+			path, _ := full.Params.Arguments["path"].(string)
+			text := fmt.Sprintf("ok tool=%s path=%s", full.Params.Name, path)
+			payload, _ := json.Marshal(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      3,
+				"result": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": text}},
+					"isError": false,
+				},
+			})
+			fmt.Fprintln(os.Stdout, string(payload))
 		}
 	}
 	if path := os.Getenv("RED_PANDA_MCP_CLEANUP"); path != "" {

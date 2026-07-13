@@ -9,21 +9,31 @@ const agentExe = path.join(repoRoot, 'bin', process.platform === 'win32' ? 'red-
 const databasePath = path.join(repoRoot, 'ui-e2e-red-panda.db');
 const gatewayAddr = '127.0.0.1:17931';
 
+/**
+ * Env for Gateway-backed e2e (docs/36 C5).
+ * Does NOT force RED_PANDA_SLASH_TOOLS — production default is off; tool paths
+ * exercise the echo provider tool_call surface instead of Runtime Parse slash.
+ *
+ * @param {NodeJS.ProcessEnv} [baseEnv]
+ * @param {Record<string, string>} [extraEnv]
+ */
+export function buildGatewayChildEnv(baseEnv = process.env, extraEnv = {}) {
+  return {
+    ...baseEnv,
+    RED_PANDA_GATEWAY_ADDR: gatewayAddr,
+    RED_PANDA_DATABASE: databasePath,
+    RED_PANDA_AGENT_COMMAND: agentExe,
+    ...extraEnv,
+  };
+}
+
 export async function startGateway(options = {}) {
   const processBaseline = await captureManagedProcessBaseline();
   await removeDatabase();
   const extraEnv = options.env || options.extraEnv || {};
   const child = spawn(gatewayExe, {
     cwd: repoRoot,
-    env: {
-      ...process.env,
-      RED_PANDA_GATEWAY_ADDR: gatewayAddr,
-      RED_PANDA_DATABASE: databasePath,
-      RED_PANDA_AGENT_COMMAND: agentExe,
-      // e2e still uses Temporary Triggers like /read README.md
-      RED_PANDA_SLASH_TOOLS: '1',
-      ...extraEnv,
-    },
+    env: buildGatewayChildEnv(process.env, extraEnv),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
     windowsHide: true,

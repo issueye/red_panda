@@ -1,18 +1,9 @@
 package runtime
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	goruntime "runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -21,15 +12,6 @@ import (
 )
 
 const maxToolOutputBytes = 64 * 1024
-const maxGrepFileBytes = 2 * 1024 * 1024
-const defaultListDepth = 3
-const maxListEntries = 500
-const defaultGrepMatches = 100
-const maxPatchBytes = 256 * 1024
-
-// defaultShellTimeout bounds shell.exec. Many CLI tools (e.g. Office automation)
-// print success then hang on child/COM processes; we must still return.
-const defaultShellTimeout = 60 * time.Second
 
 // defaultLocalToolTimeout is a hard upper bound for local FS/RPC tools that do not
 // manage their own deadline. Normal reads fail in milliseconds; this only prevents
@@ -45,6 +27,7 @@ type GoalToolExecutor func(context.Context, methods.GoalToolExecuteParams) (meth
 type ContextToolExecutor func(context.Context, methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error)
 type SkillRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
 type SubagentRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
+type MCPToolExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
 
 // SubagentManager exposes parent-agent control of specialists and the process pool.
 type SubagentManager interface {
@@ -64,6 +47,7 @@ type ToolRunner struct {
 	SkillExecutor    SkillRunExecutor
 	SubagentExecutor SubagentRunExecutor
 	SubagentManager  SubagentManager
+	MCPExecutor      MCPToolExecutor
 }
 
 type ToolRunContext struct {
@@ -410,11 +394,11 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"title":             map[string]any{"type": "string"},
-					"objective":         map[string]any{"type": "string"},
-					"success_criteria":  map[string]any{"type": "string"},
-					"analysis_summary":  map[string]any{"type": "string"},
-					"activate":          map[string]any{"type": "boolean"},
+					"title":            map[string]any{"type": "string"},
+					"objective":        map[string]any{"type": "string"},
+					"success_criteria": map[string]any{"type": "string"},
+					"analysis_summary": map[string]any{"type": "string"},
+					"activate":         map[string]any{"type": "boolean"},
 				},
 				"required": []string{"objective"},
 			},
@@ -427,14 +411,14 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"goal_id":           map[string]any{"type": "string"},
-					"title":             map[string]any{"type": "string"},
-					"objective":         map[string]any{"type": "string"},
-					"success_criteria":  map[string]any{"type": "string"},
-					"analysis_summary":  map[string]any{"type": "string"},
-					"pipeline_phase":    map[string]any{"type": "string"},
-					"activate":          map[string]any{"type": "boolean"},
-					"action":            map[string]any{"type": "string", "description": "cancel to cancel the goal"},
+					"goal_id":          map[string]any{"type": "string"},
+					"title":            map[string]any{"type": "string"},
+					"objective":        map[string]any{"type": "string"},
+					"success_criteria": map[string]any{"type": "string"},
+					"analysis_summary": map[string]any{"type": "string"},
+					"pipeline_phase":   map[string]any{"type": "string"},
+					"activate":         map[string]any{"type": "boolean"},
+					"action":           map[string]any{"type": "string", "description": "cancel to cancel the goal"},
 				},
 				"required": []string{"goal_id"},
 			},
@@ -464,11 +448,11 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"goal_id":          map[string]any{"type": "string"},
-					"status":           map[string]any{"type": "string", "description": "succeeded | failed"},
-					"summary":          map[string]any{"type": "string"},
-					"report_markdown":  map[string]any{"type": "string"},
-					"report":           map[string]any{"type": "object"},
+					"goal_id":         map[string]any{"type": "string"},
+					"status":          map[string]any{"type": "string", "description": "succeeded | failed"},
+					"summary":         map[string]any{"type": "string"},
+					"report_markdown": map[string]any{"type": "string"},
+					"report":          map[string]any{"type": "object"},
 				},
 				"required": []string{"status", "summary"},
 			},
@@ -594,10 +578,10 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"goal_id":   map[string]any{"type": "string", "description": "Goal id whose notes to read."},
-					"kind":      map[string]any{"type": "string", "description": "Optional kind filter: finding, decision, risk, fact, handoff, note."},
-					"limit":     map[string]any{"type": "integer", "description": "Maximum number of notes to return."},
-					"since_seq": map[string]any{"type": "integer", "description": "Only return notes with seq greater than this value."},
+					"goal_id":     map[string]any{"type": "string", "description": "Goal id whose notes to read."},
+					"kind":        map[string]any{"type": "string", "description": "Optional kind filter: finding, decision, risk, fact, handoff, note."},
+					"limit":       map[string]any{"type": "integer", "description": "Maximum number of notes to return."},
+					"since_seq":   map[string]any{"type": "integer", "description": "Only return notes with seq greater than this value."},
 					"pinned_only": map[string]any{"type": "boolean", "description": "Only return pinned notes."},
 				},
 				"required": []string{"goal_id"},
@@ -626,11 +610,11 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"goal_id":  map[string]any{"type": "string", "description": "Goal id to attach the note to."},
-					"kind":     map[string]any{"type": "string", "description": "Note kind: finding, decision, risk, fact, handoff, note."},
-					"title":    map[string]any{"type": "string", "description": "Short title."},
-					"body":     map[string]any{"type": "string", "description": "Note content."},
-					"pinned":   map[string]any{"type": "boolean", "description": "Pin this note so it is always injected into the goal context."},
+					"goal_id": map[string]any{"type": "string", "description": "Goal id to attach the note to."},
+					"kind":    map[string]any{"type": "string", "description": "Note kind: finding, decision, risk, fact, handoff, note."},
+					"title":   map[string]any{"type": "string", "description": "Short title."},
+					"body":    map[string]any{"type": "string", "description": "Note content."},
+					"pinned":  map[string]any{"type": "boolean", "description": "Pin this note so it is always injected into the goal context."},
 				},
 				"required": []string{"goal_id", "kind", "title", "body"},
 			},
@@ -669,7 +653,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 	}
 }
 
-// slashToolsEnabled gates Temporary Triggers (/read, /shell, …). Default off
+// slashToolsEnabled gates Temporary Triggers (/read, /shell, 鈥?. Default off
 // so plain chat text is never parsed as tools (checklist R6). Enable with
 // RED_PANDA_SLASH_TOOLS=1 for local smoke scripts and unit tests.
 func slashToolsEnabled() bool {
@@ -724,14 +708,18 @@ func (ToolRunner) Parse(text string, runID string) (ToolInvocation, bool) {
 	}
 }
 
-func (runner ToolRunner) InvocationFromCall(runID string, index int, call tools.Call) (ToolInvocation, error) {
+func (runner ToolRunner) InvocationFromCall(runID string, index int, call tools.Call, extra ...tools.Definition) (ToolInvocation, error) {
 	if call.Name == "" {
 		return ToolInvocation{}, fmt.Errorf("tool name is required")
 	}
 	if call.ID == "" {
 		call.ID = fmt.Sprintf("tool_%s_model_%d", runID, index+1)
 	}
-	for _, definition := range runner.AvailableTools() {
+	definitions := runner.AvailableTools()
+	if len(extra) > 0 {
+		definitions = append(append([]tools.Definition{}, definitions...), extra...)
+	}
+	for _, definition := range definitions {
 		if definition.Name == call.Name {
 			if call.DisplayName == "" {
 				call.DisplayName = definition.DisplayName
@@ -744,6 +732,19 @@ func (runner ToolRunner) InvocationFromCall(runID string, index int, call tools.
 			}
 			return ToolInvocation{Call: call}, nil
 		}
+	}
+	// MCP tools may be registered after AvailableTools snapshot; accept prefix as last resort.
+	if isMCPToolName(call.Name) {
+		if call.DisplayName == "" {
+			call.DisplayName = call.Name
+		}
+		if call.Risk == "" {
+			call.Risk = tools.RiskHigh
+		}
+		if call.Arguments == nil {
+			call.Arguments = map[string]any{}
+		}
+		return ToolInvocation{Call: call}, nil
 	}
 	return ToolInvocation{}, fmt.Errorf("unknown tool %s", call.Name)
 }
@@ -788,6 +789,10 @@ func toolTimeoutFor(name string) time.Duration {
 		"goal.write", "goal.update", "goal.checkpoint", "goal.complete", "goal.list":
 		return defaultGatewayToolTimeout
 	default:
+		// MCP tools manage start/initialize/call timeouts internally (docs/19).
+		if isMCPToolName(name) {
+			return 0
+		}
 		return defaultLocalToolTimeout
 	}
 }
@@ -929,956 +934,14 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 			)
 		})
 	default:
+		if isMCPToolName(call.Name) {
+			if runner.MCPExecutor == nil {
+				return "", fmt.Errorf("MCP executor is not available")
+			}
+			return runner.MCPExecutor(ctx, runCtx, call)
+		}
 		return "", fmt.Errorf("unknown tool %s", call.Name)
 	}
-}
-
-func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
-	if runner.MemoryExecutor == nil {
-		return "", fmt.Errorf("memory tool executor is not available")
-	}
-	result, err := runner.MemoryExecutor(ctx, methods.MemoryToolExecuteParams{
-		RunID:         runCtx.RunID,
-		SessionID:     runCtx.SessionID,
-		WorkspaceRoot: runCtx.WorkingDir,
-		ToolCallID:    call.ID,
-		ToolName:      call.Name,
-		Arguments:     call.Arguments,
-	})
-	if err != nil {
-		return "", err
-	}
-	if result.Status != "" && result.Status != "completed" {
-		return result.Output, fmt.Errorf("memory tool returned status %s", result.Status)
-	}
-	return result.Output, nil
-}
-
-func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
-	if runner.TodoExecutor == nil {
-		return "", fmt.Errorf("todo tool executor is not available")
-	}
-	name := call.Name
-	if name == "todo_write" {
-		name = "todo.write"
-	}
-	result, err := runner.TodoExecutor(ctx, methods.TodoToolExecuteParams{
-		RunID:         runCtx.RunID,
-		SessionID:     runCtx.SessionID,
-		WorkspaceRoot: runCtx.WorkingDir,
-		ToolCallID:    call.ID,
-		ToolName:      name,
-		Arguments:     call.Arguments,
-	})
-	if err != nil {
-		return "", err
-	}
-	if result.Status != "" && result.Status != "completed" {
-		return result.Output, fmt.Errorf("todo tool returned status %s", result.Status)
-	}
-	return result.Output, nil
-}
-
-func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
-	if runner.GoalExecutor == nil {
-		return "", fmt.Errorf("goal tool executor is not available")
-	}
-	result, err := runner.GoalExecutor(ctx, methods.GoalToolExecuteParams{
-		RunID:         runCtx.RunID,
-		SessionID:     runCtx.SessionID,
-		WorkspaceRoot: runCtx.WorkingDir,
-		ToolCallID:    call.ID,
-		ToolName:      call.Name,
-		Arguments:     call.Arguments,
-	})
-	if err != nil {
-		return "", err
-	}
-	if result.Status != "" && result.Status != "completed" {
-		return result.Output, fmt.Errorf("goal tool returned status %s", result.Status)
-	}
-	return result.Output, nil
-}
-
-// runContextTool dispatches a context.* (goal scratchpad) tool to the Gateway.
-// Unlike goal/todo tools, context tools are intentionally NOT on the subagent
-// denylist, so specialist children can read shared findings and write handoffs.
-func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
-	if runner.ContextExecutor == nil {
-		return "", fmt.Errorf("context tool executor is not available")
-	}
-	result, err := runner.ContextExecutor(ctx, methods.ContextToolExecuteParams{
-		RunID:         runCtx.RunID,
-		SessionID:     runCtx.SessionID,
-		WorkspaceRoot: runCtx.WorkingDir,
-		ToolCallID:    call.ID,
-		ToolName:      call.Name,
-		Arguments:     call.Arguments,
-	})
-	if err != nil {
-		return "", err
-	}
-	if result.Status != "" && result.Status != "completed" {
-		return result.Output, fmt.Errorf("context tool returned status %s", result.Status)
-	}
-	// Include structured notes in the output so the model sees them inline.
-	output := result.Output
-	if len(result.Notes) > 0 {
-		notesJSON, _ := json.Marshal(map[string]any{"notes": result.Notes})
-		if output == "" {
-			output = string(notesJSON)
-		} else {
-			output = strings.TrimSpace(output) + "\n" + string(notesJSON)
-		}
-	}
-	return truncateToolOutput(output), nil
-}
-
-func readInvocation(runID string, path string) ToolInvocation {
-	return ToolInvocation{Call: tools.Call{
-		ID:          "tool_" + runID + "_read",
-		Name:        "workspace.read_file",
-		DisplayName: "Read file",
-		Risk:        tools.RiskLow,
-		Arguments:   map[string]any{"path": path},
-	}}
-}
-
-func listInvocation(runID string, path string) ToolInvocation {
-	if strings.TrimSpace(path) == "" {
-		path = "."
-	}
-	return ToolInvocation{Call: tools.Call{
-		ID:          "tool_" + runID + "_list",
-		Name:        "workspace.list",
-		DisplayName: "List files",
-		Risk:        tools.RiskLow,
-		Arguments:   map[string]any{"path": path, "max_depth": defaultListDepth},
-	}}
-}
-
-func grepInvocation(runID string, rest string) ToolInvocation {
-	pattern, path, ok := strings.Cut(strings.TrimSpace(rest), " ")
-	if !ok {
-		path = "."
-	}
-	return ToolInvocation{Call: tools.Call{
-		ID:          "tool_" + runID + "_grep",
-		Name:        "workspace.grep",
-		DisplayName: "Search files",
-		Risk:        tools.RiskLow,
-		Arguments:   map[string]any{"pattern": pattern, "path": strings.TrimSpace(path), "max_matches": defaultGrepMatches},
-	}}
-}
-
-func shellInvocation(runID string, command string) ToolInvocation {
-	return ToolInvocation{Call: tools.Call{
-		ID:          "tool_" + runID + "_shell",
-		Name:        "shell.exec",
-		DisplayName: "Shell",
-		Risk:        tools.RiskHigh,
-		Arguments:   map[string]any{"command": command},
-	}}
-}
-
-func writeInvocation(runID string, rest string) ToolInvocation {
-	path, content, ok := strings.Cut(rest, " ")
-	if !ok {
-		path = rest
-		content = ""
-	}
-	return ToolInvocation{Call: tools.Call{
-		ID:          "tool_" + runID + "_write",
-		Name:        "workspace.write_file",
-		DisplayName: "Write file",
-		Risk:        tools.RiskHigh,
-		Arguments:   map[string]any{"path": path, "content": content},
-	}}
-}
-
-func editInvocation(runID string, rest string) ToolInvocation {
-	path, replacement, ok := strings.Cut(rest, " ")
-	oldText, newText := "", ""
-	if ok {
-		oldText, newText, _ = strings.Cut(replacement, "=>")
-	}
-	return ToolInvocation{Call: tools.Call{
-		ID:          "tool_" + runID + "_edit",
-		Name:        "workspace.edit_file",
-		DisplayName: "Edit file",
-		Risk:        tools.RiskHigh,
-		Arguments: map[string]any{
-			"path":        strings.TrimSpace(path),
-			"old_text":    strings.TrimSpace(oldText),
-			"new_text":    strings.TrimSpace(newText),
-			"replace_all": false,
-		},
-	}}
-}
-
-func diffInvocation(runID string, rest string) ToolInvocation {
-	path, replacement, ok := strings.Cut(rest, " ")
-	oldText, newText := "", ""
-	if ok {
-		oldText, newText, _ = strings.Cut(replacement, "=>")
-	}
-	return ToolInvocation{Call: tools.Call{
-		ID:          "tool_" + runID + "_diff",
-		Name:        "workspace.diff_file",
-		DisplayName: "Preview diff",
-		Risk:        tools.RiskLow,
-		Arguments: map[string]any{
-			"path":        strings.TrimSpace(path),
-			"old_text":    strings.TrimSpace(oldText),
-			"new_text":    strings.TrimSpace(newText),
-			"replace_all": false,
-		},
-	}}
-}
-
-func patchInvocation(runID string, patch string) ToolInvocation {
-	return ToolInvocation{Call: tools.Call{
-		ID:          "tool_" + runID + "_patch",
-		Name:        "workspace.apply_patch",
-		DisplayName: "Apply patch",
-		Risk:        tools.RiskHigh,
-		Arguments:   map[string]any{"patch": patch},
-	}}
-}
-
-func runReadFile(root string, relPath string) (string, error) {
-	target, err := resolveWorkspacePath(root, relPath)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return "", annotateWorkspaceIOError(root, relPath, err)
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("%s is a directory (working_dir=%q)", relPath, displayWorkingDir(root))
-	}
-	file, err := os.Open(target)
-	if err != nil {
-		return "", annotateWorkspaceIOError(root, relPath, err)
-	}
-	defer file.Close()
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(io.LimitReader(file, maxToolOutputBytes)); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-// annotateWorkspaceIOError turns opaque OS errors into model-actionable messages
-// (especially "file not found under the wrong working_dir").
-func annotateWorkspaceIOError(root string, relPath string, err error) error {
-	if err == nil {
-		return nil
-	}
-	wd := displayWorkingDir(root)
-	if os.IsNotExist(err) {
-		return fmt.Errorf("file not found: %q under working_dir %q — verify the active workspace and relative path", relPath, wd)
-	}
-	return fmt.Errorf("%w (path=%q working_dir=%q)", err, relPath, wd)
-}
-
-func displayWorkingDir(root string) string {
-	if strings.TrimSpace(root) == "" {
-		if wd, err := os.Getwd(); err == nil {
-			return wd
-		}
-		return "(unset)"
-	}
-	return root
-}
-
-type workspaceDirStat struct {
-	Path                string `json:"path"`
-	Files               int    `json:"files"`
-	Dirs                int    `json:"dirs"`
-	RecommendedMaxTurns int    `json:"recommended_max_turns"`
-	IsSkipped           bool   `json:"skipped,omitempty"`
-}
-
-type workspaceStatsResult struct {
-	Root              string             `json:"root"`
-	Path              string             `json:"path"`
-	MaxDepth          int                `json:"max_depth"`
-	TotalFiles        int                `json:"total_files"`
-	TotalDirs         int                `json:"total_dirs"`
-	Truncated         bool               `json:"truncated"`
-	SuggestedSplits   int                `json:"suggested_splits"`
-	SplitGuidance     string             `json:"split_guidance"`
-	SummaryTurns      int                `json:"summary_turns"`
-	SuggestedMaxTurns int                `json:"suggested_max_turns"`
-	TurnsFormula      string             `json:"turns_formula"`
-	TopLevel          []workspaceDirStat `json:"top_level"`
-}
-
-// runWorkspaceStats walks a directory and returns counts for split planning.
-func runWorkspaceStats(root string, relPath string, maxDepth int) (string, error) {
-	result, err := computeWorkspaceStats(root, relPath, maxDepth)
-	if err != nil {
-		return "", err
-	}
-	raw, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
-}
-
-// computeWorkspaceStats returns structured counts used by workspace.stats and subagent.run budgeting.
-func computeWorkspaceStats(root string, relPath string, maxDepth int) (workspaceStatsResult, error) {
-	if strings.TrimSpace(relPath) == "" {
-		relPath = "."
-	}
-	maxDepth = clampInt(maxDepth, 1, 8)
-	target, err := resolveWorkspacePath(root, relPath)
-	if err != nil {
-		return workspaceStatsResult{}, err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return workspaceStatsResult{}, err
-	}
-	cleanRoot, err := cleanWorkspaceRoot(root)
-	if err != nil {
-		return workspaceStatsResult{}, err
-	}
-	displayRoot, err := workspaceRelativeDisplay(cleanRoot, target)
-	if err != nil {
-		displayRoot = relPath
-	}
-
-	result := workspaceStatsResult{
-		Root:         cleanRoot,
-		Path:         displayRoot,
-		MaxDepth:     maxDepth,
-		SummaryTurns: subagentSummaryTurns,
-		TurnsFormula: fmt.Sprintf("max_turns = file_count + %d (analysis summary)", subagentSummaryTurns),
-	}
-	if !info.IsDir() {
-		result.TotalFiles = 1
-		result.SuggestedSplits = 1
-		result.SplitGuidance = "single_file"
-		result.SuggestedMaxTurns = recommendedSubagentTurns(1)
-		return result, nil
-	}
-
-	const maxWalkFiles = 20000
-	topLevel := map[string]*workspaceDirStat{}
-	err = filepath.WalkDir(target, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		relToTarget, err := filepath.Rel(target, path)
-		if err != nil {
-			return nil
-		}
-		if relToTarget == "." {
-			return nil
-		}
-		depth := entryDepth(relToTarget)
-		if depth > maxDepth {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		name := d.Name()
-		if d.IsDir() && shouldSkipSearchDir(name) {
-			// Still count skipped top-level packages so the orchestrator can assign them.
-			if depth == 1 {
-				key := filepath.ToSlash(name)
-				stat := topLevel[key]
-				if stat == nil {
-					stat = &workspaceDirStat{Path: key + "/", IsSkipped: true}
-					topLevel[key] = stat
-				}
-			}
-			return filepath.SkipDir
-		}
-
-		topName := strings.Split(filepath.ToSlash(relToTarget), "/")[0]
-		stat := topLevel[topName]
-		if stat == nil {
-			display := topName
-			if d.IsDir() && depth == 1 {
-				display = topName + "/"
-			}
-			stat = &workspaceDirStat{Path: display}
-			topLevel[topName] = stat
-		}
-
-		if d.IsDir() {
-			result.TotalDirs++
-			if depth == 1 {
-				stat.Dirs++
-			}
-			return nil
-		}
-
-		result.TotalFiles++
-		stat.Files++
-		if result.TotalFiles >= maxWalkFiles {
-			result.Truncated = true
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil {
-		return workspaceStatsResult{}, err
-	}
-
-	keys := make([]string, 0, len(topLevel))
-	for key := range topLevel {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		item := *topLevel[key]
-		item.RecommendedMaxTurns = recommendedSubagentTurns(item.Files)
-		result.TopLevel = append(result.TopLevel, item)
-	}
-
-	result.SuggestedMaxTurns = recommendedSubagentTurns(result.TotalFiles)
-	switch {
-	case result.TotalFiles <= 40:
-		result.SuggestedSplits = 1
-		result.SplitGuidance = "small_tree_use_root_or_one_subagent"
-	case result.TotalFiles <= 150:
-		result.SuggestedSplits = minInt(3, maxInt(2, len(result.TopLevel)))
-		result.SplitGuidance = "medium_tree_split_by_top_level_dirs_use_each_recommended_max_turns"
-	default:
-		result.SuggestedSplits = minInt(6, maxInt(3, countNonEmptyTopDirs(result.TopLevel)))
-		result.SplitGuidance = "large_tree_spawn_multiple_subagents_in_parallel_with_file_count_budgets"
-	}
-	return result, nil
-}
-
-func countNonEmptyTopDirs(items []workspaceDirStat) int {
-	count := 0
-	for _, item := range items {
-		if item.Files > 0 || item.Dirs > 0 {
-			count++
-		}
-	}
-	if count == 0 {
-		return 1
-	}
-	return count
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func runListWorkspace(root string, relPath string, maxDepth int) (string, error) {
-	if strings.TrimSpace(relPath) == "" {
-		relPath = "."
-	}
-	maxDepth = clampInt(maxDepth, 0, 8)
-	target, err := resolveWorkspacePath(root, relPath)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return "", err
-	}
-	cleanRoot, err := cleanWorkspaceRoot(root)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		display, err := workspaceRelativeDisplay(cleanRoot, target)
-		if err != nil {
-			return "", err
-		}
-		return display, nil
-	}
-
-	var entries []string
-	var truncated bool
-	err = filepath.WalkDir(target, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		relToTarget, err := filepath.Rel(target, path)
-		if err != nil {
-			return nil
-		}
-		depth := entryDepth(relToTarget)
-		if depth > maxDepth {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if relToTarget != "." && d.IsDir() && shouldSkipSearchDir(d.Name()) {
-			return filepath.SkipDir
-		}
-		display, err := workspaceRelativeDisplay(cleanRoot, path)
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			display += "/"
-		}
-		entries = append(entries, display)
-		if len(entries) >= maxListEntries {
-			truncated = true
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	sort.Strings(entries)
-	if len(entries) == 0 {
-		return "empty", nil
-	}
-	output := strings.Join(entries, "\n")
-	if truncated {
-		output += "\n[truncated]"
-	}
-	return truncateToolOutput(output), nil
-}
-
-func runGrepWorkspace(root string, pattern string, relPath string, maxMatches int) (string, error) {
-	if strings.TrimSpace(pattern) == "" {
-		return "", fmt.Errorf("pattern is required")
-	}
-	if strings.TrimSpace(relPath) == "" {
-		relPath = "."
-	}
-	expr, err := regexp.Compile(pattern)
-	if err != nil {
-		return "", err
-	}
-	maxMatches = clampInt(maxMatches, 1, 1000)
-	target, err := resolveWorkspacePath(root, relPath)
-	if err != nil {
-		return "", err
-	}
-	cleanRoot, err := cleanWorkspaceRoot(root)
-	if err != nil {
-		return "", err
-	}
-	var matches []string
-	var truncated bool
-	visit := func(path string) error {
-		if len(matches) >= maxMatches {
-			truncated = true
-			return filepath.SkipAll
-		}
-		lines, err := grepFile(cleanRoot, path, expr, maxMatches-len(matches))
-		if err != nil {
-			return nil
-		}
-		matches = append(matches, lines...)
-		if len(matches) >= maxMatches {
-			truncated = true
-		}
-		return nil
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		if err := visit(target); err != nil && err != filepath.SkipAll {
-			return "", err
-		}
-	} else {
-		err = filepath.WalkDir(target, func(path string, d os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return nil
-			}
-			if d.IsDir() {
-				if path != target && shouldSkipSearchDir(d.Name()) {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			return visit(path)
-		})
-		if err != nil && err != filepath.SkipAll {
-			return "", err
-		}
-	}
-	if len(matches) == 0 {
-		return "no matches", nil
-	}
-	output := strings.Join(matches, "\n")
-	if truncated {
-		output += "\n[truncated]"
-	}
-	return truncateToolOutput(output), nil
-}
-
-func grepFile(root string, path string, expr *regexp.Regexp, limit int) ([]string, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.IsDir() || info.Size() > maxGrepFileBytes {
-		return nil, nil
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	reader := bufio.NewReader(file)
-	peek, _ := reader.Peek(4096)
-	if bytes.IndexByte(peek, 0) >= 0 {
-		return nil, nil
-	}
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	var matches []string
-	lineNo := 0
-	display, err := workspaceRelativeDisplay(root, path)
-	if err != nil {
-		return nil, err
-	}
-	for scanner.Scan() {
-		lineNo++
-		line := scanner.Text()
-		if expr.MatchString(line) {
-			matches = append(matches, fmt.Sprintf("%s:%d: %s", display, lineNo, strings.TrimSpace(line)))
-			if len(matches) >= limit {
-				break
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return matches, nil
-}
-
-func runWriteFile(root string, relPath string, content string) (string, error) {
-	target, err := resolveWorkspacePath(root, relPath)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("wrote %d bytes to %s", len(content), relPath), nil
-}
-
-func runEditFile(root string, relPath string, oldText string, newText string, replaceAll bool) (string, error) {
-	if strings.TrimSpace(oldText) == "" {
-		return "", fmt.Errorf("old_text is required")
-	}
-	target, err := resolveWorkspacePath(root, relPath)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return "", err
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("%s is a directory", relPath)
-	}
-	raw, err := os.ReadFile(target)
-	if err != nil {
-		return "", err
-	}
-	if bytes.IndexByte(raw, 0) >= 0 {
-		return "", fmt.Errorf("%s appears to be a binary file", relPath)
-	}
-	content := string(raw)
-	count := strings.Count(content, oldText)
-	if count == 0 {
-		return "", fmt.Errorf("old_text not found in %s", relPath)
-	}
-	if !replaceAll && count > 1 {
-		return "", fmt.Errorf("old_text occurs %d times in %s; set replace_all to true to replace all matches", count, relPath)
-	}
-	replaced := strings.Replace(content, oldText, newText, 1)
-	changed := 1
-	if replaceAll {
-		replaced = strings.ReplaceAll(content, oldText, newText)
-		changed = count
-	}
-	if err := os.WriteFile(target, []byte(replaced), info.Mode().Perm()); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("edited %s: replaced %d occurrence(s)", relPath, changed), nil
-}
-
-func runDiffFile(root string, relPath string, content string, hasContent bool, oldText string, newText string, replaceAll bool) (string, error) {
-	target, err := resolveWorkspacePath(root, relPath)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return "", err
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("%s is a directory", relPath)
-	}
-	raw, err := os.ReadFile(target)
-	if err != nil {
-		return "", err
-	}
-	if bytes.IndexByte(raw, 0) >= 0 {
-		return "", fmt.Errorf("%s appears to be a binary file", relPath)
-	}
-	oldContent := string(raw)
-	newContent := content
-	if !hasContent {
-		if strings.TrimSpace(oldText) == "" {
-			return "", fmt.Errorf("old_text is required when content is not provided")
-		}
-		count := strings.Count(oldContent, oldText)
-		if count == 0 {
-			return "", fmt.Errorf("old_text not found in %s", relPath)
-		}
-		if !replaceAll && count > 1 {
-			return "", fmt.Errorf("old_text occurs %d times in %s; set replace_all to true to preview all matches", count, relPath)
-		}
-		newContent = strings.Replace(oldContent, oldText, newText, 1)
-		if replaceAll {
-			newContent = strings.ReplaceAll(oldContent, oldText, newText)
-		}
-	}
-	if oldContent == newContent {
-		return "no changes", nil
-	}
-	return unifiedDiff(relPath, oldContent, newContent), nil
-}
-
-func runApplyPatch(root string, patch string) (string, error) {
-	if strings.TrimSpace(patch) == "" {
-		return "", fmt.Errorf("patch is required")
-	}
-	if len(patch) > maxPatchBytes {
-		return "", fmt.Errorf("patch exceeds %d bytes", maxPatchBytes)
-	}
-	patch = strings.ReplaceAll(patch, "\r\n", "\n")
-	patch = strings.ReplaceAll(patch, "\r", "\n")
-	files, err := parseUnifiedPatch(patch)
-	if err != nil {
-		return "", err
-	}
-	if len(files) == 0 {
-		return "", fmt.Errorf("patch contains no file changes")
-	}
-	changed := make([]string, 0, len(files))
-	for _, filePatch := range files {
-		target, err := resolveWorkspacePath(root, filePatch.Path)
-		if err != nil {
-			return "", err
-		}
-		info, err := os.Stat(target)
-		if err != nil {
-			return "", err
-		}
-		if info.IsDir() {
-			return "", fmt.Errorf("%s is a directory", filePatch.Path)
-		}
-		raw, err := os.ReadFile(target)
-		if err != nil {
-			return "", err
-		}
-		if bytes.IndexByte(raw, 0) >= 0 {
-			return "", fmt.Errorf("%s appears to be a binary file", filePatch.Path)
-		}
-		next, err := applyFilePatch(string(raw), filePatch)
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", filePatch.Path, err)
-		}
-		if err := os.WriteFile(target, []byte(next), info.Mode().Perm()); err != nil {
-			return "", err
-		}
-		changed = append(changed, filePatch.Path)
-	}
-	sort.Strings(changed)
-	return fmt.Sprintf("applied patch to %d file(s): %s", len(changed), strings.Join(changed, ", ")), nil
-}
-
-func runShell(ctx context.Context, root string, command string) (string, error) {
-	if strings.TrimSpace(command) == "" {
-		return "", fmt.Errorf("empty shell command")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	toolCtx, cancel := context.WithTimeout(ctx, defaultShellTimeout)
-	defer cancel()
-
-	var cmd *exec.Cmd
-	if goruntime.GOOS == "windows" {
-		// -NonInteractive avoids prompts that hang the session after work is done.
-		cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", command)
-	} else {
-		cmd = exec.Command("sh", "-c", command)
-	}
-	if root != "" {
-		if resolved, err := filepath.Abs(root); err == nil {
-			cmd.Dir = resolved
-		}
-	}
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	// Avoid inheriting a live stdin that some CLIs wait on forever.
-	cmd.Stdin = bytes.NewReader(nil)
-
-	if err := cmd.Start(); err != nil {
-		return "", err
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-toolCtx.Done():
-		// Kill the whole tree: PowerShell may exit while officecli/COM children linger,
-		// or the child may hang after printing success (exactly the OfficeCLI case).
-		killShellProcessTree(cmd)
-		// Give Wait a moment to observe the kill.
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-		}
-		output := truncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
-		if output != "" {
-			// Work often already finished (e.g. "Added slide at /slide[4]") but process
-			// did not exit — surface partial success clearly instead of a bare timeout.
-			return output, fmt.Errorf(
-				"shell command timed out after %s (process did not exit; partial output was captured — the command may have already succeeded)",
-				defaultShellTimeout,
-			)
-		}
-		return "", fmt.Errorf("shell command timed out after %s", defaultShellTimeout)
-	case err := <-done:
-		output := truncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
-		if err != nil {
-			return output, err
-		}
-		return output, nil
-	}
-}
-
-// killShellProcessTree terminates the shell and its descendants.
-// On Windows, Process.Kill only kills powershell.exe, not officecli.exe children.
-func killShellProcessTree(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	pid := cmd.Process.Pid
-	if goruntime.GOOS == "windows" && pid > 0 {
-		// /T = tree, /F = force
-		killer := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
-		_ = killer.Run()
-	}
-	_ = cmd.Process.Kill()
-}
-
-func resolveWorkspacePath(root string, relPath string) (string, error) {
-	if strings.TrimSpace(relPath) == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		root = wd
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	// Fail fast when the session working_dir itself is missing/wrong — otherwise
-	// every relative read looks like a missing file and confuses the model.
-	if info, statErr := os.Stat(absRoot); statErr != nil {
-		if os.IsNotExist(statErr) {
-			return "", fmt.Errorf("working_dir does not exist: %q", absRoot)
-		}
-		return "", fmt.Errorf("working_dir not accessible: %q: %w", absRoot, statErr)
-	} else if !info.IsDir() {
-		return "", fmt.Errorf("working_dir is not a directory: %q", absRoot)
-	}
-	cleanRoot, err := filepath.EvalSymlinks(absRoot)
-	if err != nil {
-		cleanRoot = filepath.Clean(absRoot)
-	}
-	target := relPath
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(cleanRoot, relPath)
-	}
-	absTarget, err := filepath.Abs(target)
-	if err != nil {
-		return "", err
-	}
-	cleanTarget := filepath.Clean(absTarget)
-	if evalTarget, err := filepath.EvalSymlinks(cleanTarget); err == nil {
-		cleanTarget = filepath.Clean(evalTarget)
-	}
-	if !isPathInside(cleanRoot, cleanTarget) {
-		return "", fmt.Errorf("path escapes workspace root")
-	}
-	return cleanTarget, nil
-}
-
-func cleanWorkspaceRoot(root string) (string, error) {
-	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		root = wd
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	cleanRoot, err := filepath.EvalSymlinks(absRoot)
-	if err != nil {
-		cleanRoot = filepath.Clean(absRoot)
-	}
-	return filepath.Clean(cleanRoot), nil
-}
-
-func isPathInside(root string, target string) bool {
-	root = filepath.Clean(root)
-	target = filepath.Clean(target)
-	if goruntime.GOOS == "windows" {
-		root = strings.ToLower(root)
-		target = strings.ToLower(target)
-	}
-	if target == root {
-		return true
-	}
-	return strings.HasPrefix(target, root+string(os.PathSeparator))
 }
 
 func truncateToolOutput(value string) string {
@@ -1887,34 +950,6 @@ func truncateToolOutput(value string) string {
 	}
 	return value[:maxToolOutputBytes] + "\n[truncated]"
 }
-
-func workspaceRelativeDisplay(root string, target string) (string, error) {
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return "", err
-	}
-	if rel == "." {
-		return ".", nil
-	}
-	return filepath.ToSlash(rel), nil
-}
-
-func entryDepth(rel string) int {
-	if rel == "." || rel == "" {
-		return 0
-	}
-	return len(strings.Split(filepath.Clean(rel), string(os.PathSeparator)))
-}
-
-func shouldSkipSearchDir(name string) bool {
-	switch name {
-	case ".git", "node_modules", "dist", "build", "bin", ".wails", ".vite":
-		return true
-	default:
-		return false
-	}
-}
-
 func clampInt(value int, min int, max int) int {
 	if value < min {
 		return min
@@ -1969,221 +1004,4 @@ func stringArgPresent(args map[string]any, key string) (string, bool) {
 
 type jsonNumber interface {
 	Int64() (int64, error)
-}
-
-type unifiedFilePatch struct {
-	Path  string
-	Hunks []unifiedHunk
-}
-
-type unifiedHunk struct {
-	OldStart int
-	OldCount int
-	NewStart int
-	NewCount int
-	Lines    []string
-}
-
-func unifiedDiff(path string, oldContent string, newContent string) string {
-	oldLines := splitContentLines(oldContent)
-	newLines := splitContentLines(newContent)
-	var builder strings.Builder
-	display := filepath.ToSlash(strings.TrimSpace(path))
-	fmt.Fprintf(&builder, "--- a/%s\n", display)
-	fmt.Fprintf(&builder, "+++ b/%s\n", display)
-	fmt.Fprintf(&builder, "@@ -1,%d +1,%d @@\n", len(oldLines), len(newLines))
-	for _, line := range oldLines {
-		builder.WriteString("-")
-		builder.WriteString(line)
-		builder.WriteString("\n")
-	}
-	for _, line := range newLines {
-		builder.WriteString("+")
-		builder.WriteString(line)
-		builder.WriteString("\n")
-	}
-	return truncateToolOutput(builder.String())
-}
-
-func parseUnifiedPatch(patch string) ([]unifiedFilePatch, error) {
-	lines := strings.Split(patch, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	var files []unifiedFilePatch
-	for i := 0; i < len(lines); {
-		if strings.HasPrefix(lines[i], "diff --git ") {
-			i++
-			continue
-		}
-		if isPatchMetadataLine(lines[i]) {
-			i++
-			continue
-		}
-		if !strings.HasPrefix(lines[i], "--- ") {
-			return nil, fmt.Errorf("expected --- file header")
-		}
-		oldHeader := lines[i]
-		i++
-		if i >= len(lines) || !strings.HasPrefix(lines[i], "+++ ") {
-			return nil, fmt.Errorf("expected +++ file header after %q", oldHeader)
-		}
-		path, err := patchPathFromHeader(lines[i])
-		if err != nil {
-			return nil, err
-		}
-		filePatch := unifiedFilePatch{Path: path}
-		i++
-		for i < len(lines) {
-			if strings.HasPrefix(lines[i], "diff --git ") || strings.HasPrefix(lines[i], "--- ") {
-				break
-			}
-			if isPatchMetadataLine(lines[i]) {
-				i++
-				continue
-			}
-			if !strings.HasPrefix(lines[i], "@@ ") {
-				return nil, fmt.Errorf("expected hunk header for %s", path)
-			}
-			hunk, err := parseHunkHeader(lines[i])
-			if err != nil {
-				return nil, err
-			}
-			i++
-			for i < len(lines) {
-				line := lines[i]
-				if strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "@@ ") {
-					break
-				}
-				if line == `\ No newline at end of file` {
-					i++
-					continue
-				}
-				if line == "" {
-					return nil, fmt.Errorf("empty patch line in hunk for %s must be prefixed with context/add/remove marker", path)
-				}
-				switch line[0] {
-				case ' ', '+', '-':
-					hunk.Lines = append(hunk.Lines, line)
-				default:
-					return nil, fmt.Errorf("invalid hunk line marker %q for %s", line[0], path)
-				}
-				i++
-			}
-			filePatch.Hunks = append(filePatch.Hunks, hunk)
-		}
-		if len(filePatch.Hunks) == 0 {
-			return nil, fmt.Errorf("patch for %s contains no hunks", path)
-		}
-		files = append(files, filePatch)
-	}
-	return files, nil
-}
-
-func isPatchMetadataLine(line string) bool {
-	return strings.HasPrefix(line, "index ") ||
-		strings.HasPrefix(line, "new file mode ") ||
-		strings.HasPrefix(line, "deleted file mode ") ||
-		strings.HasPrefix(line, "old mode ") ||
-		strings.HasPrefix(line, "new mode ") ||
-		strings.HasPrefix(line, "similarity index ") ||
-		strings.HasPrefix(line, "rename from ") ||
-		strings.HasPrefix(line, "rename to ")
-}
-
-func patchPathFromHeader(header string) (string, error) {
-	raw := strings.TrimSpace(strings.TrimPrefix(header, "+++ "))
-	if raw == "/dev/null" {
-		return "", fmt.Errorf("creating files from /dev/null patches is not supported")
-	}
-	if fields := strings.Fields(raw); len(fields) > 0 {
-		raw = fields[0]
-	}
-	raw = strings.TrimPrefix(raw, "b/")
-	raw = strings.TrimPrefix(raw, "a/")
-	raw = strings.Trim(raw, `"`)
-	if raw == "" || filepath.IsAbs(raw) || strings.HasPrefix(raw, "../") || strings.Contains(raw, "/../") || strings.Contains(raw, `\..\`) {
-		return "", fmt.Errorf("invalid patch path %q", raw)
-	}
-	return filepath.ToSlash(raw), nil
-}
-
-func parseHunkHeader(header string) (unifiedHunk, error) {
-	var h unifiedHunk
-	if _, err := fmt.Sscanf(header, "@@ -%d,%d +%d,%d @@", &h.OldStart, &h.OldCount, &h.NewStart, &h.NewCount); err == nil {
-		return h, nil
-	}
-	if _, err := fmt.Sscanf(header, "@@ -%d +%d @@", &h.OldStart, &h.NewStart); err == nil {
-		h.OldCount = 1
-		h.NewCount = 1
-		return h, nil
-	}
-	if _, err := fmt.Sscanf(header, "@@ -%d,%d +%d @@", &h.OldStart, &h.OldCount, &h.NewStart); err == nil {
-		h.NewCount = 1
-		return h, nil
-	}
-	if _, err := fmt.Sscanf(header, "@@ -%d +%d,%d @@", &h.OldStart, &h.NewStart, &h.NewCount); err == nil {
-		h.OldCount = 1
-		return h, nil
-	}
-	return h, fmt.Errorf("invalid hunk header %q", header)
-}
-
-func applyFilePatch(content string, patch unifiedFilePatch) (string, error) {
-	oldLines := splitContentLines(content)
-	newLines := make([]string, 0, len(oldLines))
-	oldIndex := 0
-	for _, hunk := range patch.Hunks {
-		targetIndex := hunk.OldStart - 1
-		if hunk.OldStart == 0 {
-			targetIndex = 0
-		}
-		if targetIndex < oldIndex || targetIndex > len(oldLines) {
-			return "", fmt.Errorf("hunk starts outside file")
-		}
-		newLines = append(newLines, oldLines[oldIndex:targetIndex]...)
-		oldIndex = targetIndex
-		for _, line := range hunk.Lines {
-			if line == "" {
-				return "", fmt.Errorf("invalid empty hunk line")
-			}
-			text := line[1:]
-			switch line[0] {
-			case ' ':
-				if oldIndex >= len(oldLines) || oldLines[oldIndex] != text {
-					return "", fmt.Errorf("context mismatch at line %d", oldIndex+1)
-				}
-				newLines = append(newLines, oldLines[oldIndex])
-				oldIndex++
-			case '-':
-				if oldIndex >= len(oldLines) || oldLines[oldIndex] != text {
-					return "", fmt.Errorf("remove mismatch at line %d", oldIndex+1)
-				}
-				oldIndex++
-			case '+':
-				newLines = append(newLines, text)
-			default:
-				return "", fmt.Errorf("invalid hunk marker %q", line[0])
-			}
-		}
-	}
-	newLines = append(newLines, oldLines[oldIndex:]...)
-	result := strings.Join(newLines, "\n")
-	if strings.HasSuffix(content, "\n") && (len(newLines) > 0 || content == "\n") {
-		result += "\n"
-	}
-	return result, nil
-}
-
-func splitContentLines(content string) []string {
-	if content == "" {
-		return nil
-	}
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
-	lines := strings.Split(content, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	return lines
 }

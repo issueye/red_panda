@@ -1,4 +1,6 @@
-import { ChevronDown, ChevronRight, Play, Square } from 'lucide-react';
+import { ChevronDown, ChevronRight, Play, RefreshCw, Square } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { apiJson } from '../../lib/api.js';
 import {
   formatGoalBudget,
   formatGoalBudgetAdvanced,
@@ -9,14 +11,21 @@ import {
   goalPhaseLabel,
   goalStatusLabel,
 } from '../../lib/goals.js';
+import {
+  goalNoteHeadline,
+  goalNoteKindLabel,
+  normalizeGoalNoteList,
+} from '../../lib/goalNotes.js';
 import { classNames } from '../../lib/format.js';
 import { Button, IconButton } from '../ui/button.jsx';
 
 /**
  * Collapsible goal strip above the todo list / chat composer.
+ * Expanded view includes a read-only scratchpad (context notes) projection (docs/36 C4).
  */
 export function GoalComposerStrip({
   goal = null,
+  sessionId = '',
   expanded = false,
   loading = false,
   busy = false,
@@ -24,6 +33,47 @@ export function GoalComposerStrip({
   onContinue,
   onCancel,
 }) {
+  const [notes, setNotes] = useState([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesError, setNotesError] = useState('');
+  const [notesHydrated, setNotesHydrated] = useState(false);
+
+  const loadNotes = useCallback(async () => {
+    if (!sessionId || !goal?.id || sessionId === 'local-design') {
+      setNotes([]);
+      setNotesError('');
+      setNotesHydrated(true);
+      return;
+    }
+    setNotesLoading(true);
+    setNotesError('');
+    try {
+      const data = await apiJson(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/goals/${encodeURIComponent(goal.id)}/notes`,
+      );
+      setNotes(normalizeGoalNoteList(data));
+      setNotesHydrated(true);
+    } catch (error) {
+      setNotes([]);
+      setNotesError(error?.message || '加载笔记失败');
+      setNotesHydrated(true);
+    } finally {
+      setNotesLoading(false);
+    }
+  }, [goal?.id, sessionId]);
+
+  useEffect(() => {
+    if (!expanded || !goal?.id) return undefined;
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await loadNotes();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, goal?.id, goal?.updatedAt, loadNotes]);
+
   if (!loading && !goal) {
     return null;
   }
@@ -126,6 +176,53 @@ export function GoalComposerStrip({
             {goal.reportMarkdown ? (
               <pre className="goal-composer-report">{goal.reportMarkdown}</pre>
             ) : null}
+
+            <div className="goal-notes-panel" data-testid="goal-notes-panel">
+              <div className="goal-notes-header">
+                <strong>共享笔记</strong>
+                <span className="goal-notes-hint">只读 · Goal scratchpad</span>
+                <IconButton
+                  data-testid="goal-notes-refresh"
+                  disabled={notesLoading || !sessionId || sessionId === 'local-design'}
+                  label="刷新笔记"
+                  onClick={() => { loadNotes().catch(() => {}); }}
+                  variant="ghost"
+                >
+                  <RefreshCw size={12} className={notesLoading ? 'tool-spin' : undefined} />
+                </IconButton>
+              </div>
+              {notesLoading && !notesHydrated ? (
+                <p className="goal-notes-empty">加载笔记…</p>
+              ) : null}
+              {notesError ? (
+                <p className="goal-notes-empty" data-testid="goal-notes-error">{notesError}</p>
+              ) : null}
+              {!notesLoading && !notesError && notes.length === 0 && notesHydrated ? (
+                <p className="goal-notes-empty" data-testid="goal-notes-empty">暂无笔记（模型可通过 context.write 写入）</p>
+              ) : null}
+              {notes.length > 0 ? (
+                <ul className="goal-notes-list" data-testid="goal-notes-list">
+                  {notes.map((note) => (
+                    <li
+                      className={classNames('goal-note-item', note.pinned && 'is-pinned')}
+                      data-testid="goal-note-item"
+                      key={note.id || `${note.seq}-${note.title}`}
+                    >
+                      <div className="goal-note-meta">
+                        <span className="goal-note-kind">{goalNoteKindLabel(note.kind)}</span>
+                        {note.pinned ? <em className="goal-note-pin">置顶</em> : null}
+                        {note.phase ? <span className="goal-note-phase">{note.phase}</span> : null}
+                        {note.source ? <span className="goal-note-source">{note.source}</span> : null}
+                      </div>
+                      <strong className="goal-note-title">{goalNoteHeadline(note)}</strong>
+                      {note.body ? (
+                        <p className="goal-note-body">{note.body}</p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </div>

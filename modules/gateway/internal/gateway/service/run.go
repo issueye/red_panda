@@ -17,6 +17,7 @@ import (
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
 	"redpanda/protocol/events"
+	protocolmcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
 	protows "redpanda/protocol/ws"
@@ -305,6 +306,11 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
+	if err := r.applyMCPServers(&params); err != nil {
+		_ = NewGoalService(r.repos).PauseByRun(runID, "run_failed")
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
+		return StartRunResult{}, err
+	}
 
 	accepted, err := r.runtime.ReplyWithMode(ctx, runtimeMode, params)
 	if err != nil {
@@ -411,6 +417,31 @@ func (r RunService) applyTodoContext(params *methods.ReplyParams) error {
 		return nil
 	}
 	params.Options.TodoContext = ctx
+	return nil
+}
+
+// applyMCPServers attaches enabled MCP server configs (with secrets) so Runtime
+// can discover tools and execute tools/call (docs/36 D2). Gateway never starts
+// MCP processes itself.
+func (r RunService) applyMCPServers(params *methods.ReplyParams) error {
+	if params == nil {
+		return nil
+	}
+	rows, err := r.repos.MCPServers.List(100)
+	if err != nil {
+		return err
+	}
+	out := make([]protocolmcp.MCPServerConfig, 0, len(rows))
+	for _, row := range rows {
+		if !row.Enabled {
+			continue
+		}
+		out = append(out, mcpServerProtocolConfig(row, false))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	params.Options.MCPServers = out
 	return nil
 }
 

@@ -82,6 +82,35 @@ func (s ContextService) executeRead(params methods.ContextToolExecuteParams) (me
 	return contextResult("context.read", rows), nil
 }
 
+// ListNotes returns the goal scratchpad for Desktop projection (docs/36 C4).
+// Read-only; enforces goal membership of the session.
+func (s ContextService) ListNotes(sessionID, goalID string, limit int) ([]methods.GoalNoteDTO, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	goalID = strings.TrimSpace(goalID)
+	if sessionID == "" || goalID == "" {
+		return nil, fmt.Errorf("session_id and goal_id are required")
+	}
+	goal, err := s.repos.Goals.Get(goalID)
+	if err != nil {
+		return nil, fmt.Errorf("goal not found")
+	}
+	if goal.SessionID != sessionID {
+		return nil, fmt.Errorf("goal does not belong to this session")
+	}
+	if limit <= 0 || limit > contextMaxListLimit {
+		limit = contextDefaultListLimit
+	}
+	rows, err := s.repos.Contexts.List(goalID, repository.NoteListOpts{Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]methods.GoalNoteDTO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, noteToDTO(r))
+	}
+	return out, nil
+}
+
 func (s ContextService) executeSearch(params methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
 	goalID, _, err := s.requireAccessibleGoal(params)
 	if err != nil {

@@ -216,6 +216,42 @@ func TestContextReadPinnedFirstOrder(t *testing.T) {
 	}
 }
 
+// Desktop C4 projection: ListNotes is the HTTP-facing read of the same scratchpad.
+func TestContextListNotesForDesktop(t *testing.T) {
+	ctxSvc, goalSvc, session := newContextTestService(t)
+	goalID := createActiveGoal(t, goalSvc, session, "run_root")
+
+	_, err := ctxSvc.ExecuteRuntimeTool(methods.ContextToolExecuteParams{
+		RunID: "run_root", SessionID: session, ToolCallID: "desk1", ToolName: "context.write",
+		Arguments: map[string]any{"goal_id": goalID, "kind": "finding", "title": "UI visible", "body": "scratchpad body"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := ctxSvc.ListNotes(session, goalID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("ListNotes count = %d, want 1", len(items))
+	}
+	if items[0].Title != "UI visible" || items[0].Body != "scratchpad body" {
+		t.Fatalf("unexpected note: %+v", items[0])
+	}
+
+	if _, err := ctxSvc.ListNotes(session, "missing", 0); err == nil {
+		t.Fatal("expected missing goal error")
+	}
+	other, err := ctxSvc.repos.Sessions.Create("other", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctxSvc.ListNotes(other.ID, goalID, 0); err == nil {
+		t.Fatal("expected cross-session rejection")
+	}
+}
+
 func TestContextReadRejectsCrossSessionGoal(t *testing.T) {
 	ctxSvc, goalSvc, sessionA := newContextTestService(t)
 	goalID := createActiveGoal(t, goalSvc, sessionA, "run_a")

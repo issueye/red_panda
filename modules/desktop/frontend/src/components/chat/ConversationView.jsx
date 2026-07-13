@@ -26,6 +26,7 @@ export function ConversationView({
   onProviderProfileChange,
   readOnlyHint = '',
   goal = null,
+  goalSessionId = '',
   goalExpanded = false,
   goalLoading = false,
   goalBusy = false,
@@ -66,6 +67,7 @@ export function ConversationView({
               onCancel={onGoalCancel}
               onContinue={onGoalContinue}
               onToggleExpanded={onGoalExpandToggle}
+              sessionId={goalSessionId}
             />
             <TodoComposerStrip
               expanded={todosExpanded}

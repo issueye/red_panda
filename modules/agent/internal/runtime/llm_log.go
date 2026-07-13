@@ -58,14 +58,14 @@ func logLLMRequest(enabled bool, runID string, sessionID string, model string, u
 	// Pretty-print when possible so files are easy to inspect offline.
 	var pretty json.RawMessage
 	payload := map[string]any{
-		"logged_at":   time.Now().UTC().Format(time.RFC3339Nano),
-		"run_id":      runID,
-		"session_id":  sessionID,
-		"model":       model,
-		"url":         url,
-		"body_bytes":  len(rawBody),
-		"truncated":   truncated,
-		"note":        "API keys are never written to this log. Enable via Desktop settings → 记录 LLM 请求.",
+		"logged_at":  time.Now().UTC().Format(time.RFC3339Nano),
+		"run_id":     runID,
+		"session_id": sessionID,
+		"model":      model,
+		"url":        url,
+		"body_bytes": len(rawBody),
+		"truncated":  truncated,
+		"note":       "API keys are never written to this log. Enable via Desktop settings → 记录 LLM 请求.",
 	}
 	if json.Valid(body) {
 		pretty = json.RawMessage(body)

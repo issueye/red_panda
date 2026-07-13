@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | **Date** | 2026-07-13 |
-| **Status** | proposed |
+| **Status** | in progress (A1–A6 + B1–B4 + C1–C5 + D2 + D6 landed on branch) |
 | **Branch context** | `feat/goal-context-scratchpad` 及后续合并主干 |
 | **Related** | [35-redundancy-convergence-checklist](35-redundancy-convergence-checklist.md)、[34-goal-implementation-optimization-plan](34-goal-implementation-optimization-plan.md)、收敛后评估（综合 ~7.5） |
 
@@ -87,8 +87,8 @@
 | **A2** | 每会话至多一个 active（DB + service）；stale active 修复后再 bind | model/migrate、goal service | M | A1 可并行启动 ✅ 已落地（partial unique + RepairStaleActive + service 门闩） |
 | **A3** | Segment ledger 幂等 `(goal_id, run_id, segment_index)`；计数与 ledger 同事务 | `GoalSegment`、goal service | M | A1 ✅ 已落地（终态冻结新 segment、绑定 run 校验、幂等 replay） |
 | **A4** | 预算权威：Goal 下压 client `max_tool_turns`；wall-time 进 Runtime deadline | run.go、goal_loop、ReplyOptions | M | A3 ✅ 已落地（clamp + remaining total 收紧；wall deadline 已在 goal_loop） |
-| **A5** | 流式语义：中间 segment 禁止 root `final=true`；仅一次 root Finish | runtime loop、provider 消费 | H | A4 |
-| **A6** | 生命周期可观测：pause/cancel/budget 必有 `goal_updated` 或强制 hydrate | gateway + App hydrate | L | A1–A5 |
+| **A5** | 流式语义：中间 segment 禁止 root `final=true`；仅一次 root Finish | runtime loop、provider 消费 | H | A4 ✅ 已落地（`deferGoalStreamFinal` + root 收尾 final；空 Final 在 unbound 仍关闭 stream；多 segment 单测锁 final/finish 各 1） |
+| **A6** | 生命周期可观测：pause/cancel/budget 必有 `goal_updated` 或强制 hydrate | gateway + App hydrate | L | A1–A5 ✅ 已落地（Gateway `OnRootRunTerminal` 先于 Publish；Desktop root terminal 强制 `hydrateGoals`；工具突变仍走 `goal_updated`） |
 
 ### 4.3 验收门禁（轨道 A 总出口）
 
@@ -136,10 +136,10 @@ modules/agent/internal/
 
 | 包 ID | 内容 | 策略 | 风险 |
 | --- | --- | --- | --- |
-| **B1** | 抽出 `tools/workspace*.go` + `shell` + `web`（文件移动，行为零 diff） | `git mv` + 同 package 或先同目录拆文件 | L |
-| **B2** | 抽出 `gateway_tools.go`（memory/todo/goal/context + callGatewayResult） | 依赖 B1 或并行 | L |
-| **B3** | 抽出 `loop`（`runProviderLoop*`、`goal_loop`、segment carry） | 接口：Runtime 注入 provider/tools | M |
-| **B4** | 抽出 `subagent` + `skill` 包 | 保持 denylist/allowlist 行为 | M |
+| **B1** | 抽出 `tools/workspace*.go` + `shell` + `web`（文件移动，行为零 diff） | `git mv` + 同 package 或先同目录拆文件 | L ✅ 已落地（同 package：`tools_workspace.go` / `tools_shell.go`；web 已在 `web_tools.go`） |
+| **B2** | 抽出 `gateway_tools.go`（memory/todo/goal/context + callGatewayResult） | 依赖 B1 或并行 | L ✅ 已落地（`tools_gateway.go`；`callGatewayResult` 仍在 runtime 门面） |
+| **B3** | 抽出 `loop`（`runProviderLoop*`、`goal_loop`、segment carry） | 接口：Runtime 注入 provider/tools | M ✅ 已落地（同 package：`loop.go` + `tool_batch.go`；顺带 `tool_execute.go` / `gateway_rpc.go` / `todo_run_state.go` / `subagent_runtime.go`；`goal_loop.go` 已有） |
+| **B4** | 抽出 `subagent` + `skill` 包 | 保持 denylist/allowlist 行为 | M ✅ 已落地（同 package 文件归位；`subagent_run/capture/control/policy/manager` + 既有 skill_*；独立 `internal/subagent|skill` 包目录可后续 B4b） |
 | **B5** | （可选）统一内部 `GatewayToolDispatcher`；仍保留 4 个 wire method | 非 BREAKING | L |
 | **B6** | （可选后期）`state.tool.execute` 单 RPC + 旧 method 适配 1–2 版本 | BREAKING 友好期 | H |
 
@@ -147,8 +147,8 @@ modules/agent/internal/
 
 | 文件/区域 | 当前约 | 目标 |
 | --- | --- | --- |
-| `runtime.go` | 1800 | ≤600（门面+分发） |
-| `tools.go` | 2100 | ≤400（注册表+dispatch）或拆没 |
+| `runtime.go` | 1800 → ~603 | ≤600（门面+分发；B4 后达标） |
+| `tools.go` | 2100 → ~950 | ≤400（注册表+dispatch）或拆没；B1 后主文件已含注册表+dispatch+共享 helper |
 | `provider.go` | 860 | ≤900 可接受，或 loop 分离后略降 |
 | `web_tools.go` | 920 | DDG 可迁 `web_ddg.go`，主路径 ≤500 |
 
@@ -178,17 +178,17 @@ Desktop 真正成为“Gateway 投影 + 交互”，避免再成为第二状态�
 
 | 包 ID | 内容 | 验收 |
 | --- | --- | --- |
-| **C1** | 抽出 `useSessionBootstrap`：bootstrap、session list、workspace open/hydrate | App 再减 ≥200 行；unit/e2e 绿 |
-| **C2** | 抽出 `useSessionActions`：create/delete/fork/compact/send/cancel | 同上 |
-| **C3** | Goal/Todo hydrate 与 auto-continue 收拢到 `useGoalSession` | Goal 条状态仅来自 Gateway hydrate + reduce |
-| **C4** | （可选）Context notes 只读面板（Goal 展开或 Activity 过滤） | 用户可检视 scratchpad，不经模型黑盒 |
-| **C5** | e2e 去 slash 分叉：主路径改 tool_calls 或测试专用 provider stub | 去掉对 `RED_PANDA_SLASH_TOOLS` 的生产级依赖 |
+| **C1** | 抽出 `useSessionBootstrap`：bootstrap、session list、workspace open/hydrate | App 再减 ≥200 行；unit/e2e 绿 ✅ 已落地（`hooks/useSessionBootstrap.js` + `lib/sessionNormalize.js`；App.jsx 1779→~1559） |
+| **C2** | 抽出 `useSessionActions`：create/delete/fork/compact/send/cancel | 同上 ✅ 已落地（`hooks/useSessionActions.js`；App.jsx ~1559→~1061） |
+| **C3** | Goal/Todo hydrate 与 auto-continue 收拢到 `useGoalSession` | Goal 条状态仅来自 Gateway hydrate + reduce ✅ 已落地（`hooks/useGoalSession.js`；App 仅组合 + root-terminal `hydrateGoalsRef` 接线） |
+| **C4** | （可选）Context notes 只读面板（Goal 展开或 Activity 过滤） | 用户可检视 scratchpad，不经模型黑盒 ✅ 已落地（`GET .../goals/:id/notes` + Goal 条展开只读列表） |
+| **C5** | e2e 去 slash 分叉：主路径改 tool_calls 或测试专用 provider stub | 去掉对 `RED_PANDA_SLASH_TOOLS` 的生产级依赖 ✅ 已落地（gateway e2e 用 echo `read file` / `run shell`；`buildGatewayChildEnv` 不再强制 slash） |
 
 ### 6.4 App.jsx 目标
 
 | 指标 | 当前约 | 目标 |
 | --- | --- | --- |
-| 行数 | 1688 | ≤900（壳 + 组合 hooks） |
+| 行数 | 1688 → ~1061 → ~896 | ≤900（壳 + 组合 hooks；C3 后达标） |
 | 直接 `apiJson` 调用点 | 多 | 集中在 hooks/lib |
 
 ---
@@ -200,7 +200,7 @@ Desktop 真正成为“Gateway 投影 + 交互”，避免再成为第二状态�
 | 阶段 | 内容 | 说明 |
 | --- | --- | --- |
 | **D1-保持** | 维持只读 discovery 文案与边界 | 已做 |
-| **D2-执行 MVP** | Runtime 注册 allowlist 内 MCP tools；`tools/call` + 权限 + 超时 + 清理 | 独立里程碑，勿与 B3 混 PR |
+| **D2-执行 MVP** | Runtime 注册 allowlist 内 MCP tools；`tools/call` + 权限 + 超时 + 清理 | 独立里程碑，勿与 B3 混 PR ✅ 已落地（ReplyOptions.mcp_servers + Runtime prepare/call；默认 risk=high；进程每次 one-shot，D3 再做复用） |
 | **D3** | 长驻进程复用 / 重启策略 | D2 稳定后 |
 
 ### 7.2 CLI
@@ -212,10 +212,10 @@ Desktop 真正成为“Gateway 投影 + 交互”，避免再成为第二状态�
 
 ### 7.3 CI / 一键门禁
 
-| 包 ID | 内容 |
-| --- | --- |
-| **D6** | 根目录 `scripts/ci-gate.ps1`（或 Task）：protocol + agent + gateway + desktop unit |
-| **D7** | 可选 nightly：Playwright gateway-backed（含进程泄漏断言） |
+| 包 ID | 内容 | 状态 |
+| --- | --- | --- |
+| **D6** | 根目录 `scripts/ci-gate.ps1`（或 Task）：protocol + agent + gateway + desktop unit | ✅ 已落地（可选 `-WithProtocolCompat`） |
+| **D7** | 可选 nightly：Playwright gateway-backed（含进程泄漏断言） | 待办 |
 
 建议门禁脚本最小集：
 
@@ -302,7 +302,7 @@ Week 8+       MCP D2 或 CLI D4
 | --- | --- | --- |
 | 综合健康度（评估口径） | 7.5 | ≥8.0 |
 | Runtime 最大单文件 | ~2100 行 | ≤800 行 |
-| App.jsx | ~1688 行 | ≤900 行 |
+| App.jsx | ~1688 → ~896 行 | ≤900 行（C3 已达标） |
 | 收敛清单 Wave 6 | 0/3 | ≥2/3（S1/S2） |
 | docs/34 Goal 验收 | 部分 | 100% |
 | 一键门禁 | 无 | `ci-gate` 本地/CI 可跑 |
@@ -340,13 +340,19 @@ Week 8+       MCP D2 或 CLI D4
 
 ## 13. 立即执行清单（下一迭代，建议 5 个 PR）
 
-1. **`docs: add optimization plan 36`**（本文）  
-2. **`fix(goal): CAS terminal transitions + bind checks`（A1）**  
-3. **`fix(goal): segment ledger idempotency`（A3，可与 A2 分 PR）**  
-4. **`refactor(runtime): split tools.go into workspace/shell/web files`（B1，zero-diff）**  
-5. **`chore: add scripts/ci-gate.ps1`（D6）**  
+1. **`docs: add optimization plan 36`**（本文） ✅  
+2. **`fix(goal): CAS terminal transitions + bind checks`（A1）** ✅（含 A2）  
+3. **`fix(goal): segment ledger idempotency`（A3，可与 A2 分 PR）** ✅（含 A4）  
+4. **`refactor(runtime): split tools.go into workspace/shell/web files`（B1，zero-diff）** ✅（含 B2 `tools_gateway.go`）  
+5. **`chore: add scripts/ci-gate.ps1`（D6）** ✅  
+6. **`fix(goal): stream final + lifecycle hydrate`（A5/A6）** ✅  
 
-完成 2–5 后，再评估是否开 **B3 loop 抽取** 或 **C1 bootstrap hook**。
+轨道 B 结构主线（B1–B4）已关门（同 package 拆文件，未做独立子目录包迁移）。  
+C1–C3 已抽出 bootstrap / session actions / goal session；App.jsx ~896 行（≤900）。  
+
+C 轨道 C1–C5 已落地；**D2 MCP tools/call MVP** 已落地（Gateway 注入启用中的 MCP 配置，Runtime 发现并执行 `tools/call`）。  
+
+下一优先：**D3** MCP 进程复用，或 **D4** CLI / **D8** planner 叙事清理。
 
 ---
 

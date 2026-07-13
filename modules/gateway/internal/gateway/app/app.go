@@ -146,6 +146,7 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/sessions/:id/goals", controllers.Goal.ListBySession)
 	api.POST("/sessions/:id/goals/start", controllers.Goal.Start)
 	api.GET("/sessions/:id/goals/:goalId", controllers.Goal.Get)
+	api.GET("/sessions/:id/goals/:goalId/notes", controllers.Goal.ListNotes)
 	api.POST("/sessions/:id/goals/:goalId/cancel", controllers.Goal.Cancel)
 	api.POST("/sessions/:id/goals/:goalId/continue", controllers.Goal.Continue)
 	api.GET("/memory", controllers.Memory.List)

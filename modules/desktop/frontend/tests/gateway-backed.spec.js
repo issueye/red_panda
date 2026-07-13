@@ -16,18 +16,22 @@ test('Gateway-backed desktop run renders chat tools and timeline @gateway-backed
     await page.goto('/');
     await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
-    await page.getByTestId('chat-composer-input').fill('/read README.md');
+    // Echo provider tool_call path (not Runtime slash Parse / RED_PANDA_SLASH_TOOLS).
+    await page.getByTestId('chat-composer-input').fill('read file README.md');
     await page.getByTestId('chat-composer-send').click();
 
-    await expect(page.getByTestId('message-row').filter({ hasText: '/read README.md' })).toBeVisible();
+    await expect(page.getByTestId('message-row').filter({ hasText: 'read file README.md' })).toBeVisible();
     const readTool = page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' });
-    await expect(readTool).toContainText('已完成', { timeout: 20000 });
-    await expect(readTool).toContainText(/# red_panda|Go-based local AI Agent/i, { timeout: 20000 });
+    await expect(readTool).toHaveClass(/tool-completed/, { timeout: 20000 });
+    // Echo provider surfaces tool output in the following assistant message.
+    await expect(page.getByTestId('message-row').filter({
+      hasText: /# red_panda|Go-based local AI Agent/i,
+    })).toBeVisible({ timeout: 20000 });
 
     await page.getByTestId('right-tab-activity').click();
     const activity = page.getByTestId('activity-panel');
     await expect(activity).toBeVisible();
-    const runRow = activity.getByTestId('activity-run').filter({ hasText: '/read README.md' });
+    const runRow = activity.getByTestId('activity-run').filter({ hasText: 'read file README.md' });
     await expect(runRow.getByTestId('activity-run-status')).toContainText('已完成', { timeout: 10000 });
     if (await runRow.getByTestId('activity-event-timeline').count() === 0) {
       await expect(runRow.getByTestId('activity-run-toggle')).toBeVisible();
@@ -66,17 +70,18 @@ test('Gateway-backed desktop renders denied tool failure path @gateway-backed', 
     await page.goto('/');
     await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
-    await page.getByTestId('chat-composer-input').fill('/shell echo denied-e2e');
+    await page.getByTestId('chat-composer-input').fill('run shell echo denied-e2e');
     await page.getByTestId('chat-composer-send').click();
 
     const shellTool = page.getByTestId('tool-card').filter({ hasText: 'shell.exec' });
-    await expect(shellTool).toContainText('已拒绝', { timeout: 20000 });
-    await expect(shellTool).toContainText('tool is denied by tool_denylist', { timeout: 20000 });
+    await expect(shellTool).toHaveClass(/tool-denied|tool-failed/, { timeout: 20000 });
     await expect(page.getByTestId('message-row').filter({ hasText: 'tool is denied by tool_denylist' })).toBeVisible({ timeout: 20000 });
 
     await page.getByTestId('right-tab-activity').click();
-    const runRow = page.getByTestId('activity-run').filter({ hasText: '/shell echo denied-e2e' });
-    await expect(runRow.getByTestId('activity-run-status')).toContainText('已拒绝', { timeout: 15000 });
+    const runRow = page.getByTestId('activity-run').filter({ hasText: 'run shell echo denied-e2e' });
+    // Model tool_call path: denylist fails the tool; the run still finishes after the
+    // provider summarizes the failure (slash Temporary Triggers used to end as denied).
+    await expect(runRow.getByTestId('activity-run-status')).toContainText(/已完成|已拒绝/, { timeout: 15000 });
     if (await runRow.getByTestId('activity-event-timeline').count() === 0) {
       await runRow.getByTestId('activity-run-toggle').click();
     }
@@ -95,7 +100,7 @@ test('Gateway-backed desktop forks and summarizes a session in place @gateway-ba
     await page.goto('/');
     await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
 
-    await page.getByTestId('chat-composer-input').fill('/read README.md');
+    await page.getByTestId('chat-composer-input').fill('read file README.md');
     await page.getByTestId('chat-composer-send').click();
     await expect(page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' })).toHaveClass(/tool-completed/, { timeout: 20000 });
 
@@ -103,7 +108,7 @@ test('Gateway-backed desktop forks and summarizes a session in place @gateway-ba
     const forkedSession = page.getByTestId('session-item').filter({ hasText: '的分叉' });
     await expect(forkedSession).toBeVisible({ timeout: 15000 });
     await expect(forkedSession).toContainText('分叉');
-    await expect(page.getByTestId('message-row').filter({ hasText: '/read README.md' }).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('message-row').filter({ hasText: 'read file README.md' }).first()).toBeVisible({ timeout: 15000 });
 
     const sessionsBefore = await page.getByTestId('session-item').count();
     const applied = page.waitForResponse((response) => (
@@ -113,7 +118,7 @@ test('Gateway-backed desktop forks and summarizes a session in place @gateway-ba
     await page.getByTestId('session-compact').click();
     await applied;
     await expect(page.getByTestId('session-item')).toHaveCount(sessionsBefore);
-    await expect(page.getByTestId('message-row').filter({ hasText: '/read README.md' }).first()).toBeVisible();
+    await expect(page.getByTestId('message-row').filter({ hasText: 'read file README.md' }).first()).toBeVisible();
   } finally {
     await page.close().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, 300));

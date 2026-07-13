@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	maxWebFetchBytes       = 2 * 1024 * 1024
-	defaultWebResults      = 8
+	maxWebFetchBytes  = 2 * 1024 * 1024
+	defaultWebResults = 8
 	// webRequestTimeout is the hard upper bound for a single search/fetch attempt.
 	// Keep it strict so the UI never sits on "进行中" indefinitely.
 	webRequestTimeout      = 20 * time.Second
@@ -39,9 +39,9 @@ var duckDuckGoHTMLEndpoint = defaultDDGHTMLEndpoint
 var tavilySearchEndpoint = defaultTavilyEndpoint
 
 type webSearchItem struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Snippet string `json:"snippet,omitempty"`
+	Title   string  `json:"title"`
+	URL     string  `json:"url"`
+	Snippet string  `json:"snippet,omitempty"`
 	Score   float64 `json:"score,omitempty"`
 }
 
@@ -57,6 +57,7 @@ type webSearchOptions struct {
 //   - auto: Tavily when an API key is configured, otherwise DuckDuckGo
 //   - tavily: Tavily only (errors if no key)
 //   - duckduckgo: DDG HTML/JSON fallback path (fragile; prefer Tavily in production)
+//
 // Further DDG HTML parsing may be split to web_tools_ddg.go without changing this contract.
 func runWebSearch(ctx context.Context, query string, maxResults int, opts webSearchOptions) (string, error) {
 	query = strings.TrimSpace(query)
@@ -85,9 +86,9 @@ func runWebSearch(ctx context.Context, query string, maxResults int, opts webSea
 	}
 
 	var (
-		items  []webSearchItem
-		source string
-		answer string
+		items   []webSearchItem
+		source  string
+		answer  string
 		lastErr error
 	)
 

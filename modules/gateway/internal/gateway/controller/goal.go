@@ -42,6 +42,16 @@ func (g GoalController) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, item))
 }
 
+// ListNotes returns the goal scratchpad (context notes) for Desktop read-only UI.
+func (g GoalController) ListNotes(c *gin.Context) {
+	items, err := g.Services.Context.ListNotes(c.Param("id"), c.Param("goalId"), 0)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"ok": false, "error": gin.H{"code": "goal_notes_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, gin.H{"items": items, "count": len(items)}))
+}
+
 func (g GoalController) Cancel(c *gin.Context) {
 	current, err := g.Services.Goal.Get(c.Param("id"), c.Param("goalId"))
 	if err != nil {
