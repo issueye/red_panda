@@ -43,7 +43,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 		},
 		Input: methods.ReplyInput{Text: "analyze login"},
 	}
-	turns := applyGoalSpecialist(&params, spec, "analyze login", 0)
+	turns := (&Runtime{}).applyGoalSpecialist(&params, spec, "analyze login", 0, "run_test", "", "")
 	if turns != spec.DefaultMaxTurns {
 		t.Fatalf("turns = %d, want %d", turns, spec.DefaultMaxTurns)
 	}
@@ -87,7 +87,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 	spec, _ := lookupGoalSpecialist("goal-implementer")
 	params := methods.ReplyParams{Options: methods.ReplyOptions{}}
-	_ = applyGoalSpecialist(&params, spec, "implement step", 100)
+	_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "implement step", 100, "run_test", "", "")
 	// Cap to CapMaxTurns
 	if params.Options.MaxToolTurns != spec.CapMaxTurns {
 		t.Fatalf("max turns = %d, want cap %d", params.Options.MaxToolTurns, spec.CapMaxTurns)
@@ -118,7 +118,7 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 func TestApplyGoalSpecialistVerifierDeniesWrite(t *testing.T) {
 	spec, _ := lookupGoalSpecialist("goal-verifier")
 	params := methods.ReplyParams{Options: methods.ReplyOptions{}}
-	_ = applyGoalSpecialist(&params, spec, "verify", 0)
+	_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "verify", 0, "run_test", "", "")
 	defs := []tools.Definition{
 		{Name: "workspace.read_file"},
 		{Name: "shell.exec"},

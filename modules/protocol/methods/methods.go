@@ -22,6 +22,7 @@ const (
 	MemoryToolExecute   = "memory.tool.execute"
 	TodoToolExecute     = "todo.tool.execute"
 	GoalToolExecute     = "goal.tool.execute"
+	ContextToolExecute  = "context.tool.execute"
 )
 
 type PeerInfo struct {
@@ -276,6 +277,39 @@ type GoalToolExecuteResult struct {
 	Output string    `json:"output,omitempty"`
 	Goal   *GoalDTO  `json:"goal,omitempty"`
 	Goals  []GoalDTO `json:"goals,omitempty"`
+}
+
+// ContextToolExecuteParams is Runtime -> Gateway for context.* tools (goal scratchpad).
+type ContextToolExecuteParams struct {
+	RunID         string         `json:"run_id"`
+	SessionID     string         `json:"session_id"`
+	WorkspaceRoot string         `json:"workspace_root,omitempty"`
+	ToolCallID    string         `json:"tool_call_id"`
+	ToolName      string         `json:"tool_name"`
+	Arguments     map[string]any `json:"arguments,omitempty"`
+}
+
+// ContextToolExecuteResult is Gateway -> Runtime for context tools.
+type ContextToolExecuteResult struct {
+	Status string       `json:"status"`
+	Output string       `json:"output,omitempty"`
+	Notes  []GoalNoteDTO `json:"notes,omitempty"`
+}
+
+// GoalNoteDTO is the shared shape for a goal scratchpad note.
+type GoalNoteDTO struct {
+	ID        string `json:"id"`
+	GoalID    string `json:"goal_id"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title"`
+	Body      string `json:"body,omitempty"`
+	Phase     string `json:"phase,omitempty"`
+	Source    string `json:"source,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Seq       int    `json:"seq"`
+	Pinned    int    `json:"pinned"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 type Message struct {

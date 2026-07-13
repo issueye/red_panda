@@ -165,6 +165,24 @@ type GoalSegment struct {
 	CreatedAt    time.Time
 }
 
+// GoalNote is a structured scratchpad entry scoped to a goal, shared across
+// segments, runs, and specialist subagents via the context.* tools.
+type GoalNote struct {
+	ID        string `gorm:"primaryKey"`
+	GoalID    string `gorm:"index;uniqueIndex:idx_goal_note_seq"`
+	SessionID string `gorm:"index"`
+	Seq       int    `gorm:"uniqueIndex:idx_goal_note_seq"`
+	Kind      string `gorm:"index"`
+	Title     string
+	Body      string `gorm:"type:text"`
+	Phase     string `gorm:"index"`
+	Source    string
+	RunID     string `gorm:"index"`
+	Pinned    bool   `gorm:"index"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type ToolCall struct {
 	ID            string `gorm:"primaryKey"`
 	RootRunID     string `gorm:"index"`

@@ -24,5 +24,6 @@ func Migrate(db *gorm.DB) error {
 		&model.AgentDefinition{},
 		&model.Goal{},
 		&model.GoalSegment{},
+		&model.GoalNote{},
 	)
 }

@@ -27,6 +27,7 @@ type Set struct {
 	Skills     SkillService
 	Agents     AgentDefinitionService
 	Goal       GoalService
+	Context    ContextService
 }
 
 type AppService struct {
@@ -48,5 +49,6 @@ func NewSet(opts Options) Set {
 		Skills:     NewSkillService(opts.RuntimeClient),
 		Agents:     NewAgentDefinitionService(opts.Repos),
 		Goal:       NewGoalService(opts.Repos),
+		Context:    NewContextService(opts.Repos),
 	}
 }

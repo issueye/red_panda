@@ -176,7 +176,15 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	childParams.Options.MaxToolTurns = maxTurns
 
 	if isSpecialist {
-		maxTurns = applyGoalSpecialist(&childParams, specialist, task, maxTurns)
+		parentGoalID := strings.TrimSpace(params.Options.GoalID)
+		parentObjective := ""
+		if params.Options.GoalContext != nil {
+			parentObjective = params.Options.GoalContext.Objective
+			if parentGoalID == "" {
+				parentGoalID = strings.TrimSpace(params.Options.GoalContext.GoalID)
+			}
+		}
+		maxTurns = r.applyGoalSpecialist(&childParams, specialist, task, maxTurns, params.RunID, parentGoalID, parentObjective)
 	}
 
 	capture := &subagentRunCapture{

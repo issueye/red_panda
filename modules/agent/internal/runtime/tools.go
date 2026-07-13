@@ -42,6 +42,7 @@ const defaultGatewayToolTimeout = 30 * time.Second
 type MemoryToolExecutor func(context.Context, methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error)
 type TodoToolExecutor func(context.Context, methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error)
 type GoalToolExecutor func(context.Context, methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error)
+type ContextToolExecutor func(context.Context, methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error)
 type SkillRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
 type SubagentRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
 
@@ -59,6 +60,7 @@ type ToolRunner struct {
 	MemoryExecutor   MemoryToolExecutor
 	TodoExecutor     TodoToolExecutor
 	GoalExecutor     GoalToolExecutor
+	ContextExecutor  ContextToolExecutor
 	SkillExecutor    SkillRunExecutor
 	SubagentExecutor SubagentRunExecutor
 	SubagentManager  SubagentManager
@@ -584,6 +586,86 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 				"required": []string{"url"},
 			},
 		},
+		{
+			Name:        "context.read",
+			DisplayName: "Read goal notes",
+			Description: "Read shared scratchpad notes for the active goal (pinned first, then most recent). Findings persist across segments, runs, and specialist subagents.",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal_id":   map[string]any{"type": "string", "description": "Goal id whose notes to read."},
+					"kind":      map[string]any{"type": "string", "description": "Optional kind filter: finding, decision, risk, fact, handoff, note."},
+					"limit":     map[string]any{"type": "integer", "description": "Maximum number of notes to return."},
+					"since_seq": map[string]any{"type": "integer", "description": "Only return notes with seq greater than this value."},
+					"pinned_only": map[string]any{"type": "boolean", "description": "Only return pinned notes."},
+				},
+				"required": []string{"goal_id"},
+			},
+		},
+		{
+			Name:        "context.search",
+			DisplayName: "Search goal notes",
+			Description: "Full-text search across the shared scratchpad notes for a goal (matches title and body).",
+			Risk:        tools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal_id": map[string]any{"type": "string", "description": "Goal id whose notes to search."},
+					"query":   map[string]any{"type": "string", "description": "Search query text."},
+					"limit":   map[string]any{"type": "integer", "description": "Maximum number of matches to return."},
+				},
+				"required": []string{"goal_id", "query"},
+			},
+		},
+		{
+			Name:        "context.write",
+			DisplayName: "Write goal note",
+			Description: "Append a shared scratchpad note to the active goal. Notes persist across segments, runs, and specialist subagents, enabling context sharing.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal_id":  map[string]any{"type": "string", "description": "Goal id to attach the note to."},
+					"kind":     map[string]any{"type": "string", "description": "Note kind: finding, decision, risk, fact, handoff, note."},
+					"title":    map[string]any{"type": "string", "description": "Short title."},
+					"body":     map[string]any{"type": "string", "description": "Note content."},
+					"pinned":   map[string]any{"type": "boolean", "description": "Pin this note so it is always injected into the goal context."},
+				},
+				"required": []string{"goal_id", "kind", "title", "body"},
+			},
+		},
+		{
+			Name:        "context.replace",
+			DisplayName: "Replace goal note",
+			Description: "Upsert a shared scratchpad note by (goal_id, kind, title). Updates the body in place when a matching note exists, otherwise creates one.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal_id": map[string]any{"type": "string", "description": "Goal id to attach the note to."},
+					"kind":    map[string]any{"type": "string", "description": "Note kind: finding, decision, risk, fact, handoff, note."},
+					"title":   map[string]any{"type": "string", "description": "Short title identifying the note to replace."},
+					"body":    map[string]any{"type": "string", "description": "Replacement content."},
+					"pinned":  map[string]any{"type": "boolean", "description": "Pin this note."},
+				},
+				"required": []string{"goal_id", "kind", "title", "body"},
+			},
+		},
+		{
+			Name:        "context.delete",
+			DisplayName: "Delete goal note",
+			Description: "Delete a shared scratchpad note from a goal.",
+			Risk:        tools.RiskHigh,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal_id": map[string]any{"type": "string", "description": "Goal id the note belongs to."},
+					"note_id": map[string]any{"type": "string", "description": "Note id to delete."},
+				},
+				"required": []string{"goal_id", "note_id"},
+			},
+		},
 	}
 }
 
@@ -808,6 +890,8 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 		return runner.runTodoTool(ctx, runCtx, call)
 	case "goal.write", "goal.update", "goal.checkpoint", "goal.complete", "goal.list":
 		return runner.runGoalTool(ctx, runCtx, call)
+	case "context.read", "context.search", "context.write", "context.replace", "context.delete":
+		return runner.runContextTool(ctx, runCtx, call)
 	case "memory.list", "memory.create", "memory.update", "memory.delete":
 		return runner.runMemoryTool(ctx, runCtx, call)
 	case "web.search":
@@ -899,6 +983,40 @@ func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext,
 		return result.Output, fmt.Errorf("goal tool returned status %s", result.Status)
 	}
 	return result.Output, nil
+}
+
+// runContextTool dispatches a context.* (goal scratchpad) tool to the Gateway.
+// Unlike goal/todo tools, context tools are intentionally NOT on the subagent
+// denylist, so specialist children can read shared findings and write handoffs.
+func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+	if runner.ContextExecutor == nil {
+		return "", fmt.Errorf("context tool executor is not available")
+	}
+	result, err := runner.ContextExecutor(ctx, methods.ContextToolExecuteParams{
+		RunID:         runCtx.RunID,
+		SessionID:     runCtx.SessionID,
+		WorkspaceRoot: runCtx.WorkingDir,
+		ToolCallID:    call.ID,
+		ToolName:      call.Name,
+		Arguments:     call.Arguments,
+	})
+	if err != nil {
+		return "", err
+	}
+	if result.Status != "" && result.Status != "completed" {
+		return result.Output, fmt.Errorf("context tool returned status %s", result.Status)
+	}
+	// Include structured notes in the output so the model sees them inline.
+	output := result.Output
+	if len(result.Notes) > 0 {
+		notesJSON, _ := json.Marshal(map[string]any{"notes": result.Notes})
+		if output == "" {
+			output = string(notesJSON)
+		} else {
+			output = strings.TrimSpace(output) + "\n" + string(notesJSON)
+		}
+	}
+	return truncateToolOutput(output), nil
 }
 
 func readInvocation(runID string, path string) ToolInvocation {

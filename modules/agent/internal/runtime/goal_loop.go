@@ -13,6 +13,7 @@ const (
 	defaultGoalMaxSegmentsPerRun = 4
 	carrySummarizedK             = 6
 	carrySummarizedMaxRunes      = 500
+	goalNoteDigestBodyRune       = 300
 )
 
 // runGoalState is the per-run Goal snapshot used by the multi-segment controller.
@@ -265,6 +266,12 @@ func (r *Runtime) runWithGoalLoop(
 			params.Options.TodoContext = ctxTodos
 		}
 		if ctxGoal := r.goalContextForRun(params.RunID); ctxGoal != nil {
+			// Splice pinned/recent scratchpad notes into the goal context so
+			// segment N+1 sees segment N's key findings without an explicit
+			// context.read call. Best-effort: failures are logged, not fatal.
+			if notes := r.goalNotesDigest(params.RunID, ctxGoal.GoalID); notes != "" {
+				ctxGoal.Context = strings.TrimSpace(ctxGoal.Context) + "\n\n" + notes
+			}
 			params.Options.GoalContext = ctxGoal
 		}
 
@@ -439,4 +446,77 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// goalNotesDigest reads pinned + recent scratchpad notes for a goal from the
+// Gateway and renders a compact digest. Used to auto-inject shared findings into
+// each new goal segment. Returns "" when there are no notes or the gateway is
+// unavailable (best-effort, never blocks the goal loop).
+func (r *Runtime) goalNotesDigest(runID string, goalID string) string {
+	notes := r.fetchGoalNotes(runID, goalID, 10)
+	return renderNotesDigest("Shared goal notes", notes)
+}
+
+// goalNotesBrief renders the goal objective + pinned/recent notes for a specialist
+// child. It includes the goal_id so the child can call context.read/search itself.
+func (r *Runtime) goalNotesBrief(runID string, goalID string, objective string) string {
+	header := fmt.Sprintf("Parent goal %q (use context.read with goal_id=%s to read full notes):\nObjective: %s\n", goalID, goalID, strings.TrimSpace(objective))
+	notes := r.fetchGoalNotes(runID, goalID, 8)
+	if len(notes) == 0 {
+		return header + "(no shared notes yet)"
+	}
+	return header + renderNotesDigest("", notes)
+}
+
+// fetchGoalNotes calls the context.read tool via the gateway RPC. Best-effort:
+// on any error returns nil so callers degrade gracefully.
+func (r *Runtime) fetchGoalNotes(runID string, goalID string, limit int) []methods.GoalNoteDTO {
+	if strings.TrimSpace(goalID) == "" {
+		return nil
+	}
+	callCtx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+	result, err := r.executeContextTool(callCtx, methods.ContextToolExecuteParams{
+		RunID:     runID,
+		SessionID: "",
+		ToolCallID: fmt.Sprintf("notes_inject_%s_%d", runID, time.Now().UnixNano()),
+		ToolName:  "context.read",
+		Arguments: map[string]any{"goal_id": goalID, "limit": limit},
+	})
+	if err != nil {
+		return nil
+	}
+	return result.Notes
+}
+
+func renderNotesDigest(heading string, notes []methods.GoalNoteDTO) string {
+	if len(notes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if heading != "" {
+		b.WriteString(heading)
+		b.WriteString(":\n")
+	}
+	for _, n := range notes {
+		pin := ""
+		if n.Pinned != 0 {
+			pin = "[pinned] "
+		}
+		title := strings.TrimSpace(n.Title)
+		if title == "" {
+			title = "(untitled)"
+		}
+		body := strings.TrimSpace(n.Body)
+		if len(body) > goalNoteDigestBodyRune {
+			body = string([]rune(body)[:goalNoteDigestBodyRune]) + "…"
+		}
+		fmt.Fprintf(&b, "- %s[%s] %s", pin, n.Kind, title)
+		if body != "" {
+			b.WriteString(": ")
+			b.WriteString(body)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

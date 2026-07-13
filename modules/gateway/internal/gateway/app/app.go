@@ -65,6 +65,12 @@ func Run(ctx context.Context, cfg Config) error {
 				return nil, fmt.Errorf("invalid goal tool params")
 			}
 			return services.Goal.ExecuteRuntimeTool(req)
+		case methods.ContextToolExecute:
+			var req methods.ContextToolExecuteParams
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, fmt.Errorf("invalid context tool params")
+			}
+			return services.Context.ExecuteRuntimeTool(req)
 		default:
 			return nil, fmt.Errorf("method not found: %s", method)
 		}

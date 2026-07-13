@@ -19,6 +19,7 @@ type Set struct {
 	MCPServers  MCPServerConfigRepository
 	Agents      AgentDefinitionRepository
 	Goals       GoalRepository
+	Contexts    ContextRepository
 }
 
 func NewSet(db *gorm.DB) Set {
@@ -28,7 +29,7 @@ func NewSet(db *gorm.DB) Set {
 		RunEvents:   NewRunEventRepository(db),
 		Workspaces:  NewWorkspaceRepository(db),
 		Sessions:    NewSessionRepository(db),
-		Lineage:     NewSessionLineageRepository(db),
+		Lineage:    NewSessionLineageRepository(db),
 		Compactions: NewSessionCompactionRepository(db),
 		Memory:      NewMemoryRepository(db),
 		Todos:       NewTodoRepository(db),
@@ -39,5 +40,6 @@ func NewSet(db *gorm.DB) Set {
 		MCPServers:  NewMCPServerConfigRepository(db),
 		Agents:      NewAgentDefinitionRepository(db),
 		Goals:       NewGoalRepository(db),
+		Contexts:    NewContextRepository(db),
 	}
 }

@@ -105,6 +105,7 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 	rt.tools.MemoryExecutor = rt.executeMemoryTool
 	rt.tools.TodoExecutor = rt.todoExecutor
 	rt.tools.GoalExecutor = rt.goalExecutor
+	rt.tools.ContextExecutor = rt.executeContextTool
 	rt.tools.SkillExecutor = rt.executeSkillRun
 	rt.tools.SubagentExecutor = rt.executeSubagentRun
 	rt.tools.SubagentManager = rt
@@ -1539,6 +1540,21 @@ func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecu
 	var result methods.GoalToolExecuteResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return methods.GoalToolExecuteResult{}, err
+	}
+	return result, nil
+}
+
+// executeContextTool forwards a context.* (goal scratchpad) tool call to the
+// Gateway. It is available to both the root run and specialist children because
+// context.* is intentionally absent from subagentRunDenylist.
+func (r *Runtime) executeContextTool(ctx context.Context, req methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
+	raw, err := r.callGateway(ctx, methods.ContextToolExecute, req)
+	if err != nil {
+		return methods.ContextToolExecuteResult{}, err
+	}
+	var result methods.ContextToolExecuteResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.ContextToolExecuteResult{}, err
 	}
 	return result, nil
 }

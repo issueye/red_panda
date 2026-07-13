@@ -218,9 +218,10 @@ func disableGoalPipelineForChild(options *methods.ReplyOptions) {
 	options.GoalContext = nil
 }
 
-// applyGoalSpecialist configures child ReplyParams for a phase specialist.
-// Returns adjusted maxTurns.
-func applyGoalSpecialist(child *methods.ReplyParams, spec goalSpecialist, task string, maxTurns int) int {
+// applyGoalSpecialist configures child ReplyParams for a phase specialist and
+// injects a brief of the parent goal (objective + shared notes) so the child is
+// not context-blind. Returns adjusted maxTurns.
+func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpecialist, task string, maxTurns int, parentRunID string, goalID string, objective string) int {
 	if child == nil {
 		return maxTurns
 	}
@@ -242,6 +243,8 @@ func applyGoalSpecialist(child *methods.ReplyParams, spec goalSpecialist, task s
 	child.Options.MaxToolTurns = maxTurns
 
 	// Denylist: always include global subagent denylist + specialist extras.
+	// Note: context.* tools are intentionally NOT denylisted, so the child can
+	// read/write shared scratchpad notes via context.read/context.write.
 	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, subagentRunDenylist...)
 	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, spec.ExtraDenylist...)
 
@@ -264,8 +267,16 @@ func applyGoalSpecialist(child *methods.ReplyParams, spec goalSpecialist, task s
 			"Return one final report for the parent. Do not nest subagents.",
 		spec.Key, spec.Phase, spec.NameZH, maxTurns,
 	)
+
+	// Inject a brief of the parent goal's shared notes so the specialist is not
+	// context-blind. Includes the goal_id so the child can call context.read
+	// itself for deeper detail. Best-effort: empty when no notes/gateway.
+	brief := ""
+	if strings.TrimSpace(goalID) != "" {
+		brief = "\n\n" + r.goalNotesBrief(parentRunID, goalID, objective)
+	}
 	child.Options.MemoryContext = &methods.MemoryContext{
-		Context: roleBlock + budgetNote,
+		Context: roleBlock + budgetNote + brief,
 	}
 
 	// Ensure task text still carries the user assignment.
