@@ -162,7 +162,10 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	childParams.RunID = childRunID
 	childParams.Session.Conversation = nil
 	childParams.Input.Text = childTask
-	childParams.Options.MemoryContext = &methods.MemoryContext{
+	// Workers do not inherit root memory; role text is SpecialistContext only.
+	childParams.Options.MemoryContext = nil
+	childParams.Options.SpecialistContext = &methods.SpecialistContext{
+		Kind: "worker",
 		Context: fmt.Sprintf(
 			"You are a focused subagent named %q. Complete only the assigned task using workspace tools as needed. "+
 				"Your tool-turn budget is %d (derived from file_count=%d plus %d turns for analysis summary). "+

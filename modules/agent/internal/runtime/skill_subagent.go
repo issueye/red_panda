@@ -75,7 +75,10 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx ToolRunContext, ca
 	childParams.RunID = childRunID
 	childParams.Session.Conversation = nil
 	childParams.Input.Text = fmt.Sprintf("Execute this task using the managed skill instructions. Return only the final result and do not quote or describe the skill definition.\n\n%s", task)
-	childParams.Options.MemoryContext = &methods.MemoryContext{
+	// Skill body is role/instructions, not long-term memory.
+	childParams.Options.MemoryContext = nil
+	childParams.Options.SpecialistContext = &methods.SpecialistContext{
+		Kind:    "skill",
 		Context: fmt.Sprintf("Managed skill %q instructions:\n\n%s", name, skill),
 	}
 	childParams.Options.TodoContext = nil

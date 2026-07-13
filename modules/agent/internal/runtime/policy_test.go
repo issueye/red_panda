@@ -94,3 +94,63 @@ func TestAvailableToolsForOptionsHidesDeniedAndUnlistedTools(t *testing.T) {
 		t.Fatalf("filtered tools = %#v, want workspace.read_file only", filtered)
 	}
 }
+
+func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
+	t.Setenv("RED_PANDA_DEBUG_TOOLS", "")
+	definitions := []tools.Definition{
+		{Name: "workspace.read_file"},
+		{Name: "skill.run"},
+		{Name: "skill.create"},
+		{Name: "skill.update"},
+		{Name: "skill.delete"},
+		{Name: "subagent.run"},
+		{Name: "subagent.pool_status"},
+		{Name: "subagent.pool_resize"},
+		{Name: "subagent.pool_reset"},
+	}
+	filtered := availableToolsForOptions(definitions, methods.ReplyOptions{})
+	names := map[string]bool{}
+	for _, d := range filtered {
+		names[d.Name] = true
+	}
+	for _, keep := range []string{"workspace.read_file", "skill.run", "subagent.run"} {
+		if !names[keep] {
+			t.Fatalf("expected %s in default tools: %#v", keep, names)
+		}
+	}
+	for _, hide := range []string{"skill.create", "skill.update", "skill.delete", "subagent.pool_status", "subagent.pool_resize", "subagent.pool_reset"} {
+		if names[hide] {
+			t.Fatalf("ops tool %s should be hidden by default: %#v", hide, names)
+		}
+	}
+
+	// Explicit allowlist opt-in for one ops tool.
+	one := availableToolsForOptions(definitions, methods.ReplyOptions{
+		ToolAllowlist: []string{"skill.create", "workspace.read_file"},
+	})
+	if len(one) != 2 {
+		t.Fatalf("allowlist opt-in = %#v", one)
+	}
+
+	// DebugTools opens all ops tools.
+	debug := availableToolsForOptions(definitions, methods.ReplyOptions{DebugTools: true})
+	if len(debug) != len(definitions) {
+		t.Fatalf("debug tools len = %d, want %d", len(debug), len(definitions))
+	}
+}
+
+func TestEvaluateToolPolicyDeniesOpsToolsWhenHidden(t *testing.T) {
+	t.Setenv("RED_PANDA_DEBUG_TOOLS", "")
+	decision := EvaluateToolPolicy(methods.ReplyOptions{ToolPolicy: "allow_all"}, tools.Call{
+		Name: "skill.create", Risk: tools.RiskHigh,
+	})
+	if decision.Action != ToolDecisionDeny {
+		t.Fatalf("expected deny for hidden ops tool, got %s (%s)", decision.Action, decision.Reason)
+	}
+	decision = EvaluateToolPolicy(methods.ReplyOptions{ToolPolicy: "allow_all", DebugTools: true}, tools.Call{
+		Name: "skill.create", Risk: tools.RiskHigh,
+	})
+	if decision.Action != ToolDecisionAllow {
+		t.Fatalf("expected allow when DebugTools, got %s (%s)", decision.Action, decision.Reason)
+	}
+}

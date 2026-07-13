@@ -164,8 +164,14 @@ func TestRuntimeRunsSkillInIsolatedProcessSubAgent(t *testing.T) {
 	if strings.Contains(childParams.Input.Text, "SKILL_PRIVATE_SENTINEL") || !strings.Contains(childParams.Input.Text, "inspect the current change") {
 		t.Fatalf("child task input is not isolated from skill instructions: %q", childParams.Input.Text)
 	}
-	if childParams.Options.MemoryContext == nil || !strings.Contains(childParams.Options.MemoryContext.Context, "SKILL_PRIVATE_SENTINEL") {
-		t.Fatalf("child system skill context is missing: %#v", childParams.Options.MemoryContext)
+	if childParams.Options.MemoryContext != nil {
+		t.Fatalf("skill child must not put skill body in MemoryContext: %#v", childParams.Options.MemoryContext)
+	}
+	if childParams.Options.SpecialistContext == nil || !strings.Contains(childParams.Options.SpecialistContext.Context, "SKILL_PRIVATE_SENTINEL") {
+		t.Fatalf("child system skill context is missing: %#v", childParams.Options.SpecialistContext)
+	}
+	if childParams.Options.SpecialistContext.Kind != "skill" {
+		t.Fatalf("specialist kind = %q, want skill", childParams.Options.SpecialistContext.Kind)
 	}
 	if childParams.Options.SpawnSubAgents || childParams.Options.SubAgentBackend != "" {
 		t.Fatalf("child options are not isolated: %#v", childParams.Options)

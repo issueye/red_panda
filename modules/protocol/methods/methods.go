@@ -133,6 +133,12 @@ type ReplyOptions struct {
 	// Runtime merges SystemPrompt / DefaultMaxTurns / Phase / NameZH over builtin
 	// goal specialists so Settings edits are the execution source of truth.
 	AgentDefinitions []AgentDefinitionRef `json:"agent_definitions,omitempty"`
+	// DebugTools exposes ops-only tools (subagent.pool_*, skill.create/update/delete)
+	// to the provider. Can also be enabled via RED_PANDA_DEBUG_TOOLS=1.
+	DebugTools bool `json:"debug_tools,omitempty"`
+	// SpecialistContext is role/brief system text for subagents, goal specialists,
+	// and skill runners. It is NOT long-term memory — use MemoryContext for that.
+	SpecialistContext *SpecialistContext `json:"specialist_context,omitempty"`
 }
 
 // AgentDefinitionRef is a compact specialist profile attached to agent.reply.
@@ -144,6 +150,13 @@ type AgentDefinitionRef struct {
 	SystemPrompt    string `json:"system_prompt,omitempty"`
 	DefaultMaxTurns int    `json:"default_max_turns,omitempty"`
 	Enabled         bool   `json:"enabled"`
+}
+
+// SpecialistContext carries ephemeral role instructions for child runs.
+type SpecialistContext struct {
+	// Kind is a free-form label: specialist | worker | skill.
+	Kind    string `json:"kind,omitempty"`
+	Context string `json:"context,omitempty"`
 }
 
 type MemoryContext struct {

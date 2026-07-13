@@ -152,8 +152,14 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 			t.Fatalf("%s should be denied for analyst: %#v", denied, filtered)
 		}
 	}
-	if !strings.Contains(params.Options.MemoryContext.Context, "goal-analyst") {
-		t.Fatalf("system prompt missing specialist key: %s", params.Options.MemoryContext.Context)
+	if params.Options.MemoryContext != nil {
+		t.Fatal("specialist must not put role text in MemoryContext")
+	}
+	if params.Options.SpecialistContext == nil || !strings.Contains(params.Options.SpecialistContext.Context, "goal-analyst") {
+		t.Fatalf("system prompt missing specialist key: %#v", params.Options.SpecialistContext)
+	}
+	if params.Options.SpecialistContext.Kind != "specialist" {
+		t.Fatalf("kind = %q, want specialist", params.Options.SpecialistContext.Kind)
 	}
 }
 

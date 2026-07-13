@@ -2,12 +2,53 @@ package runtime
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
 	"redpanda/protocol/tools"
 )
+
+// opsOnlyTools are registered for Desktop/CLI/debug use but hidden from the
+// default provider tool schema (checklist O1/O3). Enable with RED_PANDA_DEBUG_TOOLS=1,
+// ReplyOptions.DebugTools, or an explicit tool_allowlist entry.
+var opsOnlyTools = map[string]struct{}{
+	"subagent.pool_status": {},
+	"subagent.pool_resize": {},
+	"subagent.pool_reset":  {},
+	"skill.create":         {},
+	"skill.update":         {},
+	"skill.delete":         {},
+}
+
+func isOpsOnlyTool(name string) bool {
+	_, ok := opsOnlyTools[strings.TrimSpace(name)]
+	return ok
+}
+
+func debugToolsEnabled(options methods.ReplyOptions) bool {
+	if options.DebugTools {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_DEBUG_TOOLS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func opsToolExposed(options methods.ReplyOptions, name string) bool {
+	if !isOpsOnlyTool(name) {
+		return true
+	}
+	if debugToolsEnabled(options) {
+		return true
+	}
+	// Explicit allowlist opt-in for a single ops tool without opening all debug tools.
+	return containsString(options.ToolAllowlist, name)
+}
 
 type ToolDecisionAction string
 
@@ -31,6 +72,9 @@ func EvaluateToolPolicy(options methods.ReplyOptions, call tools.Call) ToolDecis
 	}
 	if len(options.ToolAllowlist) > 0 && !containsString(options.ToolAllowlist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is not in tool_allowlist"}
+	}
+	if !opsToolExposed(options, call.Name) {
+		return ToolDecision{Action: ToolDecisionDeny, Reason: "ops tool is not enabled (set debug_tools or RED_PANDA_DEBUG_TOOLS)"}
 	}
 
 	switch options.ToolPolicy {
@@ -88,6 +132,9 @@ func availableToolsForOptions(definitions []tools.Definition, options methods.Re
 			continue
 		}
 		if len(options.ToolAllowlist) > 0 && !containsString(options.ToolAllowlist, definition.Name) {
+			continue
+		}
+		if !opsToolExposed(options, definition.Name) {
 			continue
 		}
 		filtered = append(filtered, definition)

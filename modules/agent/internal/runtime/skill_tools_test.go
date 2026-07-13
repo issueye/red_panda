@@ -339,6 +339,7 @@ func TestRuntimeHTTPProviderCreatesManagedSkill(t *testing.T) {
 		Options: methods.ReplyOptions{
 			ToolPolicy:     "allow_all",
 			PermissionMode: "strict",
+			DebugTools:     true, // skill.create is ops-only by default
 		},
 	})
 	waitForResponse(t, lines, "reply_skill_http")
@@ -397,6 +398,7 @@ func TestRuntimeManagedSkillCreateHonorsPermissionDenial(t *testing.T) {
 		Options: methods.ReplyOptions{
 			ToolPolicy:     "risk_based",
 			PermissionMode: "strict",
+			DebugTools:     true, // skill.create is ops-only by default
 		},
 	})
 	waitForResponse(t, lines, "reply_skill_permission")

@@ -1,7 +1,7 @@
 # 代码冗余与功能过度实现 — 收敛清单
 
 Updated: 2026-07-13  
-Status: in progress (Wave 0 done; Wave 1 R1a/R1c done)  
+Status: in progress (Wave 0 done; Wave 1 R1a/R1c/R4 done; Wave 2 O1/O3 done)  
 依据：全项目评估 + Goal 上下文共享后审计（结构冗余 / 语义重叠 / 过度实现）
 
 ## 使用方式
@@ -64,7 +64,7 @@ go test ./modules/gateway/internal/gateway/service/ -count=1 -run "Context|Goal|
 | **R1a** | Runtime 统一 gateway tool 转发 | 结构冗余 | L | done | `callGatewayResult` 统一 unmarshal；`executeMemory/Todo/Goal/ContextTool` 共用；4 个 method 名不变 | memory/todo/goal/context 转发行为不变；round-trip 测绿 | — |
 | **R1b** | Protocol 参数形状去重（非 BREAKING） | 结构冗余 | L | todo | 抽取公共字段注释/嵌入 struct（若 Go JSON 兼容）或仅文档化公共约定；**不改 wire 字段名** | 旧客户端仍可解析；`protocol` 测试绿 | R1a 可并行 |
 | **R1c** | Gateway `ExecuteRuntimeTool` 公共校验 | 结构冗余 | L | done | `validateRuntimeToolMeta`（`runtime_tool_meta.go`）；memory 不强制 session；todo/goal/context 强制 session | 文案一致；meta 单测 + 四域 Execute 测绿 | — |
-| **R4** | Specialist brief 不再滥用 MemoryContext | 语义冗余 | M | todo | 新增 `SpecialistContext` 或 `ReplyOptions.SystemExtra`；specialist role+notes 不再写入 `MemoryContext`；Memory 仍只表示记忆 | provider 消息顺序单测；specialist 仍能看到 brief；真实 memory 注入不被覆盖 | R1a 可后 |
+| **R4** | Specialist brief 不再滥用 MemoryContext | 语义冗余 | M | done | 新增 `SpecialistContext`；specialist/worker/skill 角色文本写入该字段；`MemoryContext` 仅长期记忆；provider 先 specialist 后 memory | provider 顺序测；specialist/skill 隔离测绿 | R1a |
 
 **建议提交：**
 
@@ -87,8 +87,8 @@ go test ./modules/protocol/... ./modules/agent/... ./modules/gateway/...
 
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **O1** | 默认隐藏 subagent 运维工具 | 过度暴露 | M | todo | `subagent.pool_status/resize/reset`（及可选 `pool` 管理）不进入默认 `AvailableTools`；仅 env/`debug_tools=true` 或 allowlist 显式打开 | 默认 provider tools 列表不含 pool_*；显式打开仍可用；测 policy | — |
-| **O3** | Skill 管理工具移出默认主循环 | 过度暴露 | M | todo | `skill.create/update/delete` 默认不对模型暴露；保留 HTTP/Desktop CRUD + `skill.list`/`skill.run`（按产品决定 list 是否默认） | Settings 仍可管理 skills；默认 run 的 tools schema 无 create/update/delete | — |
+| **O1** | 默认隐藏 subagent 运维工具 | 过度暴露 | M | done | `opsOnlyTools` + `availableToolsForOptions`/`EvaluateToolPolicy`；`subagent.pool_*` 默认隐藏；`RED_PANDA_DEBUG_TOOLS` / `DebugTools` / allowlist 可开 | 默认 schema 无 pool_*；debug/allowlist 可开；policy 测绿 | — |
+| **O3** | Skill 管理工具移出默认主循环 | 过度暴露 | M | done | `skill.create/update/delete` 列入 ops-only；`skill.list`/`skill.run` 仍默认暴露；HTTP/Desktop CRUD 不受影响 | 默认 schema 无 create/update/delete；debug 下仍可测 skill.create | — |
 | **O8** | Goal 模式默认工具白名单 | 选择税 | M | todo | `goals_enabled` 或 bound goal 时，Runtime/Gateway 施加收紧 allowlist：workspace + shell(视 policy) + todo + goal + context + subagent.run；排除 pool/skill 管理/memory 可选 | Goal run 工具集可测；非 Goal run 行为不变 | O1/O3 可并行 |
 | **O5a** | Goal 设置面隐藏未稳预算 | 过度 | L | todo | Desktop：`max_auto_continues` 等未完全关门的项默认折叠/高级区；文案标明实验性 | 默认 UI 更短；高级仍可配 | — |
 | **R6** | Slash 命令降级 | 入口冗余 | L | todo | `Parse` slash 仅 `RED_PANDA_SLASH_TOOLS=1` 或 test build tag；README Temporary Triggers 标注 debug | 默认纯文本不再触发 /read；e2e 改走 tool_calls 或开 env | — |
@@ -226,13 +226,13 @@ L / M / H — <why>
 | Wave | 条目 | todo | in_progress | done | wontfix |
 | --- | --- | --- | --- | --- | --- |
 | 0 | R3, R2, R2a | 0 | 0 | 2 | 1 |
-| 1 | R1a, R1b, R1c, R4 | 2 | 0 | 2 | 0 |
-| 2 | O1, O3, O8, O5a, R6 | 5 | 0 | 0 | 0 |
+| 1 | R1a, R1b, R1c, R4 | 1 | 0 | 3 | 0 |
+| 2 | O1, O3, O8, O5a, R6 | 3 | 0 | 2 | 0 |
 | 3 | O2, O4, O2b | 3 | 0 | 0 | 0 |
 | 4 | R5, R5b, O5b | 3 | 0 | 0 | 0 |
 | 5 | R7a, R7b, R7c, O7, O6 | 5 | 0 | 0 | 0 |
 | 6 | S1, S2, S3 | 3 | 0 | 0 | 0 |
-| **合计** | **26** | **21** | **0** | **4** | **1** |
+| **合计** | **26** | **18** | **0** | **7** | **1** |
 
 ---
 

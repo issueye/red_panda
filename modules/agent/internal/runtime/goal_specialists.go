@@ -333,7 +333,11 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 	if strings.TrimSpace(goalID) != "" {
 		brief = "\n\n" + r.goalNotesBrief(parentRunID, sessionID, goalID, objective)
 	}
-	child.Options.MemoryContext = &methods.MemoryContext{
+	// Role text lives in SpecialistContext — not MemoryContext — so project/session
+	// memory is not overwritten or mislabeled as "memory".
+	child.Options.MemoryContext = nil
+	child.Options.SpecialistContext = &methods.SpecialistContext{
+		Kind:    "specialist",
 		Context: roleBlock + budgetNote + brief,
 	}
 

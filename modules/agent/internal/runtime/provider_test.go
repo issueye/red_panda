@@ -202,6 +202,34 @@ func TestOpenAICompatibleMessagesInjectsSkillsCatalog(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleMessagesPutsSpecialistContextBeforeMemory(t *testing.T) {
+	messages := openAICompatibleMessages(ProviderRequest{
+		Input: methods.ReplyInput{Text: "do the step"},
+		Options: methods.ReplyOptions{
+			SpecialistContext: &methods.SpecialistContext{
+				Kind:    "specialist",
+				Context: "You are goal-analyst. SPECIALIST_ROLE",
+			},
+			MemoryContext: &methods.MemoryContext{
+				Context: "Memory:\n- [project/fact] Prefer tests.",
+			},
+		},
+	})
+	// [0]=time, [1]=specialist, [2]=memory, [3]=user
+	if len(messages) < 4 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	if messages[1]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[1]["content"]), "SPECIALIST_ROLE") {
+		t.Fatalf("expected specialist system message, got %#v", messages[1])
+	}
+	if messages[2]["role"] != "system" || !strings.Contains(fmt.Sprint(messages[2]["content"]), "Prefer tests") {
+		t.Fatalf("expected memory after specialist, got %#v", messages[2])
+	}
+	if messages[3]["role"] != "user" {
+		t.Fatalf("expected user last, got %#v", messages[3])
+	}
+}
+
 func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) {
 	var messages []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

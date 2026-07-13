@@ -693,6 +693,13 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 			"content": rootAgentTodoPolicy,
 		})
 	}
+	// Specialist/worker/skill role briefs are separate from long-term memory.
+	if req.Options.SpecialistContext != nil && strings.TrimSpace(req.Options.SpecialistContext.Context) != "" {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": strings.TrimSpace(req.Options.SpecialistContext.Context),
+		})
+	}
 	if req.Options.MemoryContext != nil && strings.TrimSpace(req.Options.MemoryContext.Context) != "" {
 		messages = append(messages, map[string]any{
 			"role":    "system",
