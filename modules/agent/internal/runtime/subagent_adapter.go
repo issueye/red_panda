@@ -86,3 +86,29 @@ func (s runtimeEventSink) Bridge(ctx context.Context, spec subagent.RunSpec, chi
 	}
 	return s.runtime.emitAgentEvent(ctx, spec.Parent, subAgentRef(spec.SubAgentID, spec.Name), child.Type, stream, payload)
 }
+
+func subAgentRef(subAgentID string, name string) events.AgentRef {
+	return events.AgentRef{
+		AgentID:       subAgentID,
+		Role:          events.AgentRoleSubAgent,
+		SubAgentID:    subAgentID,
+		ParentAgentID: "root",
+		Path:          []string{"root", subAgentID},
+		Name:          name,
+	}
+}
+
+func copyPayload(payload map[string]any) map[string]any {
+	next := map[string]any{}
+	for key, value := range payload {
+		next[key] = value
+	}
+	return next
+}
+
+func firstPayloadString(payload map[string]any, key string, fallback string) string {
+	if value, ok := payload[key].(string); ok && value != "" {
+		return value
+	}
+	return fallback
+}

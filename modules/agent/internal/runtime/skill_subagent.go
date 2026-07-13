@@ -103,6 +103,14 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx agenttools.ToolRun
 
 	var output strings.Builder
 	childStatus := ""
+	bridgeSpec := subagent.RunSpec{
+		RootRunID:  params.RunID,
+		SubAgentID: subAgentID,
+		Name:       agentName,
+		Backend:    "runtime_process",
+		Parent:     params,
+		Child:      childParams,
+	}
 	err = child.Start(childCtx, childParams, func(event events.Envelope) {
 		if event.Type == events.EventMessageDelta && event.Agent.Role == events.AgentRoleRoot {
 			if delta, ok := event.Payload["delta"].(string); ok {
@@ -112,7 +120,7 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx agenttools.ToolRun
 		if event.Type == events.EventFinish {
 			childStatus, _ = event.Payload["status"].(string)
 		}
-		r.bridgeProcessSubAgentEvent(context.Background(), params, subAgentID, agentName, "runtime_process", event)
+		_ = (runtimeEventSink{runtime: r}).Bridge(context.Background(), bridgeSpec, event)
 	})
 	if err != nil {
 		if childCtx.Err() != nil {

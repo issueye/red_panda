@@ -159,6 +159,34 @@ flowchart TD
 | Context Manager | token 估算、工具输出裁剪、压缩 |
 | Memory Store | 项目记忆、用户记忆、历史检索 |
 
+### 4.1 当前子代理包边界
+
+子代理实现采用接口倒置，保持以下单向依赖：
+
+```text
+internal/runtime
+    │ 构造 RunSpec、Goal 专家配置、工具与 JSON-RPC 入口
+    ▼
+internal/subagent
+    │ Coordinator、Registry、Capture、ProcessPool、Process
+    ▼
+modules/protocol
+```
+
+各组件职责：
+
+| 组件 | 所属包 | 职责 |
+| --- | --- | --- |
+| `Coordinator` | `internal/subagent` | 注册状态、获取进程、启动、收集结果、校验报告、释放进程和终态流转 |
+| `Registry` | `internal/subagent` | 并发安全地管理子代理记录、取消函数、查询、强制终态和移除 |
+| `Capture` | `internal/subagent` | 收集消息、reasoning、工具事件和失败诊断，判断最终报告是否可用 |
+| `Process` / `ProcessPool` | `internal/subagent` | stdio/IPC 子进程通信和工作进程复用 |
+| `runtimeProcessProvider` | `internal/runtime` | 将 `process_pool`、`runtime_process` 后端适配到 Coordinator |
+| `runtimeEventSink` | `internal/runtime` | 将子代理状态和子进程事件接回 root run 事件流 |
+| `executeSubagentRun` | `internal/runtime` | 解析工具参数、计算预算、构造 ChildParams、应用 Goal 专家规则并提交 RunSpec |
+
+`internal/subagent` 不得导入 `internal/runtime`、`internal/tools` 或 Gateway。Goal、Memory、Todo 和会话策略继续由 Runtime 负责，不能下沉到通用 Coordinator。
+
 ## 5. 子代理模型
 
 ### 5.1 子代理状态
@@ -224,15 +252,26 @@ Agent Runtime 向模型暴露子代理工具：
 
 | 后端 | 执行方式 | 适用阶段 |
 | --- | --- | --- |
-| `in_process` | Runtime 内 goroutine 执行子 agent，共享当前进程资源 | MVP |
-| `runtime_process` | 为子代理启动独立 `red-panda-agent` 进程 | 第二阶段 |
-| `pool_worker` | 从 Runtime worker pool 分配子代理执行 | 第三阶段 |
+| `in_process` | Runtime 内 goroutine 执行子 agent，共享当前进程资源 | 仅保留 planner 兼容路径 |
+| `runtime_process` | 为子代理启动独立 `red-panda-agent` 进程 | 已实现 |
+| `process_pool` | 从父 Runtime 进程池分配可复用子代理进程 | 已实现，普通 `subagent.run` 默认值 |
 
 默认策略：
 
-- MVP 使用 `in_process`。
-- 当子代理需要危险工具、长时间任务或独立权限模式时，可升级为 `runtime_process`。
-- `pool_worker` 只在网关已支持 process pool 后启用。
+- 普通 `subagent.run` 默认使用 `process_pool`。
+- 父运行显式选择不池化执行时使用 `runtime_process`。
+- `in_process` 仅保留给旧版 planner 触发路径，不进入 Coordinator 的进程后端选择。
+
+### 5.4 Coordinator 端口
+
+Coordinator 只消费两个最小接口：
+
+1. `ProcessProvider`：按 backend 获取子代理进程并返回单次 Release 函数。
+2. `EventSink`：发送生命周期状态并桥接子进程事件。
+
+Runtime 实现这两个接口，但接口定义保留在 `internal/subagent`。这种方式避免 `subagent -> runtime` 循环依赖，也避免用包含 Goal、Gateway 和事件细节的巨大 Host 接口掩盖耦合。
+
+Runtime 在调用 Coordinator 前必须完成 ChildParams 构造和权限收紧。Coordinator 不修改业务上下文，只保证通用执行生命周期在成功、失败和取消路径上都释放一次进程，并保持终态不可被迟到事件覆盖。
 
 ## 6. 子代理事件
 

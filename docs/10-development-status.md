@@ -1,6 +1,6 @@
 # Current Development Status
 
-Updated: 2026-07-11
+Updated: 2026-07-13
 
 ## Overall Status
 
@@ -14,6 +14,7 @@ Updated: 2026-07-11
 - Root agent and subagents share one root run WebSocket channel using `root_seq`, `agent_seq`, and stream metadata.
 - `subagent_backend=runtime_process` runs a subagent through an independent child `red-panda-agent` process and bridges child `agent.event` output back to the parent root run channel.
 - `subagent_backend=process_pool` runs a subagent through a reusable child `red-panda-agent` process from the parent Runtime pool.
+- Subagent execution now uses an interface-driven `Coordinator`: Runtime builds Goal-aware `RunSpec` values, while `internal/subagent` owns concurrent lifecycle `Registry`, event/result `Capture`, process acquisition ports, report validation, and process release semantics.
 - Gateway root runs support `runtime_mode=per_run_process` in `run.start` options. `single_core` remains the default. Per-run process events enter the same WebSocket/projection stream, and Gateway shuts down and removes the per-run Runtime client after run finish.
 - Gateway provider profile backend is complete: CRUD APIs live under `/api/v1/provider-profiles`, profiles store OpenAI-compatible provider settings with masked API key state, and `run.start` can pass `provider_profile_id`.
 - Gateway exposes persisted run event timeline queries through `GET /api/v1/runs/:id/events` with `after_seq` and `limit`.
@@ -246,6 +247,13 @@ Updated: 2026-07-11
     - `context.*` intentionally absent from `subagentRunDenylist` so specialist children share the same scratchpad — verified by a registration test,
     - auto-inject: each new goal segment splices pinned + recent notes into `GoalContext.Context` (`goalNotesDigest`); each specialist child receives a goal brief (objective + notes + goal_id) in `MemoryContext` (`goalNotesBrief` via `applyGoalSpecialist`) so children are not context-blind and can call `context.read` themselves,
     - closes the three context-loss gaps: segment-to-segment (was last-6-truncated), root→specialist (children were context-blind), and cross-run (notes persist in SQLite beyond the 200-message cap).
+102. Centralized reusable subagent execution behind package interfaces:
+    - extracted child event/result collection into `internal/subagent.Capture`, preserving actionable failure diagnostics and tool-call-only report rejection,
+    - extracted concurrent lifecycle state into `internal/subagent.Registry`, including sticky terminal states, root-run scoping, one-shot cancellation, reset, query, and removal,
+    - added `internal/subagent.Coordinator` with consumer-owned `ProcessProvider` and `EventSink` ports for register→acquire→start→capture→validate→release execution,
+    - added Runtime process/event adapters while keeping Goal specialist resolution, ChildParams construction, tool handlers, JSON-RPC handlers, and root event sequencing Runtime-owned,
+    - migrated ordinary `subagent.run` to Coordinator and routed planner, skill, list, cancel, and reset state access directly through Registry,
+    - verified the package boundary with Agent full tests and race tests for `internal/subagent` and `internal/runtime`.
 
 ## Modules
 

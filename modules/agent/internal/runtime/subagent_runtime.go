@@ -94,7 +94,7 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 		"summary":     backend + " planner subagent started",
 		"backend":     backend,
 	})
-	child, release, err := r.acquireProcessSubAgent(ctx, params, subAgentID, backend)
+	child, release, err := (runtimeProcessProvider{runtime: r}).Acquire(ctx, params, subAgentID, backend)
 	if err != nil {
 		r.subagents.Finish(params.RunID, subAgentID, "failed", backend+" planner subagent failed", err.Error())
 		_ = r.emitAgentEvent(context.Background(), params, agent, events.EventSubAgentUpdate, nil, map[string]any{
@@ -122,8 +122,16 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 	childParams.Options.SubAgentBackend = ""
 	disableGoalPipelineForChild(&childParams.Options)
 
+	bridgeSpec := subagent.RunSpec{
+		RootRunID:  params.RunID,
+		SubAgentID: subAgentID,
+		Name:       "planner",
+		Backend:    backend,
+		Parent:     params,
+		Child:      childParams,
+	}
 	err = child.Start(ctx, childParams, func(event events.Envelope) {
-		r.bridgeProcessSubAgentEvent(context.Background(), params, subAgentID, "planner", backend, event)
+		_ = (runtimeEventSink{runtime: r}).Bridge(context.Background(), bridgeSpec, event)
 	})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -154,38 +162,6 @@ func (r *Runtime) runProcessPlannerSubAgent(ctx context.Context, params methods.
 		"summary":     backend + " planner subagent completed",
 		"backend":     backend,
 	})
-}
-
-func (r *Runtime) acquireProcessSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string, backend string) (subagent.Process, func(bool), error) {
-	if backend == "process_pool" {
-		return r.processPool.Acquire(ctx, params, subAgentID)
-	}
-	child, err := r.newProcessSubAgent(ctx, params, subAgentID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return child, func(reusable bool) {
-		_ = child.Close(context.Background())
-	}, nil
-}
-
-func (r *Runtime) bridgeProcessSubAgentEvent(ctx context.Context, params methods.ReplyParams, subAgentID string, agentName string, backend string, child events.Envelope) {
-	if child.Type == events.EventFinish {
-		return
-	}
-	payload := copyPayload(child.Payload)
-	payload["subagent_id"] = subAgentID
-	payload["backend"] = backend
-	if child.Type == events.EventSubAgentUpdate {
-		payload["name"] = firstPayloadString(payload, "name", agentName)
-	}
-	stream := child.Stream
-	if stream != nil {
-		next := *stream
-		next.StreamID = "stream_" + subAgentID + "_" + stream.StreamID
-		stream = &next
-	}
-	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, agentName), child.Type, stream, payload)
 }
 
 func (r *Runtime) markSubAgentCancelled(params methods.ReplyParams, subAgentID string) {
@@ -238,17 +214,6 @@ func (r *Runtime) handleSubAgentCancel(req jsonrpc.Request) error {
 	return r.writeResponse(resp)
 }
 
-func subAgentRef(subAgentID string, name string) events.AgentRef {
-	return events.AgentRef{
-		AgentID:       subAgentID,
-		Role:          events.AgentRoleSubAgent,
-		SubAgentID:    subAgentID,
-		ParentAgentID: "root",
-		Path:          []string{"root", subAgentID},
-		Name:          name,
-	}
-}
-
 func normalizedSubAgentBackend(value string) string {
 	switch value {
 	case "runtime_process":
@@ -258,21 +223,6 @@ func normalizedSubAgentBackend(value string) string {
 	default:
 		return "in_process"
 	}
-}
-
-func copyPayload(payload map[string]any) map[string]any {
-	next := map[string]any{}
-	for key, value := range payload {
-		next[key] = value
-	}
-	return next
-}
-
-func firstPayloadString(payload map[string]any, key string, fallback string) string {
-	if value, ok := payload[key].(string); ok && value != "" {
-		return value
-	}
-	return fallback
 }
 
 func sleepContext(ctx context.Context, d time.Duration) bool {
