@@ -56,23 +56,24 @@ type Runtime struct {
 	log     io.Writer
 	version string
 
-	mu                 sync.Mutex
-	eventMu            sync.Mutex
-	initialized        bool
-	nextSeq            map[string]uint64
-	agentSeq           map[string]map[string]uint64
-	gatewayPending     map[jsonrpc.ID]chan jsonrpc.Response
-	nextGatewayID      uint64
-	permissions        map[string]chan permission.ResolveParams
-	activeRuns         map[string]context.CancelFunc
-	subagents          *subagent.Registry
-	provider           provider.Provider
-	tools              agenttools.ToolRunner
-	processPool        *subagent.ProcessPool
-	mcp                *agentmcp.Manager
-	runTodos           map[string][]methods.TodoItemDTO
-	runGoals           map[string]*runGoalState
-	newProcessSubAgent func(context.Context, methods.ReplyParams, string) (subagent.Process, error)
+	mu                  sync.Mutex
+	eventMu             sync.Mutex
+	initialized         bool
+	nextSeq             map[string]uint64
+	agentSeq            map[string]map[string]uint64
+	gatewayPending      map[jsonrpc.ID]chan jsonrpc.Response
+	nextGatewayID       uint64
+	permissions         map[string]chan permission.ResolveParams
+	activeRuns          map[string]context.CancelFunc
+	subagents           *subagent.Registry
+	provider            provider.Provider
+	tools               agenttools.ToolRunner
+	processPool         *subagent.ProcessPool
+	subagentCoordinator *subagent.Coordinator
+	mcp                 *agentmcp.Manager
+	runTodos            map[string][]methods.TodoItemDTO
+	runGoals            map[string]*runGoalState
+	newProcessSubAgent  func(context.Context, methods.ReplyParams, string) (subagent.Process, error)
 }
 
 var _ agenttools.SubagentManager = (*Runtime)(nil)
@@ -105,6 +106,11 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 	rt.tools.MCPExecutor = rt.executeMCPTool
 	rt.newProcessSubAgent = rt.createProcessSubAgent
 	rt.processPool = subagent.NewProcessPool(subagent.PoolSizeFromEnv(), rt.newProcessSubAgent)
+	coordinator, err := subagent.NewCoordinator(runtimeProcessProvider{runtime: rt}, runtimeEventSink{runtime: rt}, rt.subagents)
+	if err != nil {
+		panic(err)
+	}
+	rt.subagentCoordinator = coordinator
 	return rt
 }
 
