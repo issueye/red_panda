@@ -1,4 +1,4 @@
-package runtime
+package mcp
 
 import (
 	"bufio"
@@ -16,9 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"redpanda/protocol/jsonrpc"
-	"redpanda/protocol/mcp"
-	"redpanda/protocol/methods"
+	protomcp "redpanda/protocol/mcp"
 )
 
 const (
@@ -65,28 +63,11 @@ func (b *boundedBuffer) String() string {
 	return strings.TrimSpace(b.buf.String())
 }
 
-func (r *Runtime) handleMCPDiscover(ctx context.Context, req jsonrpc.Request) error {
-	var params methods.MCPDiscoverParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
-	}
-
-	result := mcp.MCPDiscoveryResult{Servers: make([]mcp.MCPServerDiscovery, 0, len(params.Servers))}
-	for _, server := range params.Servers {
-		result.Servers = append(result.Servers, r.discoverMCPServer(ctx, params.WorkspaceRoot, server))
-	}
-	resp, err := jsonrpc.NewResult(req.ID, result)
-	if err != nil {
-		return err
-	}
-	return r.writeResponse(resp)
-}
-
-func (r *Runtime) discoverMCPServer(ctx context.Context, workspaceRoot string, config mcp.MCPServerConfig) (result mcp.MCPServerDiscovery) {
+func (m *Manager) DiscoverServer(ctx context.Context, workspaceRoot string, config protomcp.MCPServerConfig) (result protomcp.MCPServerDiscovery) {
 	startedAt := time.Now()
 	result.Name = config.Name
 	result.Status = "failed"
-	result.Tools = []mcp.MCPToolDefinition{}
+	result.Tools = []protomcp.MCPToolDefinition{}
 	defer func() { result.DurationMS = time.Since(startedAt).Milliseconds() }()
 	defer func() {
 		result.Error = redactMCPSecrets(result.Error, config.Env)
@@ -133,10 +114,10 @@ func (r *Runtime) discoverMCPServer(ctx context.Context, workspaceRoot string, c
 		startDone:       make(chan struct{}),
 		shutdownTimeout: durationMillis(timeouts.ShutdownMS),
 	}
-	r.registerMCPProcess(process)
+	m.registerProcess(process)
 	defer func() {
 		process.close(durationMillis(timeouts.ShutdownMS))
-		r.unregisterMCPProcess(process)
+		m.unregisterProcess(process)
 		result.StderrSummary = stderr.String()
 	}()
 
@@ -167,7 +148,7 @@ func (r *Runtime) discoverMCPServer(ctx context.Context, workspaceRoot string, c
 		"params": map[string]any{
 			"protocolVersion": mcpProtocolVersion,
 			"capabilities":    map[string]any{},
-			"clientInfo":      map[string]any{"name": "red-panda-agent", "version": r.version},
+			"clientInfo":      map[string]any{"name": "red-panda-agent", "version": m.version},
 		},
 	}
 	if err = writeMCPMessage(stdin, initialize); err != nil {
@@ -175,8 +156,8 @@ func (r *Runtime) discoverMCPServer(ctx context.Context, workspaceRoot string, c
 		return result
 	}
 	var initResult struct {
-		ProtocolVersion string            `json:"protocolVersion"`
-		ServerInfo      mcp.MCPServerInfo `json:"serverInfo"`
+		ProtocolVersion string                 `json:"protocolVersion"`
+		ServerInfo      protomcp.MCPServerInfo `json:"serverInfo"`
 	}
 	if err = waitMCPResponse(ctx, lines, readErrors, process, 1, durationMillis(timeouts.InitializeMS), &initResult); err != nil {
 		result.Error = "initialize failed: " + err.Error()
@@ -209,7 +190,7 @@ func (r *Runtime) discoverMCPServer(ctx context.Context, workspaceRoot string, c
 				continue
 			}
 		}
-		result.Tools = append(result.Tools, mcp.MCPToolDefinition{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+		result.Tools = append(result.Tools, protomcp.MCPToolDefinition{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
 	}
 	result.Status = "ready"
 	return result
@@ -270,25 +251,25 @@ func (p *mcpProcess) close(timeout time.Duration) {
 	})
 }
 
-func (r *Runtime) registerMCPProcess(process *mcpProcess) {
-	r.mu.Lock()
-	r.mcpProcesses[process] = struct{}{}
-	r.mu.Unlock()
+func (m *Manager) registerProcess(process *mcpProcess) {
+	m.mu.Lock()
+	m.processes[process] = struct{}{}
+	m.mu.Unlock()
 }
 
-func (r *Runtime) unregisterMCPProcess(process *mcpProcess) {
-	r.mu.Lock()
-	delete(r.mcpProcesses, process)
-	r.mu.Unlock()
+func (m *Manager) unregisterProcess(process *mcpProcess) {
+	m.mu.Lock()
+	delete(m.processes, process)
+	m.mu.Unlock()
 }
 
-func (r *Runtime) closeMCPProcesses() {
-	r.mu.Lock()
-	processes := make([]*mcpProcess, 0, len(r.mcpProcesses))
-	for process := range r.mcpProcesses {
+func (m *Manager) CloseAll() {
+	m.mu.Lock()
+	processes := make([]*mcpProcess, 0, len(m.processes))
+	for process := range m.processes {
 		processes = append(processes, process)
 	}
-	r.mu.Unlock()
+	m.mu.Unlock()
 	for _, process := range processes {
 		process.close(process.shutdownTimeout)
 	}

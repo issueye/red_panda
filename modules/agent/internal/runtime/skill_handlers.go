@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"redpanda/agent/internal/skill"
 	"strings"
 
 	"redpanda/protocol/jsonrpc"
@@ -13,7 +14,7 @@ func (r *Runtime) handleAgentSkills(req jsonrpc.Request) error {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
 	}
-	items, err := listManagedSkills(params.WorkspaceRoot)
+	items, err := skill.ListManaged(params.WorkspaceRoot)
 	if err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32000, err.Error()))
 	}
@@ -35,7 +36,7 @@ func (r *Runtime) handleAgentSkillLoad(req jsonrpc.Request) error {
 	include := params.IncludeInstructions
 	// Default management loads to include instructions when omitted is false;
 	// callers must opt in. Desktop/Gateway should pass include_instructions=true.
-	detail, err := loadManagedSkillDetail(params.WorkspaceRoot, params.Name, include)
+	detail, err := skill.LoadManagedDetail(params.WorkspaceRoot, params.Name, include)
 	if err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32000, err.Error()))
 	}
@@ -51,7 +52,7 @@ func (r *Runtime) handleAgentSkillCreate(req jsonrpc.Request) error {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
 	}
-	output, err := runCreateSkill(params.WorkspaceRoot, params.Name, params.Description, params.Instructions)
+	output, err := skill.RunCreate(params.WorkspaceRoot, params.Name, params.Description, params.Instructions)
 	if err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32000, err.Error()))
 	}
@@ -63,7 +64,7 @@ func (r *Runtime) handleAgentSkillUpdate(req jsonrpc.Request) error {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
 	}
-	output, err := runUpdateSkill(params.WorkspaceRoot, params.Name, params.Description, params.Instructions)
+	output, err := skill.RunUpdate(params.WorkspaceRoot, params.Name, params.Description, params.Instructions)
 	if err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32000, err.Error()))
 	}
@@ -78,7 +79,7 @@ func (r *Runtime) handleAgentSkillDelete(req jsonrpc.Request) error {
 	if strings.TrimSpace(params.Name) == "" {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "skill name is required"))
 	}
-	if _, err := runDeleteSkill(params.WorkspaceRoot, params.Name); err != nil {
+	if _, err := skill.RunDelete(params.WorkspaceRoot, params.Name); err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32000, err.Error()))
 	}
 	resp, err := jsonrpc.NewResult(req.ID, methods.SkillDeleteResult{

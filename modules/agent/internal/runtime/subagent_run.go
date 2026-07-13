@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"redpanda/agent/internal/subagent"
+	agenttools "redpanda/agent/internal/tools"
 	"strings"
 	"time"
 
@@ -15,15 +17,15 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	if runCtx.Reply == nil {
 		return "", fmt.Errorf("subagent requires reply context")
 	}
-	task := strings.TrimSpace(stringArg(call.Arguments, "task"))
+	task := strings.TrimSpace(agenttools.StringArg(call.Arguments, "task"))
 	if task == "" {
 		return "", fmt.Errorf("subagent task is required")
 	}
-	name := strings.TrimSpace(stringArg(call.Arguments, "name"))
+	name := strings.TrimSpace(agenttools.StringArg(call.Arguments, "name"))
 	if name == "" {
 		name = "worker"
 	}
-	name = sanitizeSubagentName(name)
+	name = subagent.SanitizeName(name)
 	specialist, isSpecialist := resolveGoalSpecialist(runCtx.Reply.Options.AgentDefinitions, name)
 	displayName := goalSpecialistDisplayName(name)
 	if isSpecialist && strings.TrimSpace(specialist.NameZH) != "" {
@@ -37,15 +39,15 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 
 	// Budget = file_count + summary turns. Parent should pass file_count (from workspace.stats)
 	// or path (auto-counted). Explicit max_turns still wins when provided.
-	fileCount := intArg(call.Arguments, "file_count", 0)
-	scopePath := strings.TrimSpace(stringArg(call.Arguments, "path"))
+	fileCount := agenttools.IntArg(call.Arguments, "file_count", 0)
+	scopePath := strings.TrimSpace(agenttools.StringArg(call.Arguments, "path"))
 	if fileCount <= 0 && scopePath != "" && runCtx.WorkingDir != "" {
-		if stats, err := computeWorkspaceStats(runCtx.WorkingDir, scopePath, 4); err == nil {
+		if stats, err := agenttools.ComputeWorkspaceStats(runCtx.WorkingDir, scopePath, 4); err == nil {
 			fileCount = stats.TotalFiles
 		}
 	}
-	explicitTurns := intArg(call.Arguments, "max_turns", 0)
-	maxTurns := effectiveSubagentToolTurns(explicitTurns, fileCount)
+	explicitTurns := agenttools.IntArg(call.Arguments, "max_turns", 0)
+	maxTurns := subagent.EffectiveToolTurns(explicitTurns, fileCount)
 	// Goal phase specialists use role defaults when parent omitted budget.
 	if isSpecialist && explicitTurns <= 0 && fileCount <= 0 {
 		maxTurns = specialist.DefaultMaxTurns
@@ -66,9 +68,9 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	}
 
 	r.registerSubAgent(params, subAgentID, agentName, backend, cancel)
-	startSummary := "subagent started: " + truncateSummary(task, 80)
+	startSummary := "subagent started: " + subagent.TruncateSummary(task, 80)
 	if isSpecialist {
-		startSummary = displayName + " 已启动: " + truncateSummary(task, 60)
+		startSummary = displayName + " 已启动: " + subagent.TruncateSummary(task, 60)
 	}
 	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id":     subAgentID,
@@ -100,10 +102,10 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 	childTask := task
 	if scopePath != "" && !strings.Contains(strings.ToLower(task), strings.ToLower(scopePath)) {
 		childTask = fmt.Sprintf("Scope path: %s\nFile count budget: %d files => max_turns=%d (files + %d summary turns).\n\n%s",
-			scopePath, fileCount, maxTurns, subagentSummaryTurns, task)
+			scopePath, fileCount, maxTurns, subagent.SummaryTurns, task)
 	} else if fileCount > 0 {
 		childTask = fmt.Sprintf("File count budget: %d files => max_turns=%d (files + %d summary turns).\n\n%s",
-			fileCount, maxTurns, subagentSummaryTurns, task)
+			fileCount, maxTurns, subagent.SummaryTurns, task)
 	}
 
 	childParams := params
@@ -118,14 +120,14 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 			"You are a focused subagent named %q. Complete only the assigned task using workspace tools as needed. "+
 				"Your tool-turn budget is %d (derived from file_count=%d plus %d turns for analysis summary). "+
 				"Return a clear final report for the parent agent. Do not spawn nested subagents.",
-			agentName, maxTurns, fileCount, subagentSummaryTurns,
+			agentName, maxTurns, fileCount, subagent.SummaryTurns,
 		),
 	}
 	childParams.Options.TodoContext = nil
 	disableGoalPipelineForChild(&childParams.Options)
 	childParams.Options.SpawnSubAgents = false
 	childParams.Options.SubAgentBackend = ""
-	childParams.Options.ToolDenylist = appendUniqueStrings(childParams.Options.ToolDenylist, subagentRunDenylist...)
+	childParams.Options.ToolDenylist = appendUniqueStrings(childParams.Options.ToolDenylist, subagent.RunDenylist...)
 	// Budget scales with directory file count; no artificial maximum (unless specialist cap).
 	childParams.Options.MaxToolTurns = maxTurns
 
@@ -175,7 +177,7 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 		return "", detail
 	}
 
-	result := strings.TrimSpace(truncateToolOutput(capture.FinalText()))
+	result := strings.TrimSpace(agenttools.TruncateToolOutput(capture.FinalText()))
 	if result == "" {
 		detail := capture.FailureError("subagent returned an empty final report")
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
@@ -186,7 +188,7 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
 		return "", detail
 	}
-	if !isUsableFinalText(result) {
+	if !subagent.ReportUsable(result) {
 		detail := capture.FailureError("subagent returned tool calls instead of a final report")
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
 		return "", detail
@@ -194,9 +196,9 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 
 	reusable = true
 	r.finishSubAgent(params.RunID, subAgentID, "completed", "subagent completed", "")
-	doneSummary := "subagent completed: " + truncateSummary(task, 80)
+	doneSummary := "subagent completed: " + subagent.TruncateSummary(task, 80)
 	if isSpecialist {
-		doneSummary = displayName + " 已完成: " + truncateSummary(task, 60)
+		doneSummary = displayName + " 已完成: " + subagent.TruncateSummary(task, 60)
 	}
 	_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
 		"subagent_id":     subAgentID,

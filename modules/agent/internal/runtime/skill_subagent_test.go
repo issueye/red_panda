@@ -7,6 +7,9 @@ import (
 	"sync"
 	"testing"
 
+	"redpanda/agent/internal/provider"
+	"redpanda/agent/internal/skill"
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -79,7 +82,7 @@ func (p *recordingSkillProcess) Close(context.Context) error {
 
 func TestRuntimeRunsSkillInIsolatedProcessSubAgent(t *testing.T) {
 	root := t.TempDir()
-	if _, err := runCreateSkill(root, "review", "Private review skill.", "SKILL_PRIVATE_SENTINEL"); err != nil {
+	if _, err := skill.RunCreate(root, "review", "Private review skill.", "SKILL_PRIVATE_SENTINEL"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,11 +92,11 @@ func TestRuntimeRunsSkillInIsolatedProcessSubAgent(t *testing.T) {
 	lines := make(chan []byte, 64)
 	go readJSONLines(t, reader, lines)
 
-	provider := &skillRunProvider{}
+	skillProvider := &skillRunProvider{}
 	process := &recordingSkillProcess{}
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
-	rt.provider = provider
-	rt.newProcessSubAgent = func(context.Context, methods.ReplyParams, string) (processSubAgent, error) {
+	rt.provider = skillProvider
+	rt.newProcessSubAgent = func(context.Context, methods.ReplyParams, string) (ProcessSubAgent, error) {
 		return process, nil
 	}
 	sendRequest(t, context.Background(), rt, "reply_skill_run", methods.AgentReply, methods.ReplyParams{
@@ -129,14 +132,14 @@ func TestRuntimeRunsSkillInIsolatedProcessSubAgent(t *testing.T) {
 		events.EventFinish,
 	})
 
-	provider.mu.Lock()
-	requests := append([]ProviderRequest(nil), provider.requests...)
-	provider.mu.Unlock()
+	skillProvider.mu.Lock()
+	requests := append([]ProviderRequest(nil), skillProvider.requests...)
+	skillProvider.mu.Unlock()
 	if len(requests) != 2 {
 		t.Fatalf("provider request count = %d, want 2", len(requests))
 	}
 	for index, request := range requests {
-		if len(request.Session.Conversation) != 1 || conversationMessageText(request.Session.Conversation[0]) != "ROOT_HISTORY_SENTINEL" {
+		if len(request.Session.Conversation) != 1 || provider.ConversationMessageText(request.Session.Conversation[0]) != "ROOT_HISTORY_SENTINEL" {
 			t.Fatalf("root request %d conversation changed: %#v", index+1, request.Session.Conversation)
 		}
 		if strings.Contains(request.Input.Text, "SKILL_PRIVATE_SENTINEL") {
@@ -177,7 +180,7 @@ func TestRuntimeRunsSkillInIsolatedProcessSubAgent(t *testing.T) {
 		t.Fatalf("child options are not isolated: %#v", childParams.Options)
 	}
 	for _, denied := range skillSubagentDenylist {
-		if !containsString(childParams.Options.ToolDenylist, denied) {
+		if !agenttools.ContainsString(childParams.Options.ToolDenylist, denied) {
 			t.Fatalf("child denylist missing %s: %#v", denied, childParams.Options.ToolDenylist)
 		}
 	}

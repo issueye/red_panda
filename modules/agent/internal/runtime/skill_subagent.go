@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"redpanda/agent/internal/skill"
+	agenttools "redpanda/agent/internal/tools"
 	"strings"
 
 	"redpanda/protocol/events"
@@ -38,12 +40,12 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx ToolRunContext, ca
 	if runCtx.Reply == nil {
 		return "", fmt.Errorf("skill subagent requires reply context")
 	}
-	name := strings.TrimSpace(stringArg(call.Arguments, "name"))
-	task := strings.TrimSpace(stringArg(call.Arguments, "task"))
+	name := strings.TrimSpace(agenttools.StringArg(call.Arguments, "name"))
+	task := strings.TrimSpace(agenttools.StringArg(call.Arguments, "task"))
 	if task == "" {
 		return "", fmt.Errorf("skill task is required")
 	}
-	skill, err := loadManagedSkill(runCtx.WorkingDir, name)
+	skill, err := loadManagedSkillLocal(runCtx.WorkingDir, name)
 	if err != nil {
 		return "", err
 	}
@@ -114,7 +116,7 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx ToolRunContext, ca
 		r.failSkillSubAgent(params, subAgentID, agentName, name, err)
 		return "", err
 	}
-	result := strings.TrimSpace(truncateToolOutput(output.String()))
+	result := strings.TrimSpace(agenttools.TruncateToolOutput(output.String()))
 	if result == "" {
 		err := fmt.Errorf("skill subagent returned an empty result")
 		r.failSkillSubAgent(params, subAgentID, agentName, name, err)
@@ -132,8 +134,8 @@ func (r *Runtime) executeSkillRun(ctx context.Context, runCtx ToolRunContext, ca
 	return result, nil
 }
 
-func loadManagedSkill(workspaceRoot string, name string) (string, error) {
-	path, err := managedSkillFile(workspaceRoot, name, false)
+func loadManagedSkillLocal(workspaceRoot string, name string) (string, error) {
+	path, err := skill.ManagedFile(workspaceRoot, name, false)
 	if err != nil {
 		return "", err
 	}
@@ -141,7 +143,7 @@ func loadManagedSkill(workspaceRoot string, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info.Size() > maxSkillDescriptionBytes+maxSkillInstructionsBytes+1024 {
+	if info.Size() > skill.MaxDescriptionBytes+skill.MaxInstructionsBytes+1024 {
 		return "", fmt.Errorf("skill %q exceeds the managed size limit", name)
 	}
 	raw, err := os.ReadFile(path)
@@ -167,7 +169,7 @@ func (r *Runtime) failSkillSubAgent(params methods.ReplyParams, subAgentID strin
 func appendUniqueStrings(items []string, values ...string) []string {
 	result := append([]string(nil), items...)
 	for _, value := range values {
-		if !containsString(result, value) {
+		if !agenttools.ContainsString(result, value) {
 			result = append(result, value)
 		}
 	}

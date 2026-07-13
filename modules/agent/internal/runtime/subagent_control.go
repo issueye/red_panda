@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"redpanda/agent/internal/subagent"
+	agenttools "redpanda/agent/internal/tools"
 	"strings"
 	"time"
 
@@ -13,11 +15,11 @@ import (
 )
 
 func (r *Runtime) executeSubagentList(runCtx ToolRunContext, call tools.Call) (string, error) {
-	runID := strings.TrimSpace(stringArg(call.Arguments, "run_id"))
+	runID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "run_id"))
 	if runID == "" && runCtx.Reply != nil {
 		runID = runCtx.Reply.RunID
 	}
-	subAgentID := strings.TrimSpace(stringArg(call.Arguments, "subagent_id"))
+	subAgentID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "subagent_id"))
 	items := r.subAgentRecords(methods.SubAgentsParams{
 		RunID:      runID,
 		SubAgentID: subAgentID,
@@ -31,11 +33,11 @@ func (r *Runtime) executeSubagentList(runCtx ToolRunContext, call tools.Call) (s
 }
 
 func (r *Runtime) executeSubagentCancel(runCtx ToolRunContext, call tools.Call) (string, error) {
-	subAgentID := strings.TrimSpace(stringArg(call.Arguments, "subagent_id"))
+	subAgentID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "subagent_id"))
 	if subAgentID == "" {
 		return "", fmt.Errorf("subagent_id is required")
 	}
-	runID := strings.TrimSpace(stringArg(call.Arguments, "run_id"))
+	runID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "run_id"))
 	if runID == "" && runCtx.Reply != nil {
 		runID = runCtx.Reply.RunID
 	}
@@ -74,11 +76,11 @@ func (r *Runtime) executeSubagentCancel(runCtx ToolRunContext, call tools.Call) 
 // executeSubagentReset cancels a running subagent (if any) and marks it reset so
 // the parent can start a fresh specialist without leaving a stuck running state.
 func (r *Runtime) executeSubagentReset(runCtx ToolRunContext, call tools.Call) (string, error) {
-	subAgentID := strings.TrimSpace(stringArg(call.Arguments, "subagent_id"))
+	subAgentID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "subagent_id"))
 	if subAgentID == "" {
 		return "", fmt.Errorf("subagent_id is required")
 	}
-	runID := strings.TrimSpace(stringArg(call.Arguments, "run_id"))
+	runID := strings.TrimSpace(agenttools.StringArg(call.Arguments, "run_id"))
 	if runID == "" && runCtx.Reply != nil {
 		runID = runCtx.Reply.RunID
 	}
@@ -115,7 +117,7 @@ func (r *Runtime) executeSubagentReset(runCtx ToolRunContext, call tools.Call) (
 	}
 
 	// Optionally recycle idle pool workers so the next run is cold-start clean.
-	resetPool := boolArg(call.Arguments, "reset_pool", false)
+	resetPool := agenttools.BoolArg(call.Arguments, "reset_pool", false)
 	var pool any
 	if resetPool {
 		pool = r.processPool.Reset(context.Background())
@@ -140,9 +142,9 @@ func (r *Runtime) executeSubagentPoolStatus() (string, error) {
 }
 
 func (r *Runtime) executeSubagentPoolResize(call tools.Call) (string, error) {
-	limit := intArg(call.Arguments, "size", 0)
+	limit := agenttools.IntArg(call.Arguments, "size", 0)
 	if limit <= 0 {
-		return "", fmt.Errorf("size must be between 1 and %d", maxSubAgentPoolSize)
+		return "", fmt.Errorf("size must be between 1 and %d", subagent.MaxPoolSize)
 	}
 	status := r.processPool.SetLimit(limit)
 	return marshalToolJSON(map[string]any{

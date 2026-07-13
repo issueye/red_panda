@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"redpanda/agent/internal/subagent"
 	"strings"
 
 	"redpanda/protocol/events"
@@ -147,7 +148,7 @@ func (c *subagentRunCapture) FailureError(headline string) error {
 	parts = append(parts, fmt.Sprintf("max_turns=%d", c.maxTurns))
 	if c.fileCount > 0 {
 		parts = append(parts, fmt.Sprintf("file_count=%d", c.fileCount))
-		parts = append(parts, fmt.Sprintf("turns_formula=file_count(%d)+summary(%d)", c.fileCount, subagentSummaryTurns))
+		parts = append(parts, fmt.Sprintf("turns_formula=file_count(%d)+summary(%d)", c.fileCount, subagent.SummaryTurns))
 	}
 	if c.scopePath != "" {
 		parts = append(parts, "path="+c.scopePath)
@@ -177,11 +178,11 @@ func (c *subagentRunCapture) FailureError(headline string) error {
 		parts = append(parts, "hint="+hint)
 	}
 	if c.task != "" {
-		parts = append(parts, "task="+truncateSummary(c.task, 120))
+		parts = append(parts, "task="+subagent.TruncateSummary(c.task, 120))
 	}
 	// Reasoning can help the parent understand silent failures, but keep it short.
 	if reasoning := strings.TrimSpace(c.reasoning.String()); reasoning != "" && c.FinalText() == "" {
-		parts = append(parts, "reasoning_preview="+truncateSummary(reasoning, 240))
+		parts = append(parts, "reasoning_preview="+subagent.TruncateSummary(reasoning, 240))
 	}
 	return fmt.Errorf("%s", strings.Join(parts, " | "))
 }

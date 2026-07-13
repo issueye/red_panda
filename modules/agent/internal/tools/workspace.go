@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"bufio"
@@ -8,26 +8,27 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"redpanda/agent/internal/pathutil"
 	"regexp"
-	goruntime "runtime"
 	"sort"
 	"strings"
 
-	"redpanda/protocol/tools"
+	ptools "redpanda/protocol/tools"
 )
 
 const maxGrepFileBytes = 2 * 1024 * 1024
 const defaultListDepth = 3
+const subagentSummaryTurns = 8
 const maxListEntries = 500
 const defaultGrepMatches = 100
 const maxPatchBytes = 256 * 1024
 
 func readInvocation(runID string, path string) ToolInvocation {
-	return ToolInvocation{Call: tools.Call{
+	return ToolInvocation{Call: ptools.Call{
 		ID:          "tool_" + runID + "_read",
 		Name:        "workspace.read_file",
 		DisplayName: "Read file",
-		Risk:        tools.RiskLow,
+		Risk:        ptools.RiskLow,
 		Arguments:   map[string]any{"path": path},
 	}}
 }
@@ -36,11 +37,11 @@ func listInvocation(runID string, path string) ToolInvocation {
 	if strings.TrimSpace(path) == "" {
 		path = "."
 	}
-	return ToolInvocation{Call: tools.Call{
+	return ToolInvocation{Call: ptools.Call{
 		ID:          "tool_" + runID + "_list",
 		Name:        "workspace.list",
 		DisplayName: "List files",
-		Risk:        tools.RiskLow,
+		Risk:        ptools.RiskLow,
 		Arguments:   map[string]any{"path": path, "max_depth": defaultListDepth},
 	}}
 }
@@ -50,21 +51,21 @@ func grepInvocation(runID string, rest string) ToolInvocation {
 	if !ok {
 		path = "."
 	}
-	return ToolInvocation{Call: tools.Call{
+	return ToolInvocation{Call: ptools.Call{
 		ID:          "tool_" + runID + "_grep",
 		Name:        "workspace.grep",
 		DisplayName: "Search files",
-		Risk:        tools.RiskLow,
+		Risk:        ptools.RiskLow,
 		Arguments:   map[string]any{"pattern": pattern, "path": strings.TrimSpace(path), "max_matches": defaultGrepMatches},
 	}}
 }
 
 func shellInvocation(runID string, command string) ToolInvocation {
-	return ToolInvocation{Call: tools.Call{
+	return ToolInvocation{Call: ptools.Call{
 		ID:          "tool_" + runID + "_shell",
 		Name:        "shell.exec",
 		DisplayName: "Shell",
-		Risk:        tools.RiskHigh,
+		Risk:        ptools.RiskHigh,
 		Arguments:   map[string]any{"command": command},
 	}}
 }
@@ -75,11 +76,11 @@ func writeInvocation(runID string, rest string) ToolInvocation {
 		path = rest
 		content = ""
 	}
-	return ToolInvocation{Call: tools.Call{
+	return ToolInvocation{Call: ptools.Call{
 		ID:          "tool_" + runID + "_write",
 		Name:        "workspace.write_file",
 		DisplayName: "Write file",
-		Risk:        tools.RiskHigh,
+		Risk:        ptools.RiskHigh,
 		Arguments:   map[string]any{"path": path, "content": content},
 	}}
 }
@@ -90,11 +91,11 @@ func editInvocation(runID string, rest string) ToolInvocation {
 	if ok {
 		oldText, newText, _ = strings.Cut(replacement, "=>")
 	}
-	return ToolInvocation{Call: tools.Call{
+	return ToolInvocation{Call: ptools.Call{
 		ID:          "tool_" + runID + "_edit",
 		Name:        "workspace.edit_file",
 		DisplayName: "Edit file",
-		Risk:        tools.RiskHigh,
+		Risk:        ptools.RiskHigh,
 		Arguments: map[string]any{
 			"path":        strings.TrimSpace(path),
 			"old_text":    strings.TrimSpace(oldText),
@@ -110,11 +111,11 @@ func diffInvocation(runID string, rest string) ToolInvocation {
 	if ok {
 		oldText, newText, _ = strings.Cut(replacement, "=>")
 	}
-	return ToolInvocation{Call: tools.Call{
+	return ToolInvocation{Call: ptools.Call{
 		ID:          "tool_" + runID + "_diff",
 		Name:        "workspace.diff_file",
 		DisplayName: "Preview diff",
-		Risk:        tools.RiskLow,
+		Risk:        ptools.RiskLow,
 		Arguments: map[string]any{
 			"path":        strings.TrimSpace(path),
 			"old_text":    strings.TrimSpace(oldText),
@@ -125,11 +126,11 @@ func diffInvocation(runID string, rest string) ToolInvocation {
 }
 
 func patchInvocation(runID string, patch string) ToolInvocation {
-	return ToolInvocation{Call: tools.Call{
+	return ToolInvocation{Call: ptools.Call{
 		ID:          "tool_" + runID + "_patch",
 		Name:        "workspace.apply_patch",
 		DisplayName: "Apply patch",
-		Risk:        tools.RiskHigh,
+		Risk:        ptools.RiskHigh,
 		Arguments:   map[string]any{"patch": patch},
 	}}
 }
@@ -206,7 +207,7 @@ type workspaceStatsResult struct {
 
 // runWorkspaceStats walks a directory and returns counts for split planning.
 func runWorkspaceStats(root string, relPath string, maxDepth int) (string, error) {
-	result, err := computeWorkspaceStats(root, relPath, maxDepth)
+	result, err := ComputeWorkspaceStats(root, relPath, maxDepth)
 	if err != nil {
 		return "", err
 	}
@@ -218,7 +219,7 @@ func runWorkspaceStats(root string, relPath string, maxDepth int) (string, error
 }
 
 // computeWorkspaceStats returns structured counts used by workspace.stats and subagent.run budgeting.
-func computeWorkspaceStats(root string, relPath string, maxDepth int) (workspaceStatsResult, error) {
+func ComputeWorkspaceStats(root string, relPath string, maxDepth int) (workspaceStatsResult, error) {
 	if strings.TrimSpace(relPath) == "" {
 		relPath = "."
 	}
@@ -231,7 +232,7 @@ func computeWorkspaceStats(root string, relPath string, maxDepth int) (workspace
 	if err != nil {
 		return workspaceStatsResult{}, err
 	}
-	cleanRoot, err := cleanWorkspaceRoot(root)
+	cleanRoot, err := pathutil.CleanWorkspaceRoot(root)
 	if err != nil {
 		return workspaceStatsResult{}, err
 	}
@@ -386,7 +387,7 @@ func runListWorkspace(root string, relPath string, maxDepth int) (string, error)
 	if err != nil {
 		return "", err
 	}
-	cleanRoot, err := cleanWorkspaceRoot(root)
+	cleanRoot, err := pathutil.CleanWorkspaceRoot(root)
 	if err != nil {
 		return "", err
 	}
@@ -443,7 +444,7 @@ func runListWorkspace(root string, relPath string, maxDepth int) (string, error)
 	if truncated {
 		output += "\n[truncated]"
 	}
-	return truncateToolOutput(output), nil
+	return TruncateToolOutput(output), nil
 }
 
 func runGrepWorkspace(root string, pattern string, relPath string, maxMatches int) (string, error) {
@@ -462,7 +463,7 @@ func runGrepWorkspace(root string, pattern string, relPath string, maxMatches in
 	if err != nil {
 		return "", err
 	}
-	cleanRoot, err := cleanWorkspaceRoot(root)
+	cleanRoot, err := pathutil.CleanWorkspaceRoot(root)
 	if err != nil {
 		return "", err
 	}
@@ -515,7 +516,7 @@ func runGrepWorkspace(root string, pattern string, relPath string, maxMatches in
 	if truncated {
 		output += "\n[truncated]"
 	}
-	return truncateToolOutput(output), nil
+	return TruncateToolOutput(output), nil
 }
 
 func grepFile(root string, path string, expr *regexp.Regexp, limit int) ([]string, error) {
@@ -748,43 +749,12 @@ func resolveWorkspacePath(root string, relPath string) (string, error) {
 	if evalTarget, err := filepath.EvalSymlinks(cleanTarget); err == nil {
 		cleanTarget = filepath.Clean(evalTarget)
 	}
-	if !isPathInside(cleanRoot, cleanTarget) {
+	if !pathutil.IsPathInside(cleanRoot, cleanTarget) {
 		return "", fmt.Errorf("path escapes workspace root")
 	}
 	return cleanTarget, nil
 }
 
-func cleanWorkspaceRoot(root string) (string, error) {
-	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		root = wd
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	cleanRoot, err := filepath.EvalSymlinks(absRoot)
-	if err != nil {
-		cleanRoot = filepath.Clean(absRoot)
-	}
-	return filepath.Clean(cleanRoot), nil
-}
-
-func isPathInside(root string, target string) bool {
-	root = filepath.Clean(root)
-	target = filepath.Clean(target)
-	if goruntime.GOOS == "windows" {
-		root = strings.ToLower(root)
-		target = strings.ToLower(target)
-	}
-	if target == root {
-		return true
-	}
-	return strings.HasPrefix(target, root+string(os.PathSeparator))
-}
 func workspaceRelativeDisplay(root string, target string) (string, error) {
 	rel, err := filepath.Rel(root, target)
 	if err != nil {
@@ -843,7 +813,7 @@ func unifiedDiff(path string, oldContent string, newContent string) string {
 		builder.WriteString(line)
 		builder.WriteString("\n")
 	}
-	return truncateToolOutput(builder.String())
+	return TruncateToolOutput(builder.String())
 }
 
 func parseUnifiedPatch(patch string) ([]unifiedFilePatch, error) {
@@ -1027,4 +997,11 @@ func splitContentLines(content string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+func recommendedSubagentTurns(fileCount int) int {
+	if fileCount < 0 {
+		fileCount = 0
+	}
+	return fileCount + subagentSummaryTurns
 }

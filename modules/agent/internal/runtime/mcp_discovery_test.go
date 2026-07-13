@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"redpanda/protocol/jsonrpc"
-	"redpanda/protocol/mcp"
+	protomcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 )
 
@@ -30,8 +30,9 @@ func TestMCPDiscoverSuccessAndBoundedStderr(t *testing.T) {
 	if len(result.Tools) != 1 || result.Tools[0].Name != "read_file" {
 		t.Fatalf("unexpected tools: %#v", result.Tools)
 	}
-	if len(result.StderrSummary) != mcpStderrLimit {
-		t.Fatalf("stderr summary length = %d, want %d", len(result.StderrSummary), mcpStderrLimit)
+	const stderrLimit = 8192
+	if len(result.StderrSummary) != stderrLimit {
+		t.Fatalf("stderr summary length = %d, want %d", len(result.StderrSummary), stderrLimit)
 	}
 	waitForFile(t, cleanup)
 }
@@ -131,7 +132,7 @@ func TestMCPDiscoverHandleLine(t *testing.T) {
 	var output bytes.Buffer
 	runtime := New(strings.NewReader(""), &output, &bytes.Buffer{}, "test")
 	config := helperMCPConfig(t, "success", filepath.Join(t.TempDir(), "cleanup"))
-	params := methods.MCPDiscoverParams{Servers: []mcp.MCPServerConfig{config}}
+	params := methods.MCPDiscoverParams{Servers: []protomcp.MCPServerConfig{config}}
 	raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "discover-1", "method": methods.MCPDiscover, "params": params})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +148,7 @@ func TestMCPDiscoverHandleLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result mcp.MCPDiscoveryResult
+	var result protomcp.MCPDiscoveryResult
 	if err := json.Unmarshal(encoded, &result); err != nil {
 		t.Fatal(err)
 	}
@@ -161,10 +162,10 @@ func TestCoreShutdownClosesActiveMCPProcess(t *testing.T) {
 	cleanup := filepath.Join(t.TempDir(), "cleanup")
 	config := helperMCPConfig(t, "timeout", cleanup)
 	config.Timeouts.ListMS = 5000
-	done := make(chan mcp.MCPServerDiscovery, 1)
-	go func() { done <- runtime.discoverMCPServer(context.Background(), "", config) }()
+	done := make(chan protomcp.MCPServerDiscovery, 1)
+	go func() { done <- runtime.mcp.DiscoverServer(context.Background(), "", config) }()
 	waitForFile(t, cleanup+".ready")
-	runtime.closeMCPProcesses()
+	runtime.mcp.CloseAll()
 	select {
 	case result := <-done:
 		if result.Status != "failed" {
@@ -176,9 +177,9 @@ func TestCoreShutdownClosesActiveMCPProcess(t *testing.T) {
 	waitForFile(t, cleanup)
 }
 
-func helperMCPConfig(t *testing.T, mode, cleanup string) mcp.MCPServerConfig {
+func helperMCPConfig(t *testing.T, mode, cleanup string) protomcp.MCPServerConfig {
 	t.Helper()
-	return mcp.MCPServerConfig{
+	return protomcp.MCPServerConfig{
 		Name:    "fake",
 		Command: os.Args[0],
 		Args:    []string{"-test.run=TestMCPHelperProcess", "--", mode},
@@ -187,16 +188,16 @@ func helperMCPConfig(t *testing.T, mode, cleanup string) mcp.MCPServerConfig {
 			"RED_PANDA_MCP_CLEANUP": cleanup,
 		},
 		Enabled: true,
-		Timeouts: mcp.MCPTimeouts{
+		Timeouts: protomcp.MCPTimeouts{
 			StartMS: 1000, InitializeMS: 1000, ListMS: 1000, ShutdownMS: 200,
 		},
 	}
 }
 
-func runMCPDiscover(t *testing.T, config mcp.MCPServerConfig) mcp.MCPServerDiscovery {
+func runMCPDiscover(t *testing.T, config protomcp.MCPServerConfig) protomcp.MCPServerDiscovery {
 	t.Helper()
-	runtime := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "test")
-	return runtime.discoverMCPServer(context.Background(), "", config)
+	rt := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "test")
+	return rt.mcp.DiscoverServer(context.Background(), "", config)
 }
 
 func waitForFile(t *testing.T, path string) {
@@ -227,7 +228,7 @@ func TestMCPHelperProcess(t *testing.T) {
 		}
 	}
 	if mode == "stderr" {
-		_, _ = fmt.Fprint(os.Stderr, strings.Repeat("x", mcpStderrLimit*2))
+		_, _ = fmt.Fprint(os.Stderr, strings.Repeat("x", 8192*2))
 	}
 	if mode == "secret-stderr" {
 		_, _ = fmt.Fprintf(os.Stderr, "diagnostic=%s", os.Getenv("MCP_API_KEY"))

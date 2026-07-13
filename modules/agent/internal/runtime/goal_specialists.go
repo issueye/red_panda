@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"redpanda/agent/internal/subagent"
 	"strings"
 
 	"redpanda/protocol/methods"
@@ -16,7 +17,7 @@ type goalSpecialist struct {
 	DefaultMaxTurns int
 	// Allowlist when non-empty: only these tools are exposed (plus denylist still applies).
 	Allowlist []string
-	// ExtraDenylist is merged on top of subagentRunDenylist.
+	// ExtraDenylist is merged on top of subagent.RunDenylist.
 	ExtraDenylist []string
 	SystemPrompt  string
 	// CapMaxTurns hard-caps specialist budget (0 = use effectiveSubagentToolTurns only).
@@ -39,7 +40,7 @@ var workspaceWriteTools = []string{
 
 // contextShareTools are goal scratchpad tools. Specialists with an allowlist must
 // include these explicitly — otherwise policy hides them even though they are
-// absent from subagentRunDenylist.
+// absent from subagent.RunDenylist.
 var contextShareTools = []string{
 	"context.read",
 	"context.search",
@@ -303,7 +304,7 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 	// Denylist: always include global subagent denylist + specialist extras.
 	// Note: context.* tools are intentionally NOT denylisted, and specialists
 	// with an allowlist must also list them (see withContextShareTools).
-	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, subagentRunDenylist...)
+	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, subagent.RunDenylist...)
 	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, spec.ExtraDenylist...)
 
 	if len(spec.Allowlist) > 0 {

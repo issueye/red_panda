@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"redpanda/protocol/methods"
-	"redpanda/protocol/tools"
+	ptools "redpanda/protocol/tools"
 )
 
 // duckDuckGoResultHTML renders a fragment that mirrors the structure of
@@ -384,14 +384,14 @@ func TestAnnotateWebErrorMentionsConfiguredEnvProxy(t *testing.T) {
 func TestWebToolsRegisteredAsHighRisk(t *testing.T) {
 	runner := ToolRunner{}
 	for _, name := range []string{"web.search", "web.fetch"} {
-		invocation, err := runner.InvocationFromCall("run_web", 0, tools.Call{
+		invocation, err := runner.InvocationFromCall("run_web", 0, ptools.Call{
 			Name:      name,
 			Arguments: map[string]any{"query": "x", "url": "https://example.com"},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if invocation.Call.Risk != tools.RiskHigh {
+		if invocation.Call.Risk != ptools.RiskHigh {
 			t.Fatalf("%s risk = %s, want high", name, invocation.Call.Risk)
 		}
 		if invocation.Call.DisplayName == "" {

@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
-	"redpanda/protocol/tools"
+	ptools "redpanda/protocol/tools"
 )
 
 // opsOnlyTools are registered for Desktop/CLI/debug use but hidden from the
@@ -47,7 +47,7 @@ func opsToolExposed(options methods.ReplyOptions, name string) bool {
 		return true
 	}
 	// Explicit allowlist opt-in for a single ops tool without opening all debug tools.
-	return containsString(options.ToolAllowlist, name)
+	return ContainsString(options.ToolAllowlist, name)
 }
 
 type ToolDecisionAction string
@@ -63,15 +63,15 @@ type ToolDecision struct {
 	Reason string
 }
 
-func EvaluateToolPolicy(options methods.ReplyOptions, call tools.Call) ToolDecision {
+func EvaluateToolPolicy(options methods.ReplyOptions, call ptools.Call) ToolDecision {
 	if options.GoalsEnabled != nil && !*options.GoalsEnabled && strings.HasPrefix(call.Name, "goal.") {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "goals are disabled"}
 	}
-	if containsString(options.ToolDenylist, call.Name) {
+	if ContainsString(options.ToolDenylist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is denied by tool_denylist"}
 	}
 	allowlist := effectiveToolAllowlist(options)
-	if len(allowlist) > 0 && !containsString(allowlist, call.Name) {
+	if len(allowlist) > 0 && !ContainsString(allowlist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is not in tool_allowlist"}
 	}
 	// opsToolExposed may treat explicit client allowlist as opt-in for ops tools.
@@ -98,8 +98,8 @@ func EvaluateToolPolicy(options methods.ReplyOptions, call tools.Call) ToolDecis
 	}
 }
 
-func riskBasedDecision(permissionMode string, risk tools.Risk) ToolDecision {
-	if risk == tools.RiskLow {
+func riskBasedDecision(permissionMode string, risk ptools.Risk) ToolDecision {
+	if risk == ptools.RiskLow {
 		return ToolDecision{Action: ToolDecisionAllow, Reason: "low risk tool"}
 	}
 	switch permission.Mode(permissionMode) {
@@ -108,7 +108,7 @@ func riskBasedDecision(permissionMode string, risk tools.Risk) ToolDecision {
 	case permission.ModeDenyAll:
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "permission_mode deny_all"}
 	case permission.ModePermissive:
-		if risk == tools.RiskHigh {
+		if risk == ptools.RiskHigh {
 			return ToolDecision{Action: ToolDecisionRequirePermission, Reason: "high risk tool in permissive mode"}
 		}
 		return ToolDecision{Action: ToolDecisionAllow, Reason: "non-high risk tool in permissive mode"}
@@ -117,7 +117,7 @@ func riskBasedDecision(permissionMode string, risk tools.Risk) ToolDecision {
 	}
 }
 
-func containsString(items []string, value string) bool {
+func ContainsString(items []string, value string) bool {
 	for _, item := range items {
 		if item == value {
 			return true
@@ -224,22 +224,22 @@ func intersectAllowlist(a, b []string) []string {
 	return out
 }
 
-func availableToolsForOptions(definitions []tools.Definition, options methods.ReplyOptions) []tools.Definition {
+func AvailableToolsForOptions(definitions []ptools.Definition, options methods.ReplyOptions) []ptools.Definition {
 	allowlist := effectiveToolAllowlist(options)
 	// Copy so opsToolExposed / denylist checks still see original options,
 	// but allowlist enforcement uses the effective list.
 	eff := options
 	eff.ToolAllowlist = allowlist
 
-	filtered := make([]tools.Definition, 0, len(definitions))
+	filtered := make([]ptools.Definition, 0, len(definitions))
 	for _, definition := range definitions {
 		if options.GoalsEnabled != nil && !*options.GoalsEnabled && strings.HasPrefix(definition.Name, "goal.") {
 			continue
 		}
-		if containsString(options.ToolDenylist, definition.Name) {
+		if ContainsString(options.ToolDenylist, definition.Name) {
 			continue
 		}
-		if len(allowlist) > 0 && !containsString(allowlist, definition.Name) {
+		if len(allowlist) > 0 && !ContainsString(allowlist, definition.Name) {
 			continue
 		}
 		if !opsToolExposed(eff, definition.Name) {

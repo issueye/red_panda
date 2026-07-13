@@ -1,4 +1,4 @@
-package runtime
+package subagent
 
 import (
 	"bufio"
@@ -19,6 +19,8 @@ import (
 	"redpanda/protocol/methods"
 )
 
+const maxJSONRPCLineBytes = 4 * 1024 * 1024
+
 type subAgentProcess struct {
 	command   string
 	args      []string
@@ -37,16 +39,16 @@ type subAgentProcess struct {
 	running   bool
 }
 
-func newSubAgentProcess(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
-	return newSubAgentProcessWithRequestHandler(ctx, params, subAgentID, nil)
+func NewProcess(ctx context.Context, params methods.ReplyParams, subAgentID string) (Process, error) {
+	return NewProcessWithRequestHandler(ctx, params, subAgentID, nil)
 }
 
-func newSubAgentProcessWithRequestHandler(
+func NewProcessWithRequestHandler(
 	ctx context.Context,
 	params methods.ReplyParams,
 	subAgentID string,
 	onRequest func(context.Context, string, any) (json.RawMessage, error),
-) (processSubAgent, error) {
+) (Process, error) {
 	command, args, err := subAgentCommand()
 	if err != nil {
 		return nil, err

@@ -1,4 +1,4 @@
-package runtime
+package subagent
 
 import (
 	"regexp"
@@ -7,12 +7,12 @@ import (
 
 const (
 	// Turns reserved for reasoning + writing the final analysis report after file work.
-	subagentSummaryTurns = 8
+	SummaryTurns = 8
 	// Fallback only when neither max_turns nor file_count/path is provided.
-	defaultSubagentToolTurns = 16
+	DefaultToolTurns = 16
 )
 
-var subagentRunDenylist = []string{
+var RunDenylist = []string{
 	"subagent.run",
 	"subagent.list",
 	"subagent.cancel",
@@ -35,30 +35,30 @@ var subagentNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 // recommendedSubagentTurns is file_count + summary/analysis allowance.
 // There is no artificial maximum; budget scales with the directory size.
-func recommendedSubagentTurns(fileCount int) int {
+func RecommendedTurns(fileCount int) int {
 	if fileCount < 1 {
 		fileCount = 1
 	}
-	return fileCount + subagentSummaryTurns
+	return fileCount + SummaryTurns
 }
 
 // effectiveSubagentToolTurns picks the specialist budget.
 // Priority: explicit max_turns > file_count formula > default.
 // No hard maximum cap: turns scale with files being analyzed.
-func effectiveSubagentToolTurns(explicit int, fileCount int) int {
+func EffectiveToolTurns(explicit int, fileCount int) int {
 	if explicit > 0 {
 		return explicit
 	}
 	if fileCount > 0 {
-		return recommendedSubagentTurns(fileCount)
+		return RecommendedTurns(fileCount)
 	}
-	return defaultSubagentToolTurns
+	return DefaultToolTurns
 }
 
 // isUsableFinalText rejects provider fallback output that contains only
 // textual <tool_call> markup. Those calls were not executed and are not a
 // final answer or specialist report.
-func isUsableFinalText(report string) bool {
+func ReportUsable(report string) bool {
 	text := strings.TrimSpace(report)
 	if text == "" {
 		return false
@@ -88,7 +88,7 @@ func isUsableFinalText(report string) bool {
 	return strings.TrimSpace(text) != ""
 }
 
-func sanitizeSubagentName(name string) string {
+func SanitizeName(name string) string {
 	cleaned := strings.Trim(subagentNameSanitizer.ReplaceAllString(strings.TrimSpace(name), "-"), "-")
 	if cleaned == "" {
 		return "worker"
@@ -99,7 +99,7 @@ func sanitizeSubagentName(name string) string {
 	return cleaned
 }
 
-func truncateSummary(text string, max int) string {
+func TruncateSummary(text string, max int) string {
 	text = strings.Join(strings.Fields(text), " ")
 	if max <= 0 || len(text) <= max {
 		return text

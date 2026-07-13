@@ -1,14 +1,15 @@
-package runtime
+package tools
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"redpanda/agent/internal/skill"
 	"strings"
 	"time"
 
 	"redpanda/protocol/methods"
-	"redpanda/protocol/tools"
+	ptools "redpanda/protocol/tools"
 )
 
 const maxToolOutputBytes = 64 * 1024
@@ -25,17 +26,17 @@ type MemoryToolExecutor func(context.Context, methods.MemoryToolExecuteParams) (
 type TodoToolExecutor func(context.Context, methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error)
 type GoalToolExecutor func(context.Context, methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error)
 type ContextToolExecutor func(context.Context, methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error)
-type SkillRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
-type SubagentRunExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
-type MCPToolExecutor func(context.Context, ToolRunContext, tools.Call) (string, error)
+type SkillRunExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
+type SubagentRunExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
+type MCPToolExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
 
 // SubagentManager exposes parent-agent control of specialists and the process pool.
 type SubagentManager interface {
-	List(runCtx ToolRunContext, call tools.Call) (string, error)
-	Cancel(runCtx ToolRunContext, call tools.Call) (string, error)
-	Reset(runCtx ToolRunContext, call tools.Call) (string, error)
+	List(runCtx ToolRunContext, call ptools.Call) (string, error)
+	Cancel(runCtx ToolRunContext, call ptools.Call) (string, error)
+	Reset(runCtx ToolRunContext, call ptools.Call) (string, error)
 	PoolStatus() (string, error)
-	PoolResize(call tools.Call) (string, error)
+	PoolResize(call ptools.Call) (string, error)
 	PoolReset() (string, error)
 }
 
@@ -58,16 +59,16 @@ type ToolRunContext struct {
 }
 
 type ToolInvocation struct {
-	Call tools.Call
+	Call ptools.Call
 }
 
-func (ToolRunner) AvailableTools() []tools.Definition {
-	return []tools.Definition{
+func (ToolRunner) AvailableTools() []ptools.Definition {
+	return []ptools.Definition{
 		{
 			Name:        "workspace.read_file",
 			DisplayName: "Read file",
 			Description: "Read a text file inside the active workspace.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -80,7 +81,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "workspace.list",
 			DisplayName: "List files",
 			Description: "List files and directories inside the active workspace.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -93,7 +94,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "workspace.stats",
 			DisplayName: "Workspace stats",
 			Description: "Summarize directory structure and file counts for split planning. Root agent MUST call this before multi-area analysis. Use total_files / top_level[].files to set each subagent.run file_count or max_turns using formula max_turns = file_count + summary_turns (summary_turns is included as suggested_max_turns).",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -106,7 +107,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "workspace.grep",
 			DisplayName: "Search files",
 			Description: "Search text files inside the active workspace with a regular expression.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -121,7 +122,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "workspace.write_file",
 			DisplayName: "Write file",
 			Description: "Write text content to a file inside the active workspace.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -135,7 +136,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "workspace.edit_file",
 			DisplayName: "Edit file",
 			Description: "Replace exact text inside a file in the active workspace.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -151,7 +152,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "workspace.diff_file",
 			DisplayName: "Preview diff",
 			Description: "Preview a unified diff for a proposed text change to one workspace file.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -168,7 +169,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "workspace.apply_patch",
 			DisplayName: "Apply patch",
 			Description: "Apply a workspace-scoped unified patch to text files.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -181,7 +182,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "shell.exec",
 			DisplayName: "Shell",
 			Description: "Run a shell command in the active workspace.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -194,7 +195,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "skill.list",
 			DisplayName: "List skills",
 			Description: "List managed workspace skills under .codex/skills with name and description only. The catalog is also injected at conversation start; call this to re-check after skill.create/update/delete in the same run.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -204,7 +205,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "skill.create",
 			DisplayName: "Create skill",
 			Description: "Create a managed SKILL.md under .codex/skills in the active workspace.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -219,7 +220,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "skill.update",
 			DisplayName: "Update skill",
 			Description: "Replace an existing managed SKILL.md under .codex/skills in the active workspace.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -234,7 +235,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "skill.delete",
 			DisplayName: "Delete skill",
 			Description: "Delete a managed SKILL.md under .codex/skills in the active workspace.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -247,7 +248,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "skill.run",
 			DisplayName: "Run skill",
 			Description: "Run a managed workspace skill in an isolated runtime-process subagent and return only its final result. Prefer names from the skills catalog injected for this conversation.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -261,7 +262,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "subagent.run",
 			DisplayName: "Run subagent",
 			Description: "Spawn a process-pool specialist and return its final report. For Goal multi-step work use phase names exactly: goal-analyst, goal-planner, goal-implementer, goal-verifier, goal-evaluator (tool policy and prompts are applied automatically). For broad codebase analysis without Goal, call workspace.stats first and set file_count/max_turns; split non-overlapping scopes; synthesize results instead of re-reading.",
-			Risk:        tools.RiskMedium,
+			Risk:        ptools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -286,7 +287,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "subagent.list",
 			DisplayName: "List subagents",
 			Description: "List subagents for the current root run and show process-pool occupancy. Use this to manage specialists.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -299,7 +300,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "subagent.cancel",
 			DisplayName: "Cancel subagent",
 			Description: "Cancel a running subagent managed by the parent agent.",
-			Risk:        tools.RiskMedium,
+			Risk:        ptools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -313,7 +314,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "subagent.reset",
 			DisplayName: "Reset subagent",
 			Description: "Cancel a subagent if it is still running, mark it reset, and remove it from the active registry so a fresh specialist can be started. Optionally also reset idle process-pool workers.",
-			Risk:        tools.RiskMedium,
+			Risk:        ptools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -328,7 +329,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "subagent.pool_status",
 			DisplayName: "Subagent pool status",
 			Description: "Inspect the subagent process pool: limit, active workers, idle workers, and in-use count.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -338,7 +339,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "subagent.pool_resize",
 			DisplayName: "Resize subagent pool",
 			Description: "Change the subagent process pool size (1-8). Excess idle workers are closed immediately.",
-			Risk:        tools.RiskMedium,
+			Risk:        ptools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -351,7 +352,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "subagent.pool_reset",
 			DisplayName: "Reset subagent pool",
 			Description: "Discard all idle process-pool workers so the next subagent.run creates fresh processes. In-use workers are left running until completion.",
-			Risk:        tools.RiskMedium,
+			Risk:        ptools.RiskMedium,
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -361,7 +362,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "todo.write",
 			DisplayName: "Update todos",
 			Description: "Session checklist only (this chat). REQUIRED for multi-step work: plan steps shown above the chat input. Prefer full list each call; at most one in_progress. Do NOT use for durable preferences (memory.*) or long-horizon Goal findings (context.* / goal.checkpoint). Skip only for trivial one-shot Q&A.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -390,7 +391,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "goal.write",
 			DisplayName: "Create goal",
 			Description: "Create a long-horizon Goal (objective + budgets + pipeline). Use after analysis when work spans multiple segments/runs. Then use todo.write for micro-steps and context.write for findings. Not for short checklists alone.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -407,7 +408,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "goal.update",
 			DisplayName: "Update goal",
 			Description: "Update goal fields, pipeline_phase, or action=cancel. Use activate=true to activate a pending goal.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -427,7 +428,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "goal.checkpoint",
 			DisplayName: "Goal checkpoint",
 			Description: "Save a short progress snapshot on the Goal (status recovery across continues). Prefer one concise summary. Structured findings belong in context.write (kind=finding|decision|handoff); durable user preferences belong in memory.create.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -444,7 +445,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "goal.complete",
 			DisplayName: "Complete goal",
 			Description: "Mark goal succeeded or failed AFTER final evaluation and user-facing completion report. Requires summary.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -461,7 +462,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "goal.list",
 			DisplayName: "List goals",
 			Description: "List session goals. Prefer injected Goal context when present.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -471,7 +472,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "todo.list",
 			DisplayName: "List todos",
 			Description: "Read the current session checklist (todo.*). Prefer injected Todo context after writes. Not durable memory and not Goal scratchpad notes.",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -484,7 +485,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "memory.list",
 			DisplayName: "List memory",
 			Description: "List durable project/session preferences and facts (cross-goal). Not for the live work checklist (todo.*) or Goal execution notes (context.*).",
-			Risk:        tools.RiskMedium,
+			Risk:        ptools.RiskMedium,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -498,7 +499,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "memory.create",
 			DisplayName: "Create memory",
 			Description: "Create durable project/session knowledge for future runs (preferences, standing facts). Do NOT use as a task queue (todo.write) or to store Goal-only findings (context.write).",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -515,7 +516,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "memory.update",
 			DisplayName: "Update memory",
 			Description: "Update a project or session memory record visible to the current run.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -533,7 +534,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "memory.delete",
 			DisplayName: "Delete memory",
 			Description: "Soft-delete a project or session memory record visible to the current run.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -546,7 +547,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "web.search",
 			DisplayName: "Web search",
 			Description: "Search the public web and return titles, URLs, and snippets. Uses Tavily when configured (recommended), otherwise DuckDuckGo. May include a short answer field when Tavily is used.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -560,7 +561,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "web.fetch",
 			DisplayName: "Web fetch",
 			Description: "Download a single http or https URL and return readable text from the page.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -574,7 +575,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "context.read",
 			DisplayName: "Read goal notes",
 			Description: "Read this Goal's shared scratchpad (findings/decisions/handoffs). Scoped to one goal; shared across segments, continues, and specialists. Not durable user preferences (memory.*) and not the step checklist (todo.*).",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -591,7 +592,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "context.search",
 			DisplayName: "Search goal notes",
 			Description: "Full-text search across the shared scratchpad notes for a goal (matches title and body).",
-			Risk:        tools.RiskLow,
+			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -606,7 +607,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "context.write",
 			DisplayName: "Write goal note",
 			Description: "Append a structured note on the active Goal scratchpad (finding/decision/risk/fact/handoff). Survives segment boundaries and specialist handoffs. Use goal.checkpoint for a short progress snapshot; use memory.create only for lasting preferences across goals.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -623,7 +624,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "context.replace",
 			DisplayName: "Replace goal note",
 			Description: "Upsert a shared scratchpad note by (goal_id, kind, title). Updates the body in place when a matching note exists, otherwise creates one.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -640,7 +641,7 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 			Name:        "context.delete",
 			DisplayName: "Delete goal note",
 			Description: "Delete a shared scratchpad note from a goal.",
-			Risk:        tools.RiskHigh,
+			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -708,7 +709,7 @@ func (ToolRunner) Parse(text string, runID string) (ToolInvocation, bool) {
 	}
 }
 
-func (runner ToolRunner) InvocationFromCall(runID string, index int, call tools.Call, extra ...tools.Definition) (ToolInvocation, error) {
+func (runner ToolRunner) InvocationFromCall(runID string, index int, call ptools.Call, extra ...ptools.Definition) (ToolInvocation, error) {
 	if call.Name == "" {
 		return ToolInvocation{}, fmt.Errorf("tool name is required")
 	}
@@ -717,7 +718,7 @@ func (runner ToolRunner) InvocationFromCall(runID string, index int, call tools.
 	}
 	definitions := runner.AvailableTools()
 	if len(extra) > 0 {
-		definitions = append(append([]tools.Definition{}, definitions...), extra...)
+		definitions = append(append([]ptools.Definition{}, definitions...), extra...)
 	}
 	for _, definition := range definitions {
 		if definition.Name == call.Name {
@@ -734,12 +735,12 @@ func (runner ToolRunner) InvocationFromCall(runID string, index int, call tools.
 		}
 	}
 	// MCP tools may be registered after AvailableTools snapshot; accept prefix as last resort.
-	if isMCPToolName(call.Name) {
+	if IsMCPToolName(call.Name) {
 		if call.DisplayName == "" {
 			call.DisplayName = call.Name
 		}
 		if call.Risk == "" {
-			call.Risk = tools.RiskHigh
+			call.Risk = ptools.RiskHigh
 		}
 		if call.Arguments == nil {
 			call.Arguments = map[string]any{}
@@ -749,17 +750,17 @@ func (runner ToolRunner) InvocationFromCall(runID string, index int, call tools.
 	return ToolInvocation{}, fmt.Errorf("unknown tool %s", call.Name)
 }
 
-func (runner ToolRunner) Run(ctx context.Context, workingDir string, invocation ToolInvocation) (tools.Result, string) {
+func (runner ToolRunner) Run(ctx context.Context, workingDir string, invocation ToolInvocation) (ptools.Result, string) {
 	return runner.RunWithContext(ctx, ToolRunContext{WorkingDir: workingDir}, invocation)
 }
 
-func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunContext, invocation ToolInvocation) (tools.Result, string) {
+func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunContext, invocation ToolInvocation) (ptools.Result, string) {
 	started := time.Now()
 	call := invocation.Call
-	result := tools.Result{
+	result := ptools.Result{
 		ToolCallID: call.ID,
 		Name:       call.Name,
-		Status:     tools.CallStatusCompleted,
+		Status:     ptools.CallStatusCompleted,
 	}
 
 	output, err := runBounded(ctx, toolTimeoutFor(call.Name), func(toolCtx context.Context) (string, error) {
@@ -768,13 +769,13 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 
 	result.DurationMS = time.Since(started).Milliseconds()
 	if err != nil {
-		result.Status = tools.CallStatusFailed
+		result.Status = ptools.CallStatusFailed
 		result.Error = err.Error()
 		// Always emit a standardized envelope (even on failure) so UI/model share one schema.
-		result.Output = standardizeToolOutput(call.Name, output, err, result.DurationMS)
+		result.Output = StandardizeToolOutput(call.Name, output, err, result.DurationMS)
 		return result, result.Output
 	}
-	result.Output = standardizeToolOutput(call.Name, output, nil, result.DurationMS)
+	result.Output = StandardizeToolOutput(call.Name, output, nil, result.DurationMS)
 	return result, result.Output
 }
 
@@ -790,7 +791,7 @@ func toolTimeoutFor(name string) time.Duration {
 		return defaultGatewayToolTimeout
 	default:
 		// MCP tools manage start/initialize/call timeouts internally (docs/19).
-		if isMCPToolName(name) {
+		if IsMCPToolName(name) {
 			return 0
 		}
 		return defaultLocalToolTimeout
@@ -837,35 +838,35 @@ func runBounded(ctx context.Context, timeout time.Duration, fn func(context.Cont
 	}
 }
 
-func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
 	switch call.Name {
 	case "workspace.read_file":
-		return runReadFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"))
+		return runReadFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"))
 	case "workspace.list":
-		return runListWorkspace(runCtx.WorkingDir, stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_depth", defaultListDepth))
+		return runListWorkspace(runCtx.WorkingDir, StringArgDefault(call.Arguments, "path", "."), IntArg(call.Arguments, "max_depth", defaultListDepth))
 	case "workspace.stats":
-		return runWorkspaceStats(runCtx.WorkingDir, stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_depth", 4))
+		return runWorkspaceStats(runCtx.WorkingDir, StringArgDefault(call.Arguments, "path", "."), IntArg(call.Arguments, "max_depth", 4))
 	case "workspace.grep":
-		return runGrepWorkspace(runCtx.WorkingDir, stringArg(call.Arguments, "pattern"), stringArgDefault(call.Arguments, "path", "."), intArg(call.Arguments, "max_matches", defaultGrepMatches))
+		return runGrepWorkspace(runCtx.WorkingDir, StringArg(call.Arguments, "pattern"), StringArgDefault(call.Arguments, "path", "."), IntArg(call.Arguments, "max_matches", defaultGrepMatches))
 	case "workspace.write_file":
-		return runWriteFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), stringArg(call.Arguments, "content"))
+		return runWriteFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"), StringArg(call.Arguments, "content"))
 	case "workspace.edit_file":
-		return runEditFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), stringArg(call.Arguments, "old_text"), stringArg(call.Arguments, "new_text"), boolArg(call.Arguments, "replace_all", false))
+		return runEditFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"), StringArg(call.Arguments, "old_text"), StringArg(call.Arguments, "new_text"), BoolArg(call.Arguments, "replace_all", false))
 	case "workspace.diff_file":
 		content, hasContent := stringArgPresent(call.Arguments, "content")
-		return runDiffFile(runCtx.WorkingDir, stringArg(call.Arguments, "path"), content, hasContent, stringArg(call.Arguments, "old_text"), stringArg(call.Arguments, "new_text"), boolArg(call.Arguments, "replace_all", false))
+		return runDiffFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"), content, hasContent, StringArg(call.Arguments, "old_text"), StringArg(call.Arguments, "new_text"), BoolArg(call.Arguments, "replace_all", false))
 	case "workspace.apply_patch":
-		return runApplyPatch(runCtx.WorkingDir, stringArg(call.Arguments, "patch"))
+		return runApplyPatch(runCtx.WorkingDir, StringArg(call.Arguments, "patch"))
 	case "shell.exec":
-		return runShell(ctx, runCtx.WorkingDir, stringArg(call.Arguments, "command"))
+		return runShell(ctx, runCtx.WorkingDir, StringArg(call.Arguments, "command"))
 	case "skill.list":
-		return runListSkills(runCtx.WorkingDir)
+		return skill.RunList(runCtx.WorkingDir)
 	case "skill.create":
-		return runCreateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
+		return skill.RunCreate(runCtx.WorkingDir, StringArg(call.Arguments, "name"), StringArg(call.Arguments, "description"), StringArg(call.Arguments, "instructions"))
 	case "skill.update":
-		return runUpdateSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"), stringArg(call.Arguments, "description"), stringArg(call.Arguments, "instructions"))
+		return skill.RunUpdate(runCtx.WorkingDir, StringArg(call.Arguments, "name"), StringArg(call.Arguments, "description"), StringArg(call.Arguments, "instructions"))
 	case "skill.delete":
-		return runDeleteSkill(runCtx.WorkingDir, stringArg(call.Arguments, "name"))
+		return skill.RunDelete(runCtx.WorkingDir, StringArg(call.Arguments, "name"))
 	case "skill.run":
 		if runner.SkillExecutor == nil {
 			return "", fmt.Errorf("skill subagent executor is not available")
@@ -919,8 +920,8 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 		return runWebOp(ctx, func(opCtx context.Context) (string, error) {
 			return runWebSearch(
 				opCtx,
-				stringArg(call.Arguments, "query"),
-				effectiveWebResultCount(runCtx, intArg(call.Arguments, "max_results", 0)),
+				StringArg(call.Arguments, "query"),
+				effectiveWebResultCount(runCtx, IntArg(call.Arguments, "max_results", 0)),
 				searchOpts,
 			)
 		})
@@ -928,13 +929,13 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 		return runWebOp(ctx, func(opCtx context.Context) (string, error) {
 			return runWebFetch(
 				opCtx,
-				stringArg(call.Arguments, "url"),
-				effectiveWebFetchBytes(runCtx, intArg(call.Arguments, "max_bytes", 0)),
+				StringArg(call.Arguments, "url"),
+				effectiveWebFetchBytes(runCtx, IntArg(call.Arguments, "max_bytes", 0)),
 				effectiveWebHTTPProxy(runCtx),
 			)
 		})
 	default:
-		if isMCPToolName(call.Name) {
+		if IsMCPToolName(call.Name) {
 			if runner.MCPExecutor == nil {
 				return "", fmt.Errorf("MCP executor is not available")
 			}
@@ -944,7 +945,7 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 	}
 }
 
-func truncateToolOutput(value string) string {
+func TruncateToolOutput(value string) string {
 	if len(value) <= maxToolOutputBytes {
 		return value
 	}
@@ -960,20 +961,20 @@ func clampInt(value int, min int, max int) int {
 	return value
 }
 
-func stringArg(args map[string]any, key string) string {
+func StringArg(args map[string]any, key string) string {
 	value, _ := args[key].(string)
 	return value
 }
 
-func stringArgDefault(args map[string]any, key string, fallback string) string {
-	value := strings.TrimSpace(stringArg(args, key))
+func StringArgDefault(args map[string]any, key string, fallback string) string {
+	value := strings.TrimSpace(StringArg(args, key))
 	if value == "" {
 		return fallback
 	}
 	return value
 }
 
-func intArg(args map[string]any, key string, fallback int) int {
+func IntArg(args map[string]any, key string, fallback int) int {
 	switch value := args[key].(type) {
 	case int:
 		return value
@@ -989,7 +990,7 @@ func intArg(args map[string]any, key string, fallback int) int {
 	return fallback
 }
 
-func boolArg(args map[string]any, key string, fallback bool) bool {
+func BoolArg(args map[string]any, key string, fallback bool) bool {
 	value, ok := args[key].(bool)
 	if !ok {
 		return fallback

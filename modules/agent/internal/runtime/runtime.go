@@ -7,10 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"redpanda/agent/internal/skill"
 	"strconv"
 	"sync"
 	"time"
 
+	agentmcp "redpanda/agent/internal/mcp"
+	"redpanda/agent/internal/provider"
+	"redpanda/agent/internal/subagent"
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/events"
 	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
@@ -63,13 +68,11 @@ type Runtime struct {
 	subagents          map[string]*runtimeSubAgent
 	provider           Provider
 	tools              ToolRunner
-	processPool        *subAgentProcessPool
-	mcpProcesses       map[*mcpProcess]struct{}
-	// mcpBindings maps runID → canonical mcp__server__tool → binding for tools/call.
-	mcpBindings        map[string]map[string]mcpToolBinding
+	processPool        *ProcessPool
+	mcp                *MCPManager
 	runTodos           map[string][]methods.TodoItemDTO
 	runGoals           map[string]*runGoalState
-	newProcessSubAgent func(context.Context, methods.ReplyParams, string) (processSubAgent, error)
+	newProcessSubAgent func(context.Context, methods.ReplyParams, string) (ProcessSubAgent, error)
 }
 
 func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
@@ -84,12 +87,11 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 		permissions:    map[string]chan permission.ResolveParams{},
 		activeRuns:     map[string]context.CancelFunc{},
 		subagents:      map[string]*runtimeSubAgent{},
-		mcpProcesses:   map[*mcpProcess]struct{}{},
-		mcpBindings:    map[string]map[string]mcpToolBinding{},
+		mcp:            agentmcp.NewManager(version, log),
 		runTodos:       map[string][]methods.TodoItemDTO{},
 		runGoals:       map[string]*runGoalState{},
-		provider:       newProviderFromEnv(log),
-		tools:          ToolRunner{},
+		provider:       provider.NewFromEnv(log),
+		tools:          agenttools.ToolRunner{},
 	}
 	rt.tools.MemoryExecutor = rt.executeMemoryTool
 	rt.tools.TodoExecutor = rt.todoExecutor
@@ -100,7 +102,7 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 	rt.tools.SubagentManager = rt
 	rt.tools.MCPExecutor = rt.executeMCPTool
 	rt.newProcessSubAgent = rt.createProcessSubAgent
-	rt.processPool = newSubAgentProcessPool(subAgentPoolSizeFromEnv(), rt.newProcessSubAgent)
+	rt.processPool = subagent.NewProcessPool(subagent.PoolSizeFromEnv(), rt.newProcessSubAgent)
 	return rt
 }
 
@@ -161,7 +163,9 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 	case methods.CorePing:
 		return r.handlePing(req)
 	case methods.CoreShutdown:
-		r.closeMCPProcesses()
+		if r.mcp != nil {
+			r.mcp.CloseAll()
+		}
 		if r.processPool != nil {
 			r.processPool.Close(context.Background())
 		}
@@ -298,7 +302,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 
 	// Always reload skills from disk for this conversation so newly created
 	// skills are immediately available without restarting sessions/runtime.
-	params.Options.SkillsContext = buildSkillsContext(params.Session.WorkingDir)
+	params.Options.SkillsContext = skill.BuildContext(params.Session.WorkingDir)
 	r.emitSkillsInjected(ctx, params)
 	r.emitMemoryInjected(ctx, params)
 
@@ -541,7 +545,9 @@ func (r *Runtime) unregisterRun(runID string) {
 	delete(r.activeRuns, runID)
 	delete(r.nextSeq, runID)
 	delete(r.agentSeq, runID)
-	delete(r.mcpBindings, runID)
+	if r.mcp != nil {
+		r.mcp.ClearBindings(runID)
+	}
 }
 
 func (r *Runtime) cancelRun(runID string) bool {

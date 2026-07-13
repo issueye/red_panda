@@ -1,4 +1,4 @@
-package runtime
+package provider
 
 import (
 	"context"
@@ -245,9 +245,9 @@ func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) 
 	defer server.Close()
 
 	provider := HTTPCompatibleProvider{
-		baseURL: server.URL,
-		model:   "test-model",
-		client:  server.Client(),
+		BaseURL: server.URL,
+		Model:   "test-model",
+		Client:  server.Client(),
 	}
 	var chunks []ProviderChunk
 	err := provider.Complete(context.Background(), ProviderRequest{
@@ -528,9 +528,9 @@ func TestHTTPCompatibleProviderSendsToolsAfterToolHistory(t *testing.T) {
 	defer server.Close()
 
 	provider := HTTPCompatibleProvider{
-		baseURL: server.URL,
-		model:   "test-model",
-		client:  server.Client(),
+		BaseURL: server.URL,
+		Model:   "test-model",
+		Client:  server.Client(),
 	}
 	err := provider.Complete(context.Background(), ProviderRequest{
 		RunID: "run_tools_after_history",
@@ -592,10 +592,10 @@ func TestHTTPCompatibleProviderStreamsContentDeltas(t *testing.T) {
 	defer server.Close()
 
 	provider := HTTPCompatibleProvider{
-		baseURL: server.URL,
-		model:   "test-model",
-		stream:  true,
-		client:  server.Client(),
+		BaseURL: server.URL,
+		Model:   "test-model",
+		Stream:  true,
+		Client:  server.Client(),
 	}
 	var chunks []ProviderChunk
 	err := provider.Complete(context.Background(), ProviderRequest{
@@ -631,10 +631,10 @@ func TestHTTPCompatibleProviderStreamsToolCalls(t *testing.T) {
 	defer server.Close()
 
 	provider := HTTPCompatibleProvider{
-		baseURL: server.URL,
-		model:   "test-model",
-		stream:  true,
-		client:  server.Client(),
+		BaseURL: server.URL,
+		Model:   "test-model",
+		Stream:  true,
+		Client:  server.Client(),
 	}
 	var chunks []ProviderChunk
 	err := provider.Complete(context.Background(), ProviderRequest{

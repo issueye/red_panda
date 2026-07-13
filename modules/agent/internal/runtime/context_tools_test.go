@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"redpanda/agent/internal/subagent"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 
 // TestContextToolsRegisteredAndNotDenylisted verifies the key design property:
 // context.* tools exist with the right risk levels AND are intentionally absent
-// from subagentRunDenylist so specialist children can share scratchpad notes.
+// from subagent.RunDenylist so specialist children can share scratchpad notes.
 func TestContextToolsRegisteredAndNotDenylisted(t *testing.T) {
 	runner := ToolRunner{}
 	wantRisk := map[string]tools.Risk{
@@ -40,7 +41,7 @@ func TestContextToolsRegisteredAndNotDenylisted(t *testing.T) {
 
 	// The critical assertion: no context.* entry may appear in the subagent
 	// denylist, otherwise specialist children could not read/write shared notes.
-	for _, denied := range subagentRunDenylist {
+	for _, denied := range subagent.RunDenylist {
 		if len(denied) >= 8 && denied[:8] == "context." {
 			t.Fatalf("context tool must not be denylisted for subagents: %q", denied)
 		}

@@ -75,7 +75,7 @@ func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecu
 
 // executeContextTool forwards a context.* (goal scratchpad) tool call to the
 // Gateway. It is available to both the root run and specialist children because
-// context.* is intentionally absent from subagentRunDenylist.
+// context.* is intentionally absent from subagent.RunDenylist.
 func (r *Runtime) executeContextTool(ctx context.Context, req methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
 	var result methods.ContextToolExecuteResult
 	if err := r.callGatewayResult(ctx, methods.ContextToolExecute, req, &result); err != nil {

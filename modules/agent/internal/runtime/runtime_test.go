@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"redpanda/agent/internal/subagent"
 	"strings"
 	"testing"
 	"time"
@@ -285,7 +286,7 @@ func TestRuntimeProcessSubAgentBridgesChildEvents(t *testing.T) {
 	go readJSONLines(t, reader, lines)
 
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
-	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (ProcessSubAgent, error) {
 		return fakeProcessSubAgent{}, nil
 	}
 	ctx := context.Background()
@@ -342,11 +343,11 @@ func TestProcessPoolSubAgentReusesChild(t *testing.T) {
 
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
 	created := 0
-	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (ProcessSubAgent, error) {
 		created++
 		return fakeProcessSubAgent{}, nil
 	}
-	rt.processPool = newSubAgentProcessPool(1, rt.newProcessSubAgent)
+	rt.processPool = subagent.NewProcessPool(1, rt.newProcessSubAgent)
 	ctx := context.Background()
 
 	for _, runID := range []string{"run_pool_subagent_1", "run_pool_subagent_2"} {
@@ -390,7 +391,7 @@ func TestProcessSubAgentFailureEmitsFailedUpdateAndRootFinish(t *testing.T) {
 			name:    "runtime_process_create_failure",
 			backend: "runtime_process",
 			setup: func(rt *Runtime, failure error) {
-				rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+				rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (ProcessSubAgent, error) {
 					return nil, failure
 				}
 			},
@@ -399,10 +400,10 @@ func TestProcessSubAgentFailureEmitsFailedUpdateAndRootFinish(t *testing.T) {
 			name:    "process_pool_start_failure",
 			backend: "process_pool",
 			setup: func(rt *Runtime, failure error) {
-				rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+				rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (ProcessSubAgent, error) {
 					return failingProcessSubAgent{err: failure}, nil
 				}
-				rt.processPool = newSubAgentProcessPool(1, rt.newProcessSubAgent)
+				rt.processPool = subagent.NewProcessPool(1, rt.newProcessSubAgent)
 			},
 		},
 	}

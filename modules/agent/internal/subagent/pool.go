@@ -1,4 +1,4 @@
-package runtime
+package subagent
 
 import (
 	"context"
@@ -11,15 +11,15 @@ import (
 )
 
 const defaultSubAgentPoolSize = 2
-const maxSubAgentPoolSize = 8
+const MaxPoolSize = 8
 
-type subAgentProcessFactory func(context.Context, methods.ReplyParams, string) (processSubAgent, error)
+type subAgentProcessFactory func(context.Context, methods.ReplyParams, string) (Process, error)
 
-type subAgentProcessPool struct {
+type ProcessPool struct {
 	mu      sync.Mutex
 	limit   int
 	active  int
-	idle    []processSubAgent
+	idle    []Process
 	factory subAgentProcessFactory
 }
 
@@ -31,31 +31,31 @@ type subAgentPoolStatus struct {
 	Max    int `json:"max"`
 }
 
-func newSubAgentProcessPool(limit int, factory subAgentProcessFactory) *subAgentProcessPool {
+func NewProcessPool(limit int, factory subAgentProcessFactory) *ProcessPool {
 	if limit <= 0 {
 		limit = defaultSubAgentPoolSize
 	}
-	if limit > maxSubAgentPoolSize {
-		limit = maxSubAgentPoolSize
+	if limit > MaxPoolSize {
+		limit = MaxPoolSize
 	}
-	return &subAgentProcessPool{
+	return &ProcessPool{
 		limit:   limit,
 		factory: factory,
 	}
 }
 
-func subAgentPoolSizeFromEnv() int {
+func PoolSizeFromEnv() int {
 	value, err := strconv.Atoi(os.Getenv("RED_PANDA_SUBAGENT_POOL_SIZE"))
 	if err != nil || value <= 0 {
 		return defaultSubAgentPoolSize
 	}
-	if value > maxSubAgentPoolSize {
-		return maxSubAgentPoolSize
+	if value > MaxPoolSize {
+		return MaxPoolSize
 	}
 	return value
 }
 
-func (p *subAgentProcessPool) Acquire(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, func(bool), error) {
+func (p *ProcessPool) Acquire(ctx context.Context, params methods.ReplyParams, subAgentID string) (Process, func(bool), error) {
 	for {
 		p.mu.Lock()
 		if last := len(p.idle) - 1; last >= 0 {
@@ -88,7 +88,7 @@ func (p *subAgentProcessPool) Acquire(ctx context.Context, params methods.ReplyP
 	}
 }
 
-func (p *subAgentProcessPool) releaseFunc(child processSubAgent) func(bool) {
+func (p *ProcessPool) releaseFunc(child Process) func(bool) {
 	return func(reusable bool) {
 		if child == nil {
 			return
@@ -105,7 +105,7 @@ func (p *subAgentProcessPool) releaseFunc(child processSubAgent) func(bool) {
 }
 
 // Status returns a snapshot of pool capacity and occupancy.
-func (p *subAgentProcessPool) Status() subAgentPoolStatus {
+func (p *ProcessPool) Status() subAgentPoolStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	idle := len(p.idle)
@@ -114,20 +114,20 @@ func (p *subAgentProcessPool) Status() subAgentPoolStatus {
 		Active: p.active,
 		Idle:   idle,
 		InUse:  p.active - idle,
-		Max:    maxSubAgentPoolSize,
+		Max:    MaxPoolSize,
 	}
 }
 
 // SetLimit updates the pool capacity. Shrinking only affects future acquires
 // and how many idle workers may be retained; excess idle workers are closed.
-func (p *subAgentProcessPool) SetLimit(limit int) subAgentPoolStatus {
+func (p *ProcessPool) SetLimit(limit int) subAgentPoolStatus {
 	if limit <= 0 {
 		limit = defaultSubAgentPoolSize
 	}
-	if limit > maxSubAgentPoolSize {
-		limit = maxSubAgentPoolSize
+	if limit > MaxPoolSize {
+		limit = MaxPoolSize
 	}
-	var overflow []processSubAgent
+	var overflow []Process
 	p.mu.Lock()
 	p.limit = limit
 	for len(p.idle) > limit {
@@ -141,7 +141,7 @@ func (p *subAgentProcessPool) SetLimit(limit int) subAgentPoolStatus {
 		Active: p.active,
 		Idle:   len(p.idle),
 		InUse:  p.active - len(p.idle),
-		Max:    maxSubAgentPoolSize,
+		Max:    MaxPoolSize,
 	}
 	p.mu.Unlock()
 	for _, child := range overflow {
@@ -152,7 +152,7 @@ func (p *subAgentProcessPool) SetLimit(limit int) subAgentPoolStatus {
 
 // Reset closes all idle workers so the next acquire creates fresh processes.
 // In-use workers are left alone until they complete.
-func (p *subAgentProcessPool) Reset(ctx context.Context) subAgentPoolStatus {
+func (p *ProcessPool) Reset(ctx context.Context) subAgentPoolStatus {
 	p.mu.Lock()
 	idle := p.idle
 	p.idle = nil
@@ -162,7 +162,7 @@ func (p *subAgentProcessPool) Reset(ctx context.Context) subAgentPoolStatus {
 		Active: p.active,
 		Idle:   0,
 		InUse:  p.active,
-		Max:    maxSubAgentPoolSize,
+		Max:    MaxPoolSize,
 	}
 	p.mu.Unlock()
 	for _, child := range idle {
@@ -171,7 +171,7 @@ func (p *subAgentProcessPool) Reset(ctx context.Context) subAgentPoolStatus {
 	return status
 }
 
-func (p *subAgentProcessPool) Close(ctx context.Context) {
+func (p *ProcessPool) Close(ctx context.Context) {
 	p.mu.Lock()
 	idle := p.idle
 	p.idle = nil

@@ -1,26 +1,27 @@
-package runtime
+package skill
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	pathutil "redpanda/agent/internal/pathutil"
 	"regexp"
 	"strings"
 )
 
 const managedSkillsPath = ".codex/skills"
-const maxSkillDescriptionBytes = 4 * 1024
-const maxSkillInstructionsBytes = 256 * 1024
+const MaxDescriptionBytes = 4 * 1024
+const MaxInstructionsBytes = 256 * 1024
 
 var managedSkillNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
-func runCreateSkill(workspaceRoot string, name string, description string, instructions string) (string, error) {
+func RunCreate(workspaceRoot string, name string, description string, instructions string) (string, error) {
 	content, err := renderManagedSkill(name, description, instructions)
 	if err != nil {
 		return "", err
 	}
-	target, err := managedSkillFile(workspaceRoot, name, true)
+	target, err := ManagedFile(workspaceRoot, name, true)
 	if err != nil {
 		return "", err
 	}
@@ -43,12 +44,12 @@ func runCreateSkill(workspaceRoot string, name string, description string, instr
 	return managedSkillOutput("skill.create", name), nil
 }
 
-func runUpdateSkill(workspaceRoot string, name string, description string, instructions string) (string, error) {
+func RunUpdate(workspaceRoot string, name string, description string, instructions string) (string, error) {
 	content, err := renderManagedSkill(name, description, instructions)
 	if err != nil {
 		return "", err
 	}
-	target, err := managedSkillFile(workspaceRoot, name, false)
+	target, err := ManagedFile(workspaceRoot, name, false)
 	if err != nil {
 		return "", err
 	}
@@ -96,14 +97,14 @@ func renderManagedSkill(name string, description string, instructions string) (s
 	if description == "" {
 		return "", fmt.Errorf("skill description is required")
 	}
-	if len(description) > maxSkillDescriptionBytes {
-		return "", fmt.Errorf("skill description exceeds %d bytes", maxSkillDescriptionBytes)
+	if len(description) > MaxDescriptionBytes {
+		return "", fmt.Errorf("skill description exceeds %d bytes", MaxDescriptionBytes)
 	}
 	if instructions == "" {
 		return "", fmt.Errorf("skill instructions are required")
 	}
-	if len(instructions) > maxSkillInstructionsBytes {
-		return "", fmt.Errorf("skill instructions exceed %d bytes", maxSkillInstructionsBytes)
+	if len(instructions) > MaxInstructionsBytes {
+		return "", fmt.Errorf("skill instructions exceed %d bytes", MaxInstructionsBytes)
 	}
 	descriptionJSON, err := json.Marshal(description)
 	if err != nil {
@@ -112,11 +113,11 @@ func renderManagedSkill(name string, description string, instructions string) (s
 	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s\n", name, descriptionJSON, instructions), nil
 }
 
-func managedSkillFile(workspaceRoot string, name string, create bool) (string, error) {
+func ManagedFile(workspaceRoot string, name string, create bool) (string, error) {
 	if !managedSkillNamePattern.MatchString(strings.TrimSpace(name)) {
 		return "", fmt.Errorf("skill name must be lowercase ASCII and use only letters, digits, and hyphens")
 	}
-	root, err := cleanWorkspaceRoot(workspaceRoot)
+	root, err := pathutil.CleanWorkspaceRoot(workspaceRoot)
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +158,7 @@ func managedSkillDirectory(parent string, path string, create bool, skillName st
 		return "", err
 	}
 	evaluated = filepath.Clean(evaluated)
-	if !isPathInside(parent, evaluated) {
+	if !pathutil.IsPathInside(parent, evaluated) {
 		return "", fmt.Errorf("skill path escapes managed skill root")
 	}
 	evaluatedInfo, err := os.Stat(evaluated)

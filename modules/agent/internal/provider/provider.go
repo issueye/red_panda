@@ -1,4 +1,4 @@
-package runtime
+package provider
 
 import (
 	"bufio"
@@ -12,8 +12,14 @@ import (
 	"strings"
 	"time"
 
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
+)
+
+const (
+	defaultListDepth   = 3
+	defaultGrepMatches = 50
 )
 
 type Provider interface {
@@ -45,7 +51,7 @@ type ProviderChunk struct {
 	ToolCalls []tools.Call
 }
 
-func newProviderFromEnv(log io.Writer) Provider {
+func NewFromEnv(log io.Writer) Provider {
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER")))
 	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_BASE_URL")), "/")
 	if provider == "openai_compatible" || provider == "http_compatible" || baseURL != "" {
@@ -59,11 +65,11 @@ func newProviderFromEnv(log io.Writer) Provider {
 			return EchoProvider{}
 		}
 		return HTTPCompatibleProvider{
-			baseURL: baseURL,
-			apiKey:  apiKey,
-			model:   model,
-			stream:  boolEnv("RED_PANDA_PROVIDER_STREAM"),
-			client:  &http.Client{Timeout: 90 * time.Second},
+			BaseURL: baseURL,
+			APIKey:  apiKey,
+			Model:   model,
+			Stream:  boolEnv("RED_PANDA_PROVIDER_STREAM"),
+			Client:  &http.Client{Timeout: 90 * time.Second},
 		}
 	}
 	return EchoProvider{}
@@ -321,11 +327,11 @@ func diffModelCall(runID string, rest string) tools.Call {
 }
 
 type HTTPCompatibleProvider struct {
-	baseURL string
-	apiKey  string
-	model   string
-	stream  bool
-	client  *http.Client
+	BaseURL string
+	APIKey  string
+	Model   string
+	Stream  bool
+	Client  *http.Client
 }
 
 func (p HTTPCompatibleProvider) Name() string {
@@ -333,7 +339,7 @@ func (p HTTPCompatibleProvider) Name() string {
 }
 
 func (p HTTPCompatibleProvider) Complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
-	if override, ok := providerFromOptions(req.Options, p.stream); ok {
+	if override, ok := providerFromOptions(req.Options, p.Stream); ok {
 		return override.complete(ctx, req, emit)
 	}
 	return p.complete(ctx, req, emit)
@@ -342,12 +348,12 @@ func (p HTTPCompatibleProvider) Complete(ctx context.Context, req ProviderReques
 func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
 	model := req.Options.Model
 	if model == "" {
-		model = p.model
+		model = p.Model
 	}
 	body := map[string]any{
 		"model":    model,
 		"messages": openAICompatibleMessages(req),
-		"stream":   p.stream,
+		"stream":   p.Stream,
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = openAICompatibleTools(req.Tools)
@@ -357,7 +363,7 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 	if err != nil {
 		return err
 	}
-	endpoint := openAICompatibleChatCompletionsURL(p.baseURL)
+	endpoint := openAICompatibleChatCompletionsURL(p.BaseURL)
 	if path, logErr := logLLMRequest(req.Options.LogLLMRequests, req.RunID, req.Session.ID, model, endpoint, rawBody); logErr != nil {
 		// Never fail the user-facing request because diagnostics failed.
 		fmt.Fprintf(os.Stderr, "red-panda-agent: llm request log failed: %v\n", logErr)
@@ -369,10 +375,10 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	if p.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
 	}
-	resp, err := p.client.Do(httpReq)
+	resp, err := p.Client.Do(httpReq)
 	if err != nil {
 		return err
 	}
@@ -381,7 +387,7 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 		rawResp, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 		return fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, string(rawResp))
 	}
-	if p.stream {
+	if p.Stream {
 		return p.completeStream(resp.Body, emit)
 	}
 	rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -391,8 +397,8 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 	return completeHTTPResponse(rawResp, emit)
 }
 
-func openAICompatibleChatCompletionsURL(baseURL string) string {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+func openAICompatibleChatCompletionsURL(raw string) string {
+	baseURL := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if strings.HasSuffix(baseURL, "/chat/completions") {
 		return baseURL
 	}
@@ -419,11 +425,11 @@ func providerFromOptions(options methods.ReplyOptions, fallbackStream bool) (HTT
 		model = "default"
 	}
 	return HTTPCompatibleProvider{
-		baseURL: baseURL,
-		apiKey:  strings.TrimSpace(options.ProviderAPIKey),
-		model:   model,
-		stream:  fallbackStream,
-		client:  &http.Client{Timeout: 90 * time.Second},
+		BaseURL: baseURL,
+		APIKey:  strings.TrimSpace(options.ProviderAPIKey),
+		Model:   model,
+		Stream:  fallbackStream,
+		Client:  &http.Client{Timeout: 90 * time.Second},
 	}, true
 }
 
@@ -740,7 +746,7 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		})
 	}
 	for _, message := range req.Session.Conversation {
-		content := conversationMessageText(message)
+		content := ConversationMessageText(message)
 		if content == "" {
 			continue
 		}
@@ -859,7 +865,7 @@ const maxToolResultForModel = 16 * 1024
 // toolExchangeContent formats a tool result for the next provider turn.
 // Always returns a standardized JSON envelope (never silently drops fields).
 func toolExchangeContent(result tools.Result) string {
-	return modelFacingToolContent(result)
+	return agenttools.ModelFacingToolContent(result)
 }
 
 func openAICompatibleConversationRole(role string) (string, bool) {
@@ -872,7 +878,7 @@ func openAICompatibleConversationRole(role string) (string, bool) {
 	return "", false
 }
 
-func conversationMessageText(message methods.Message) string {
+func ConversationMessageText(message methods.Message) string {
 	parts := make([]string, 0, len(message.Content))
 	for _, block := range message.Content {
 		if text := strings.TrimSpace(block.Text); text != "" {

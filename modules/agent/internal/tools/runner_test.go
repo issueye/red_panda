@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"redpanda/protocol/methods"
-	"redpanda/protocol/tools"
+	ptools "redpanda/protocol/tools"
 )
 
 func TestRunWorkspaceStatsSuggestsSplitsForLargeTree(t *testing.T) {
@@ -34,10 +34,10 @@ func TestRunWorkspaceStatsSuggestsSplitsForLargeTree(t *testing.T) {
 	if stats.SuggestedSplits < 2 {
 		t.Fatalf("suggested_splits = %d, want >= 2", stats.SuggestedSplits)
 	}
-	if stats.SuggestedMaxTurns != stats.TotalFiles+subagentSummaryTurns {
-		t.Fatalf("suggested_max_turns = %d, want files+summary %d", stats.SuggestedMaxTurns, stats.TotalFiles+subagentSummaryTurns)
+	if stats.SuggestedMaxTurns != stats.TotalFiles+8 {
+		t.Fatalf("suggested_max_turns = %d, want files+summary %d", stats.SuggestedMaxTurns, stats.TotalFiles+8)
 	}
-	if len(stats.TopLevel) == 0 || stats.TopLevel[0].RecommendedMaxTurns != stats.TopLevel[0].Files+subagentSummaryTurns {
+	if len(stats.TopLevel) == 0 || stats.TopLevel[0].RecommendedMaxTurns != stats.TopLevel[0].Files+8 {
 		t.Fatalf("top_level recommended_max_turns missing/wrong: %#v", stats.TopLevel)
 	}
 	if !strings.Contains(stats.SplitGuidance, "split") && !strings.Contains(stats.SplitGuidance, "multiple") {
@@ -258,7 +258,7 @@ func TestRunApplyPatchRejectsEscapingPath(t *testing.T) {
 
 func TestToolRunnerAcceptsListAndGrepCalls(t *testing.T) {
 	runner := ToolRunner{}
-	for _, call := range []tools.Call{
+	for _, call := range []ptools.Call{
 		{Name: "workspace.list", Arguments: map[string]any{"path": "."}},
 		{Name: "workspace.grep", Arguments: map[string]any{"pattern": "red", "path": "."}},
 	} {
@@ -266,7 +266,7 @@ func TestToolRunnerAcceptsListAndGrepCalls(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if invocation.Call.ID == "" || invocation.Call.Risk != tools.RiskLow {
+		if invocation.Call.ID == "" || invocation.Call.Risk != ptools.RiskLow {
 			t.Fatalf("expected low risk invocation with generated id, got %#v", invocation.Call)
 		}
 	}
@@ -274,7 +274,7 @@ func TestToolRunnerAcceptsListAndGrepCalls(t *testing.T) {
 
 func TestToolRunnerAcceptsEditCall(t *testing.T) {
 	runner := ToolRunner{}
-	for _, call := range []tools.Call{
+	for _, call := range []ptools.Call{
 		{Name: "workspace.edit_file", Arguments: map[string]any{"path": "note.txt", "old_text": "a", "new_text": "b"}},
 		{Name: "workspace.apply_patch", Arguments: map[string]any{"patch": "--- a/note.txt\n+++ b/note.txt\n"}},
 	} {
@@ -282,18 +282,18 @@ func TestToolRunnerAcceptsEditCall(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if invocation.Call.Risk != tools.RiskHigh {
+		if invocation.Call.Risk != ptools.RiskHigh {
 			t.Fatalf("expected high risk invocation, got %#v", invocation.Call)
 		}
 	}
-	diffInvocation, err := runner.InvocationFromCall("run_tools", 0, tools.Call{
+	diffInvocation, err := runner.InvocationFromCall("run_tools", 0, ptools.Call{
 		Name:      "workspace.diff_file",
 		Arguments: map[string]any{"path": "note.txt", "old_text": "a", "new_text": "b"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diffInvocation.Call.Risk != tools.RiskLow {
+	if diffInvocation.Call.Risk != ptools.RiskLow {
 		t.Fatalf("expected diff tool to be low risk, got %#v", diffInvocation.Call)
 	}
 }
@@ -309,7 +309,7 @@ func TestToolRunnerRunsListSlashCommand(t *testing.T) {
 		t.Fatal("expected /list to parse")
 	}
 	result, output := runner.Run(context.Background(), root, invocation)
-	if result.Status != tools.CallStatusCompleted {
+	if result.Status != ptools.CallStatusCompleted {
 		t.Fatalf("expected completed result, got %#v", result)
 	}
 	if !strings.Contains(output, "README.md") {
@@ -362,25 +362,25 @@ func TestToolRunnerMemoryToolsUseExecutor(t *testing.T) {
 		},
 	}
 
-	listInvocation, err := runner.InvocationFromCall("run_memory_tool", 0, tools.Call{
+	listInvocation, err := runner.InvocationFromCall("run_memory_tool", 0, ptools.Call{
 		Name:      "memory.list",
 		Arguments: map[string]any{"scope": "session"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if listInvocation.Call.Risk != tools.RiskMedium {
+	if listInvocation.Call.Risk != ptools.RiskMedium {
 		t.Fatalf("memory.list risk = %s, want medium", listInvocation.Call.Risk)
 	}
 
-	createInvocation, err := runner.InvocationFromCall("run_memory_tool", 1, tools.Call{
+	createInvocation, err := runner.InvocationFromCall("run_memory_tool", 1, ptools.Call{
 		Name:      "memory.create",
 		Arguments: map[string]any{"scope": "session", "content": "remember this"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if createInvocation.Call.Risk != tools.RiskHigh {
+	if createInvocation.Call.Risk != ptools.RiskHigh {
 		t.Fatalf("memory.create risk = %s, want high", createInvocation.Call.Risk)
 	}
 
@@ -389,7 +389,7 @@ func TestToolRunnerMemoryToolsUseExecutor(t *testing.T) {
 		RunID:      "run_memory_tool",
 		SessionID:  "session_memory_tool",
 	}, createInvocation)
-	if result.Status != tools.CallStatusCompleted {
+	if result.Status != ptools.CallStatusCompleted {
 		t.Fatalf("expected completed result, got %#v", result)
 	}
 	if !strings.Contains(output, "memory.create") {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"redpanda/agent/internal/subagent"
+	agenttools "redpanda/agent/internal/tools"
 	"strings"
 
 	"redpanda/protocol/events"
@@ -321,7 +323,7 @@ func (r *Runtime) retryFinalAnswer(
 		return nil
 	})
 	text := strings.TrimSpace(answer.String())
-	if err != nil || returnedToolCalls || !isUsableFinalText(text) {
+	if err != nil || returnedToolCalls || !subagent.ReportUsable(text) {
 		return false
 	}
 	err = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
@@ -405,7 +407,7 @@ func recoveryAnswerForRun(params methods.ReplyParams, history []ToolExchange) st
 }
 
 func readableToolResultText(result tools.Result) string {
-	if env, ok := parseStandardToolResult(result.Output); ok {
+	if env, ok := agenttools.ParseStandardToolResult(result.Output); ok {
 		if strings.TrimSpace(env.Text) != "" {
 			return strings.TrimSpace(env.Text)
 		}
@@ -413,14 +415,14 @@ func readableToolResultText(result tools.Result) string {
 			return strings.TrimSpace(env.Error)
 		}
 		if env.Data != nil {
-			return preferReadableText(env.Data, "")
+			return agenttools.PreferReadableText(env.Data, "")
 		}
 	}
 	return strings.TrimSpace(result.Output)
 }
 
 func extractSearchAnswer(raw string) string {
-	if env, ok := parseStandardToolResult(raw); ok {
+	if env, ok := agenttools.ParseStandardToolResult(raw); ok {
 		if m, ok := env.Data.(map[string]any); ok {
 			if built := formatSearchData(m); built != "" {
 				return built
@@ -465,7 +467,7 @@ func formatSearchData(v map[string]any) string {
 			b.WriteString(fmt.Sprintf("%d. %s\n   %s\n", i+1, strings.TrimSpace(title), strings.TrimSpace(url)))
 			if snip := strings.TrimSpace(snippet); snip != "" {
 				b.WriteString("   ")
-				b.WriteString(compactOneLine(snip, 160))
+				b.WriteString(agenttools.CompactOneLine(snip, 160))
 				b.WriteString("\n")
 			}
 		}

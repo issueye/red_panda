@@ -1,4 +1,4 @@
-package runtime
+package mcp
 
 import (
 	"context"
@@ -11,28 +11,23 @@ import (
 	"time"
 	"unicode"
 
-	"redpanda/protocol/mcp"
+	protomcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
 
-// mcpToolBinding maps a provider-facing canonical name to a server + raw tool.
-type mcpToolBinding struct {
-	Config  mcp.MCPServerConfig
-	RawName string
-	Def     tools.Definition
-}
+const maxToolOutputBytes = 64 * 1024
 
-// prepareMCPToolsForRun discovers tools from enabled MCP server configs on the
+// PrepareToolsForRun discovers tools from enabled MCP server configs on the
 // reply options and registers bindings for tools/call (docs/36 D2 / docs/19).
 // Discovery failures for one server omit that server's tools; Runtime stays up.
-func (r *Runtime) prepareMCPToolsForRun(ctx context.Context, params methods.ReplyParams) []tools.Definition {
+func (m *Manager) PrepareToolsForRun(ctx context.Context, params methods.ReplyParams) []tools.Definition {
 	servers := params.Options.MCPServers
 	if len(servers) == 0 {
 		return nil
 	}
 	workspace := params.Session.WorkingDir
-	bindings := make(map[string]mcpToolBinding)
+	bindings := make(map[string]ToolBinding)
 	defs := make([]tools.Definition, 0)
 	for _, server := range servers {
 		if !server.Enabled {
@@ -41,13 +36,13 @@ func (r *Runtime) prepareMCPToolsForRun(ctx context.Context, params methods.Repl
 		if strings.TrimSpace(server.Command) == "" || strings.TrimSpace(server.Name) == "" {
 			continue
 		}
-		discovery := r.discoverMCPServer(ctx, workspace, server)
+		discovery := m.DiscoverServer(ctx, workspace, server)
 		if discovery.Status != "ready" {
-			fmt.Fprintf(r.log, "mcp discover %s: %s (%s)\n", server.Name, discovery.Status, discovery.Error)
+			fmt.Fprintf(m.log, "mcp discover %s: %s (%s)\n", server.Name, discovery.Status, discovery.Error)
 			continue
 		}
 		for _, tool := range discovery.Tools {
-			canonical := mcpCanonicalName(server.Name, tool.Name)
+			canonical := CanonicalName(server.Name, tool.Name)
 			if canonical == "" {
 				continue
 			}
@@ -59,54 +54,54 @@ func (r *Runtime) prepareMCPToolsForRun(ctx context.Context, params methods.Repl
 				Name:        canonical,
 				DisplayName: "MCP " + server.Name + " / " + tool.Name,
 				Description: strings.TrimSpace(tool.Description),
-				Risk:        mcpToolRisk(server, tool.Name),
-				Parameters:  mcpParametersSchema(tool.InputSchema),
+				Risk:        toolRisk(server, tool.Name),
+				Parameters:  parametersSchema(tool.InputSchema),
 			}
 			if def.Description == "" {
 				def.Description = "MCP tool " + tool.Name + " on server " + server.Name
 			}
-			bindings[canonical] = mcpToolBinding{Config: server, RawName: tool.Name, Def: def}
+			bindings[canonical] = ToolBinding{Config: server, RawName: tool.Name, Def: def}
 			defs = append(defs, def)
 		}
 	}
-	r.setMCPBindings(params.RunID, bindings)
+	m.setBindings(params.RunID, bindings)
 	return defs
 }
 
-func (r *Runtime) setMCPBindings(runID string, bindings map[string]mcpToolBinding) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.mcpBindings == nil {
-		r.mcpBindings = map[string]map[string]mcpToolBinding{}
+func (m *Manager) setBindings(runID string, bindings map[string]ToolBinding) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.bindings == nil {
+		m.bindings = map[string]map[string]ToolBinding{}
 	}
 	if len(bindings) == 0 {
-		delete(r.mcpBindings, runID)
+		delete(m.bindings, runID)
 		return
 	}
-	r.mcpBindings[runID] = bindings
+	m.bindings[runID] = bindings
 }
 
-func (r *Runtime) clearMCPBindings(runID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.mcpBindings, runID)
+func (m *Manager) ClearBindings(runID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.bindings, runID)
 }
 
-func (r *Runtime) mcpBinding(runID, canonical string) (mcpToolBinding, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	byRun := r.mcpBindings[runID]
+func (m *Manager) Binding(runID, canonical string) (ToolBinding, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	byRun := m.bindings[runID]
 	if byRun == nil {
-		return mcpToolBinding{}, false
+		return ToolBinding{}, false
 	}
 	b, ok := byRun[canonical]
 	return b, ok
 }
 
-func (r *Runtime) mcpDefinitionsForRun(runID string) []tools.Definition {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	byRun := r.mcpBindings[runID]
+func (m *Manager) DefinitionsForRun(runID string) []tools.Definition {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	byRun := m.bindings[runID]
 	if len(byRun) == 0 {
 		return nil
 	}
@@ -117,37 +112,20 @@ func (r *Runtime) mcpDefinitionsForRun(runID string) []tools.Definition {
 	return out
 }
 
-func (r *Runtime) toolsForReply(ctx context.Context, params methods.ReplyParams) []tools.Definition {
-	// Ensure bindings exist for this run (idempotent re-prepare is cheap enough for MVP;
-	// discovery is the cost — only prepare once when empty).
-	if len(params.Options.MCPServers) > 0 && len(r.mcpDefinitionsForRun(params.RunID)) == 0 {
-		_ = r.prepareMCPToolsForRun(ctx, params)
-	}
-	base := r.tools.AvailableTools()
-	mcpDefs := r.mcpDefinitionsForRun(params.RunID)
-	if len(mcpDefs) == 0 {
-		return base
-	}
-	out := make([]tools.Definition, 0, len(base)+len(mcpDefs))
-	out = append(out, base...)
-	out = append(out, mcpDefs...)
-	return out
-}
-
-func (r *Runtime) executeMCPTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
-	binding, ok := r.mcpBinding(runCtx.RunID, call.Name)
+func (m *Manager) ExecuteTool(ctx context.Context, runID string, workingDir string, call tools.Call) (string, error) {
+	binding, ok := m.Binding(runID, call.Name)
 	if !ok {
 		return "", fmt.Errorf("unknown MCP tool %s", call.Name)
 	}
-	return r.callMCPTool(ctx, runCtx.WorkingDir, binding.Config, binding.RawName, call.Arguments)
+	return m.CallTool(ctx, workingDir, binding.Config, binding.RawName, call.Arguments)
 }
 
 // callMCPTool starts a one-shot MCP stdio session, runs tools/call, then cleans up.
 // Process reuse is deferred to D3.
-func (r *Runtime) callMCPTool(
+func (m *Manager) CallTool(
 	ctx context.Context,
 	workspaceRoot string,
-	config mcp.MCPServerConfig,
+	config protomcp.MCPServerConfig,
 	rawToolName string,
 	arguments map[string]any,
 ) (output string, err error) {
@@ -190,10 +168,10 @@ func (r *Runtime) callMCPTool(
 		startDone:       make(chan struct{}),
 		shutdownTimeout: durationMillis(timeouts.ShutdownMS),
 	}
-	r.registerMCPProcess(process)
+	m.registerProcess(process)
 	defer func() {
 		process.close(durationMillis(timeouts.ShutdownMS))
-		r.unregisterMCPProcess(process)
+		m.unregisterProcess(process)
 		if err != nil {
 			msg := redactMCPSecrets(err.Error(), config.Env)
 			if summary := stderr.String(); summary != "" {
@@ -227,7 +205,7 @@ func (r *Runtime) callMCPTool(
 		"params": map[string]any{
 			"protocolVersion": mcpProtocolVersion,
 			"capabilities":    map[string]any{},
-			"clientInfo":      map[string]any{"name": "red-panda-agent", "version": r.version},
+			"clientInfo":      map[string]any{"name": "red-panda-agent", "version": m.version},
 		},
 	}
 	if err = writeMCPMessage(stdin, initialize); err != nil {
@@ -292,7 +270,7 @@ func (r *Runtime) callMCPTool(
 }
 
 // mcpCanonicalName builds mcp__server__tool (design docs/19 §8.1).
-func mcpCanonicalName(serverName, rawTool string) string {
+func CanonicalName(serverName, rawTool string) string {
 	server := strings.TrimSpace(serverName)
 	raw := strings.TrimSpace(rawTool)
 	if server == "" || raw == "" {
@@ -322,7 +300,7 @@ func sanitizeMCPToken(value string) string {
 	return strings.Trim(out, "_")
 }
 
-func mcpToolRisk(config mcp.MCPServerConfig, rawTool string) tools.Risk {
+func toolRisk(config protomcp.MCPServerConfig, rawTool string) tools.Risk {
 	if config.RiskOverrides != nil {
 		if risk, ok := config.RiskOverrides[rawTool]; ok {
 			switch strings.ToLower(strings.TrimSpace(risk)) {
@@ -339,7 +317,7 @@ func mcpToolRisk(config mcp.MCPServerConfig, rawTool string) tools.Risk {
 	return tools.RiskHigh
 }
 
-func mcpParametersSchema(schema map[string]any) map[string]any {
+func parametersSchema(schema map[string]any) map[string]any {
 	if schema == nil {
 		return map[string]any{"type": "object", "properties": map[string]any{}}
 	}
@@ -354,6 +332,6 @@ func mcpParametersSchema(schema map[string]any) map[string]any {
 	return out
 }
 
-func isMCPToolName(name string) bool {
+func IsToolName(name string) bool {
 	return strings.HasPrefix(name, "mcp__")
 }

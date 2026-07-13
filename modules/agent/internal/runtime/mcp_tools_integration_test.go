@@ -7,24 +7,15 @@ import (
 	"strings"
 	"testing"
 
-	"redpanda/protocol/mcp"
+	agentmcp "redpanda/agent/internal/mcp"
+	protomcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
 
-func TestMCPCanonicalNameAndRisk(t *testing.T) {
-	if got := mcpCanonicalName("filesystem", "read.file"); got != "mcp__filesystem__read_file" {
+func TestMCPCanonicalName(t *testing.T) {
+	if got := agentmcp.CanonicalName("filesystem", "read.file"); got != "mcp__filesystem__read_file" {
 		t.Fatalf("canonical = %q", got)
-	}
-	cfg := mcp.MCPServerConfig{
-		Name:          "fake",
-		RiskOverrides: map[string]string{"read_file": "low"},
-	}
-	if mcpToolRisk(cfg, "read_file") != tools.RiskLow {
-		t.Fatal("expected low risk override")
-	}
-	if mcpToolRisk(cfg, "other") != tools.RiskHigh {
-		t.Fatal("expected default high risk")
 	}
 }
 
@@ -40,10 +31,10 @@ func TestPrepareMCPToolsAndCall(t *testing.T) {
 			WorkingDir: "",
 		},
 		Options: methods.ReplyOptions{
-			MCPServers: []mcp.MCPServerConfig{config},
+			MCPServers: []protomcp.MCPServerConfig{config},
 		},
 	}
-	defs := rt.prepareMCPToolsForRun(context.Background(), params)
+	defs := rt.mcp.PrepareToolsForRun(context.Background(), params)
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 tool def, got %#v", defs)
 	}
@@ -54,7 +45,6 @@ func TestPrepareMCPToolsAndCall(t *testing.T) {
 		t.Fatalf("expected high risk, got %s", defs[0].Risk)
 	}
 
-	// toolsForReply should merge MCP defs without re-discovery when bindings exist.
 	merged := rt.toolsForReply(context.Background(), params)
 	found := false
 	for _, d := range merged {
@@ -81,7 +71,7 @@ func TestPrepareMCPToolsAndCall(t *testing.T) {
 		t.Fatalf("unexpected call output: %q", out)
 	}
 	waitForFile(t, cleanup)
-	rt.clearMCPBindings(params.RunID)
+	rt.mcp.ClearBindings(params.RunID)
 }
 
 func TestMCPCallTimeoutAndCleanup(t *testing.T) {
@@ -94,10 +84,10 @@ func TestMCPCallTimeoutAndCleanup(t *testing.T) {
 	params := methods.ReplyParams{
 		RunID: "run_mcp_timeout",
 		Options: methods.ReplyOptions{
-			MCPServers: []mcp.MCPServerConfig{config},
+			MCPServers: []protomcp.MCPServerConfig{config},
 		},
 	}
-	defs := rt.prepareMCPToolsForRun(context.Background(), params)
+	defs := rt.mcp.PrepareToolsForRun(context.Background(), params)
 	if len(defs) != 1 {
 		t.Fatalf("discover for call-timeout mode should still list tools, got %#v", defs)
 	}
@@ -119,10 +109,10 @@ func TestMCPCallIsError(t *testing.T) {
 	params := methods.ReplyParams{
 		RunID: "run_mcp_err",
 		Options: methods.ReplyOptions{
-			MCPServers: []mcp.MCPServerConfig{config},
+			MCPServers: []protomcp.MCPServerConfig{config},
 		},
 	}
-	_ = rt.prepareMCPToolsForRun(context.Background(), params)
+	_ = rt.mcp.PrepareToolsForRun(context.Background(), params)
 	_, err := rt.executeMCPTool(context.Background(), ToolRunContext{RunID: params.RunID}, tools.Call{
 		Name: "mcp__fake__read_file",
 	})
@@ -153,9 +143,9 @@ func TestDispatchMCPToolViaRunner(t *testing.T) {
 	rt := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "test")
 	params := methods.ReplyParams{
 		RunID:   "run_dispatch",
-		Options: methods.ReplyOptions{MCPServers: []mcp.MCPServerConfig{config}},
+		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
 	}
-	_ = rt.prepareMCPToolsForRun(context.Background(), params)
+	_ = rt.mcp.PrepareToolsForRun(context.Background(), params)
 	result, _ := rt.tools.RunWithContext(context.Background(), ToolRunContext{RunID: params.RunID}, ToolInvocation{
 		Call: tools.Call{
 			ID:   "tc1",

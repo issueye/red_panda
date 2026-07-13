@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"bytes"
@@ -63,7 +63,7 @@ func runShell(ctx context.Context, root string, command string) (string, error) 
 		case <-done:
 		case <-time.After(2 * time.Second):
 		}
-		output := truncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
+		output := TruncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
 		if output != "" {
 			// Work often already finished (e.g. "Added slide at /slide[4]") but process
 			// did not exit 鈥?surface partial success clearly instead of a bare timeout.
@@ -74,7 +74,7 @@ func runShell(ctx context.Context, root string, command string) (string, error) 
 		}
 		return "", fmt.Errorf("shell command timed out after %s", defaultShellTimeout)
 	case err := <-done:
-		output := truncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
+		output := TruncateToolOutput(strings.TrimSpace(stdout.String() + "\n" + stderr.String()))
 		if err != nil {
 			return output, err
 		}

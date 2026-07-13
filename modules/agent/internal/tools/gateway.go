@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"redpanda/protocol/methods"
-	"redpanda/protocol/tools"
+	ptools "redpanda/protocol/tools"
 )
 
-func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
 	if runner.MemoryExecutor == nil {
 		return "", fmt.Errorf("memory tool executor is not available")
 	}
@@ -31,7 +31,7 @@ func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContex
 	return result.Output, nil
 }
 
-func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
 	if runner.TodoExecutor == nil {
 		return "", fmt.Errorf("todo tool executor is not available")
 	}
@@ -56,7 +56,7 @@ func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext,
 	return result.Output, nil
 }
 
-func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
 	if runner.GoalExecutor == nil {
 		return "", fmt.Errorf("goal tool executor is not available")
 	}
@@ -80,7 +80,7 @@ func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext,
 // runContextTool dispatches a context.* (goal scratchpad) tool to the Gateway.
 // Unlike goal/todo tools, context tools are intentionally NOT on the subagent
 // denylist, so specialist children can read shared findings and write handoffs.
-func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunContext, call tools.Call) (string, error) {
+func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
 	if runner.ContextExecutor == nil {
 		return "", fmt.Errorf("context tool executor is not available")
 	}
@@ -108,5 +108,5 @@ func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunConte
 			output = strings.TrimSpace(output) + "\n" + string(notesJSON)
 		}
 	}
-	return truncateToolOutput(output), nil
+	return TruncateToolOutput(output), nil
 }

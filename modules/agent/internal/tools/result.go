@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"encoding/json"
@@ -6,12 +6,15 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"redpanda/protocol/tools"
+	ptools "redpanda/protocol/tools"
 )
 
 // Standard tool result schema version. All tools should return this envelope so
 // UI, model, and recovery paths can parse results consistently.
 const toolResultSchemaV1 = "red_panda.tool_result.v1"
+
+// maxToolResultForModel caps each tool result fed back into the next LLM turn.
+const maxToolResultForModel = 16 * 1024
 
 // StandardToolResult is the canonical envelope for tool success/failure payloads.
 type StandardToolResult struct {
@@ -34,8 +37,8 @@ type ToolResultMeta struct {
 	Note          string `json:"note,omitempty"`
 }
 
-func standardizeToolOutput(toolName string, raw string, runErr error, durationMS int64) string {
-	if env, ok := parseStandardToolResult(raw); ok {
+func StandardizeToolOutput(toolName string, raw string, runErr error, durationMS int64) string {
+	if env, ok := ParseStandardToolResult(raw); ok {
 		// Already standardized — only refresh duration when missing.
 		if env.Meta.DurationMS == 0 && durationMS > 0 {
 			env.Meta.DurationMS = durationMS
@@ -43,7 +46,7 @@ func standardizeToolOutput(toolName string, raw string, runErr error, durationMS
 		if runErr != nil && env.Error == "" {
 			env.Error = runErr.Error()
 			env.OK = false
-			env.Status = string(tools.CallStatusFailed)
+			env.Status = string(ptools.CallStatusFailed)
 		}
 		return mustMarshalToolResult(env)
 	}
@@ -53,7 +56,7 @@ func standardizeToolOutput(toolName string, raw string, runErr error, durationMS
 		return mustMarshalToolResult(StandardToolResult{
 			Schema: toolResultSchemaV1,
 			Tool:   toolName,
-			Status: string(tools.CallStatusFailed),
+			Status: string(ptools.CallStatusFailed),
 			OK:     false,
 			Text:   errText,
 			Error:  errText,
@@ -71,7 +74,7 @@ func standardizeToolOutput(toolName string, raw string, runErr error, durationMS
 	var data any
 	text := raw
 	if raw != "" && json.Unmarshal([]byte(raw), &data) == nil {
-		text = preferReadableText(data, raw)
+		text = PreferReadableText(data, raw)
 	} else if raw != "" {
 		// Plain text already lives in Text. Duplicating it in Data can double a
 		// JSON-RPC event beyond scanner/transport limits for large file reads.
@@ -97,7 +100,7 @@ func standardizeToolOutput(toolName string, raw string, runErr error, durationMS
 	return mustMarshalToolResult(StandardToolResult{
 		Schema: toolResultSchemaV1,
 		Tool:   toolName,
-		Status: string(tools.CallStatusCompleted),
+		Status: string(ptools.CallStatusCompleted),
 		OK:     true,
 		Text:   text,
 		Data:   data,
@@ -117,7 +120,7 @@ func truncationNote(truncated bool, originalBytes int) string {
 	return fmt.Sprintf("payload truncated for transport; original_bytes=%d", originalBytes)
 }
 
-func parseStandardToolResult(raw string) (StandardToolResult, bool) {
+func ParseStandardToolResult(raw string) (StandardToolResult, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || !strings.HasPrefix(raw, "{") {
 		return StandardToolResult{}, false
@@ -157,7 +160,7 @@ func mustMarshalToolResult(env StandardToolResult) string {
 }
 
 // preferReadableText extracts a human-readable summary from structured tool data.
-func preferReadableText(data any, fallback string) string {
+func PreferReadableText(data any, fallback string) string {
 	switch v := data.(type) {
 	case string:
 		return v
@@ -197,7 +200,7 @@ func preferReadableText(data any, fallback string) string {
 				}
 				if snippet != "" {
 					b.WriteString("   ")
-					b.WriteString(compactOneLine(snippet, 200))
+					b.WriteString(CompactOneLine(snippet, 200))
 					b.WriteString("\n")
 				}
 			}
@@ -213,7 +216,7 @@ func preferReadableText(data any, fallback string) string {
 	return fallback
 }
 
-func compactOneLine(value string, max int) string {
+func CompactOneLine(value string, max int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	if max <= 0 || len(value) <= max {
 		return value
@@ -227,8 +230,8 @@ func compactOneLine(value string, max int) string {
 
 // modelFacingToolContent returns a standardized, bounded view of a tool result
 // for the next LLM turn. Full Result.Output is preserved for UI/events.
-func modelFacingToolContent(result tools.Result) string {
-	env, ok := parseStandardToolResult(result.Output)
+func ModelFacingToolContent(result ptools.Result) string {
+	env, ok := ParseStandardToolResult(result.Output)
 	if !ok {
 		// Legacy/non-standard output — still wrap so the model always sees a schema.
 		raw := strings.TrimSpace(result.Output)
@@ -239,7 +242,7 @@ func modelFacingToolContent(result tools.Result) string {
 			Schema: toolResultSchemaV1,
 			Tool:   result.Name,
 			Status: string(result.Status),
-			OK:     result.Status == tools.CallStatusCompleted,
+			OK:     result.Status == ptools.CallStatusCompleted,
 			Text:   raw,
 			Error:  strings.TrimSpace(result.Error),
 			Data:   map[string]any{"content": raw},
@@ -255,7 +258,7 @@ func modelFacingToolContent(result tools.Result) string {
 		text = strings.TrimSpace(env.Error)
 	}
 	if text == "" && env.Data != nil {
-		text = preferReadableText(env.Data, "")
+		text = PreferReadableText(env.Data, "")
 	}
 
 	original := len(text)
@@ -304,4 +307,66 @@ func trimToBytes(value string, max int) string {
 		cut = max
 	}
 	return value[:cut] + "…"
+}
+
+// ReadableToolResultText extracts human-readable text from a standardized tool result.
+func ReadableToolResultText(result ptools.Result) string {
+	if env, ok := ParseStandardToolResult(result.Output); ok {
+		if strings.TrimSpace(env.Text) != "" {
+			return strings.TrimSpace(env.Text)
+		}
+		if strings.TrimSpace(env.Error) != "" {
+			return strings.TrimSpace(env.Error)
+		}
+		if env.Data != nil {
+			return PreferReadableText(env.Data, "")
+		}
+	}
+	return strings.TrimSpace(result.Output)
+}
+
+// ExtractSearchAnswer pulls answer + links from a web.search standard envelope or raw JSON.
+func ExtractSearchAnswer(raw string) string {
+	if env, ok := ParseStandardToolResult(raw); ok {
+		if m, ok := env.Data.(map[string]any); ok {
+			if built := formatSearchDataLocal(m); built != "" {
+				return built
+			}
+		}
+		if strings.TrimSpace(env.Text) != "" {
+			return strings.TrimSpace(env.Text)
+		}
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return ""
+	}
+	return formatSearchDataLocal(parsed)
+}
+
+func formatSearchDataLocal(v map[string]any) string {
+	answer, _ := v["answer"].(string)
+	items, _ := v["items"].([]any)
+	if strings.TrimSpace(answer) == "" && len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if strings.TrimSpace(answer) != "" {
+		b.WriteString(strings.TrimSpace(answer))
+	}
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		url, _ := m["url"].(string)
+		if strings.TrimSpace(url) == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(strings.TrimSpace(url))
+	}
+	return b.String()
 }

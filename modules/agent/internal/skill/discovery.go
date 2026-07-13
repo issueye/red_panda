@@ -1,10 +1,11 @@
-package runtime
+package skill
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	pathutil "redpanda/agent/internal/pathutil"
 	"sort"
 	"strings"
 
@@ -13,14 +14,14 @@ import (
 
 // buildSkillsContext loads the latest managed skills from disk for one conversation.
 // It is intentionally re-read every time so newly created skills are usable immediately.
-func buildSkillsContext(workspaceRoot string) *methods.SkillsContext {
+func BuildContext(workspaceRoot string) *methods.SkillsContext {
 	root := strings.TrimSpace(workspaceRoot)
 	if root == "" {
 		return &methods.SkillsContext{
 			Context: "Managed skills: no workspace selected. Skills live under .codex/skills after a workspace is opened.",
 		}
 	}
-	items, err := listManagedSkills(root)
+	items, err := ListManaged(root)
 	if err != nil {
 		return &methods.SkillsContext{
 			Context: "Managed skills: failed to load .codex/skills (" + err.Error() + "). Use skill.list to retry.",
@@ -60,8 +61,8 @@ func formatSkillsCatalog(items []methods.SkillSummary) string {
 	return strings.TrimSpace(b.String())
 }
 
-func listManagedSkills(workspaceRoot string) ([]methods.SkillSummary, error) {
-	root, err := cleanWorkspaceRoot(workspaceRoot)
+func ListManaged(workspaceRoot string) ([]methods.SkillSummary, error) {
+	root, err := pathutil.CleanWorkspaceRoot(workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +85,7 @@ func listManagedSkills(workspaceRoot string) ([]methods.SkillSummary, error) {
 			continue
 		}
 		// Description-only is enough for catalogs and conversation injection.
-		detail, err := loadManagedSkillDetail(root, name, false)
+		detail, err := LoadManagedDetail(root, name, false)
 		if err != nil {
 			continue
 		}
@@ -101,12 +102,12 @@ func listManagedSkills(workspaceRoot string) ([]methods.SkillSummary, error) {
 	return items, nil
 }
 
-func loadManagedSkillDetail(workspaceRoot string, name string, includeInstructions bool) (methods.SkillDetail, error) {
+func LoadManagedDetail(workspaceRoot string, name string, includeInstructions bool) (methods.SkillDetail, error) {
 	name = strings.TrimSpace(name)
 	if !managedSkillNamePattern.MatchString(name) {
 		return methods.SkillDetail{}, fmt.Errorf("skill name must be lowercase ASCII and use only letters, digits, and hyphens")
 	}
-	path, err := managedSkillFile(workspaceRoot, name, false)
+	path, err := ManagedFile(workspaceRoot, name, false)
 	if err != nil {
 		return methods.SkillDetail{}, err
 	}
@@ -120,7 +121,7 @@ func loadManagedSkillDetail(workspaceRoot string, name string, includeInstructio
 	if !info.Mode().IsRegular() {
 		return methods.SkillDetail{}, fmt.Errorf("skill %q SKILL.md is not a regular file", name)
 	}
-	if info.Size() > maxSkillDescriptionBytes+maxSkillInstructionsBytes+1024 {
+	if info.Size() > MaxDescriptionBytes+MaxInstructionsBytes+1024 {
 		return methods.SkillDetail{}, fmt.Errorf("skill %q exceeds the managed size limit", name)
 	}
 	raw, err := os.ReadFile(path)
@@ -211,8 +212,8 @@ func decodeFrontmatterDescription(raw string) string {
 	return strings.Trim(raw, `"'`)
 }
 
-func runListSkills(workspaceRoot string) (string, error) {
-	items, err := listManagedSkills(workspaceRoot)
+func RunList(workspaceRoot string) (string, error) {
+	items, err := ListManaged(workspaceRoot)
 	if err != nil {
 		return "", err
 	}
@@ -227,13 +228,13 @@ func runListSkills(workspaceRoot string) (string, error) {
 	return string(raw), nil
 }
 
-func runDeleteSkill(workspaceRoot string, name string) (string, error) {
+func RunDelete(workspaceRoot string, name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if !managedSkillNamePattern.MatchString(name) {
 		return "", fmt.Errorf("skill name must be lowercase ASCII and use only letters, digits, and hyphens")
 	}
 	// managedSkillFile validates directory boundaries and symlink escape.
-	target, err := managedSkillFile(workspaceRoot, name, false)
+	target, err := ManagedFile(workspaceRoot, name, false)
 	if err != nil {
 		return "", err
 	}

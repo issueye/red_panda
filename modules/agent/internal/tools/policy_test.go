@@ -1,20 +1,20 @@
-package runtime
+package tools
 
 import (
 	"testing"
 
 	"redpanda/protocol/methods"
-	"redpanda/protocol/tools"
+	ptools "redpanda/protocol/tools"
 )
 
 func TestEvaluateToolPolicy(t *testing.T) {
-	highRiskShell := tools.Call{Name: "shell.exec", Risk: tools.RiskHigh}
-	lowRiskRead := tools.Call{Name: "workspace.read_file", Risk: tools.RiskLow}
+	highRiskShell := ptools.Call{Name: "shell.exec", Risk: ptools.RiskHigh}
+	lowRiskRead := ptools.Call{Name: "workspace.read_file", Risk: ptools.RiskLow}
 
 	tests := []struct {
 		name     string
 		options  methods.ReplyOptions
-		call     tools.Call
+		call     ptools.Call
 		expected ToolDecisionAction
 	}{
 		{
@@ -81,12 +81,12 @@ func TestEvaluateToolPolicy(t *testing.T) {
 }
 
 func TestAvailableToolsForOptionsHidesDeniedAndUnlistedTools(t *testing.T) {
-	definitions := []tools.Definition{
+	definitions := []ptools.Definition{
 		{Name: "workspace.read_file"},
 		{Name: "skill.run"},
 		{Name: "shell.exec"},
 	}
-	filtered := availableToolsForOptions(definitions, methods.ReplyOptions{
+	filtered := AvailableToolsForOptions(definitions, methods.ReplyOptions{
 		ToolAllowlist: []string{"workspace.read_file", "skill.run"},
 		ToolDenylist:  []string{"skill.run"},
 	})
@@ -97,7 +97,7 @@ func TestAvailableToolsForOptionsHidesDeniedAndUnlistedTools(t *testing.T) {
 
 func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 	t.Setenv("RED_PANDA_DEBUG_TOOLS", "")
-	definitions := []tools.Definition{
+	definitions := []ptools.Definition{
 		{Name: "workspace.read_file"},
 		{Name: "skill.run"},
 		{Name: "skill.create"},
@@ -108,7 +108,7 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 		{Name: "subagent.pool_resize"},
 		{Name: "subagent.pool_reset"},
 	}
-	filtered := availableToolsForOptions(definitions, methods.ReplyOptions{})
+	filtered := AvailableToolsForOptions(definitions, methods.ReplyOptions{})
 	names := map[string]bool{}
 	for _, d := range filtered {
 		names[d.Name] = true
@@ -125,7 +125,7 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 	}
 
 	// Explicit allowlist opt-in for one ops tool.
-	one := availableToolsForOptions(definitions, methods.ReplyOptions{
+	one := AvailableToolsForOptions(definitions, methods.ReplyOptions{
 		ToolAllowlist: []string{"skill.create", "workspace.read_file"},
 	})
 	if len(one) != 2 {
@@ -133,7 +133,7 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 	}
 
 	// DebugTools opens all ops tools.
-	debug := availableToolsForOptions(definitions, methods.ReplyOptions{DebugTools: true})
+	debug := AvailableToolsForOptions(definitions, methods.ReplyOptions{DebugTools: true})
 	if len(debug) != len(definitions) {
 		t.Fatalf("debug tools len = %d, want %d", len(debug), len(definitions))
 	}
@@ -141,14 +141,14 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 
 func TestEvaluateToolPolicyDeniesOpsToolsWhenHidden(t *testing.T) {
 	t.Setenv("RED_PANDA_DEBUG_TOOLS", "")
-	decision := EvaluateToolPolicy(methods.ReplyOptions{ToolPolicy: "allow_all"}, tools.Call{
-		Name: "skill.create", Risk: tools.RiskHigh,
+	decision := EvaluateToolPolicy(methods.ReplyOptions{ToolPolicy: "allow_all"}, ptools.Call{
+		Name: "skill.create", Risk: ptools.RiskHigh,
 	})
 	if decision.Action != ToolDecisionDeny {
 		t.Fatalf("expected deny for hidden ops tool, got %s (%s)", decision.Action, decision.Reason)
 	}
-	decision = EvaluateToolPolicy(methods.ReplyOptions{ToolPolicy: "allow_all", DebugTools: true}, tools.Call{
-		Name: "skill.create", Risk: tools.RiskHigh,
+	decision = EvaluateToolPolicy(methods.ReplyOptions{ToolPolicy: "allow_all", DebugTools: true}, ptools.Call{
+		Name: "skill.create", Risk: ptools.RiskHigh,
 	})
 	if decision.Action != ToolDecisionAllow {
 		t.Fatalf("expected allow when DebugTools, got %s (%s)", decision.Action, decision.Reason)
@@ -158,7 +158,7 @@ func TestEvaluateToolPolicyDeniesOpsToolsWhenHidden(t *testing.T) {
 func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	t.Setenv("RED_PANDA_DEBUG_TOOLS", "")
 	enabled := true
-	definitions := []tools.Definition{
+	definitions := []ptools.Definition{
 		{Name: "workspace.read_file"},
 		{Name: "shell.exec"},
 		{Name: "goal.write"},
@@ -170,7 +170,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 		{Name: "web.search"},
 	}
 	// Bound goal with no client allowlist → Goal default set.
-	filtered := availableToolsForOptions(definitions, methods.ReplyOptions{
+	filtered := AvailableToolsForOptions(definitions, methods.ReplyOptions{
 		GoalsEnabled: &enabled,
 	})
 	names := map[string]bool{}
@@ -190,7 +190,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	}
 
 	// Client allowlist intersected with goal defaults (cannot expand past defaults).
-	narrow := availableToolsForOptions(definitions, methods.ReplyOptions{
+	narrow := AvailableToolsForOptions(definitions, methods.ReplyOptions{
 		GoalsEnabled:  &enabled,
 		ToolAllowlist: []string{"workspace.read_file", "memory.create"},
 	})
@@ -200,7 +200,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 
 	// Non-goal chat keeps memory tools (minus ops-only).
 	disabled := false
-	open := availableToolsForOptions(definitions, methods.ReplyOptions{GoalsEnabled: &disabled})
+	open := AvailableToolsForOptions(definitions, methods.ReplyOptions{GoalsEnabled: &disabled})
 	openNames := map[string]bool{}
 	for _, d := range open {
 		openNames[d.Name] = true

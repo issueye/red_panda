@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"redpanda/agent/internal/subagent"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -107,13 +108,13 @@ func TestIsUsableFinalTextRejectsToolCallOnlyOutput(t *testing.T) {
 <parameter=path>frontend/src/App.vue</parameter>
 </function>
 </tool_call>`
-	if isUsableFinalText(toolCalls) {
+	if subagent.ReportUsable(toolCalls) {
 		t.Fatal("tool-call-only output must not be accepted as a completed report")
 	}
-	if !isUsableFinalText(toolCalls + "\nFrontend uses Vue and Vite.") {
+	if !subagent.ReportUsable(toolCalls + "\nFrontend uses Vue and Vite.") {
 		t.Fatal("tool calls followed by a real report should remain usable")
 	}
-	if isUsableFinalText("<tool_call>\n<function=workspace__read>") {
+	if subagent.ReportUsable("<tool_call>\n<function=workspace__read>") {
 		t.Fatal("incomplete tool-call-only output must not be accepted")
 	}
 }
@@ -136,7 +137,7 @@ func TestAvailableToolsIncludesSubagentRun(t *testing.T) {
 
 func TestSubagentProcessPoolStatusResizeAndReset(t *testing.T) {
 	created := 0
-	pool := newSubAgentProcessPool(2, func(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+	pool := subagent.NewProcessPool(2, func(ctx context.Context, params methods.ReplyParams, subAgentID string) (ProcessSubAgent, error) {
 		created++
 		return fakeProcessSubAgent{}, nil
 	})
@@ -185,16 +186,16 @@ func TestAvailableToolsIncludeSubagentManagement(t *testing.T) {
 }
 
 func TestEffectiveSubagentToolTurnsUsesFileCountFormula(t *testing.T) {
-	if got := effectiveSubagentToolTurns(0, 0); got != defaultSubagentToolTurns {
-		t.Fatalf("empty inputs = %d, want default %d", got, defaultSubagentToolTurns)
+	if got := subagent.EffectiveToolTurns(0, 0); got != subagent.DefaultToolTurns {
+		t.Fatalf("empty inputs = %d, want default %d", got, subagent.DefaultToolTurns)
 	}
-	if got := effectiveSubagentToolTurns(0, 120); got != 120+subagentSummaryTurns {
-		t.Fatalf("file_count formula = %d, want %d", got, 120+subagentSummaryTurns)
+	if got := subagent.EffectiveToolTurns(0, 120); got != 120+subagent.SummaryTurns {
+		t.Fatalf("file_count formula = %d, want %d", got, 120+subagent.SummaryTurns)
 	}
-	if got := effectiveSubagentToolTurns(200, 120); got != 200 {
+	if got := subagent.EffectiveToolTurns(200, 120); got != 200 {
 		t.Fatalf("explicit max_turns should win, got %d", got)
 	}
-	if got := recommendedSubagentTurns(1); got != 1+subagentSummaryTurns {
+	if got := subagent.RecommendedTurns(1); got != 1+subagent.SummaryTurns {
 		t.Fatalf("single file formula = %d", got)
 	}
 }
@@ -208,7 +209,7 @@ func TestRuntimeSubagentRunToolReturnsChildFinalText(t *testing.T) {
 	go readJSONLines(t, reader, lines)
 
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
-	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (ProcessSubAgent, error) {
 		return taskAwareFakeSubAgent{taskPrefix: "desktop"}, nil
 	}
 	rt.provider = subagentToolProvider{}
@@ -265,7 +266,7 @@ func TestRuntimeContinuesAfterInvalidSubagentReport(t *testing.T) {
 	go readJSONLines(t, reader, lines)
 
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
-	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
+	rt.newProcessSubAgent = func(ctx context.Context, params methods.ReplyParams, subAgentID string) (ProcessSubAgent, error) {
 		return toolCallOnlyFakeSubAgent{}, nil
 	}
 	rt.provider = subagentFailureRecoveryProvider{}

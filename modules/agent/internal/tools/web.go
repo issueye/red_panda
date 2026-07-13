@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -160,7 +160,7 @@ func runWebSearch(ctx context.Context, query string, maxResults int, opts webSea
 	if err != nil {
 		return "", err
 	}
-	return truncateToolOutput(string(raw)), nil
+	return TruncateToolOutput(string(raw)), nil
 }
 
 func normalizeWebSearchProvider(value string) string {

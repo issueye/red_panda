@@ -3,7 +3,7 @@ package runtime
 import (
 	"context"
 
-	"redpanda/protocol/events"
+	"redpanda/agent/internal/subagent"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
@@ -13,14 +13,8 @@ type runtimeSubAgent struct {
 	cancel context.CancelFunc
 }
 
-type processSubAgent interface {
-	Start(ctx context.Context, childParams methods.ReplyParams, onEvent func(events.Envelope)) error
-	Cancel(ctx context.Context, runID string, reason string) error
-	Close(ctx context.Context) error
-}
-
-func (r *Runtime) createProcessSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string) (processSubAgent, error) {
-	return newSubAgentProcessWithRequestHandler(ctx, params, subAgentID, r.callGateway)
+func (r *Runtime) createProcessSubAgent(ctx context.Context, params methods.ReplyParams, subAgentID string) (ProcessSubAgent, error) {
+	return subagent.NewProcessWithRequestHandler(ctx, params, subAgentID, r.callGateway)
 }
 
 // SubagentManager implementation (parent-agent tool control surface).

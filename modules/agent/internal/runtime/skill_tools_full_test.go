@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 
+	"redpanda/agent/internal/provider"
+	"redpanda/agent/internal/skill"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
@@ -24,9 +26,9 @@ func (skillCreateProvider) Name() string {
 	return "skill-create-test"
 }
 
-func (skillCreateProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+func (skillCreateProvider) Complete(_ context.Context, req provider.ProviderRequest, emit func(provider.ProviderChunk) error) error {
 	if len(req.ToolHistory) == 0 {
-		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+		return emit(provider.ProviderChunk{ToolCalls: []tools.Call{{
 			ID:   "call_permission_skill_create",
 			Name: "skill.create",
 			Arguments: map[string]any{
@@ -36,22 +38,22 @@ func (skillCreateProvider) Complete(_ context.Context, req ProviderRequest, emit
 			},
 		}}})
 	}
-	if err := emit(ProviderChunk{Delta: "unexpected"}); err != nil {
+	if err := emit(provider.ProviderChunk{Delta: "unexpected"}); err != nil {
 		return err
 	}
-	return emit(ProviderChunk{Final: true})
+	return emit(provider.ProviderChunk{Final: true})
 }
 
 func TestBuildSkillsContextReflectsLatestDiskSkills(t *testing.T) {
 	root := t.TempDir()
-	empty := buildSkillsContext(root)
+	empty := skill.BuildContext(root)
 	if empty == nil || !strings.Contains(empty.Context, "none") {
 		t.Fatalf("expected empty catalog, got %#v", empty)
 	}
-	if _, err := runCreateSkill(root, "code-review", "Review code safely.", "# Workflow\n\n1. Inspect."); err != nil {
+	if _, err := skill.RunCreate(root, "code-review", "Review code safely.", "# Workflow\n\n1. Inspect."); err != nil {
 		t.Fatal(err)
 	}
-	catalog := buildSkillsContext(root)
+	catalog := skill.BuildContext(root)
 	if catalog == nil || len(catalog.Items) != 1 || catalog.Items[0].Name != "code-review" {
 		t.Fatalf("expected code-review skill in catalog, got %#v", catalog)
 	}
@@ -59,10 +61,10 @@ func TestBuildSkillsContextReflectsLatestDiskSkills(t *testing.T) {
 		t.Fatalf("catalog context missing skill details: %q", catalog.Context)
 	}
 	// Creating another skill must appear on the next build (no cache).
-	if _, err := runCreateSkill(root, "release-notes", "Draft release notes.", "# Notes"); err != nil {
+	if _, err := skill.RunCreate(root, "release-notes", "Draft release notes.", "# Notes"); err != nil {
 		t.Fatal(err)
 	}
-	next := buildSkillsContext(root)
+	next := skill.BuildContext(root)
 	if next == nil || len(next.Items) != 2 {
 		t.Fatalf("expected 2 skills after create, got %#v", next)
 	}
@@ -70,7 +72,7 @@ func TestBuildSkillsContextReflectsLatestDiskSkills(t *testing.T) {
 
 func TestManagedSkillCreateAndUpdate(t *testing.T) {
 	root := t.TempDir()
-	createOutput, err := runCreateSkill(root, "code-review", "Review code safely.", "# Workflow\n\n1. Inspect the diff.\n2. Report findings.")
+	createOutput, err := skill.RunCreate(root, "code-review", "Review code safely.", "# Workflow\n\n1. Inspect the diff.\n2. Report findings.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,7 @@ func TestManagedSkillCreateAndUpdate(t *testing.T) {
 	target := filepath.Join(root, ".codex", "skills", "code-review", "SKILL.md")
 	assertManagedSkillContent(t, target, "code-review", "Review code safely.", "1. Inspect the diff.")
 
-	updateOutput, err := runUpdateSkill(root, "code-review", "Review code and tests.", "# Workflow\n\n1. Inspect changes.\n2. Run focused tests.")
+	updateOutput, err := skill.RunUpdate(root, "code-review", "Review code and tests.", "# Workflow\n\n1. Inspect changes.\n2. Run focused tests.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,18 +102,18 @@ func TestManagedSkillCreateAndUpdate(t *testing.T) {
 func TestManagedSkillCreateAndUpdateRejectInvalidState(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"", "Code-Review", "../escape", "nested/review", "review_tool"} {
-		if _, err := runCreateSkill(root, name, "description", "instructions"); err == nil {
+		if _, err := skill.RunCreate(root, name, "description", "instructions"); err == nil {
 			t.Fatalf("create accepted invalid name %q", name)
 		}
 	}
-	if _, err := runCreateSkill(root, "review", "", "instructions"); err == nil {
+	if _, err := skill.RunCreate(root, "review", "", "instructions"); err == nil {
 		t.Fatal("create accepted an empty description")
 	}
-	if _, err := runCreateSkill(root, "review", "description", ""); err == nil {
+	if _, err := skill.RunCreate(root, "review", "description", ""); err == nil {
 		t.Fatal("create accepted empty instructions")
 	}
 
-	if _, err := runCreateSkill(root, "review", "first description", "first instructions"); err != nil {
+	if _, err := skill.RunCreate(root, "review", "first description", "first instructions"); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(root, ".codex", "skills", "review", "SKILL.md")
@@ -119,7 +121,7 @@ func TestManagedSkillCreateAndUpdateRejectInvalidState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runCreateSkill(root, "review", "replacement", "replacement"); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := skill.RunCreate(root, "review", "replacement", "replacement"); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("duplicate create error = %v", err)
 	}
 	after, err := os.ReadFile(target)
@@ -130,7 +132,7 @@ func TestManagedSkillCreateAndUpdateRejectInvalidState(t *testing.T) {
 		t.Fatal("duplicate create changed the existing skill")
 	}
 
-	if _, err := runUpdateSkill(root, "missing", "description", "instructions"); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := skill.RunUpdate(root, "missing", "description", "instructions"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("missing update error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".codex", "skills", "missing", "SKILL.md")); !os.IsNotExist(err) {
@@ -144,7 +146,7 @@ func TestManagedSkillCreateRejectsEscapingSymlinkWithoutOutsideWrites(t *testing
 	if err := os.Symlink(outside, filepath.Join(root, ".codex")); err != nil {
 		t.Skipf("symlink creation is unavailable: %v", err)
 	}
-	if _, err := runCreateSkill(root, "review", "description", "instructions"); err == nil || !strings.Contains(err.Error(), "escapes managed skill root") {
+	if _, err := skill.RunCreate(root, "review", "description", "instructions"); err == nil || !strings.Contains(err.Error(), "escapes managed skill root") {
 		t.Fatalf("escaping symlink error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "skills")); !os.IsNotExist(err) {
@@ -189,7 +191,7 @@ func TestToolRunnerRegistersManagedSkillToolsAsHighRisk(t *testing.T) {
 
 func TestManagedSkillListLoadDelete(t *testing.T) {
 	root := t.TempDir()
-	emptyList, err := runListSkills(root)
+	emptyList, err := skill.RunList(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,14 +199,14 @@ func TestManagedSkillListLoadDelete(t *testing.T) {
 		t.Fatalf("empty list = %s", emptyList)
 	}
 
-	if _, err := runCreateSkill(root, "alpha", "Alpha skill.", "# Alpha\n\nDo alpha."); err != nil {
+	if _, err := skill.RunCreate(root, "alpha", "Alpha skill.", "# Alpha\n\nDo alpha."); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runCreateSkill(root, "beta", "Beta skill.", "# Beta\n\nDo beta."); err != nil {
+	if _, err := skill.RunCreate(root, "beta", "Beta skill.", "# Beta\n\nDo beta."); err != nil {
 		t.Fatal(err)
 	}
 
-	listOutput, err := runListSkills(root)
+	listOutput, err := skill.RunList(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,14 +217,14 @@ func TestManagedSkillListLoadDelete(t *testing.T) {
 		t.Fatalf("list output leaked instructions: %s", listOutput)
 	}
 
-	detail, err := loadManagedSkillDetail(root, "alpha", true)
+	detail, err := skill.LoadManagedDetail(root, "alpha", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if detail.Name != "alpha" || detail.Description != "Alpha skill." || !strings.Contains(detail.Instructions, "Do alpha.") {
 		t.Fatalf("unexpected detail: %#v", detail)
 	}
-	summaryOnly, err := loadManagedSkillDetail(root, "alpha", false)
+	summaryOnly, err := skill.LoadManagedDetail(root, "alpha", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,24 +232,24 @@ func TestManagedSkillListLoadDelete(t *testing.T) {
 		t.Fatalf("summary load included instructions: %#v", summaryOnly)
 	}
 
-	deleteOutput, err := runDeleteSkill(root, "alpha")
+	deleteOutput, err := skill.RunDelete(root, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(deleteOutput, `"deleted":true`) {
 		t.Fatalf("delete output = %s", deleteOutput)
 	}
-	if _, err := loadManagedSkillDetail(root, "alpha", false); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := skill.LoadManagedDetail(root, "alpha", false); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("deleted skill still loadable: %v", err)
 	}
-	if _, err := runDeleteSkill(root, "missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := skill.RunDelete(root, "missing"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("missing delete error = %v", err)
 	}
 }
 
 func TestAgentSkillsJSONRPCHandlers(t *testing.T) {
 	root := t.TempDir()
-	if _, err := runCreateSkill(root, "review", "Review code.", "# Steps\n\n1. Read."); err != nil {
+	if _, err := skill.RunCreate(root, "review", "Review code.", "# Steps\n\n1. Read."); err != nil {
 		t.Fatal(err)
 	}
 
@@ -328,7 +330,7 @@ func TestRuntimeHTTPProviderCreatesManagedSkill(t *testing.T) {
 	go readJSONLines(t, reader, lines)
 
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
-	rt.provider = HTTPCompatibleProvider{baseURL: server.URL, model: "test-model", client: server.Client()}
+	rt.provider = provider.HTTPCompatibleProvider{BaseURL: server.URL, Model: "test-model", Client: server.Client()}
 	sendRequest(t, context.Background(), rt, "reply_skill_http", methods.AgentReply, methods.ReplyParams{
 		RunID: "run_skill_http",
 		Session: methods.ReplySession{
