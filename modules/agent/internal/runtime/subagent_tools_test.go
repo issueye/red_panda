@@ -13,12 +13,12 @@ import (
 )
 
 func TestSubagentRunCaptureBuildsActionableEmptyResultError(t *testing.T) {
-	capture := &subagentRunCapture{
-		maxTurns: 16,
-		backend:  "process_pool",
-		name:     "desktop",
-		task:     "analyze desktop frontend modules",
-	}
+	capture := subagent.NewCapture(subagent.CaptureOptions{
+		MaxTurns: 16,
+		Backend:  "process_pool",
+		Name:     "desktop",
+		Task:     "analyze desktop frontend modules",
+	})
 	capture.Observe(events.Envelope{
 		Type: events.EventToolStarted,
 		Payload: map[string]any{
@@ -67,7 +67,7 @@ func TestSubagentRunCaptureBuildsActionableEmptyResultError(t *testing.T) {
 }
 
 func TestSubagentRunCaptureCollectsMessageWithoutRootRoleFilter(t *testing.T) {
-	capture := &subagentRunCapture{name: "backend"}
+	capture := subagent.NewCapture(subagent.CaptureOptions{Name: "backend"})
 	capture.Observe(events.Envelope{
 		Type: events.EventMessageDelta,
 		Agent: events.AgentRef{
@@ -85,7 +85,7 @@ func TestSubagentRunCaptureCollectsMessageWithoutRootRoleFilter(t *testing.T) {
 }
 
 func TestSubagentRunCaptureMarksRecoveryFallback(t *testing.T) {
-	capture := &subagentRunCapture{name: "goal-analyst"}
+	capture := subagent.NewCapture(subagent.CaptureOptions{Name: "goal-analyst"})
 	capture.Observe(events.Envelope{
 		Type: events.EventMessageDelta,
 		Payload: map[string]any{
@@ -93,7 +93,7 @@ func TestSubagentRunCaptureMarksRecoveryFallback(t *testing.T) {
 			"recovered": true,
 		},
 	})
-	if !capture.RecoveredFallback {
+	if !capture.RecoveredFallback() {
 		t.Fatal("expected recovered fallback to be tracked")
 	}
 }

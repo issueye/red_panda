@@ -143,14 +143,14 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 		maxTurns = r.applyGoalSpecialist(&childParams, specialist, task, maxTurns, params.RunID, params.Session.ID, parentGoalID, parentObjective)
 	}
 
-	capture := &subagentRunCapture{
-		maxTurns:  maxTurns,
-		backend:   backend,
-		name:      agentName,
-		task:      task,
-		fileCount: fileCount,
-		scopePath: scopePath,
-	}
+	capture := subagent.NewCapture(subagent.CaptureOptions{
+		MaxTurns:  maxTurns,
+		Backend:   backend,
+		Name:      agentName,
+		Task:      task,
+		FileCount: fileCount,
+		ScopePath: scopePath,
+	})
 	err = child.Start(childCtx, childParams, func(event events.Envelope) {
 		capture.Observe(event)
 		r.bridgeProcessSubAgentEvent(context.Background(), params, subAgentID, agentName, backend, event)
@@ -171,8 +171,8 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
 		return "", detail
 	}
-	if capture.FinishStatus != "" && capture.FinishStatus != "completed" {
-		detail := capture.FailureError(fmt.Sprintf("subagent finished with status %s", capture.FinishStatus))
+	if capture.FinishStatus() != "" && capture.FinishStatus() != "completed" {
+		detail := capture.FailureError(fmt.Sprintf("subagent finished with status %s", capture.FinishStatus()))
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
 		return "", detail
 	}
@@ -183,7 +183,7 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
 		return "", detail
 	}
-	if capture.RecoveredFallback {
+	if capture.RecoveredFallback() {
 		detail := capture.FailureError("subagent used a recovery fallback instead of a final report")
 		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
 		return "", detail
