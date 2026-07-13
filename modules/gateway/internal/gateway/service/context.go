@@ -104,9 +104,9 @@ func (s ContextService) AutoInjectNotes(goalID string) ([]model.GoalNote, error)
 }
 
 func (s ContextService) executeRead(params methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
-	goalID := strings.TrimSpace(stringArgFromMap(params.Arguments, "goal_id"))
-	if goalID == "" {
-		return methods.ContextToolExecuteResult{}, fmt.Errorf("goal_id is required")
+	goalID, _, err := s.requireAccessibleGoal(params)
+	if err != nil {
+		return methods.ContextToolExecuteResult{}, err
 	}
 	limit := intArgFromMap(params.Arguments, "limit", contextDefaultListLimit)
 	opts := repository.NoteListOpts{Limit: limit}
@@ -128,9 +128,9 @@ func (s ContextService) executeRead(params methods.ContextToolExecuteParams) (me
 }
 
 func (s ContextService) executeSearch(params methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
-	goalID := strings.TrimSpace(stringArgFromMap(params.Arguments, "goal_id"))
-	if goalID == "" {
-		return methods.ContextToolExecuteResult{}, fmt.Errorf("goal_id is required")
+	goalID, _, err := s.requireAccessibleGoal(params)
+	if err != nil {
+		return methods.ContextToolExecuteResult{}, err
 	}
 	query := strings.TrimSpace(stringArgFromMap(params.Arguments, "query"))
 	if query == "" {
@@ -234,11 +234,9 @@ func (s ContextService) executeDelete(params methods.ContextToolExecuteParams) (
 	return methods.ContextToolExecuteResult{Status: "completed", Output: string(out)}, nil
 }
 
-// requireWritableGoal loads the goal, rejects terminal goals, and authorizes the
-// caller: the root active run OR a specialist child (run_id differs but still
-// belongs to the goal's session). Root goal-state tools stay locked behind
-// subagentRunDenylist; here we only gate scratchpad writes by session + non-terminal.
-func (s ContextService) requireWritableGoal(params methods.ContextToolExecuteParams) (string, model.Goal, error) {
+// requireAccessibleGoal loads the goal and ensures it belongs to the caller's session.
+// Used for read/search so notes cannot leak across sessions by guessing goal_id.
+func (s ContextService) requireAccessibleGoal(params methods.ContextToolExecuteParams) (string, model.Goal, error) {
 	goalID := strings.TrimSpace(stringArgFromMap(params.Arguments, "goal_id"))
 	if goalID == "" {
 		return "", model.Goal{}, fmt.Errorf("goal_id is required")
@@ -249,6 +247,18 @@ func (s ContextService) requireWritableGoal(params methods.ContextToolExecutePar
 	}
 	if goal.SessionID != params.SessionID {
 		return "", model.Goal{}, fmt.Errorf("goal does not belong to this session")
+	}
+	return goalID, goal, nil
+}
+
+// requireWritableGoal loads the goal, rejects terminal goals, and authorizes the
+// caller: the root active run OR a specialist child (run_id differs but still
+// belongs to the goal's session). Root goal-state tools stay locked behind
+// subagentRunDenylist; here we only gate scratchpad writes by session + non-terminal.
+func (s ContextService) requireWritableGoal(params methods.ContextToolExecuteParams) (string, model.Goal, error) {
+	goalID, goal, err := s.requireAccessibleGoal(params)
+	if err != nil {
+		return "", model.Goal{}, err
 	}
 	if isTerminalGoalStatus(goal.Status) {
 		return "", model.Goal{}, fmt.Errorf("goal is terminal")

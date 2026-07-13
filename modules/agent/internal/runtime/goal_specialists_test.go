@@ -43,7 +43,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 		},
 		Input: methods.ReplyInput{Text: "analyze login"},
 	}
-	turns := (&Runtime{}).applyGoalSpecialist(&params, spec, "analyze login", 0, "run_test", "", "")
+	turns := (&Runtime{}).applyGoalSpecialist(&params, spec, "analyze login", 0, "run_test", "sess_test", "", "")
 	if turns != spec.DefaultMaxTurns {
 		t.Fatalf("turns = %d, want %d", turns, spec.DefaultMaxTurns)
 	}
@@ -53,7 +53,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 	if params.Options.SpawnSubAgents {
 		t.Fatal("spawn subagents must be false")
 	}
-	// Allowlist must include reads and exclude writes via availableToolsForOptions.
+	// Allowlist must include reads + context share tools and exclude writes via availableToolsForOptions.
 	defs := []tools.Definition{
 		{Name: "workspace.read_file"},
 		{Name: "workspace.write_file"},
@@ -62,6 +62,10 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 		{Name: "todo.write"},
 		{Name: "subagent.run"},
 		{Name: "web.search"},
+		{Name: "context.read"},
+		{Name: "context.search"},
+		{Name: "context.write"},
+		{Name: "context.replace"},
 	}
 	filtered := availableToolsForOptions(defs, params.Options)
 	names := map[string]bool{}
@@ -73,6 +77,11 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 	}
 	if !names["web.search"] {
 		t.Fatalf("web.search should be allowed for analyst: %#v", filtered)
+	}
+	for _, ctxTool := range contextShareTools {
+		if !names[ctxTool] {
+			t.Fatalf("%s should be allowed for analyst: %#v", ctxTool, filtered)
+		}
 	}
 	for _, denied := range []string{"workspace.write_file", "shell.exec", "goal.write", "todo.write", "subagent.run"} {
 		if names[denied] {
@@ -87,7 +96,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 	spec, _ := lookupGoalSpecialist("goal-implementer")
 	params := methods.ReplyParams{Options: methods.ReplyOptions{}}
-	_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "implement step", 100, "run_test", "", "")
+	_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "implement step", 100, "run_test", "sess_test", "", "")
 	// Cap to CapMaxTurns
 	if params.Options.MaxToolTurns != spec.CapMaxTurns {
 		t.Fatalf("max turns = %d, want cap %d", params.Options.MaxToolTurns, spec.CapMaxTurns)
@@ -99,6 +108,8 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 		{Name: "todo.write"},
 		{Name: "web.search"},
 		{Name: "subagent.run"},
+		{Name: "context.read"},
+		{Name: "context.write"},
 	}
 	filtered := availableToolsForOptions(defs, params.Options)
 	names := map[string]bool{}
@@ -107,6 +118,9 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 	}
 	if !names["workspace.write_file"] || !names["shell.exec"] {
 		t.Fatalf("implementer should allow write/shell: %#v", filtered)
+	}
+	if !names["context.read"] || !names["context.write"] {
+		t.Fatalf("implementer should allow context tools (no allowlist): %#v", filtered)
 	}
 	for _, denied := range []string{"goal.write", "todo.write", "web.search", "subagent.run"} {
 		if names[denied] {
@@ -118,12 +132,14 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 func TestApplyGoalSpecialistVerifierDeniesWrite(t *testing.T) {
 	spec, _ := lookupGoalSpecialist("goal-verifier")
 	params := methods.ReplyParams{Options: methods.ReplyOptions{}}
-	_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "verify", 0, "run_test", "", "")
+	_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "verify", 0, "run_test", "sess_test", "", "")
 	defs := []tools.Definition{
 		{Name: "workspace.read_file"},
 		{Name: "shell.exec"},
 		{Name: "workspace.write_file"},
 		{Name: "workspace.apply_patch"},
+		{Name: "context.read"},
+		{Name: "context.write"},
 	}
 	filtered := availableToolsForOptions(defs, params.Options)
 	names := map[string]bool{}
@@ -133,8 +149,44 @@ func TestApplyGoalSpecialistVerifierDeniesWrite(t *testing.T) {
 	if !names["workspace.read_file"] || !names["shell.exec"] {
 		t.Fatalf("verifier should allow read/shell: %#v", filtered)
 	}
+	if !names["context.read"] || !names["context.write"] {
+		t.Fatalf("verifier should allow context share tools: %#v", filtered)
+	}
 	if names["workspace.write_file"] || names["workspace.apply_patch"] {
 		t.Fatalf("verifier must deny writes: %#v", filtered)
+	}
+}
+
+func TestAllAllowlistedSpecialistsExposeContextShareTools(t *testing.T) {
+	defs := make([]tools.Definition, 0, len(contextShareTools)+2)
+	for _, name := range contextShareTools {
+		defs = append(defs, tools.Definition{Name: name})
+	}
+	defs = append(defs, tools.Definition{Name: "workspace.read_file"}, tools.Definition{Name: "goal.write"})
+
+	for _, key := range []string{"goal-analyst", "goal-planner", "goal-verifier", "goal-evaluator"} {
+		spec, ok := lookupGoalSpecialist(key)
+		if !ok {
+			t.Fatalf("missing %s", key)
+		}
+		if len(spec.Allowlist) == 0 {
+			t.Fatalf("%s expected non-empty allowlist", key)
+		}
+		params := methods.ReplyParams{Options: methods.ReplyOptions{}}
+		_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "task", 0, "run_test", "sess_test", "", "")
+		filtered := availableToolsForOptions(defs, params.Options)
+		names := map[string]bool{}
+		for _, d := range filtered {
+			names[d.Name] = true
+		}
+		for _, ctxTool := range contextShareTools {
+			if !names[ctxTool] {
+				t.Fatalf("%s missing %s in available tools: allowlist=%v filtered=%v", key, ctxTool, spec.Allowlist, names)
+			}
+		}
+		if names["goal.write"] {
+			t.Fatalf("%s must not expose goal.write", key)
+		}
 	}
 }
 

@@ -37,21 +37,39 @@ var workspaceWriteTools = []string{
 	"workspace.apply_patch",
 }
 
+// contextShareTools are goal scratchpad tools. Specialists with an allowlist must
+// include these explicitly — otherwise policy hides them even though they are
+// absent from subagentRunDenylist.
+var contextShareTools = []string{
+	"context.read",
+	"context.search",
+	"context.write",
+	"context.replace",
+}
+
+func withContextShareTools(base ...string) []string {
+	out := make([]string, 0, len(base)+len(contextShareTools))
+	out = append(out, base...)
+	out = append(out, contextShareTools...)
+	return out
+}
+
 // builtinGoalSpecialists are the five phase experts. Keys match Gateway agent_definitions.
 var builtinGoalSpecialists = map[string]goalSpecialist{
 	"goal-analyst": {
 		Key: "goal-analyst", NameZH: "目标分析师", Phase: "analyze",
 		DefaultMaxTurns: 12, CapMaxTurns: 24,
-		Allowlist:     append(append([]string{}, workspaceReadTools...), "web.search", "web.fetch"),
+		Allowlist:     withContextShareTools(append(append([]string{}, workspaceReadTools...), "web.search", "web.fetch")...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec"),
 		SystemPrompt: `You are goal-analyst for red_panda (目标分析师).
 
-Role: analyze the user request and codebase only. Read-only.
+Role: analyze the user request and codebase only. Read-only for workspace files.
 
 Rules:
 - Do NOT modify files or run write/shell commands.
 - Do NOT call goal.* or todo.* tools.
 - Do NOT spawn nested subagents.
+- Use context.write / context.replace to persist key findings on the shared goal scratchpad.
 - Produce a clear final report the parent can trust.
 
 Preferred final report shape (JSON in a fenced block is ideal):
@@ -72,14 +90,15 @@ If the request is trivial one-shot Q&A, set "trivial": true and explain why a Go
 	"goal-planner": {
 		Key: "goal-planner", NameZH: "目标规划师", Phase: "plan",
 		DefaultMaxTurns: 8, CapMaxTurns: 12,
-		Allowlist:     append([]string{}, workspaceReadTools...),
+		Allowlist:     withContextShareTools(workspaceReadTools...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec", "web.search", "web.fetch"),
 		SystemPrompt: `You are goal-planner for red_panda (目标规划师).
 
-Role: turn analysis into an executable plan. Read-only.
+Role: turn analysis into an executable plan. Read-only for workspace files.
 
 Rules:
 - Do NOT write files or claim tools that create goals/todos (parent owns goal.write / todo.write).
+- Use context.read for prior analyst findings; context.write for plan decisions on the shared scratchpad.
 - Steps must be verifiable and ordered; keep granularity practical.
 - success_criteria must be checkable (tests, files, behaviors).
 
@@ -119,7 +138,7 @@ Preferred final report JSON:
 	"goal-verifier": {
 		Key: "goal-verifier", NameZH: "目标验证者", Phase: "verify",
 		DefaultMaxTurns: 12, CapMaxTurns: 16,
-		Allowlist:     append(append([]string{}, workspaceReadTools...), "shell.exec"),
+		Allowlist:     withContextShareTools(append(append([]string{}, workspaceReadTools...), "shell.exec")...),
 		ExtraDenylist: append([]string{}, workspaceWriteTools...),
 		SystemPrompt: `You are goal-verifier for red_panda (目标验证者).
 
@@ -129,6 +148,7 @@ Rules:
 - Prefer evidence over the implementer's claims.
 - Do NOT edit product source in v1 (no write/edit/apply_patch).
 - shell.exec is only for tests/builds that validate the step.
+- Use context.read for implementer handoff notes; context.write for verification outcomes.
 - Do NOT call goal.* / todo.* / subagent.*.
 
 Preferred final report JSON:
@@ -143,14 +163,15 @@ Preferred final report JSON:
 	"goal-evaluator": {
 		Key: "goal-evaluator", NameZH: "目标终评官", Phase: "evaluate",
 		DefaultMaxTurns: 8, CapMaxTurns: 12,
-		Allowlist:     append([]string{}, workspaceReadTools...),
+		Allowlist:     withContextShareTools(workspaceReadTools...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec", "web.search", "web.fetch"),
 		SystemPrompt: `You are goal-evaluator for red_panda (目标终评官).
 
 Role: evaluate the whole goal against success_criteria and draft the user-facing completion report.
 
 Rules:
-- Read-only. Do not write files or run shell.
+- Read-only for workspace files and shell. Do not write files or run shell.
+- Use context.read for shared findings across the goal; context.write for the final evaluation notes.
 - Compare evidence from prior specialist reports and the workspace.
 - Do NOT call goal.complete (parent does after publishing the report).
 
@@ -221,7 +242,7 @@ func disableGoalPipelineForChild(options *methods.ReplyOptions) {
 // applyGoalSpecialist configures child ReplyParams for a phase specialist and
 // injects a brief of the parent goal (objective + shared notes) so the child is
 // not context-blind. Returns adjusted maxTurns.
-func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpecialist, task string, maxTurns int, parentRunID string, goalID string, objective string) int {
+func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpecialist, task string, maxTurns int, parentRunID string, sessionID string, goalID string, objective string) int {
 	if child == nil {
 		return maxTurns
 	}
@@ -243,8 +264,8 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 	child.Options.MaxToolTurns = maxTurns
 
 	// Denylist: always include global subagent denylist + specialist extras.
-	// Note: context.* tools are intentionally NOT denylisted, so the child can
-	// read/write shared scratchpad notes via context.read/context.write.
+	// Note: context.* tools are intentionally NOT denylisted, and specialists
+	// with an allowlist must also list them (see withContextShareTools).
 	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, subagentRunDenylist...)
 	child.Options.ToolDenylist = appendUniqueStrings(child.Options.ToolDenylist, spec.ExtraDenylist...)
 
@@ -273,7 +294,7 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 	// itself for deeper detail. Best-effort: empty when no notes/gateway.
 	brief := ""
 	if strings.TrimSpace(goalID) != "" {
-		brief = "\n\n" + r.goalNotesBrief(parentRunID, goalID, objective)
+		brief = "\n\n" + r.goalNotesBrief(parentRunID, sessionID, goalID, objective)
 	}
 	child.Options.MemoryContext = &methods.MemoryContext{
 		Context: roleBlock + budgetNote + brief,

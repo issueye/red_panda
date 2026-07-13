@@ -2,6 +2,7 @@ package service
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -208,5 +209,40 @@ func TestContextAutoInjectNotesPinnedFirst(t *testing.T) {
 	}
 	if !notes[0].Pinned || notes[0].Title != "Pinned" {
 		t.Fatalf("pinned note should be first: %+v", notes[0])
+	}
+}
+
+func TestContextReadRejectsCrossSessionGoal(t *testing.T) {
+	ctxSvc, goalSvc, sessionA := newContextTestService(t)
+	goalID := createActiveGoal(t, goalSvc, sessionA, "run_a")
+
+	_, _ = ctxSvc.ExecuteRuntimeTool(methods.ContextToolExecuteParams{
+		RunID: "run_a", SessionID: sessionA, ToolCallID: "n_cross", ToolName: "context.write",
+		Arguments: map[string]any{"goal_id": goalID, "kind": "finding", "title": "secret", "body": "do not leak"},
+	})
+
+	// Second session in the same DB.
+	sessionB, err := ctxSvc.repos.Sessions.Create("other-session", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ctxSvc.ExecuteRuntimeTool(methods.ContextToolExecuteParams{
+		RunID: "run_b", SessionID: sessionB.ID, ToolCallID: "n_read", ToolName: "context.read",
+		Arguments: map[string]any{"goal_id": goalID},
+	})
+	if err == nil {
+		t.Fatal("cross-session context.read should fail")
+	}
+	if !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = ctxSvc.ExecuteRuntimeTool(methods.ContextToolExecuteParams{
+		RunID: "run_b", SessionID: sessionB.ID, ToolCallID: "n_search", ToolName: "context.search",
+		Arguments: map[string]any{"goal_id": goalID, "query": "secret"},
+	})
+	if err == nil {
+		t.Fatal("cross-session context.search should fail")
 	}
 }

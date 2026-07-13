@@ -269,7 +269,7 @@ func (r *Runtime) runWithGoalLoop(
 			// Splice pinned/recent scratchpad notes into the goal context so
 			// segment N+1 sees segment N's key findings without an explicit
 			// context.read call. Best-effort: failures are logged, not fatal.
-			if notes := r.goalNotesDigest(params.RunID, ctxGoal.GoalID); notes != "" {
+			if notes := r.goalNotesDigest(params.RunID, params.Session.ID, ctxGoal.GoalID); notes != "" {
 				ctxGoal.Context = strings.TrimSpace(ctxGoal.Context) + "\n\n" + notes
 			}
 			params.Options.GoalContext = ctxGoal
@@ -452,16 +452,16 @@ func firstNonEmpty(values ...string) string {
 // Gateway and renders a compact digest. Used to auto-inject shared findings into
 // each new goal segment. Returns "" when there are no notes or the gateway is
 // unavailable (best-effort, never blocks the goal loop).
-func (r *Runtime) goalNotesDigest(runID string, goalID string) string {
-	notes := r.fetchGoalNotes(runID, goalID, 10)
+func (r *Runtime) goalNotesDigest(runID string, sessionID string, goalID string) string {
+	notes := r.fetchGoalNotes(runID, sessionID, goalID, 10)
 	return renderNotesDigest("Shared goal notes", notes)
 }
 
 // goalNotesBrief renders the goal objective + pinned/recent notes for a specialist
 // child. It includes the goal_id so the child can call context.read/search itself.
-func (r *Runtime) goalNotesBrief(runID string, goalID string, objective string) string {
+func (r *Runtime) goalNotesBrief(runID string, sessionID string, goalID string, objective string) string {
 	header := fmt.Sprintf("Parent goal %q (use context.read with goal_id=%s to read full notes):\nObjective: %s\n", goalID, goalID, strings.TrimSpace(objective))
-	notes := r.fetchGoalNotes(runID, goalID, 8)
+	notes := r.fetchGoalNotes(runID, sessionID, goalID, 8)
 	if len(notes) == 0 {
 		return header + "(no shared notes yet)"
 	}
@@ -470,18 +470,23 @@ func (r *Runtime) goalNotesBrief(runID string, goalID string, objective string) 
 
 // fetchGoalNotes calls the context.read tool via the gateway RPC. Best-effort:
 // on any error returns nil so callers degrade gracefully.
-func (r *Runtime) fetchGoalNotes(runID string, goalID string, limit int) []methods.GoalNoteDTO {
-	if strings.TrimSpace(goalID) == "" {
+// sessionID is required: Gateway rejects empty session_id, and without it
+// auto-inject would silently no-op every segment/specialist handoff.
+func (r *Runtime) fetchGoalNotes(runID string, sessionID string, goalID string, limit int) []methods.GoalNoteDTO {
+	if strings.TrimSpace(goalID) == "" || strings.TrimSpace(sessionID) == "" {
 		return nil
+	}
+	if limit <= 0 {
+		limit = 10
 	}
 	callCtx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
 	defer cancel()
 	result, err := r.executeContextTool(callCtx, methods.ContextToolExecuteParams{
-		RunID:     runID,
-		SessionID: "",
+		RunID:      runID,
+		SessionID:  sessionID,
 		ToolCallID: fmt.Sprintf("notes_inject_%s_%d", runID, time.Now().UnixNano()),
-		ToolName:  "context.read",
-		Arguments: map[string]any{"goal_id": goalID, "limit": limit},
+		ToolName:   "context.read",
+		Arguments:  map[string]any{"goal_id": goalID, "limit": limit},
 	})
 	if err != nil {
 		return nil
