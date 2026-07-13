@@ -21,18 +21,20 @@ type EventSink interface {
 }
 
 type RunSpec struct {
-	RootRunID   string
-	SubAgentID  string
-	Name        string
-	DisplayName string
-	Backend     string
-	Task        string
-	FileCount   int
-	ScopePath   string
-	MaxTurns    int
-	GoalPhase   string
-	Parent      methods.ReplyParams
-	Child       methods.ReplyParams
+	RootRunID        string
+	SubAgentID       string
+	Name             string
+	DisplayName      string
+	Backend          string
+	Task             string
+	FileCount        int
+	ScopePath        string
+	MaxTurns         int
+	GoalPhase        string
+	StartSummary     string
+	CompletedSummary string
+	Parent           methods.ReplyParams
+	Child            methods.ReplyParams
 }
 
 type StatusEvent struct {
@@ -136,8 +138,12 @@ func (c *Coordinator) Run(ctx context.Context, spec RunSpec) (RunResult, error) 
 	}
 
 	reusable = true
-	c.registry.Finish(spec.RootRunID, spec.SubAgentID, "completed", "subagent completed", "")
-	c.emitStatus(context.Background(), spec, StatusEvent{Status: "completed", Summary: "subagent completed"})
+	completedSummary := spec.CompletedSummary
+	if strings.TrimSpace(completedSummary) == "" {
+		completedSummary = "subagent completed"
+	}
+	c.registry.Finish(spec.RootRunID, spec.SubAgentID, "completed", completedSummary, "")
+	c.emitStatus(context.Background(), spec, StatusEvent{Status: "completed", Summary: completedSummary})
 	return RunResult{Text: text, FinishStatus: status, RecoveredFallback: capture.RecoveredFallback()}, nil
 }
 
@@ -152,6 +158,9 @@ func (c *Coordinator) emitStatus(ctx context.Context, spec RunSpec, status Statu
 }
 
 func runningSummary(spec RunSpec) string {
+	if strings.TrimSpace(spec.StartSummary) != "" {
+		return spec.StartSummary
+	}
 	if strings.TrimSpace(spec.DisplayName) != "" {
 		return spec.DisplayName + " started"
 	}

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
@@ -57,8 +56,6 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 	subAgentID := fmt.Sprintf("worker_%s_%d", name, time.Now().UnixNano())
 	agentName := name
 	childRunID := params.RunID + ":subagent:" + subAgentID
-	childCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	// 专家工作进程始终使用进程池，以便复用和重置。
 	backend := "process_pool"
@@ -67,37 +64,10 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 		backend = "runtime_process"
 	}
 
-	r.registerSubAgent(params, subAgentID, agentName, backend, cancel)
 	startSummary := "subagent started: " + subagent.TruncateSummary(task, 80)
 	if isSpecialist {
 		startSummary = displayName + " 已启动: " + subagent.TruncateSummary(task, 60)
 	}
-	_ = r.emitAgentEvent(ctx, params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
-		"subagent_id":     subAgentID,
-		"name":            agentName,
-		"display_name":    displayName,
-		"status":          "running",
-		"summary":         startSummary,
-		"backend":         backend,
-		"task":            task,
-		"file_count":      fileCount,
-		"max_turns":       maxTurns,
-		"path":            scopePath,
-		"goal_specialist": isSpecialist,
-		"goal_phase":      specialist.Phase,
-	})
-
-	child, release, err := r.acquireProcessSubAgent(childCtx, params, subAgentID, backend)
-	if err != nil {
-		r.failWorkerSubAgent(params, subAgentID, agentName, backend, err)
-		return "", err
-	}
-	reusable := false
-	defer func() {
-		if release != nil {
-			release(reusable)
-		}
-	}()
 
 	childTask := task
 	if scopePath != "" && !strings.Contains(strings.ToLower(task), strings.ToLower(scopePath)) {
@@ -143,72 +113,28 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx agenttools.Tool
 		maxTurns = r.applyGoalSpecialist(&childParams, specialist, task, maxTurns, params.RunID, params.Session.ID, parentGoalID, parentObjective)
 	}
 
-	capture := subagent.NewCapture(subagent.CaptureOptions{
-		MaxTurns:  maxTurns,
-		Backend:   backend,
-		Name:      agentName,
-		Task:      task,
-		FileCount: fileCount,
-		ScopePath: scopePath,
-	})
-	err = child.Start(childCtx, childParams, func(event events.Envelope) {
-		capture.Observe(event)
-		r.bridgeProcessSubAgentEvent(context.Background(), params, subAgentID, agentName, backend, event)
-	})
-	if err != nil {
-		if childCtx.Err() != nil {
-			r.finishSubAgent(params.RunID, subAgentID, "cancelled", "subagent cancelled", childCtx.Err().Error())
-			_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
-				"subagent_id": subAgentID,
-				"name":        agentName,
-				"status":      "cancelled",
-				"summary":     "subagent cancelled",
-				"backend":     backend,
-			})
-			return "", childCtx.Err()
-		}
-		detail := capture.FailureError(fmt.Sprintf("subagent process error: %v", err))
-		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
-		return "", detail
-	}
-	if capture.FinishStatus() != "" && capture.FinishStatus() != "completed" {
-		detail := capture.FailureError(fmt.Sprintf("subagent finished with status %s", capture.FinishStatus()))
-		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
-		return "", detail
-	}
-
-	result := strings.TrimSpace(agenttools.TruncateToolOutput(capture.FinalText()))
-	if result == "" {
-		detail := capture.FailureError("subagent returned an empty final report")
-		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
-		return "", detail
-	}
-	if capture.RecoveredFallback() {
-		detail := capture.FailureError("subagent used a recovery fallback instead of a final report")
-		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
-		return "", detail
-	}
-	if !subagent.ReportUsable(result) {
-		detail := capture.FailureError("subagent returned tool calls instead of a final report")
-		r.failWorkerSubAgent(params, subAgentID, agentName, backend, detail)
-		return "", detail
-	}
-
-	reusable = true
-	r.finishSubAgent(params.RunID, subAgentID, "completed", "subagent completed", "")
 	doneSummary := "subagent completed: " + subagent.TruncateSummary(task, 80)
 	if isSpecialist {
 		doneSummary = displayName + " 已完成: " + subagent.TruncateSummary(task, 60)
 	}
-	_ = r.emitAgentEvent(context.Background(), params, subAgentRef(subAgentID, agentName), events.EventSubAgentUpdate, nil, map[string]any{
-		"subagent_id":     subAgentID,
-		"name":            agentName,
-		"display_name":    displayName,
-		"status":          "completed",
-		"summary":         doneSummary,
-		"backend":         backend,
-		"goal_specialist": isSpecialist,
-		"goal_phase":      specialist.Phase,
+	runResult, err := r.subagentCoordinator.Run(ctx, subagent.RunSpec{
+		RootRunID:        params.RunID,
+		SubAgentID:       subAgentID,
+		Name:             agentName,
+		DisplayName:      displayName,
+		Backend:          backend,
+		Task:             task,
+		FileCount:        fileCount,
+		ScopePath:        scopePath,
+		MaxTurns:         maxTurns,
+		GoalPhase:        specialist.Phase,
+		StartSummary:     startSummary,
+		CompletedSummary: doneSummary,
+		Parent:           params,
+		Child:            childParams,
 	})
-	return result, nil
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(agenttools.TruncateToolOutput(runResult.Text)), nil
 }
