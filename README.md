@@ -26,31 +26,18 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 
 ## Design Docs
 
-- [Existing Project Analysis](docs/01-existing-project-analysis.md)
+See [docs/README.md](docs/README.md) for the current index. Highlights:
+
+- [Current Development Status](docs/10-development-status.md)
+- [Convergence Checklist](docs/35-redundancy-convergence-checklist.md)
 - [Functional Design](docs/02-functional-design.md)
 - [Gateway MVC Design](docs/03-gateway-mvc-design.md)
-- [Agent Runtime Multi-Process and Subagent Design](docs/04-agent-runtime-design.md)
-- [stdio JSON-RPC Multiplexing Protocol](docs/05-stdio-jsonrpc-multiplexing.md)
-- [Desktop Gateway WebSocket Integration](docs/06-desktop-gateway-integration.md)
+- [Agent Runtime Design](docs/04-agent-runtime-design.md)
+- [stdio JSON-RPC Multiplexing](docs/05-stdio-jsonrpc-multiplexing.md)
+- [Desktop Gateway Integration](docs/06-desktop-gateway-integration.md)
 - [Desktop Tech and UI Design](docs/07-desktop-tech-ui-design.md)
-- [Development Plan](docs/08-development-plan.md)
-- [Parallel Development Plan](docs/09-parallel-development-plan.md)
-- [Current Development Status](docs/10-development-status.md)
-- [Structured Development Roadmap](docs/11-structured-development-roadmap.md)
-- [Current Execution Plan](docs/12-current-execution-plan.md)
-- [Session Fork and Compact Design](docs/13-session-fork-compact-design.md)
-- [Memory and History Design](docs/14-memory-history-design.md)
-- [v0.1.0 Release Plan](docs/16-v0.1.0-release-plan.md)
-- [v0.1.0 Release Notes](docs/17-v0.1.0-release-notes.md)
-- [v0.1.1 Development Plan](docs/18-v0.1.1-development-plan.md)
-- [MCP stdio Tools Design](docs/19-mcp-stdio-tools-design.md)
-- [v0.1.1 Release Notes](docs/20-v0.1.1-release-notes.md)
-- [UI Normalization](docs/21-ui-normalization.md)
-- [v0.1.2 Development Plan](docs/22-v0.1.2-development-plan.md)
-- [v0.1.2 Release Notes](docs/23-v0.1.2-release-notes.md)
-- [v0.1.3 Development Plan](docs/24-v0.1.3-development-plan.md)
-- [v0.1.4 Development Plan](docs/25-v0.1.4-development-plan.md)
-- [v0.1.5 Development Plan](docs/26-v0.1.5-development-plan.md)
+- [Goal / Todo / Memory / MCP designs](docs/README.md) (feature docs)
+- Historical roadmaps and release notes: [docs/archive/](docs/archive/)
 
 ## Current Running Loop
 

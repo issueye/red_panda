@@ -19,10 +19,14 @@ const (
 	MCPDiscover         = "mcp.discover"
 	PermissionResolve   = "permission.resolve"
 	AgentEvent          = "agent.event"
-	MemoryToolExecute   = "memory.tool.execute"
-	TodoToolExecute     = "todo.tool.execute"
-	GoalToolExecute     = "goal.tool.execute"
-	ContextToolExecute  = "context.tool.execute"
+	// Gateway-backed state tools share one wire shape (checklist R1b):
+	//   Params:  { run_id, session_id?, workspace_root?, tool_call_id, tool_name, arguments }
+	//   Result:  { status, output?, …domain payload }
+	// Method names stay domain-specific for compatibility; Runtime uses callGatewayResult.
+	MemoryToolExecute  = "memory.tool.execute"
+	TodoToolExecute    = "todo.tool.execute"
+	GoalToolExecute    = "goal.tool.execute"
+	ContextToolExecute = "context.tool.execute"
 )
 
 type PeerInfo struct {

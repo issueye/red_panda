@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { ChatPanel } from './components/chat/ChatPanel.jsx';
 import { MemoryPanel } from './components/MemoryPanel.jsx';
@@ -14,9 +14,9 @@ import { TabButton } from './components/ui/tabs.jsx';
 import { WorkspacePanel } from './components/WorkspacePanel.jsx';
 import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
+import { useGatewayResources } from './hooks/useGatewayResources.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
-import { normalizeAgentList } from './lib/agents.js';
-import { gatewayBaseURL } from './lib/config.js';
+import { apiJson, gatewayBase } from './lib/api.js';
 import {
   goalFromUpdatedEvent,
   goalShouldAutoContinue,
@@ -26,17 +26,6 @@ import {
 import { extractAgentScope } from './lib/conversationScope.js';
 import { selectDirectory } from './lib/desktopShell.js';
 import { displayRuntimeMode, displaySessionKind, displayStatus } from './lib/displayLabels.js';
-import {
-  mcpServerCreatePayload,
-  mcpServerUpdatePayload,
-  normalizeMcpDiscovery,
-  normalizeMcpServer,
-} from './lib/mcpServers.js';
-import {
-  normalizeProviderProfile,
-  providerProfileCreatePayload,
-  providerProfileUpdatePayload,
-} from './lib/providerProfiles.js';
 import { appendDiagnosticLog } from './lib/diagnosticLog.js';
 import { parseCommand } from './lib/commands.js';
 import { buildRunStartOptions, defaultRunSettings } from './lib/runOptions.js';
@@ -50,12 +39,6 @@ import {
   patchSessionRuntimeMap,
   resolveEventSessionId,
 } from './lib/sessionRuntime.js';
-import {
-  normalizeSkillDetail,
-  normalizeSkillsList,
-  skillCreatePayload,
-  skillUpdatePayload,
-} from './lib/skills.js';
 import { resolveSubAgentLifecycleStatus } from './lib/subagentStatus.js';
 import {
   countOpenTodos,
@@ -67,8 +50,6 @@ import {
   estimateEffectiveSessionTokens,
   tokenBudgetState,
 } from './lib/tokenBudget.js';
-
-const gatewayBase = gatewayBaseURL();
 
 const initialSessions = [
   { id: 'local-design', title: '架构', subtitle: '本地任务与子代理' },
@@ -126,18 +107,6 @@ function loadRightPanelWidth() {
   } catch {
     return RIGHT_PANEL_WIDTH_DEFAULT;
   }
-}
-
-async function apiJson(path, options = {}) {
-  const response = await fetch(`${gatewayBase}${path}`, {
-    headers: { 'content-type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
-  const body = await response.json();
-  if (!response.ok || body.ok === false) {
-    throw new Error(body.error?.message || `HTTP ${response.status}`);
-  }
-  return body.data;
 }
 
 function normalizeSession(session) {
@@ -338,19 +307,45 @@ export function App() {
   ));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [runSettings, setRunSettings] = useState(loadRunSettings);
-  const [providerProfiles, setProviderProfiles] = useState([]);
-  const [providerProfilesLoading, setProviderProfilesLoading] = useState(false);
-  const [providerProfilesError, setProviderProfilesError] = useState('');
-  const [managedAgents, setManagedAgents] = useState([]);
-  const [managedAgentsLoading, setManagedAgentsLoading] = useState(false);
-  const [managedAgentsError, setManagedAgentsError] = useState('');
-  const [mcpServers, setMcpServers] = useState([]);
-  const [mcpServersLoading, setMcpServersLoading] = useState(false);
-  const [mcpServersError, setMcpServersError] = useState('');
-  const [mcpDiscoveryByServer, setMcpDiscoveryByServer] = useState({});
-  const [skills, setSkills] = useState([]);
-  const [skillsLoading, setSkillsLoading] = useState(false);
-  const [skillsError, setSkillsError] = useState('');
+  const workspaceRootRef = useRef('');
+  workspaceRootRef.current = workspace?.root_path || workspace?.root || '';
+  const getWorkspaceRoot = useCallback(() => workspaceRootRef.current, []);
+  const {
+    providerProfiles,
+    providerProfilesLoading,
+    providerProfilesError,
+    loadProviderProfiles,
+    createProviderProfile,
+    updateProviderProfile,
+    deleteProviderProfile,
+    managedAgents,
+    managedAgentsLoading,
+    managedAgentsError,
+    loadAgents,
+    createAgent,
+    updateAgent,
+    deleteAgent,
+    mcpServers,
+    mcpServersLoading,
+    mcpServersError,
+    mcpDiscoveryByServer,
+    loadMcpServers,
+    createMcpServer,
+    updateMcpServer,
+    deleteMcpServer,
+    discoverMcpServer,
+    skills,
+    skillsLoading,
+    skillsError,
+    loadSkills,
+    loadSkillDetail,
+    createSkill,
+    updateSkill,
+    deleteSkill,
+  } = useGatewayResources({
+    getWorkspaceRoot,
+    setRunSettings,
+  });
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
   const rightPanelResizeRef = useRef(null);
@@ -578,121 +573,8 @@ export function App() {
     setGlobalPendingPermissions(Array.isArray(items) ? items.map(normalizePermission) : []);
   }
 
-  async function loadProviderProfiles() {
-    setProviderProfilesLoading(true);
-    setProviderProfilesError('');
-    try {
-      const items = await apiJson('/api/v1/provider-profiles');
-      const normalized = Array.isArray(items) ? items.map(normalizeProviderProfile) : [];
-      setProviderProfiles(normalized);
-      setRunSettings((current) => {
-        if (!current.providerProfileId || normalized.some((item) => item.id === current.providerProfileId)) {
-          return current;
-        }
-        return { ...current, providerProfileId: '' };
-      });
-      return normalized;
-    } catch (error) {
-      setProviderProfilesError(error.message);
-      return [];
-    } finally {
-      setProviderProfilesLoading(false);
-    }
-  }
-
-  async function loadAgents() {
-    setManagedAgentsLoading(true);
-    setManagedAgentsError('');
-    try {
-      const data = await apiJson('/api/v1/agents');
-      const normalized = normalizeAgentList(data);
-      setManagedAgents(normalized);
-      return normalized;
-    } catch (error) {
-      setManagedAgentsError(error.message);
-      return [];
-    } finally {
-      setManagedAgentsLoading(false);
-    }
-  }
-
-  async function createAgent(payload) {
-    const created = await apiJson('/api/v1/agents', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    await loadAgents();
-    return created;
-  }
-
-  async function updateAgent(id, payload) {
-    const updated = await apiJson(`/api/v1/agents/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-    await loadAgents();
-    return updated;
-  }
-
-  async function deleteAgent(id) {
-    await apiJson(`/api/v1/agents/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    await loadAgents();
-  }
-
-  async function loadMcpServers() {
-    setMcpServersLoading(true);
-    setMcpServersError('');
-    try {
-      const data = await apiJson('/api/v1/mcp/servers');
-      const normalized = Array.isArray(data?.servers)
-        ? data.servers.map(normalizeMcpServer)
-        : [];
-      setMcpServers(normalized);
-      return normalized;
-    } catch (error) {
-      setMcpServersError(error.message);
-      return [];
-    } finally {
-      setMcpServersLoading(false);
-    }
-  }
-
   function currentWorkspaceRoot() {
-    return workspace?.root_path || workspace?.root || '';
-  }
-
-  async function loadSkills(workspaceRootOverride) {
-    const root = workspaceRootOverride || currentWorkspaceRoot();
-    setSkillsLoading(true);
-    setSkillsError('');
-    if (!root) {
-      setSkills([]);
-      setSkillsLoading(false);
-      setSkillsError('打开工作区后可管理托管技能。');
-      return [];
-    }
-    try {
-      const data = await apiJson(`/api/v1/skills?workspace_root=${encodeURIComponent(root)}`);
-      const normalized = normalizeSkillsList(data);
-      setSkills(normalized);
-      return normalized;
-    } catch (error) {
-      setSkillsError(error.message);
-      return [];
-    } finally {
-      setSkillsLoading(false);
-    }
-  }
-
-  async function loadSkillDetail(name) {
-    const root = currentWorkspaceRoot();
-    if (!root || !name) {
-      throw new Error('workspace and skill name are required');
-    }
-    const data = await apiJson(
-      `/api/v1/skills/${encodeURIComponent(name)}?workspace_root=${encodeURIComponent(root)}&include_instructions=1`,
-    );
-    return normalizeSkillDetail(data);
+    return workspaceRootRef.current;
   }
 
   async function hydrateTodos(sessionId) {
@@ -1359,11 +1241,7 @@ export function App() {
     if (currentRoot === rootKey) {
       const nextWorkspace = nextRecent[0] || null;
       setWorkspace(nextWorkspace);
-      if (nextWorkspace?.root || nextWorkspace?.root_path) {
-        loadSkills(nextWorkspace.root_path || nextWorkspace.root);
-      } else {
-        setSkills([]);
-      }
+      loadSkills(nextWorkspace?.root_path || nextWorkspace?.root || '');
     }
     if (currentSessionId && !remaining.some((item) => item.id === currentSessionId)) {
       if (remaining.length > 0) {
@@ -1947,160 +1825,6 @@ export function App() {
       return [];
     } finally {
       setRunEventsLoading((items) => ({ ...items, [runId]: false }));
-    }
-  }
-
-  async function createProviderProfile(input) {
-    const created = await apiJson('/api/v1/provider-profiles', {
-      method: 'POST',
-      body: JSON.stringify(providerProfileCreatePayload(input)),
-    });
-    const normalized = normalizeProviderProfile(created);
-    setProviderProfiles((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
-    setRunSettings((current) => ({ ...current, providerProfileId: normalized.id }));
-    return normalized;
-  }
-
-  async function updateProviderProfile(id, input) {
-    const updated = await apiJson(`/api/v1/provider-profiles/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(providerProfileUpdatePayload(input)),
-    });
-    const normalized = normalizeProviderProfile(updated);
-    setProviderProfiles((items) => [
-      normalized,
-      ...items.filter((item) => item.id !== normalized.id),
-    ]);
-    return normalized;
-  }
-
-  async function deleteProviderProfile(id) {
-    await apiJson(`/api/v1/provider-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    setProviderProfiles((items) => items.filter((item) => item.id !== id));
-    setRunSettings((current) => (
-      current.providerProfileId === id
-        ? { ...current, providerProfileId: '' }
-        : current
-    ));
-  }
-
-  async function createMcpServer(input) {
-    setMcpServersError('');
-    try {
-      const created = await apiJson('/api/v1/mcp/servers', {
-        method: 'POST',
-        body: JSON.stringify(mcpServerCreatePayload(input)),
-      });
-      const normalized = normalizeMcpServer(created);
-      setMcpServers((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
-      return normalized;
-    } catch (error) {
-      setMcpServersError(error.message);
-      throw error;
-    }
-  }
-
-  async function updateMcpServer(id, input) {
-    setMcpServersError('');
-    try {
-      const updated = await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        body: JSON.stringify(mcpServerUpdatePayload(input)),
-      });
-      const normalized = normalizeMcpServer(updated);
-      setMcpServers((items) => [
-        normalized,
-        ...items.filter((item) => item.id !== normalized.id),
-      ]);
-      return normalized;
-    } catch (error) {
-      setMcpServersError(error.message);
-      throw error;
-    }
-  }
-
-  async function deleteMcpServer(id) {
-    setMcpServersError('');
-    try {
-      await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      setMcpServers((items) => items.filter((item) => item.id !== id));
-      setMcpDiscoveryByServer((current) => {
-        const next = { ...current };
-        delete next[id];
-        return next;
-      });
-    } catch (error) {
-      setMcpServersError(error.message);
-      throw error;
-    }
-  }
-
-  async function discoverMcpServer(id) {
-    setMcpDiscoveryByServer((current) => ({
-      ...current,
-      [id]: { ...current[id], loading: true, error: '' },
-    }));
-    try {
-      const data = await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}/discover`, {
-        method: 'POST',
-      });
-      const result = normalizeMcpDiscovery(data);
-      setMcpDiscoveryByServer((current) => ({
-        ...current,
-        [id]: { loading: false, error: '', result },
-      }));
-      return result;
-    } catch (error) {
-      setMcpDiscoveryByServer((current) => ({
-        ...current,
-        [id]: { ...current[id], loading: false, error: error.message },
-      }));
-      throw error;
-    }
-  }
-
-  async function createSkill(input) {
-    setSkillsError('');
-    try {
-      const created = await apiJson('/api/v1/skills', {
-        method: 'POST',
-        body: JSON.stringify(skillCreatePayload(input, currentWorkspaceRoot())),
-      });
-      await loadSkills();
-      return created;
-    } catch (error) {
-      setSkillsError(error.message);
-      throw error;
-    }
-  }
-
-  async function updateSkill(name, input) {
-    setSkillsError('');
-    try {
-      const updated = await apiJson(`/api/v1/skills/${encodeURIComponent(name)}`, {
-        method: 'PUT',
-        body: JSON.stringify(skillUpdatePayload(input, currentWorkspaceRoot())),
-      });
-      await loadSkills();
-      return updated;
-    } catch (error) {
-      setSkillsError(error.message);
-      throw error;
-    }
-  }
-
-  async function deleteSkill(name) {
-    setSkillsError('');
-    const root = currentWorkspaceRoot();
-    try {
-      await apiJson(
-        `/api/v1/skills/${encodeURIComponent(name)}?workspace_root=${encodeURIComponent(root)}`,
-        { method: 'DELETE' },
-      );
-      setSkills((items) => items.filter((item) => item.name !== name));
-    } catch (error) {
-      setSkillsError(error.message);
-      throw error;
     }
   }
 

@@ -1,7 +1,7 @@
 # 代码冗余与功能过度实现 — 收敛清单
 
 Updated: 2026-07-13  
-Status: in progress (through Wave 4 R5 + O5a; remaining R1b/O2b/R5b/O5b/Wave5+)  
+Status: in progress (Wave 0–4 core + R7a/O7 done; remaining R7b/c, O6, O2b, R5b, O5b, Wave 6)  
 依据：全项目评估 + Goal 上下文共享后审计（结构冗余 / 语义重叠 / 过度实现）
 
 ## 使用方式
@@ -62,7 +62,7 @@ go test ./modules/gateway/internal/gateway/service/ -count=1 -run "Context|Goal|
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **R1a** | Runtime 统一 gateway tool 转发 | 结构冗余 | L | done | `callGatewayResult` 统一 unmarshal；`executeMemory/Todo/Goal/ContextTool` 共用；4 个 method 名不变 | memory/todo/goal/context 转发行为不变；round-trip 测绿 | — |
-| **R1b** | Protocol 参数形状去重（非 BREAKING） | 结构冗余 | L | todo | 抽取公共字段注释/嵌入 struct（若 Go JSON 兼容）或仅文档化公共约定；**不改 wire 字段名** | 旧客户端仍可解析；`protocol` 测试绿 | R1a 可并行 |
+| **R1b** | Protocol 参数形状去重（非 BREAKING） | 结构冗余 | L | done | methods.go 注释统一 Runtime tool wire 形状；不改 method 名/字段 | 兼容保留 | R1a |
 | **R1c** | Gateway `ExecuteRuntimeTool` 公共校验 | 结构冗余 | L | done | `validateRuntimeToolMeta`（`runtime_tool_meta.go`）；memory 不强制 session；todo/goal/context 强制 session | 文案一致；meta 单测 + 四域 Execute 测绿 | — |
 | **R4** | Specialist brief 不再滥用 MemoryContext | 语义冗余 | M | done | 新增 `SpecialistContext`；specialist/worker/skill 角色文本写入该字段；`MemoryContext` 仅长期记忆；provider 先 specialist 后 memory | provider 顺序测；specialist/skill 隔离测绿 | R1a |
 
@@ -141,10 +141,10 @@ go test ./modules/agent/internal/runtime/ -run "AvailableTools|Policy|Goal|Speci
 
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **R7a** | 拆 `useGatewayResources` | 结构 | M | todo | 从 `App.jsx` 抽出 provider/mcp/skills/agents CRUD hooks | App 行数明显下降；现有 unit/e2e 绿 | — |
+| **R7a** | 拆 `useGatewayResources` | 结构 | M | done | `hooks/useGatewayResources.js` + `lib/api.js`；Settings CRUD 迁出 App | App 减约 150 行；unit 绿 | — |
 | **R7b** | `reduceRunEvent` 纯函数 | 结构 | M | todo | WS 事件归约移出 App；单测覆盖 tool/permission/goal/todo | 事件行为锁定；App 变薄 | — |
 | **R7c** | Settings 按 tab 拆文件 | 结构 | L | todo | `SettingsProviders.jsx` / `SettingsMcp.jsx` / … | SettingsPanel 门面 <300 行级 | — |
-| **O7** | docs 归档 | 文档 | L | todo | `docs/archive/` 搬入历史 plan/release；根 docs 留 architecture + status + 本清单 | README 链接更新；现行文档 ≤10 篇入口 | — |
+| **O7** | docs 归档 | 文档 | L | done | 14 篇历史 plan/release → `docs/archive/`；新增 `docs/README.md` 索引；根 README 指向索引 | 现行入口清晰 | — |
 | **O6** | web_tools 主路径收敛 | 维护 | M | todo | 默认 Tavily（有 key）；DDG HTML 降级简化或移到 `web_tools_ddg.go` | 搜索测不依赖外网 flaky；超时用例稳定 | — |
 
 **建议提交：** 每个 R7* 独立 PR，避免巨石前端 PR。
@@ -226,13 +226,13 @@ L / M / H — <why>
 | Wave | 条目 | todo | in_progress | done | wontfix |
 | --- | --- | --- | --- | --- | --- |
 | 0 | R3, R2, R2a | 0 | 0 | 2 | 1 |
-| 1 | R1a, R1b, R1c, R4 | 1 | 0 | 3 | 0 |
+| 1 | R1a, R1b, R1c, R4 | 0 | 0 | 4 | 0 |
 | 2 | O1, O3, O8, O5a, R6 | 0 | 0 | 5 | 0 |
 | 3 | O2, O4, O2b | 1 | 0 | 2 | 0 |
 | 4 | R5, R5b, O5b | 2 | 0 | 1 | 0 |
-| 5 | R7a, R7b, R7c, O7, O6 | 5 | 0 | 0 | 0 |
+| 5 | R7a, R7b, R7c, O7, O6 | 3 | 0 | 2 | 0 |
 | 6 | S1, S2, S3 | 3 | 0 | 0 | 0 |
-| **合计** | **26** | **12** | **0** | **13** | **1** |
+| **合计** | **26** | **9** | **0** | **16** | **1** |
 
 ---
 
