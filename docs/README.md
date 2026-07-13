@@ -5,7 +5,9 @@
 | Doc | Purpose |
 | --- | --- |
 | [10-development-status.md](10-development-status.md) | What is implemented now |
-| [35-redundancy-convergence-checklist.md](35-redundancy-convergence-checklist.md) | Active refactor/convergence backlog |
+| [35-redundancy-convergence-checklist.md](35-redundancy-convergence-checklist.md) | Wave 0–5 convergence backlog (mostly done) |
+| [36-optimization-plan.md](36-optimization-plan.md) | **System optimization plan** (Goal correctness → Runtime split → Frontend → MCP/CLI/CI) |
+| [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |
 | [04-agent-runtime-design.md](04-agent-runtime-design.md) | Runtime / subagent model |
