@@ -1,7 +1,7 @@
 # 代码冗余与功能过度实现 — 收敛清单
 
 Updated: 2026-07-13  
-Status: planning  
+Status: in progress (Wave 0 started)  
 依据：全项目评估 + Goal 上下文共享后审计（结构冗余 / 语义重叠 / 过度实现）
 
 ## 使用方式
@@ -37,9 +37,9 @@ Status: planning
 
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **R3** | 统一 notes 自动注入路径 | 死代码/双轨 | L | todo | 删除或接线 `ContextService.AutoInjectNotes`；Runtime 只保留一条路径（推荐：继续 `fetchGoalNotes` + 删未用 API，或改为 Runtime 调内部 inject RPC） | 无双轨；segment/specialist inject 集成测仍绿；文档不再提未接线 API | — |
-| **R2** | Specialist 单一真相源 | 双写配置 | M | todo | **方案 A（推荐）**：Runtime `applyGoalSpecialist` 优先使用 Gateway `agent_definitions`（prompt/max_turns）；硬编码作 fallback。**方案 B**：Desktop 标明“展示用，执行以 Runtime 内置为准”，停止暗示可配置生效 | 改 Gateway builtin prompt 能影响执行（A），或 UI/文档明确不驱动执行（B）；单测锁行为 | — |
-| **R2a** |（可选）禁止无效编辑误导 | 产品诚实 | L | todo | 若选 R2-B：builtin 定义只读或保存时提示“不生效” | Settings 不会让用户以为改 prompt 已生效 | R2 |
+| **R3** | 统一 notes 自动注入路径 | 死代码/双轨 | L | done | 删除未接线的 `ContextService.AutoInjectNotes`；Runtime 唯一路径 `fetchGoalNotes` → `context.read`（带 session_id） | 无双轨；pinned-first 经 `context.read` 测；inject 测绿 | — |
+| **R2** | Specialist 单一真相源 | 双写配置 | M | done | **方案 A**：`RunService.applyAgentDefinitions` 把 enabled 目录挂到 `ReplyOptions.AgentDefinitions`；Runtime `resolveGoalSpecialist` 覆盖 prompt/turns/phase/name_zh；tool allow/deny 仍 Runtime 内置 | 改 Gateway builtin prompt 出现在 reply options 与 resolve 结果；disabled 定义不可用 | — |
+| **R2a** |（可选）禁止无效编辑误导 | 产品诚实 | L | wontfix | R2-A 已使 Settings prompt 生效，无需只读误导提示 | — | R2 |
 
 **建议提交：**
 
@@ -223,16 +223,16 @@ L / M / H — <why>
 
 ## 进度追踪（汇总）
 
-| Wave | 条目 | todo | in_progress | done |
-| --- | --- | --- | --- | --- |
-| 0 | R3, R2, R2a | 3 | 0 | 0 |
-| 1 | R1a, R1b, R1c, R4 | 4 | 0 | 0 |
-| 2 | O1, O3, O8, O5a, R6 | 5 | 0 | 0 |
-| 3 | O2, O4, O2b | 3 | 0 | 0 |
-| 4 | R5, R5b, O5b | 3 | 0 | 0 |
-| 5 | R7a, R7b, R7c, O7, O6 | 5 | 0 | 0 |
-| 6 | S1, S2, S3 | 3 | 0 | 0 |
-| **合计** | **26** | **26** | **0** | **0** |
+| Wave | 条目 | todo | in_progress | done | wontfix |
+| --- | --- | --- | --- | --- | --- |
+| 0 | R3, R2, R2a | 0 | 0 | 2 | 1 |
+| 1 | R1a, R1b, R1c, R4 | 4 | 0 | 0 | 0 |
+| 2 | O1, O3, O8, O5a, R6 | 5 | 0 | 0 | 0 |
+| 3 | O2, O4, O2b | 3 | 0 | 0 | 0 |
+| 4 | R5, R5b, O5b | 3 | 0 | 0 | 0 |
+| 5 | R7a, R7b, R7c, O7, O6 | 5 | 0 | 0 | 0 |
+| 6 | S1, S2, S3 | 3 | 0 | 0 | 0 |
+| **合计** | **26** | **23** | **0** | **2** | **1** |
 
 ---
 

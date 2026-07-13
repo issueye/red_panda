@@ -8,7 +8,9 @@
 
 ## 目标
 
-提供 **智能体（Agent / Specialist）定义** 的集中管理：内置 Goal 流水线五专家 + 用户自定义智能体。配置落在 Gateway SQLite，Desktop 设置页维护；Runtime 后续可按 `key` 拉取启用列表套用提示词与轮次。
+提供 **智能体（Agent / Specialist）定义** 的集中管理：内置 Goal 流水线五专家 + 用户自定义智能体。配置落在 Gateway SQLite，Desktop 设置页维护。
+
+**执行真相源（Wave 0 / R2）**：每次 `run.start` → `agent.reply` 时，Gateway `applyAgentDefinitions` 将 **enabled** 目录写入 `ReplyOptions.agent_definitions`。Runtime `resolveGoalSpecialist` 用其中的 `system_prompt` / `default_max_turns` / `phase` / `name_zh` **覆盖**内置 specialist；工具 allow/deny 策略仍由 Runtime 硬编码（含 context 共享工具），避免 Settings 误剥安全边界。内置表仅作 Gateway 不可达时的 fallback。
 
 ## 数据
 

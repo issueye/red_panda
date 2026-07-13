@@ -186,11 +186,12 @@ func TestContextSearchAndDelete(t *testing.T) {
 	}
 }
 
-func TestContextAutoInjectNotesPinnedFirst(t *testing.T) {
+func TestContextReadPinnedFirstOrder(t *testing.T) {
+	// Single inject path is Runtime fetchGoalNotes → context.read (not a parallel
+	// AutoInjectNotes service API). List order must keep pinned notes first.
 	ctxSvc, goalSvc, session := newContextTestService(t)
 	goalID := createActiveGoal(t, goalSvc, session, "run_root")
 
-	// Write a pinned note + a regular note.
 	_, _ = ctxSvc.ExecuteRuntimeTool(methods.ContextToolExecuteParams{
 		RunID: "run_root", SessionID: session, ToolCallID: "p1", ToolName: "context.write",
 		Arguments: map[string]any{"goal_id": goalID, "kind": "decision", "title": "Pinned", "body": "important", "pinned": true},
@@ -200,15 +201,18 @@ func TestContextAutoInjectNotesPinnedFirst(t *testing.T) {
 		Arguments: map[string]any{"goal_id": goalID, "kind": "finding", "title": "Regular", "body": "ok"},
 	})
 
-	notes, err := ctxSvc.AutoInjectNotes(goalID)
+	r, err := ctxSvc.ExecuteRuntimeTool(methods.ContextToolExecuteParams{
+		RunID: "run_root", SessionID: session, ToolCallID: "p3", ToolName: "context.read",
+		Arguments: map[string]any{"goal_id": goalID, "limit": 10},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(notes) != 2 {
-		t.Fatalf("auto-inject should return 2 notes, got %d", len(notes))
+	if len(r.Notes) != 2 {
+		t.Fatalf("read should return 2 notes, got %d", len(r.Notes))
 	}
-	if !notes[0].Pinned || notes[0].Title != "Pinned" {
-		t.Fatalf("pinned note should be first: %+v", notes[0])
+	if r.Notes[0].Pinned == 0 || r.Notes[0].Title != "Pinned" {
+		t.Fatalf("pinned note should be first: %+v", r.Notes[0])
 	}
 }
 

@@ -76,8 +76,11 @@ func (r *Runtime) executeSubagentRun(ctx context.Context, runCtx ToolRunContext,
 		name = "worker"
 	}
 	name = sanitizeSubagentName(name)
-	specialist, isSpecialist := lookupGoalSpecialist(name)
+	specialist, isSpecialist := resolveGoalSpecialist(runCtx.Reply.Options.AgentDefinitions, name)
 	displayName := goalSpecialistDisplayName(name)
+	if isSpecialist && strings.TrimSpace(specialist.NameZH) != "" {
+		displayName = specialist.NameZH
+	}
 	if isSpecialist {
 		if err := r.validateGoalSpecialistPhase(runCtx.Reply.RunID, specialist); err != nil {
 			return "", err

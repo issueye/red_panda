@@ -504,6 +504,48 @@ func TestRunServiceApplyProviderProfile(t *testing.T) {
 	}
 }
 
+func TestRunServiceApplyAgentDefinitions(t *testing.T) {
+	repos, service := newRunServiceTestFixture(t)
+	// Seed builtins then override analyst prompt through the managed API path.
+	agentSvc := NewAgentDefinitionService(repos)
+	if err := agentSvc.EnsureBuiltins(); err != nil {
+		t.Fatal(err)
+	}
+	row, err := repos.Agents.GetByKey("goal-analyst")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.SystemPrompt = "GATEWAY AUTHORITATIVE PROMPT"
+	row.DefaultMaxTurns = 9
+	if _, err := repos.Agents.Update(row); err != nil {
+		t.Fatal(err)
+	}
+
+	params := methods.ReplyParams{Session: methods.ReplySession{ID: "sess_agents"}}
+	if err := service.applyAgentDefinitions(&params); err != nil {
+		t.Fatal(err)
+	}
+	if len(params.Options.AgentDefinitions) < 5 {
+		t.Fatalf("expected builtin specialists, got %d", len(params.Options.AgentDefinitions))
+	}
+	var found *methods.AgentDefinitionRef
+	for i := range params.Options.AgentDefinitions {
+		if params.Options.AgentDefinitions[i].Key == "goal-analyst" {
+			found = &params.Options.AgentDefinitions[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("goal-analyst missing from reply options")
+	}
+	if found.SystemPrompt != "GATEWAY AUTHORITATIVE PROMPT" || found.DefaultMaxTurns != 9 {
+		t.Fatalf("definition not attached: %#v", found)
+	}
+	if !found.Enabled {
+		t.Fatal("expected enabled definition")
+	}
+}
+
 func TestRunServiceApplyMemoryContext(t *testing.T) {
 	repos, service := newRunServiceTestFixture(t)
 	if _, err := repos.Memory.Create(model.MemoryRecord{

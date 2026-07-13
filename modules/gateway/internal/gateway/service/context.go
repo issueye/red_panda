@@ -17,9 +17,6 @@ const (
 	contextMaxNoteTitleRune = 200
 	contextDefaultListLimit = 50
 	contextMaxListLimit     = 200
-	// contextAutoInjectLimit is how many recent notes the runtime auto-injects
-	// into each new goal segment (pinned always included, plus this many recent).
-	contextAutoInjectRecent = 10
 )
 
 var contextAllowedKinds = map[string]struct{}{
@@ -68,39 +65,6 @@ func (s ContextService) ExecuteRuntimeTool(params methods.ContextToolExecutePara
 	default:
 		return methods.ContextToolExecuteResult{}, fmt.Errorf("unsupported context tool %q", name)
 	}
-}
-
-// AutoInjectNotes returns a compact digest of the goal's pinned + most recent
-// notes for the runtime to splice into GoalContext on each new segment. It is
-// also used to brief specialist children.
-func (s ContextService) AutoInjectNotes(goalID string) ([]model.GoalNote, error) {
-	pinnedTrue := true
-	pinned, err := s.repos.Contexts.List(goalID, repository.NoteListOpts{Pinned: &pinnedTrue, Limit: contextMaxListLimit})
-	if err != nil {
-		return nil, err
-	}
-	recent, err := s.repos.Contexts.List(goalID, repository.NoteListOpts{Limit: contextAutoInjectRecent})
-	if err != nil {
-		return nil, err
-	}
-	// Merge dedup by ID, pinned first.
-	seen := map[string]struct{}{}
-	merged := make([]model.GoalNote, 0, len(pinned)+len(recent))
-	for _, n := range pinned {
-		if _, ok := seen[n.ID]; ok {
-			continue
-		}
-		seen[n.ID] = struct{}{}
-		merged = append(merged, n)
-	}
-	for _, n := range recent {
-		if _, ok := seen[n.ID]; ok {
-			continue
-		}
-		seen[n.ID] = struct{}{}
-		merged = append(merged, n)
-	}
-	return merged, nil
 }
 
 func (s ContextService) executeRead(params methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {

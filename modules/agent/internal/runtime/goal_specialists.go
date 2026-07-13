@@ -196,6 +196,43 @@ func lookupGoalSpecialist(name string) (goalSpecialist, bool) {
 	return spec, ok
 }
 
+// resolveGoalSpecialist merges Gateway-managed agent_definitions over builtin
+// specialists. Prompt, default max turns, phase, and display name come from
+// Gateway when present; tool allow/deny policy stays Runtime-owned (context
+// share tools, write isolation) so Settings cannot accidentally strip safety.
+func resolveGoalSpecialist(defs []methods.AgentDefinitionRef, name string) (goalSpecialist, bool) {
+	base, ok := lookupGoalSpecialist(name)
+	if !ok {
+		return goalSpecialist{}, false
+	}
+	key := normalizeGoalSpecialistKey(name)
+	for _, def := range defs {
+		if normalizeGoalSpecialistKey(def.Key) != key {
+			continue
+		}
+		if !def.Enabled {
+			return goalSpecialist{}, false
+		}
+		if prompt := strings.TrimSpace(def.SystemPrompt); prompt != "" {
+			base.SystemPrompt = prompt
+		}
+		if def.DefaultMaxTurns > 0 {
+			base.DefaultMaxTurns = def.DefaultMaxTurns
+		}
+		if phase := strings.TrimSpace(def.Phase); phase != "" {
+			base.Phase = phase
+		}
+		if nameZH := strings.TrimSpace(def.NameZH); nameZH != "" {
+			base.NameZH = nameZH
+		}
+		if display := strings.TrimSpace(def.Name); display != "" && base.NameZH == "" {
+			base.NameZH = display
+		}
+		return base, true
+	}
+	return base, true
+}
+
 func normalizeGoalSpecialistKey(name string) string {
 	key := strings.ToLower(strings.TrimSpace(name))
 	key = strings.ReplaceAll(key, "_", "-")

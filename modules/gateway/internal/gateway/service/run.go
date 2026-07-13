@@ -298,6 +298,10 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
+	if err := r.applyAgentDefinitions(&params); err != nil {
+		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
+		return StartRunResult{}, err
+	}
 
 	accepted, err := r.runtime.ReplyWithMode(ctx, runtimeMode, params)
 	if err != nil {
@@ -404,6 +408,36 @@ func (r RunService) applyTodoContext(params *methods.ReplyParams) error {
 		return nil
 	}
 	params.Options.TodoContext = ctx
+	return nil
+}
+
+// applyAgentDefinitions attaches enabled Gateway agent profiles so Runtime can
+// treat managed system prompts / default turns as the execution source of truth
+// for goal specialists (builtin hardcode remains fallback only).
+func (r RunService) applyAgentDefinitions(params *methods.ReplyParams) error {
+	if params == nil {
+		return nil
+	}
+	defs, err := NewAgentDefinitionService(r.repos).ListEnabled()
+	if err != nil {
+		return err
+	}
+	if len(defs) == 0 {
+		return nil
+	}
+	out := make([]methods.AgentDefinitionRef, 0, len(defs))
+	for _, d := range defs {
+		out = append(out, methods.AgentDefinitionRef{
+			Key:             d.Key,
+			Name:            d.Name,
+			NameZH:          d.NameZH,
+			Phase:           d.Phase,
+			SystemPrompt:    d.SystemPrompt,
+			DefaultMaxTurns: d.DefaultMaxTurns,
+			Enabled:         d.Enabled,
+		})
+	}
+	params.Options.AgentDefinitions = out
 	return nil
 }
 

@@ -32,6 +32,70 @@ func TestLookupGoalSpecialists(t *testing.T) {
 	}
 }
 
+func TestResolveGoalSpecialistPrefersGatewayPromptAndTurns(t *testing.T) {
+	builtin, ok := lookupGoalSpecialist("goal-analyst")
+	if !ok {
+		t.Fatal("builtin analyst")
+	}
+	defs := []methods.AgentDefinitionRef{{
+		Key:             "goal-analyst",
+		NameZH:          "自定义分析师",
+		Phase:           "analyze",
+		SystemPrompt:    "CUSTOM PROMPT FROM GATEWAY SETTINGS",
+		DefaultMaxTurns: 7,
+		Enabled:         true,
+	}}
+	spec, ok := resolveGoalSpecialist(defs, "goal-analyst")
+	if !ok {
+		t.Fatal("resolve failed")
+	}
+	if spec.SystemPrompt != "CUSTOM PROMPT FROM GATEWAY SETTINGS" {
+		t.Fatalf("prompt = %q, want gateway override", spec.SystemPrompt)
+	}
+	if spec.DefaultMaxTurns != 7 {
+		t.Fatalf("turns = %d, want 7", spec.DefaultMaxTurns)
+	}
+	if spec.NameZH != "自定义分析师" {
+		t.Fatalf("name_zh = %q", spec.NameZH)
+	}
+	// Tool policy stays Runtime-owned.
+	if len(spec.Allowlist) != len(builtin.Allowlist) {
+		t.Fatalf("allowlist should remain builtin: got %v want %v", spec.Allowlist, builtin.Allowlist)
+	}
+	for _, name := range contextShareTools {
+		found := false
+		for _, a := range spec.Allowlist {
+			if a == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("context tool %s missing after gateway merge", name)
+		}
+	}
+}
+
+func TestResolveGoalSpecialistDisabledDefinition(t *testing.T) {
+	defs := []methods.AgentDefinitionRef{{
+		Key:     "goal-analyst",
+		Enabled: false,
+	}}
+	if _, ok := resolveGoalSpecialist(defs, "goal-analyst"); ok {
+		t.Fatal("disabled gateway definition must not resolve")
+	}
+}
+
+func TestResolveGoalSpecialistFallsBackWithoutCatalog(t *testing.T) {
+	spec, ok := resolveGoalSpecialist(nil, "goal-planner")
+	if !ok || spec.Key != "goal-planner" {
+		t.Fatalf("fallback missing: %#v", spec)
+	}
+	if !strings.Contains(spec.SystemPrompt, "goal-planner") {
+		t.Fatalf("expected builtin prompt, got %q", spec.SystemPrompt)
+	}
+}
+
 func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 	spec, ok := lookupGoalSpecialist("goal-analyst")
 	if !ok {

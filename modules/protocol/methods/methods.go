@@ -129,6 +129,21 @@ type ReplyOptions struct {
 	// LogLLMRequests writes each outbound provider request body to the local
 	// diagnostic log directory (API keys are never written). Toggle from Desktop settings.
 	LogLLMRequests bool `json:"log_llm_requests,omitempty"`
+	// AgentDefinitions is the Gateway-managed specialist catalog for this reply.
+	// Runtime merges SystemPrompt / DefaultMaxTurns / Phase / NameZH over builtin
+	// goal specialists so Settings edits are the execution source of truth.
+	AgentDefinitions []AgentDefinitionRef `json:"agent_definitions,omitempty"`
+}
+
+// AgentDefinitionRef is a compact specialist profile attached to agent.reply.
+type AgentDefinitionRef struct {
+	Key             string `json:"key"`
+	Name            string `json:"name,omitempty"`
+	NameZH          string `json:"name_zh,omitempty"`
+	Phase           string `json:"phase,omitempty"`
+	SystemPrompt    string `json:"system_prompt,omitempty"`
+	DefaultMaxTurns int    `json:"default_max_turns,omitempty"`
+	Enabled         bool   `json:"enabled"`
 }
 
 type MemoryContext struct {
