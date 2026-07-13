@@ -299,6 +299,7 @@ func TestToolRunnerAcceptsEditCall(t *testing.T) {
 }
 
 func TestToolRunnerRunsListSlashCommand(t *testing.T) {
+	t.Setenv("RED_PANDA_SLASH_TOOLS", "1")
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, "README.md"), "red panda\n")
 
@@ -313,6 +314,14 @@ func TestToolRunnerRunsListSlashCommand(t *testing.T) {
 	}
 	if !strings.Contains(output, "README.md") {
 		t.Fatalf("expected output to include README.md, got:\n%s", output)
+	}
+}
+
+func TestToolRunnerSlashParseDisabledByDefault(t *testing.T) {
+	t.Setenv("RED_PANDA_SLASH_TOOLS", "")
+	runner := ToolRunner{}
+	if _, ok := runner.Parse("/list .", "run_list"); ok {
+		t.Fatal("slash tools must be off by default")
 	}
 }
 

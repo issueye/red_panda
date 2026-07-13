@@ -70,10 +70,14 @@ func EvaluateToolPolicy(options methods.ReplyOptions, call tools.Call) ToolDecis
 	if containsString(options.ToolDenylist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is denied by tool_denylist"}
 	}
-	if len(options.ToolAllowlist) > 0 && !containsString(options.ToolAllowlist, call.Name) {
+	allowlist := effectiveToolAllowlist(options)
+	if len(allowlist) > 0 && !containsString(allowlist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is not in tool_allowlist"}
 	}
-	if !opsToolExposed(options, call.Name) {
+	// opsToolExposed may treat explicit client allowlist as opt-in for ops tools.
+	eff := options
+	eff.ToolAllowlist = allowlist
+	if !opsToolExposed(eff, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "ops tool is not enabled (set debug_tools or RED_PANDA_DEBUG_TOOLS)"}
 	}
 
@@ -122,7 +126,111 @@ func containsString(items []string, value string) bool {
 	return false
 }
 
+// goalModeDefaultAllowlist is applied when a Goal is active (checklist O8).
+// It keeps long-horizon runs focused and excludes memory / ops-only tools.
+// Client tool_allowlist is intersected with this set when both are present.
+var goalModeDefaultAllowlist = []string{
+	"workspace.read_file",
+	"workspace.list",
+	"workspace.stats",
+	"workspace.grep",
+	"workspace.write_file",
+	"workspace.edit_file",
+	"workspace.diff_file",
+	"workspace.apply_patch",
+	"shell.exec",
+	"todo.write",
+	"todo.list",
+	"goal.write",
+	"goal.update",
+	"goal.checkpoint",
+	"goal.complete",
+	"goal.list",
+	"context.read",
+	"context.search",
+	"context.write",
+	"context.replace",
+	"context.delete",
+	"subagent.run",
+	"subagent.list",
+	"subagent.cancel",
+	"subagent.reset",
+	"skill.list",
+	"skill.run",
+	"web.search",
+	"web.fetch",
+}
+
+func goalModeTightensTools(options methods.ReplyOptions) bool {
+	if options.GoalsEnabled != nil && !*options.GoalsEnabled {
+		return false
+	}
+	if options.GoalsEnabled != nil && *options.GoalsEnabled {
+		return true
+	}
+	if options.ContinueGoal {
+		return true
+	}
+	if strings.TrimSpace(options.GoalID) != "" {
+		return true
+	}
+	if options.GoalContext != nil && strings.TrimSpace(options.GoalContext.GoalID) != "" {
+		return true
+	}
+	return false
+}
+
+// effectiveToolAllowlist returns the allowlist used for schema + policy.
+// Goal mode injects a default allowlist when the client did not send one;
+// an explicit client list is intersected with the Goal default so clients
+// can only tighten further.
+func effectiveToolAllowlist(options methods.ReplyOptions) []string {
+	client := options.ToolAllowlist
+	if !goalModeTightensTools(options) {
+		return client
+	}
+	if len(client) == 0 {
+		out := make([]string, len(goalModeDefaultAllowlist))
+		copy(out, goalModeDefaultAllowlist)
+		return out
+	}
+	return intersectAllowlist(client, goalModeDefaultAllowlist)
+}
+
+func intersectAllowlist(a, b []string) []string {
+	set := map[string]struct{}{}
+	for _, item := range b {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			set[item] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(a))
+	seen := map[string]struct{}{}
+	for _, item := range a {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := set[item]; !ok {
+			continue
+		}
+		if _, dup := seen[item]; dup {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
 func availableToolsForOptions(definitions []tools.Definition, options methods.ReplyOptions) []tools.Definition {
+	allowlist := effectiveToolAllowlist(options)
+	// Copy so opsToolExposed / denylist checks still see original options,
+	// but allowlist enforcement uses the effective list.
+	eff := options
+	eff.ToolAllowlist = allowlist
+
 	filtered := make([]tools.Definition, 0, len(definitions))
 	for _, definition := range definitions {
 		if options.GoalsEnabled != nil && !*options.GoalsEnabled && strings.HasPrefix(definition.Name, "goal.") {
@@ -131,10 +239,10 @@ func availableToolsForOptions(definitions []tools.Definition, options methods.Re
 		if containsString(options.ToolDenylist, definition.Name) {
 			continue
 		}
-		if len(options.ToolAllowlist) > 0 && !containsString(options.ToolAllowlist, definition.Name) {
+		if len(allowlist) > 0 && !containsString(allowlist, definition.Name) {
 			continue
 		}
-		if !opsToolExposed(options, definition.Name) {
+		if !opsToolExposed(eff, definition.Name) {
 			continue
 		}
 		filtered = append(filtered, definition)

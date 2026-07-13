@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildRunStartOptions, splitOptionList } from './runOptions.js';
+import { buildRunStartOptions, defaultRunSettings, splitOptionList } from './runOptions.js';
+
+test('default subagent backend prefers runtime_process over process_pool', () => {
+  assert.equal(defaultRunSettings.subAgentBackend, 'runtime_process');
+  const options = buildRunStartOptions({}, { root_path: 'D:/ws' }, 'hello');
+  assert.equal(options.subagent_backend, 'runtime_process');
+});
 
 test('splitOptionList trims empty entries', () => {
   assert.deepEqual(

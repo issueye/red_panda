@@ -669,7 +669,22 @@ func (ToolRunner) AvailableTools() []tools.Definition {
 	}
 }
 
+// slashToolsEnabled gates Temporary Triggers (/read, /shell, …). Default off
+// so plain chat text is never parsed as tools (checklist R6). Enable with
+// RED_PANDA_SLASH_TOOLS=1 for local smoke scripts and unit tests.
+func slashToolsEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_SLASH_TOOLS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func (ToolRunner) Parse(text string, runID string) (ToolInvocation, bool) {
+	if !slashToolsEnabled() {
+		return ToolInvocation{}, false
+	}
 	line := strings.TrimSpace(text)
 	switch {
 	case strings.HasPrefix(line, "/tool read "):

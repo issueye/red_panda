@@ -5,7 +5,8 @@ export const defaultRunSettings = {
   permissionMode: 'strict',
   providerProfileId: '',
   spawnSubAgents: false,
-  subAgentBackend: 'process_pool',
+  // One-shot child process by default; process_pool remains available as advanced.
+  subAgentBackend: 'runtime_process',
   model: '',
   toolAllowlist: '',
   toolDenylist: '',

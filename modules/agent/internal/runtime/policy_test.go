@@ -154,3 +154,61 @@ func TestEvaluateToolPolicyDeniesOpsToolsWhenHidden(t *testing.T) {
 		t.Fatalf("expected allow when DebugTools, got %s (%s)", decision.Action, decision.Reason)
 	}
 }
+
+func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
+	t.Setenv("RED_PANDA_DEBUG_TOOLS", "")
+	enabled := true
+	definitions := []tools.Definition{
+		{Name: "workspace.read_file"},
+		{Name: "shell.exec"},
+		{Name: "goal.write"},
+		{Name: "context.read"},
+		{Name: "subagent.run"},
+		{Name: "memory.create"},
+		{Name: "skill.run"},
+		{Name: "skill.create"},
+		{Name: "web.search"},
+	}
+	// Bound goal with no client allowlist → Goal default set.
+	filtered := availableToolsForOptions(definitions, methods.ReplyOptions{
+		GoalsEnabled: &enabled,
+	})
+	names := map[string]bool{}
+	for _, d := range filtered {
+		names[d.Name] = true
+	}
+	for _, keep := range []string{"workspace.read_file", "shell.exec", "goal.write", "context.read", "subagent.run", "skill.run", "web.search"} {
+		if !names[keep] {
+			t.Fatalf("goal mode should keep %s: %#v", keep, names)
+		}
+	}
+	if names["memory.create"] {
+		t.Fatalf("goal mode should hide memory.create by default: %#v", names)
+	}
+	if names["skill.create"] {
+		t.Fatalf("goal mode should still hide ops skill.create: %#v", names)
+	}
+
+	// Client allowlist intersected with goal defaults (cannot expand past defaults).
+	narrow := availableToolsForOptions(definitions, methods.ReplyOptions{
+		GoalsEnabled:  &enabled,
+		ToolAllowlist: []string{"workspace.read_file", "memory.create"},
+	})
+	if len(narrow) != 1 || narrow[0].Name != "workspace.read_file" {
+		t.Fatalf("intersect should drop memory.create: %#v", narrow)
+	}
+
+	// Non-goal chat keeps memory tools (minus ops-only).
+	disabled := false
+	open := availableToolsForOptions(definitions, methods.ReplyOptions{GoalsEnabled: &disabled})
+	openNames := map[string]bool{}
+	for _, d := range open {
+		openNames[d.Name] = true
+	}
+	if !openNames["memory.create"] {
+		t.Fatalf("non-goal chat should expose memory.create: %#v", openNames)
+	}
+	if openNames["goal.write"] {
+		t.Fatalf("goals disabled should hide goal.write: %#v", openNames)
+	}
+}

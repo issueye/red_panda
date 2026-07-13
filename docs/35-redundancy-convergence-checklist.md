@@ -1,7 +1,7 @@
 # 代码冗余与功能过度实现 — 收敛清单
 
 Updated: 2026-07-13  
-Status: in progress (Wave 0 done; Wave 1 R1a/R1c/R4 done; Wave 2 O1/O3 done)  
+Status: in progress (Waves 0–2 core + O2/O4 done; O5a/R1b/Wave4+ remaining)  
 依据：全项目评估 + Goal 上下文共享后审计（结构冗余 / 语义重叠 / 过度实现）
 
 ## 使用方式
@@ -89,9 +89,9 @@ go test ./modules/protocol/... ./modules/agent/... ./modules/gateway/...
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **O1** | 默认隐藏 subagent 运维工具 | 过度暴露 | M | done | `opsOnlyTools` + `availableToolsForOptions`/`EvaluateToolPolicy`；`subagent.pool_*` 默认隐藏；`RED_PANDA_DEBUG_TOOLS` / `DebugTools` / allowlist 可开 | 默认 schema 无 pool_*；debug/allowlist 可开；policy 测绿 | — |
 | **O3** | Skill 管理工具移出默认主循环 | 过度暴露 | M | done | `skill.create/update/delete` 列入 ops-only；`skill.list`/`skill.run` 仍默认暴露；HTTP/Desktop CRUD 不受影响 | 默认 schema 无 create/update/delete；debug 下仍可测 skill.create | — |
-| **O8** | Goal 模式默认工具白名单 | 选择税 | M | todo | `goals_enabled` 或 bound goal 时，Runtime/Gateway 施加收紧 allowlist：workspace + shell(视 policy) + todo + goal + context + subagent.run；排除 pool/skill 管理/memory 可选 | Goal run 工具集可测；非 Goal run 行为不变 | O1/O3 可并行 |
+| **O8** | Goal 模式默认工具白名单 | 选择税 | M | done | `goalModeDefaultAllowlist` + `effectiveToolAllowlist`；goals_enabled/bound goal 时默认收紧；客户端 allowlist 取交集 | Goal 隐藏 memory/ops；非 Goal 不变；policy 测绿 | O1/O3 |
 | **O5a** | Goal 设置面隐藏未稳预算 | 过度 | L | todo | Desktop：`max_auto_continues` 等未完全关门的项默认折叠/高级区；文案标明实验性 | 默认 UI 更短；高级仍可配 | — |
-| **R6** | Slash 命令降级 | 入口冗余 | L | todo | `Parse` slash 仅 `RED_PANDA_SLASH_TOOLS=1` 或 test build tag；README Temporary Triggers 标注 debug | 默认纯文本不再触发 /read；e2e 改走 tool_calls 或开 env | — |
+| **R6** | Slash 命令降级 | 入口冗余 | L | done | `Parse` 默认关闭；`RED_PANDA_SLASH_TOOLS=1` 开启 | 默认 `/list` 不解析；env 开启后测仍绿 | — |
 
 **建议提交：**
 
@@ -112,8 +112,8 @@ go test ./modules/agent/internal/runtime/ -run "AvailableTools|Policy|Goal|Speci
 
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **O2** | process_pool 默认不可见 | 过度产品化 | L | todo | Settings 默认 backend=`runtime_process`；pool 放“高级”；文档同步 | 新用户看不到池参数；API 仍接受 pool | — |
-| **O4** | MCP 能力诚实化 | 配置超前 | M | todo | **短期**：Discovery UI 标注“只读发现，不可调用”；README 单一表述。**中期另项**：实现 `tools/call`（不在本清单强制） | 用户不再误以为 MCP 已可执行 | — |
+| **O2** | process_pool 默认不可见 | 过度产品化 | L | done | 默认 `subAgentBackend=runtime_process`；Settings 将 pool 标为高级 | 默认选项为 runtime_process；API 仍接受 process_pool | — |
+| **O4** | MCP 能力诚实化 | 配置超前 | M | done | Discovery UI 标注「只读发现，对话中尚不可调用 MCP 工具」 | Settings MCP 面板可见只读说明 | — |
 | **O2b** |（可选）in-process planner 收敛 | 历史包袱 | M | todo | `/subagent` 与默认 planner 路径并入 `subagent.run` 或标注 deprecated | 无两套 subagent 叙事；测不回归 cancel | O2 |
 
 **建议提交：**
@@ -227,12 +227,12 @@ L / M / H — <why>
 | --- | --- | --- | --- | --- | --- |
 | 0 | R3, R2, R2a | 0 | 0 | 2 | 1 |
 | 1 | R1a, R1b, R1c, R4 | 1 | 0 | 3 | 0 |
-| 2 | O1, O3, O8, O5a, R6 | 3 | 0 | 2 | 0 |
-| 3 | O2, O4, O2b | 3 | 0 | 0 | 0 |
+| 2 | O1, O3, O8, O5a, R6 | 1 | 0 | 4 | 0 |
+| 3 | O2, O4, O2b | 1 | 0 | 2 | 0 |
 | 4 | R5, R5b, O5b | 3 | 0 | 0 | 0 |
 | 5 | R7a, R7b, R7c, O7, O6 | 5 | 0 | 0 | 0 |
 | 6 | S1, S2, S3 | 3 | 0 | 0 | 0 |
-| **合计** | **26** | **18** | **0** | **7** | **1** |
+| **合计** | **26** | **14** | **0** | **11** | **1** |
 
 ---
 

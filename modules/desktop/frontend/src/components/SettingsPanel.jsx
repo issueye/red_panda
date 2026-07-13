@@ -53,8 +53,8 @@ const PERMISSION_MODES = [
 ];
 
 const SUB_AGENT_BACKENDS = [
-  ['process_pool', '进程池（推荐）'],
-  ['runtime_process', '运行时进程（一次性）'],
+  ['runtime_process', '运行时进程（推荐）'],
+  ['process_pool', '进程池（高级）'],
   ['in_process', '进程内（仅 planner）'],
 ];
 
@@ -211,11 +211,20 @@ function ManagerItem({ active, children, disabled = false, enabled, icon: Icon, 
   );
 }
 
+function McpDiscoveryReadOnlyNotice() {
+  return (
+    <small className="mcp-discovery-notice" data-testid="mcp-discovery-readonly-notice">
+      只读发现：当前仅可查看服务器信息与工具清单，对话中尚不可调用 MCP 工具（tools/call 未接入）。
+    </small>
+  );
+}
+
 function McpDiscoveryPanel({ state }) {
   if (!state) {
     return (
       <section className="mcp-discovery" data-testid="mcp-discovery-empty">
-        <span className="mcp-discovery-heading">可用工具</span>
+        <span className="mcp-discovery-heading">可用工具（只读）</span>
+        <McpDiscoveryReadOnlyNotice />
         <small>使用列表中的发现按钮读取服务器信息和工具清单。</small>
       </section>
     );
@@ -224,7 +233,7 @@ function McpDiscoveryPanel({ state }) {
     return (
       <section className="mcp-discovery" data-testid="mcp-discovery-loading">
         <span className="mcp-discovery-heading">正在发现</span>
-        <small>正在连接服务器并读取工具清单。</small>
+        <small>正在连接服务器并读取工具清单（只读，不会调用工具）。</small>
       </section>
     );
   }
@@ -240,7 +249,8 @@ function McpDiscoveryPanel({ state }) {
   const servers = state.result?.servers || [];
   return (
     <section className="mcp-discovery" data-testid="mcp-discovery-result">
-      <span className="mcp-discovery-heading">可用工具</span>
+      <span className="mcp-discovery-heading">可用工具（只读）</span>
+      <McpDiscoveryReadOnlyNotice />
       {servers.length === 0 ? <small>服务器未返回发现结果。</small> : servers.map((server, index) => {
         const healthy = ['connected', 'healthy', 'ready', 'ok', 'success'].includes(server.status);
         const info = [server.serverInfo?.name, server.serverInfo?.version].filter(Boolean).join(' ');
@@ -1275,10 +1285,10 @@ export function SettingsPanel({
             settingKey="subAgentBackend"
             onUpdate={updateSetting}
             tooltip={
-              '进程池（推荐）：复用子代理进程。\n'
-              + '运行时进程：每次一次性子进程。\n'
+              '运行时进程（推荐）：每次子任务独立子进程，隔离清晰。\n'
+              + '进程池（高级）：复用空闲子进程，适合高频短任务。\n'
               + '进程内：仅 planner 等轻量子代理。\n'
-              + '主代理可用 subagent.run / list / cancel / reset / pool_* 管理子代理与进程池。'
+              + '进程池运维工具（pool_*）默认不对模型暴露，需 debug 开关。'
             }
           />
           <SettingTextInput

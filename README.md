@@ -110,16 +110,17 @@ Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gat
 
 ## Temporary Triggers
 
-- Plain text: default provider.
-- `/permission`: Runtime checkpoint permission request.
-- `/subagent`: subagent event. The default path remains the in-process `planner`; `subagent_backend=runtime_process` runs the subagent in a child `red-panda-agent` process; `subagent_backend=process_pool` runs it through the reusable child process pool.
-- `/read README.md`: low-risk file read.
-- `/list scripts`: low-risk workspace listing.
-- `/grep red_panda README.md`: low-risk workspace search.
-- `/diff README.md old text => new text`: low-risk single-file unified diff preview through `workspace.diff_file`.
-- `/shell echo rp-smoke`: high-risk shell command with permission.
-- `/write tmp/demo.txt hello`: high-risk file write with permission.
-- `/patch <unified patch>`: high-risk workspace-scoped unified patch application through `workspace.apply_patch`.
+- Plain text: default provider (tool calls via OpenAI-compatible `tool_calls`).
+- Slash workspace tools (`/read`, `/list`, `/shell`, …) are **debug-only**: set `RED_PANDA_SLASH_TOOLS=1` to enable Runtime `Parse`. Desktop command palette still uses `/goal`, `/permission`, etc. at the UI layer.
+- `/permission`: Runtime checkpoint permission request (when triggered via Desktop/options).
+- `/subagent`: subagent event. Default child backend is `runtime_process`; `process_pool` remains available as advanced.
+- With `RED_PANDA_SLASH_TOOLS=1`:
+  - `/read README.md`: low-risk file read.
+  - `/list scripts`: low-risk workspace listing.
+  - `/grep red_panda README.md`: low-risk workspace search.
+  - `/diff README.md old text => new text`: low-risk single-file unified diff preview.
+  - `/shell echo rp-smoke`: high-risk shell with permission.
+  - `/write` / `/patch`: high-risk workspace writes.
 - `read file README.md`: provider requests `workspace.read_file`.
 - `list files scripts`: provider requests `workspace.list`.
 - `grep red_panda README.md`: provider requests `workspace.grep`.
