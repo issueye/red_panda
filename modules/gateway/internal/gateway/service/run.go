@@ -298,7 +298,10 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
+	// From this point the Goal may be active and bound to runID. Any later
+	// admission failure must pause the Goal so it is not left stuck active.
 	if err := r.applyAgentDefinitions(&params); err != nil {
+		_ = NewGoalService(r.repos).PauseByRun(runID, "run_failed")
 		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}

@@ -294,6 +294,147 @@ func TestDatabaseRejectsSecondActiveGoal(t *testing.T) {
 	}
 }
 
+func TestPendingAndPausedCannotCheckpointOrComplete(t *testing.T) {
+	svc, sessionID := newGoalTestService(t)
+	// Pending (no activate)
+	write, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_pending", SessionID: sessionID, ToolCallID: "t1", ToolName: "goal.write",
+		Arguments: map[string]any{"objective": "later", "success_criteria": "done", "activate": false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"goal.checkpoint", "goal.complete"} {
+		args := map[string]any{"goal_id": write.Goal.ID, "summary": "nope"}
+		if tool == "goal.complete" {
+			args["status"] = "succeeded"
+		}
+		if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+			RunID: "run_pending", SessionID: sessionID, ToolCallID: tool, ToolName: tool, Arguments: args,
+		}); err == nil {
+			t.Fatalf("%s on pending goal should fail", tool)
+		}
+	}
+
+	// Activate then pause
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_active", SessionID: sessionID, ToolCallID: "act", ToolName: "goal.update",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "activate": true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.PauseByRun("run_active", "awaiting_continue"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"goal.checkpoint", "goal.complete"} {
+		args := map[string]any{"goal_id": write.Goal.ID, "summary": "nope"}
+		if tool == "goal.complete" {
+			args["status"] = "succeeded"
+		}
+		if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+			RunID: "run_active", SessionID: sessionID, ToolCallID: "p-" + tool, ToolName: tool, Arguments: args,
+		}); err == nil {
+			t.Fatalf("%s on paused goal should fail", tool)
+		}
+	}
+}
+
+func TestToolCancelSetsCancelRunID(t *testing.T) {
+	svc, sessionID := newGoalTestService(t)
+	write, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_cancel_tool", SessionID: sessionID, ToolCallID: "t1", ToolName: "goal.write",
+		Arguments: map[string]any{"objective": "x", "success_criteria": "y", "activate": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Wrong run cannot cancel active goal
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "other_run", SessionID: sessionID, ToolCallID: "bad", ToolName: "goal.update",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "action": "cancel"},
+	}); err == nil {
+		t.Fatal("expected cancel from unbound run to fail")
+	}
+	res, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_cancel_tool", SessionID: sessionID, ToolCallID: "ok", ToolName: "goal.update",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "action": "cancel"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Goal == nil || res.Goal.Status != "cancelled" {
+		t.Fatalf("cancel goal: %#v", res.Goal)
+	}
+	if res.CancelRunID != "run_cancel_tool" {
+		t.Fatalf("CancelRunID = %q, want run_cancel_tool", res.CancelRunID)
+	}
+	// Second cancel is idempotent and does not re-request run cancel
+	again, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_cancel_tool", SessionID: sessionID, ToolCallID: "again", ToolName: "goal.update",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "action": "cancel"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.CancelRunID != "" {
+		t.Fatalf("idempotent cancel should not set CancelRunID, got %q", again.CancelRunID)
+	}
+}
+
+func TestCheckpointCASRejectsAfterComplete(t *testing.T) {
+	svc, sessionID := newGoalTestService(t)
+	write, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_cas", SessionID: sessionID, ToolCallID: "t1", ToolName: "goal.write",
+		Arguments: map[string]any{"objective": "x", "success_criteria": "y", "activate": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_cas", SessionID: sessionID, ToolCallID: "t2", ToolName: "goal.complete",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "status": "succeeded", "summary": "done"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_cas", SessionID: sessionID, ToolCallID: "t3", ToolName: "goal.checkpoint",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "summary": "late"},
+	}); err == nil {
+		t.Fatal("checkpoint after complete should fail")
+	}
+	got, err := svc.Get(sessionID, write.Goal.ID)
+	if err != nil || got.Status != "succeeded" {
+		t.Fatalf("status overwritten: %#v %v", got, err)
+	}
+	if got.CheckpointSummary == "late" {
+		t.Fatal("late checkpoint mutated terminal goal")
+	}
+}
+
+func TestCancelGoalIdempotentOnTerminal(t *testing.T) {
+	svc, sessionID := newGoalTestService(t)
+	write, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_idem", SessionID: sessionID, ToolCallID: "t1", ToolName: "goal.write",
+		Arguments: map[string]any{"objective": "x", "success_criteria": "y", "activate": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
+		RunID: "run_idem", SessionID: sessionID, ToolCallID: "t2", ToolName: "goal.complete",
+		Arguments: map[string]any{"goal_id": write.Goal.ID, "status": "failed", "summary": "boom"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dto, err := svc.CancelGoal(sessionID, write.Goal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto.Status != "failed" {
+		t.Fatalf("cancel must not overwrite terminal status, got %s", dto.Status)
+	}
+}
+
 func TestCreateUserInitiatedAndBind(t *testing.T) {
 	svc, sessionID := newGoalTestService(t)
 	created, err := svc.CreateUserInitiated(sessionID, "实现登录", "", "")

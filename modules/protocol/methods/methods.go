@@ -305,10 +305,14 @@ type GoalToolExecuteParams struct {
 
 // GoalToolExecuteResult is Gateway -> Runtime for goal tools.
 type GoalToolExecuteResult struct {
-	Status string    `json:"status"`
-	Output string    `json:"output,omitempty"`
-	Goal   *GoalDTO  `json:"goal,omitempty"`
+	Status string   `json:"status"`
+	Output string   `json:"output,omitempty"`
+	Goal   *GoalDTO `json:"goal,omitempty"`
 	Goals  []GoalDTO `json:"goals,omitempty"`
+	// CancelRunID is set when a goal tool terminalized an active Goal that had a
+	// bound run. Gateway cancels that run after the tool response is returned
+	// (async) so the tool RPC cannot deadlock against AgentCancel.
+	CancelRunID string `json:"cancel_run_id,omitempty"`
 }
 
 // ContextToolExecuteParams is Runtime -> Gateway for context.* tools (goal scratchpad).

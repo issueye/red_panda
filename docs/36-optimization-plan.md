@@ -83,7 +83,7 @@
 
 | 包 ID | 内容 | 主要位置 | 风险 | 依赖 |
 | --- | --- | --- | --- | --- |
-| **A1** | 终态 CAS：checkpoint/complete/cancel 条件更新；未绑定 run 不可变 | `gateway/service/goal.go`、repo | M | — |
+| **A1** | 终态 CAS：checkpoint/complete/cancel 条件更新；未绑定 run 不可变 | `gateway/service/goal.go`、repo | M | — ✅ 已落地（含 tool cancel 连带 cancel run、bind 后 admission 失败 pause） |
 | **A2** | 每会话至多一个 active（DB + service）；stale active 修复后再 bind | model/migrate、goal service | M | A1 可并行启动 |
 | **A3** | Segment ledger 幂等 `(goal_id, run_id, segment_index)`；计数与 ledger 同事务 | `GoalSegment`、goal service | M | A1 |
 | **A4** | 预算权威：Goal 下压 client `max_tool_turns`；wall-time 进 Runtime deadline | run.go、goal_loop、ReplyOptions | M | A3 |

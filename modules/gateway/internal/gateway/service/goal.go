@@ -68,14 +68,19 @@ func (s GoalService) CancelGoal(sessionID, goalID string) (methods.GoalDTO, erro
 	}
 	switch row.Status {
 	case "succeeded", "failed", "cancelled":
+		// Idempotent: terminal Goals are left unchanged.
 		return goalDTO(row), nil
+	}
+	lastRunID := row.ActiveRunID
+	if lastRunID == "" {
+		lastRunID = row.LastRunID
 	}
 	now := time.Now().UTC()
 	changed, err := s.repos.Goals.TransitionStatus(row.ID, sessionID,
 		[]string{"pending", "active", "paused"}, "", map[string]any{
 			"status":        "cancelled",
 			"active_run_id": "",
-			"last_run_id":   row.ActiveRunID,
+			"last_run_id":   lastRunID,
 			"finished_at":   &now,
 		})
 	if err != nil {
@@ -85,8 +90,10 @@ func (s GoalService) CancelGoal(sessionID, goalID string) (methods.GoalDTO, erro
 	if err != nil {
 		return methods.GoalDTO{}, err
 	}
-	if !changed && updated.Status != "cancelled" {
-		return methods.GoalDTO{}, fmt.Errorf("goal is already terminal: %s", updated.Status)
+	if !changed {
+		// Concurrent complete/fail/cancel won the CAS; surface the winner without
+		// error so callers treat cancel as best-effort terminalization.
+		return goalDTO(updated), nil
 	}
 	return goalDTO(updated), nil
 }
@@ -544,15 +551,21 @@ func (s GoalService) executeUpdate(params methods.GoalToolExecuteParams) (method
 		if row.Status == "active" && row.ActiveRunID != params.RunID {
 			return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is not bound to this run")
 		}
+		// Capture before CancelGoal clears active_run_id (invariant: cancel stops the run).
+		boundRunID := row.ActiveRunID
 		dto, err := s.CancelGoal(params.SessionID, goalID)
 		if err != nil {
 			return methods.GoalToolExecuteResult{}, err
 		}
-		return methods.GoalToolExecuteResult{
+		res := methods.GoalToolExecuteResult{
 			Status: "completed",
 			Output: runtimeGoalOutput("goal.update", &dto, nil, map[string]any{"action": "cancel"}),
 			Goal:   &dto,
-		}, nil
+		}
+		if boundRunID != "" && dto.Status == "cancelled" {
+			res.CancelRunID = boundRunID
+		}
+		return res, nil
 	}
 	if row.Status == "succeeded" || row.Status == "failed" || row.Status == "cancelled" {
 		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is terminal")
@@ -560,6 +573,13 @@ func (s GoalService) executeUpdate(params methods.GoalToolExecuteParams) (method
 	if row.Status == "active" && row.ActiveRunID != params.RunID {
 		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is not bound to this run")
 	}
+	// CAS filter must use the pre-mutation binding: only already-active goals
+	// pin active_run_id. pending/paused activate must not require a prior bind.
+	casActiveRunID := ""
+	if row.Status == "active" {
+		casActiveRunID = row.ActiveRunID
+	}
+	fromStatuses := []string{row.Status}
 	if v := strings.TrimSpace(stringArgFromMap(params.Arguments, "title")); v != "" {
 		row.Title = truncateRunes(v, goalMaxTitleRune)
 	}
@@ -593,12 +613,8 @@ func (s GoalService) executeUpdate(params methods.GoalToolExecuteParams) (method
 			}
 		}
 	}
-	activeRunID := ""
-	if row.Status == "active" {
-		activeRunID = params.RunID
-	}
 	changed, err := s.repos.Goals.TransitionStatus(row.ID, params.SessionID,
-		[]string{"pending", "paused", "active"}, activeRunID, map[string]any{
+		fromStatuses, casActiveRunID, map[string]any{
 			"title":            row.Title,
 			"objective":        row.Objective,
 			"success_criteria": row.SuccessCriteria,

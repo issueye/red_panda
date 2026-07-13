@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -64,7 +65,22 @@ func Run(ctx context.Context, cfg Config) error {
 			if err := json.Unmarshal(params, &req); err != nil {
 				return nil, fmt.Errorf("invalid goal tool params")
 			}
-			return services.Goal.ExecuteRuntimeTool(req)
+			result, err := services.Goal.ExecuteRuntimeTool(req)
+			if err != nil {
+				return nil, err
+			}
+			// Cancel the bound run after the tool RPC returns so we never call
+			// AgentCancel while the Runtime is still blocked on this request.
+			if result.CancelRunID != "" {
+				runToCancel := result.CancelRunID
+				result.CancelRunID = ""
+				go func() {
+					cancelCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer cancel()
+					_ = services.Run.Cancel(cancelCtx, runToCancel, "goal cancelled")
+				}()
+			}
+			return result, nil
 		case methods.ContextToolExecute:
 			var req methods.ContextToolExecuteParams
 			if err := json.Unmarshal(params, &req); err != nil {
