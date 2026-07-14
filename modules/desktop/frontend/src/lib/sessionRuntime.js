@@ -38,6 +38,10 @@ export function createEmptySessionRuntime(overrides = {}) {
     goalHydrated: false,
     goalExpanded: false,
     goalBusy: false,
+    conversationTabs: [{
+      id: 'main', kind: 'main', title: '主对话', closable: false,
+    }],
+    activeConversationTab: 'main',
     ...overrides,
   };
 }

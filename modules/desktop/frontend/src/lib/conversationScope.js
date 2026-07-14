@@ -9,7 +9,7 @@ export function filterMainPermissions(permissions = []) { return [...permissions
 
 function matchesWorker(scope, item) {
   if (!scope || !item) return false;
-  if (scope.assignmentId && item.assignmentId === scope.assignmentId) return true;
+  if (scope.assignmentId && item.assignmentId) return item.assignmentId === scope.assignmentId;
   return Boolean(scope.workerId && item.workerId === scope.workerId);
 }
 

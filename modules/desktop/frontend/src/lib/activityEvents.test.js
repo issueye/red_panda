@@ -60,6 +60,15 @@ test('summaries classify tool, permission, error and terminal events', () => {
   assert.equal(classifyRunEventKind('finish', { status: 'completed' }), 'done');
 });
 
+test('worker assignment summaries expose isolated retry progress', () => {
+  const summary = summarizeRunEvent(event({
+    type: 'worker_assignment_updated',
+    payload: { status: 'failed', attempt: 1, retrying: true, error: 'timeout' },
+  }));
+  assert.match(summary, /第 1 次失败/);
+  assert.match(summary, /第 2 次尝试/);
+});
+
 test('filtering, grouping and options use stable run_seq ordering', () => {
   const items = [
     event({ event_id: 'evt_3', run_seq: 3, type: 'finish', payload: { status: 'completed' } }),

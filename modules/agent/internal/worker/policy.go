@@ -29,8 +29,8 @@ var DelegatedDenylist = []string{
 
 var workerNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
-// recommendedSubagentTurns 等于文件数量加上摘要和分析预留回合。
-// 没有人为上限，预算随目录规模增长。
+// RecommendedTurns returns recommended turns = file count + analysis/summary reserve.
+// No artificial upper bound; budget scales with directory size.
 func RecommendedTurns(fileCount int) int {
 	if fileCount < 1 {
 		fileCount = 1
@@ -38,7 +38,7 @@ func RecommendedTurns(fileCount int) int {
 	return fileCount + SummaryTurns
 }
 
-// effectiveSubagentToolTurns 确定专业子代理预算。
+// EffectiveToolTurns determines tool turn budget for a delegated worker.
 // 优先级：显式 max_turns > 基于 file_count 的公式 > 默认值。
 // 没有硬性最大值，回合数会随待分析文件数量增长。
 func EffectiveToolTurns(explicit int, fileCount int) int {

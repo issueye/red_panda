@@ -754,7 +754,8 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 // 例如 shell、web、Worker 和 skill。
 func toolTimeoutFor(name string) time.Duration {
 	switch name {
-	case "shell.exec", "web.search", "web.fetch", "skill.run", "worker.delegate", "worker.delegate":
+	case "shell.exec", "web.search", "web.fetch", "skill.run", "worker.delegate",
+		"worker.send", "worker.receive":
 		return 0
 	case "memory.list", "memory.create", "memory.update", "memory.delete",
 		"todo.write", "todo_write", "todo.list",

@@ -42,7 +42,7 @@ func TestWorkerContractJSONRoundTrip(t *testing.T) {
 		Message WorkerMessage `json:"message"`
 	}{
 		Pool: PoolSnapshot{
-			Configured: 2,
+			Configured: 8,
 			Ready:      1,
 			Busy:       1,
 			Running:    1,
@@ -244,7 +244,7 @@ func TestWorkerRPCPayloadsJSONRoundTrip(t *testing.T) {
 		{"message receive params", WorkerMessageReceiveParams{TimeoutMS: 5000}},
 		{"message receive result", WorkerMessageReceiveResult{Found: true, Message: WorkerMessage{ID: "message-01", RunID: "run-01", FromWorkerID: "worker-01", FromAssignmentID: "assignment-01", ToWorkerID: "worker-02", ToAssignmentID: "assignment-02", Kind: MessageKindUpdate, Payload: json.RawMessage(`{"progress":50}`), CreatedAt: now, ExpiresAt: now.Add(time.Minute)}}},
 		{"pool status params", WorkerPoolStatusParams{}},
-		{"pool status result", WorkerPoolStatusResult{Pool: PoolSnapshot{Configured: 2, Workers: []WorkerRef{}, Assignments: []AssignmentRecord{}}}},
+		{"pool status result", WorkerPoolStatusResult{Pool: PoolSnapshot{Configured: 8, Workers: []WorkerRef{}, Assignments: []AssignmentRecord{}}}},
 	}
 
 	for _, tc := range cases {

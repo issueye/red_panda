@@ -80,7 +80,17 @@ type RunEventDTO struct {
 }
 
 func NewRunService(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclient.Client) RunService {
-	return RunService{repos: repos, hub: hub, runtime: runtime, startMu: &sync.Mutex{}}
+	service := RunService{repos: repos, hub: hub, runtime: runtime, startMu: &sync.Mutex{}}
+	if runtime != nil {
+		runtime.SetRunExitHandler(service.HandleRuntimeExit)
+	}
+	return service
+}
+
+// RecoverStaleRunsOnStartup marks any leftover "running"/"waiting_permission" runs as failed.
+// Call this exactly once during gateway boot to release the concurrency budget after crashes/restarts.
+func (r RunService) RecoverStaleRunsOnStartup() (int64, error) {
+	return r.repos.Runs.RecoverStaleRuns()
 }
 
 func (r RunService) RuntimeStatus() map[string]any {
@@ -273,6 +283,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 			WebHTTPProxy:        stringOption(payload.Options, "web_http_proxy"),
 			MaxToolTurns:        intOption(payload.Options, "max_tool_turns"),
 			LogLLMRequests:      boolOption(payload.Options, "log_llm_requests"),
+			WorkerPoolSize:      intOption(payload.Options, "worker_pool_size"),
 		},
 	}
 	// Goal execution is opt-in. A missing option represents a regular
@@ -783,6 +794,33 @@ func (r RunService) HandleRuntimeEvent(event events.EnvelopeV2) {
 		}
 	}
 	r.hub.Publish(event)
+}
+
+// HandleRuntimeExit closes a run whose dedicated agent process disappeared
+// without sending EventFinish/EventError. Without this, its persisted "running"
+// record permanently consumes a global concurrency slot until gateway restart.
+func (r RunService) HandleRuntimeExit(runID string, exitErr error) {
+	row, err := r.repos.Runs.Get(runID)
+	if err != nil || (row.Status != "running" && row.Status != "waiting_permission") {
+		return
+	}
+	message := "dedicated runtime process exited before the run finished"
+	if exitErr != nil {
+		message = fmt.Sprintf("%s: %v", message, exitErr)
+	}
+	r.HandleRuntimeEvent(events.EnvelopeV2{
+		ProtocolVersion: events.ProtocolVersionV2,
+		EventID:         fmt.Sprintf("evt_runtime_exit_%d", time.Now().UnixNano()),
+		RunID:           row.ID,
+		SessionID:       row.SessionID,
+		RunSeq:          row.LastRootSeq + 1,
+		Type:            events.EventError,
+		Payload: map[string]any{
+			"status":  "failed",
+			"message": message,
+		},
+		CreatedAt: time.Now().UTC(),
+	})
 }
 
 func isToolEvent(typ events.EventType) bool {

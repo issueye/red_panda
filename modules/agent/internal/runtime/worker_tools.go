@@ -10,9 +10,19 @@ import (
 
 	agenttools "redpanda/agent/internal/tools"
 	"redpanda/agent/internal/worker"
+	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
+
+// marshalToolJSON is a local helper to return compact JSON tool results.
+func marshalToolJSON(v any) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
 
 var delegatedWorkerDenylist = []string{
 	"worker.delegate",
@@ -21,6 +31,7 @@ var delegatedWorkerDenylist = []string{
 const (
 	internalWorkerSendMethod    = "internal.worker.send"
 	internalWorkerReceiveMethod = "internal.worker.receive"
+	workerDelegateMaxAttempts   = 2
 )
 
 func (r *Runtime) executeWorkerDelegate(ctx context.Context, runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
@@ -75,26 +86,89 @@ func (r *Runtime) executeDelegatedAssignment(ctx context.Context, runCtx agentto
 	if callerID == "" {
 		return worker.AssignmentRef{}, worker.AssignmentResult{}, worker.ErrAssignmentNotFound
 	}
-	executionCtx := withWorkerExecution(ctx, spec)
-	assignment, err := r.workerPool.Delegate(executionCtx, callerID, worker.SubmitRequest{
-		RunID:      runCtx.RunID,
-		ProfileKey: spec.ProfileKey,
-		Task:       spec.Task,
-	})
-	if err != nil {
-		return worker.AssignmentRef{}, worker.AssignmentResult{}, err
-	}
-	result, err := r.workerPool.Wait(ctx, assignment.AssignmentID)
-	if err != nil {
-		return assignment, result, err
-	}
-	if result.Status != worker.AssignmentCompleted {
-		if result.Error == "" {
-			result.Error = "worker assignment did not complete"
+	var lastAssignment worker.AssignmentRef
+	var lastResult worker.AssignmentResult
+	for attempt := 1; attempt <= workerDelegateMaxAttempts; attempt++ {
+		executionCtx := withWorkerExecution(ctx, spec)
+		assignment, err := r.workerPool.Delegate(executionCtx, callerID, worker.SubmitRequest{
+			RunID: runCtx.RunID, ProfileKey: spec.ProfileKey, Task: spec.Task,
+			Attempt: attempt, RetryOf: lastAssignment.AssignmentID,
+		})
+		if err != nil {
+			if ctx.Err() != nil || attempt == workerDelegateMaxAttempts {
+				return lastAssignment, lastResult, err
+			}
+			if retryErr := waitWorkerRetry(ctx, attempt); retryErr != nil {
+				return lastAssignment, lastResult, retryErr
+			}
+			continue
 		}
-		return assignment, result, errors.New(result.Error)
+		lastAssignment = assignment
+		delegatedCtx := withAssignment(executionCtx, assignment.AssignmentID, assignment.WorkerID)
+		emitAssignment := func(status worker.AssignmentStatus, result worker.AssignmentResult, errText string, retrying bool) {
+			workerState, currentID := "ready", ""
+			if status == worker.AssignmentQueued || status == worker.AssignmentRunning {
+				workerState, currentID = "busy", string(assignment.AssignmentID)
+			}
+			_ = r.emitAgentEvent(delegatedCtx, *runCtx.Reply, events.AgentRef{Name: spec.ProfileKey}, events.EventWorkerAssignmentUpdated, nil, map[string]any{
+				"status": string(status), "task": spec.Task, "profile_key": spec.ProfileKey,
+				"attempt": assignment.Attempt, "retry_of": string(assignment.RetryOf),
+				"retrying": retrying, "retry_in_ms": retryDelay(attempt).Milliseconds(),
+				"result": strings.TrimSpace(result.Output), "error": errText,
+				"worker": map[string]any{"id": string(assignment.WorkerID), "state": workerState,
+					"profile_key": spec.ProfileKey, "current_assignment_id": currentID},
+			})
+		}
+		emitAssignment(worker.AssignmentQueued, worker.AssignmentResult{}, "", false)
+		emitAssignment(worker.AssignmentRunning, worker.AssignmentResult{}, "", false)
+
+		result, waitErr := r.workerPool.Wait(ctx, assignment.AssignmentID)
+		lastResult = result
+		finalStatus := result.Status
+		if finalStatus == "" {
+			if waitErr != nil {
+				finalStatus = worker.AssignmentFailed
+			} else {
+				finalStatus = worker.AssignmentCompleted
+			}
+		}
+		if finalStatus != worker.AssignmentCompleted && result.Error == "" {
+			result.Error = firstWorkerError(waitErr, "worker assignment did not complete")
+		}
+		lastResult = result
+		retrying := finalStatus != worker.AssignmentCompleted && ctx.Err() == nil && attempt < workerDelegateMaxAttempts
+		emitAssignment(finalStatus, result, result.Error, retrying)
+		if !retrying {
+			if finalStatus != worker.AssignmentCompleted {
+				return assignment, result, errors.New(result.Error)
+			}
+			return assignment, result, nil
+		}
+		if retryErr := waitWorkerRetry(ctx, attempt); retryErr != nil {
+			return assignment, result, retryErr
+		}
 	}
-	return assignment, result, nil
+	return lastAssignment, lastResult, errors.New("worker assignment retry limit reached")
+}
+
+func retryDelay(attempt int) time.Duration { return time.Duration(attempt) * 500 * time.Millisecond }
+
+func waitWorkerRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(retryDelay(attempt))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func firstWorkerError(err error, fallback string) string {
+	if err != nil {
+		return err.Error()
+	}
+	return fallback
 }
 
 func delegatedWorkerReply(parent methods.ReplyParams, task, profileKey string, maxTurns int) methods.ReplyParams {

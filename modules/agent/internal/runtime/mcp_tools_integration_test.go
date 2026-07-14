@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agentmcp "redpanda/agent/internal/mcp"
+	agenttools "redpanda/agent/internal/tools"
 	protomcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -57,7 +58,7 @@ func TestPrepareMCPToolsAndCall(t *testing.T) {
 		t.Fatalf("merged tools missing MCP tool: %d tools", len(merged))
 	}
 
-	out, err := rt.executeMCPTool(context.Background(), ToolRunContext{
+	out, err := rt.executeMCPTool(context.Background(), agenttools.ToolRunContext{
 		RunID:      params.RunID,
 		WorkingDir: "",
 	}, tools.Call{
@@ -91,7 +92,7 @@ func TestMCPCallTimeoutAndCleanup(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatalf("discover for call-timeout mode should still list tools, got %#v", defs)
 	}
-	_, err := rt.executeMCPTool(context.Background(), ToolRunContext{RunID: params.RunID}, tools.Call{
+	_, err := rt.executeMCPTool(context.Background(), agenttools.ToolRunContext{RunID: params.RunID}, tools.Call{
 		Name:      "mcp__fake__read_file",
 		Arguments: map[string]any{},
 	})
@@ -113,7 +114,7 @@ func TestMCPCallIsError(t *testing.T) {
 		},
 	}
 	_ = rt.mcp.PrepareToolsForRun(context.Background(), params)
-	_, err := rt.executeMCPTool(context.Background(), ToolRunContext{RunID: params.RunID}, tools.Call{
+	_, err := rt.executeMCPTool(context.Background(), agenttools.ToolRunContext{RunID: params.RunID}, tools.Call{
 		Name: "mcp__fake__read_file",
 	})
 	if err == nil || !strings.Contains(err.Error(), "permission denied by server") {
@@ -123,7 +124,7 @@ func TestMCPCallIsError(t *testing.T) {
 }
 
 func TestInvocationFromCallAcceptsMCPExtraDefs(t *testing.T) {
-	runner := ToolRunner{}
+	runner := agenttools.ToolRunner{}
 	inv, err := runner.InvocationFromCall("run_x", 0, tools.Call{Name: "mcp__fake__read_file"}, tools.Definition{
 		Name: "mcp__fake__read_file",
 		Risk: tools.RiskLow,
@@ -136,6 +137,9 @@ func TestInvocationFromCallAcceptsMCPExtraDefs(t *testing.T) {
 	}
 }
 
+type ToolRunContext = agenttools.ToolRunContext
+type ToolInvocation = agenttools.ToolInvocation
+
 func TestDispatchMCPToolViaRunner(t *testing.T) {
 	cleanup := filepath.Join(t.TempDir(), "cleanup")
 	config := helperMCPConfig(t, "success", cleanup)
@@ -146,7 +150,7 @@ func TestDispatchMCPToolViaRunner(t *testing.T) {
 		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
 	}
 	_ = rt.mcp.PrepareToolsForRun(context.Background(), params)
-	result, _ := rt.tools.RunWithContext(context.Background(), ToolRunContext{RunID: params.RunID}, ToolInvocation{
+	result, _ := rt.tools.RunWithContext(context.Background(), agenttools.ToolRunContext{RunID: params.RunID}, agenttools.ToolInvocation{
 		Call: tools.Call{
 			ID:   "tc1",
 			Name: "mcp__fake__read_file",

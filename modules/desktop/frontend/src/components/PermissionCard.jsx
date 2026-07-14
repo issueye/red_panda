@@ -48,7 +48,7 @@ export function PermissionCard({ item, onResolve }) {
           <pre>{args}</pre>
         </details>
       ) : null}
-      {resolved ? (
+      {resolved || !onResolve ? (
         <StatusBadge
           className="permission-state"
           data-testid="permission-state"

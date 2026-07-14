@@ -25,6 +25,8 @@ type EventHandler func(events.EnvelopeV2)
 
 type RequestHandler func(context.Context, string, json.RawMessage) (any, error)
 
+type RunExitHandler func(runID string, err error)
+
 const maxRuntimeJSONRPCLineBytes = 4 * 1024 * 1024
 
 type Client struct {
@@ -33,6 +35,8 @@ type Client struct {
 	version   string
 	onEvent   EventHandler
 	onRequest RequestHandler
+	onRunExit RunExitHandler
+	onExit    func(error)
 
 	mu        sync.Mutex
 	cmd       *exec.Cmd
@@ -43,6 +47,52 @@ type Client struct {
 	running   bool
 	perRuns   map[string]*Client
 	transport string // "stdio" or "ipc"
+	// extraEnv are KEY=VALUE entries injected into the child agent process environment.
+	// Used for per-run settings such as worker pool size.
+	extraEnv []string
+}
+
+// setWorkerPoolSize stores a desired pool size (1-8) to be injected as
+// RED_PANDA_WORKER_POOL_SIZE into future child agent processes.
+// Zero or out-of-range values are ignored (Runtime will use its default).
+func (c *Client) setWorkerPoolSize(size int) {
+	if size < 1 || size > 8 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Replace any previous setting for this key.
+	filtered := make([]string, 0, len(c.extraEnv))
+	for _, e := range c.extraEnv {
+		if !strings.HasPrefix(e, "RED_PANDA_WORKER_POOL_SIZE=") {
+			filtered = append(filtered, e)
+		}
+	}
+	filtered = append(filtered, fmt.Sprintf("RED_PANDA_WORKER_POOL_SIZE=%d", size))
+	c.extraEnv = filtered
+}
+
+// buildChildEnv merges base environment with extra KEY=VALUE entries,
+// ensuring later entries override earlier ones for the same key.
+func buildChildEnv(base []string, extra []string) []string {
+	out := make([]string, len(base))
+	copy(out, base)
+	for _, e := range extra {
+		key := strings.SplitN(e, "=", 2)[0]
+		prefix := key + "="
+		replaced := false
+		for i := range out {
+			if strings.HasPrefix(out[i], prefix) {
+				out[i] = e
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func New(command string, args []string, version string, onEvent EventHandler, onRequest RequestHandler) *Client {
@@ -55,6 +105,14 @@ func New(command string, args []string, version string, onEvent EventHandler, on
 		pending:   map[jsonrpc.ID]chan jsonrpc.Response{},
 		perRuns:   map[string]*Client{},
 	}
+}
+
+// SetRunExitHandler reports dedicated run processes that stop before emitting
+// a terminal event. The gateway uses this to release persisted concurrency slots.
+func (c *Client) SetRunExitHandler(handler RunExitHandler) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onRunExit = handler
 }
 
 func (c *Client) Status() map[string]any {
@@ -126,6 +184,8 @@ func (c *Client) ExecuteWithMode(ctx context.Context, mode string, params method
 	if normalizedRuntimeMode(mode) == "per_run_process" {
 		return c.executePerRun(ctx, params)
 	}
+	// For the shared core process, try to influence pool size before first start.
+	c.setWorkerPoolSize(params.Options.WorkerPoolSize)
 	if err := c.Initialize(ctx); err != nil {
 		return methods.RunExecuteResult{}, err
 	}
@@ -396,9 +456,26 @@ func (c *Client) executePerRun(ctx context.Context, params methods.RunExecutePar
 		}
 		// Release dedicated process on terminal events so multi-session slots free promptly.
 		if event.RunID == params.RunID && (event.Type == events.EventFinish || event.Type == events.EventError) {
-			go c.releasePerRun(params.RunID, child)
+			// Detach synchronously so the process-exit callback cannot race a valid
+			// terminal event and incorrectly turn a completed run into a failure.
+			if c.removePerRun(params.RunID, child) {
+				go func() { _ = child.Shutdown(context.Background()) }()
+			}
 		}
 	}, c.onRequest)
+	child.onExit = func(err error) {
+		if !c.removePerRun(params.RunID, child) {
+			return
+		}
+		c.mu.Lock()
+		handler := c.onRunExit
+		c.mu.Unlock()
+		if handler != nil {
+			handler(params.RunID, err)
+		}
+	}
+	// Propagate worker pool size (and any future extra env) to the dedicated child.
+	child.setWorkerPoolSize(params.Options.WorkerPoolSize)
 	c.mu.Lock()
 	if _, exists := c.perRuns[params.RunID]; exists {
 		c.mu.Unlock()
@@ -488,6 +565,11 @@ func (c *Client) ensureStartedStdio() error {
 	}
 
 	cmd := exec.Command(c.command, c.args...)
+	// Inject any extra environment (e.g. RED_PANDA_WORKER_POOL_SIZE) for this agent process.
+	if len(c.extraEnv) > 0 {
+		cmd.Env = buildChildEnv(os.Environ(), c.extraEnv)
+	}
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		c.mu.Unlock()
@@ -533,10 +615,12 @@ func (c *Client) ensureStartedIPC(ctx context.Context) error {
 		return err
 	}
 
+	extra := c.extraEnv
 	proc, err := ipc.StartProcess(ctx, ipc.ProcessConfig{
 		Command: c.command,
 		Args:    c.args,
 		Prefix:  "red-panda-agent",
+		Env:     extra,
 		Configure: func(cmd *exec.Cmd) {
 			cmd.Stderr = stderrWriter
 		},
@@ -722,9 +806,9 @@ func (c *Client) drainStderr(stderr io.Reader) {
 }
 
 func (c *Client) wait(cmd *exec.Cmd) {
-	_ = cmd.Wait()
+	err := cmd.Wait()
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var onExit func(error)
 	if c.cmd == cmd {
 		c.running = false
 		c.cmd = nil
@@ -737,5 +821,10 @@ func (c *Client) wait(cmd *exec.Cmd) {
 			delete(c.pending, id)
 			close(ch)
 		}
+		onExit = c.onExit
+	}
+	c.mu.Unlock()
+	if onExit != nil {
+		onExit(err)
 	}
 }

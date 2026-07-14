@@ -168,6 +168,28 @@ func TestWorkerAndAssignmentStatesAreIndependent(t *testing.T) {
 	}
 }
 
+func TestAssignmentRetryMetadataIsPreserved(t *testing.T) {
+	executor := newFakeExecutor(false)
+	pool := mustPool(t, Config{Size: 1}, func(WorkerID) (Executor, error) { return executor, nil })
+	ref, err := pool.SubmitEntry(context.Background(), SubmitRequest{
+		RunID: "run-retry", Task: "retry work", Attempt: 2, RetryOf: "assignment-000001",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := pool.Wait(context.Background(), ref.AssignmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Attempt != 2 || ref.RetryOf != "assignment-000001" || result.Attempt != 2 || result.RetryOf != "assignment-000001" {
+		t.Fatalf("retry metadata was not preserved: ref=%+v result=%+v", ref, result)
+	}
+	snapshot := findAssignment(t, pool.Snapshot(), ref.AssignmentID)
+	if snapshot.Attempt != 2 || snapshot.RetryOf != "assignment-000001" {
+		t.Fatalf("snapshot retry metadata mismatch: %+v", snapshot)
+	}
+}
+
 func TestExecutorFailureIsRecordedAsTerminalAssignment(t *testing.T) {
 	executor := newFakeExecutor(false)
 	executor.executeErr = errors.New("executor failed")

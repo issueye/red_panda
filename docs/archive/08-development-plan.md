@@ -84,7 +84,7 @@ Tasks:
 12. Implement `runtime_process` subagent backend: parent `red-panda-agent` starts an independent child `red-panda-agent` over internal stdio JSON-RPC, invokes a child run, and bridges child `agent.event` output back to the parent `root_run_id/root_seq` channel as subagent events.
 13. Add `RED_PANDA_SUBAGENT_COMMAND` override for the child subagent process command.
 14. Implement `process_pool` subagent backend: parent Runtime maintains a reusable pool of child `red-panda-agent` processes, returns successful children to the pool, and closes/discards cancelled or failed children.
-15. Add `RED_PANDA_SUBAGENT_POOL_SIZE` for the reusable child process pool size, with default `2` and maximum `8`.
+15. Add `RED_PANDA_SUBAGENT_POOL_SIZE` for the reusable child process pool size, with default `8` (was originally 2) and maximum `8`.
 16. Add OpenAI-compatible provider streaming: when `RED_PANDA_PROVIDER_STREAM=true`, send `stream=true` to `/v1/chat/completions`, parse provider `text/event-stream` data chunks, emit content through existing `message_delta` events, and accumulate streaming `tool_calls` before the existing tool-call loop.
 17. Add per-run OpenAI-compatible provider override fields accepted from Gateway, including provider, model, base URL, and API key, while keeping environment-variable fallback when no override is supplied.
 

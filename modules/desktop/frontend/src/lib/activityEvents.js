@@ -24,6 +24,14 @@ export function normalizeRunEvent(item) {
 export function summarizeRunEvent(event) {
   const payload = event?.payload || {};
   const kind = event?.eventKind || classifyRunEventKind(event?.type, payload);
+  if (event?.type === 'worker_assignment_updated') {
+    const attempt = Number(payload.attempt) || 1;
+    const status = payload.status ? displayStatus(payload.status) : '更新';
+    if (payload.retrying) {
+      return trimSummary(`工作分配 - ${status} - 第 ${attempt} 次失败，准备第 ${attempt + 1} 次尝试`);
+    }
+    return trimSummary(joinParts(['工作分配', status, payload.error || payload.summary || '']));
+  }
   if (kind === 'tool') {
     const name = firstPresent(payload.tool_name, payload.name, payload.display_name);
     const status = firstPresent(payload.status, payload.state);

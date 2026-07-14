@@ -311,6 +311,50 @@ func TestRunServiceStartDefaultRuntimeModeIsPerRunProcess(t *testing.T) {
 	}
 }
 
+func TestRunServiceUnexpectedPerRunExitReleasesConcurrentSlot(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_runtime_exit", "Runtime exit", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
+	runtime := useStdioRuntimeHelper(t, capturePath)
+	service := NewRunService(repos, eventhub.New(), runtime)
+	result, err := service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "runtime exits after accepting"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		row, getErr := repos.Runs.Get(result.RunID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if row.Status == "failed" {
+			if row.FinishedAt == nil || !strings.Contains(row.Error, "runtime process exited") {
+				t.Fatalf("unexpected recovered row: %#v", row)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run remained active after dedicated runtime exit: %#v", row)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	active, err := repos.Runs.CountActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatalf("active runs after runtime exit = %d, want 0", active)
+	}
+}
+
 func TestResolveMaxConcurrentRuns(t *testing.T) {
 	t.Setenv("RED_PANDA_MAX_CONCURRENT_RUNS", "")
 	if got := resolveMaxConcurrentRuns(nil); got != defaultMaxConcurrentRuns {

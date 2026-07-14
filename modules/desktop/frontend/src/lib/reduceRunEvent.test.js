@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createEmptySessionRuntime } from './sessionRuntime.js';
-import { appendWorkerText, reduceRunEvent, WORKER_PROTOCOL_VERSION } from './reduceRunEvent.js';
+import {
+  appendWorkerText,
+  reconcileAssignmentsWithRuns,
+  reduceRunEvent,
+  WORKER_PROTOCOL_VERSION,
+} from './reduceRunEvent.js';
 
 const event = (type, runSeq, payload = {}) => ({
   protocol_version: WORKER_PROTOCOL_VERSION,
@@ -67,12 +72,30 @@ test('finish closes run and pending permission', () => {
     running: true, currentRunId: 'run_1',
     runs: [{ id: 'run_1', status: 'running' }],
     permissions: [{ id: 'permission_1', runId: 'run_1', status: 'pending' }],
+    assignmentsById: {
+      assignment_1: { id: 'assignment_1', runId: 'run_1', status: 'running' },
+    },
+    assignmentOrder: ['assignment_1'],
   });
   const { runtime, effects } = reduceRunEvent(base, event('finish', 3, { status: 'completed' }));
   assert.equal(runtime.running, false);
   assert.equal(runtime.runs[0].status, 'completed');
   assert.equal(runtime.permissions[0].status, 'closed');
+  assert.equal(runtime.assignmentsById.assignment_1.status, 'completed');
   assert.deepEqual(effects, [{ type: 'clear_global_permissions_for_run', runId: 'run_1' }]);
+});
+
+test('worker list snapshots cannot reopen assignments from terminal runs', () => {
+  const reconciled = reconcileAssignmentsWithRuns([
+    { id: 'assignment_1', runId: 'run_1', status: 'running' },
+    { id: 'assignment_2', runId: 'run_2', status: 'running' },
+  ], [
+    { id: 'run_1', status: 'completed', finishedAt: '2026-07-14T05:08:42Z' },
+    { id: 'run_2', status: 'running' },
+  ]);
+  assert.equal(reconciled[0].status, 'completed');
+  assert.equal(reconciled[0].finishedAt, '2026-07-14T05:08:42Z');
+  assert.equal(reconciled[1].status, 'running');
 });
 
 test('terminal Run state is irreversible', () => {

@@ -10,15 +10,18 @@ function isActiveStatus(status) {
   return status === 'queued' || status === 'running' || status === 'cancelling' || status === 'waiting_permission';
 }
 
-export function WorkerPanel({ workers = [], assignments = [], onCancelAssignment }) {
+export function WorkerPanel({
+  workers = [], assignments = [], onCancelAssignment, onOpenAssignment,
+}) {
   return (
-    <section className="worker-panel-content">
+    <section className="worker-panel-content" data-testid="worker-panel-content">
       <PanelHeader title="Worker" />
       {workers.length === 0 ? <EmptyState title="Worker 池尚未就绪" /> : (
         <div className="worker-list">
           {workers.map((worker) => {
             const status = worker.state || 'ready';
             const active = status === 'busy' || status === 'draining';
+            const assignment = assignments.find((item) => item.id === worker.currentAssignmentId);
             return (
               <article
                 className={classNames('worker-item', active && 'is-running', `status-${status}`)}
@@ -29,20 +32,27 @@ export function WorkerPanel({ workers = [], assignments = [], onCancelAssignment
                 <span className={classNames('worker-icon', active && 'is-active')} aria-hidden="true">
                   {active ? <Loader2 className="worker-spin" size={15} /> : <Bot size={16} />}
                 </span>
-                <div className="worker-main">
+                <button
+                  className="worker-main"
+                  disabled={!assignment}
+                  onClick={() => onOpenAssignment?.(assignment)}
+                  type="button"
+                >
                   <span className="worker-heading">
                     <strong>{worker.id}</strong>
                     <StatusBadge status={status} />
                   </span>
                   <span className="worker-meta">{worker.healthy === false ? '执行器异常' : '执行器正常'}</span>
                   {worker.currentAssignmentId ? <small>{worker.currentAssignmentId}</small> : null}
-                </div>
+                </button>
               </article>
             );
           })}
         </div>
       )}
-      <div className="worker-section-label">工作分配</div>
+      <div className="worker-section-label" data-testid="worker-assignment-section-label">
+        工作分配
+      </div>
       {assignments.length === 0 ? <EmptyState title="暂无工作分配" /> : (
         <div className="worker-list">
           {assignments.map((assignment) => {
@@ -50,6 +60,9 @@ export function WorkerPanel({ workers = [], assignments = [], onCancelAssignment
             const active = isActiveStatus(status);
             const canCancel = status === 'queued' || status === 'running' || status === 'waiting_permission';
             const title = assignment.profileKey || assignment.workerId || assignment.id;
+            const detail = assignment.retrying
+              ? `失败，${Math.max(assignment.attempt || 1, 1) + 1} / 2 次尝试准备中`
+              : (assignment.error || assignment.summary);
             return (
               <article
                 className={classNames('worker-item', active && 'is-running', `status-${status}`)}
@@ -60,7 +73,12 @@ export function WorkerPanel({ workers = [], assignments = [], onCancelAssignment
                 <span className={classNames('worker-icon', active && 'is-active')} aria-hidden="true">
                   {active ? <Loader2 className="worker-spin" size={15} /> : <Bot size={16} />}
                 </span>
-                <div className="worker-main">
+                <button
+                  className="worker-main"
+                  data-testid="worker-assignment-open"
+                  onClick={() => onOpenAssignment?.(assignment)}
+                  type="button"
+                >
                   <span className="worker-heading">
                     <strong>{displayWorkerProfileName(title)}</strong>
                     <StatusBadge status={status} />
@@ -69,8 +87,8 @@ export function WorkerPanel({ workers = [], assignments = [], onCancelAssignment
                     {assignment.workerId || '等待 Worker'} · 事件 {formatSeq(assignment.workerSeq)}
                   </span>
                   {assignment.task ? <em>{assignment.task}</em> : null}
-                  {assignment.summary || assignment.error ? <small>{assignment.error || assignment.summary}</small> : null}
-                </div>
+                  {detail ? <small>{detail}</small> : null}
+                </button>
                 <div className="worker-actions">
                   <IconButton
                     data-testid="worker-assignment-cancel"

@@ -79,6 +79,18 @@ export function OtherTab({
                 tooltip="限制同时进行的会话任务数量（默认 3，上限 16）。同一会话内任务仍串行。"
               />
               <SettingTextInput
+                label="委托 Worker 池大小"
+                placeholder="8"
+                settings={settings}
+                settingKey="workerPoolSize"
+                onUpdate={updateSetting}
+                tooltip={
+                  '控制 worker.delegate 可同时使用的独立 Worker 槽位数量（1-8）。\n'
+                  + '默认 8。分析大型代码库时可保持较高并发，支持并行委托。\n'
+                  + '每个委托 Worker 占用一个独立 Agent 进程（per-run 模式）或槽位。'
+                }
+              />
+              <SettingTextInput
                 label="工具允许列表"
                 placeholder="workspace.read_file, workspace.list"
                 settings={settings}

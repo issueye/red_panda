@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
@@ -131,7 +132,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 		{Name: "context.write"},
 		{Name: "context.replace"},
 	}
-	filtered := availableToolsForOptions(defs, params.Options)
+	filtered := agenttools.AvailableToolsForOptions(defs, params.Options)
 	names := map[string]bool{}
 	for _, d := range filtered {
 		names[d.Name] = true
@@ -181,7 +182,7 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 		{Name: "context.read"},
 		{Name: "context.write"},
 	}
-	filtered := availableToolsForOptions(defs, params.Options)
+	filtered := agenttools.AvailableToolsForOptions(defs, params.Options)
 	names := map[string]bool{}
 	for _, d := range filtered {
 		names[d.Name] = true
@@ -211,7 +212,7 @@ func TestApplyGoalSpecialistVerifierDeniesWrite(t *testing.T) {
 		{Name: "context.read"},
 		{Name: "context.write"},
 	}
-	filtered := availableToolsForOptions(defs, params.Options)
+	filtered := agenttools.AvailableToolsForOptions(defs, params.Options)
 	names := map[string]bool{}
 	for _, d := range filtered {
 		names[d.Name] = true
@@ -244,7 +245,7 @@ func TestAllAllowlistedSpecialistsExposeContextShareTools(t *testing.T) {
 		}
 		params := methods.ReplyParams{Options: methods.ReplyOptions{}}
 		_ = (&Runtime{}).applyGoalSpecialist(&params, spec, "task", 0, "run_test", "sess_test", "", "")
-		filtered := availableToolsForOptions(defs, params.Options)
+		filtered := agenttools.AvailableToolsForOptions(defs, params.Options)
 		names := map[string]bool{}
 		for _, d := range filtered {
 			names[d.Name] = true

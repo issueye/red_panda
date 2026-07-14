@@ -25,8 +25,9 @@ test('Worker filters prefer Assignment identity and support Worker scope', () =>
     { id: 'a', assignmentId: 'assignment_1', workerId: 'worker-01' },
     { id: 'b', assignmentId: 'assignment_2', workerId: 'worker-01' },
     { id: 'c', assignmentId: 'assignment_3', workerId: 'worker-02' },
+    { id: 'd', workerId: 'worker-02' },
   ];
-  assert.deepEqual(filterWorkerMessages({ assignmentId: 'assignment_1', workerId: 'worker-02' }, items).map((item) => item.id), ['a', 'c']);
+  assert.deepEqual(filterWorkerMessages({ assignmentId: 'assignment_1', workerId: 'worker-02' }, items).map((item) => item.id), ['a', 'd']);
   assert.deepEqual(filterWorkerTools({ workerId: 'worker-01' }, items).map((item) => item.id), ['a', 'b']);
   assert.deepEqual(filterWorkerPermissions({ assignmentId: 'assignment_3' }, items).map((item) => item.id), ['c']);
 });

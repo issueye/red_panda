@@ -137,6 +137,37 @@ func TestRunRecordProjectionIgnoresWorkerAssignmentFailureForRunLifecycle(t *tes
 	}
 }
 
+func TestRunRecordRootErrorFinishesRun(t *testing.T) {
+	repo := newRunRecordTestRepository(t)
+	now := time.Now().UTC()
+	if err := repo.Start(model.RunRecord{
+		ID: "run_root_error", SessionID: "session_1", Status: "running", StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ProjectEvent(events.EnvelopeV2{
+		EventID: "evt_root_error", RunID: "run_root_error", SessionID: "session_1",
+		RunSeq: 1, Type: events.EventError, Payload: map[string]any{"message": "runtime stopped"},
+		CreatedAt: now.Add(time.Millisecond),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	row, err := repo.Get("run_root_error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "failed" || row.FinishedAt == nil || row.Error != "runtime stopped" {
+		t.Fatalf("root error did not finish run: %#v", row)
+	}
+	active, err := repo.CountActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatalf("CountActive after root error = %d, want 0", active)
+	}
+}
+
 func TestRunRecordRefreshToolCountFromToolCalls(t *testing.T) {
 	repo := newRunRecordTestRepository(t)
 	now := time.Now().UTC()
@@ -265,6 +296,51 @@ func TestRunRecordCountActiveAndListActive(t *testing.T) {
 	}
 	if len(bySession) != 2 || bySession[0].ID != "run_a" || bySession[1].ID != "run_b" {
 		t.Fatalf("ListActiveBySession(session_1) = %#v, want run_a, run_b", bySession)
+	}
+}
+
+func TestRunRecordRecoverStaleRunsReleasesOnlyActiveSlots(t *testing.T) {
+	repo := newRunRecordTestRepository(t)
+	now := time.Now().UTC()
+	for _, record := range []model.RunRecord{
+		{ID: "run_running", SessionID: "session_1", Status: "running", StartedAt: now},
+		{ID: "run_waiting", SessionID: "session_2", Status: "waiting_permission", StartedAt: now},
+		{ID: "run_completed", SessionID: "session_3", Status: "completed", StartedAt: now},
+	} {
+		if err := repo.Start(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	recovered, err := repo.RecoverStaleRuns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered != 2 {
+		t.Fatalf("recovered = %d, want 2", recovered)
+	}
+	active, err := repo.CountActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatalf("active after recovery = %d, want 0", active)
+	}
+	for _, runID := range []string{"run_running", "run_waiting"} {
+		row, getErr := repo.Get(runID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if row.Status != "failed" || row.FinishedAt == nil || row.Error == "" {
+			t.Fatalf("stale run was not recovered: %#v", row)
+		}
+	}
+	completed, err := repo.Get("run_completed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != "completed" || completed.FinishedAt != nil {
+		t.Fatalf("terminal run was modified: %#v", completed)
 	}
 }
 

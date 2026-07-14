@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -17,7 +18,7 @@ import (
 // TestContextToolsRegisteredAndNotDenylisted 验证关键设计：context.* 工具具有正确风险等级，
 // 且被有意排除在 worker.DelegatedDenylist 外，使专业子代理可共享暂存区笔记。
 func TestContextToolsRegisteredAndNotDenylisted(t *testing.T) {
-	runner := ToolRunner{}
+	runner := agenttools.ToolRunner{}
 	wantRisk := map[string]tools.Risk{
 		"context.read":    tools.RiskLow,
 		"context.search":  tools.RiskLow,

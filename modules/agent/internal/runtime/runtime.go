@@ -75,8 +75,6 @@ type Runtime struct {
 	runGoals        map[string]*runGoalState
 }
 
-var _ agenttools.SubagentManager = (*Runtime)(nil)
-
 func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 	rt := &Runtime{
 		in:             in,
@@ -179,8 +177,6 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 			return err
 		}
 		return r.writeResponse(resp)
-	case methods.AgentReply:
-		return r.handleReply(ctx, req)
 	case methods.RunExecute:
 		return r.handleRunExecute(ctx, req)
 	case methods.MCPDiscover:
@@ -195,8 +191,6 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 		return r.handleAgentSkillUpdate(req)
 	case methods.AgentSkillDelete:
 		return r.handleAgentSkillDelete(req)
-	case methods.AgentCancel:
-		return r.handleCancel(req)
 	case methods.RunCancel:
 		return r.handleRunCancel(req)
 	case methods.WorkerList:
@@ -240,6 +234,7 @@ func (r *Runtime) handleInitialize(req jsonrpc.Request) error {
 	r.protocolVersion = events.ProtocolVersionV2
 	r.mu.Unlock()
 
+	// v0.2 capabilities only. Legacy agent.reply / agent.cancel / agent.* subagent methods are gone.
 	result := methods.InitializeResult{
 		ProtocolVersion: events.ProtocolVersionV2,
 		Server:          methods.PeerInfo{Name: "red-panda-agent", Version: r.version},
@@ -250,16 +245,14 @@ func (r *Runtime) handleInitialize(req jsonrpc.Request) error {
 			{Name: methods.RunEvent, Version: 1},
 			{Name: methods.WorkerList, Version: 1},
 			{Name: methods.WorkerAssignmentCancel, Version: 1},
+			{Name: methods.WorkerMessageSend, Version: 1},
+			{Name: methods.WorkerMessageReceive, Version: 1},
 			{Name: methods.WorkerPoolStatus, Version: 1},
-			{Name: methods.AgentTools, Version: 1},
-			{Name: methods.AgentReply, Version: 1},
-			{Name: methods.AgentCancel, Version: 1},
 			{Name: methods.AgentSkills, Version: 1},
 			{Name: methods.AgentSkillLoad, Version: 1},
 			{Name: methods.AgentSkillCreate, Version: 1},
 			{Name: methods.AgentSkillUpdate, Version: 1},
 			{Name: methods.AgentSkillDelete, Version: 1},
-			{Name: methods.AgentEvent, Version: 1},
 			{Name: methods.MCPDiscover, Version: 1},
 			{Name: methods.PermissionResolve, Version: 1},
 		},
@@ -281,7 +274,7 @@ func (r *Runtime) handleRunExecute(ctx context.Context, req jsonrpc.Request) err
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
 	}
 	req.Params = raw
-	return r.handleReply(ctx, req)
+	return r.handleRun(ctx, req)
 }
 
 func (r *Runtime) handlePing(req jsonrpc.Request) error {
@@ -294,7 +287,7 @@ func (r *Runtime) handlePing(req jsonrpc.Request) error {
 	return r.writeResponse(resp)
 }
 
-func (r *Runtime) handleReply(ctx context.Context, req jsonrpc.Request) error {
+func (r *Runtime) handleRun(ctx context.Context, req jsonrpc.Request) error {
 	var params methods.ReplyParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
@@ -664,6 +657,8 @@ func (r *Runtime) emitEvent(ctx context.Context, params methods.ReplyParams, typ
 	}, typ, stream, payload)
 }
 
+// emitAgentEvent emits a v0.2 Worker-scoped event using EnvelopeV2.
+// The agent parameter is kept for minimal internal compatibility (Role/Name/Path) but hierarchy is ignored.
 func (r *Runtime) emitAgentEvent(ctx context.Context, params methods.ReplyParams, agent events.AgentRef, typ events.EventType, stream *events.StreamRef, payload map[string]any) error {
 	select {
 	case <-ctx.Done():
@@ -675,88 +670,43 @@ func (r *Runtime) emitAgentEvent(ctx context.Context, params methods.ReplyParams
 	defer r.eventMu.Unlock()
 
 	rootSeq := r.nextRootSeq(params.RunID)
-	r.mu.Lock()
-	protocolVersion := r.protocolVersion
-	r.mu.Unlock()
-	if protocolVersion == events.ProtocolVersionV2 {
-		assignment := assignmentFromContext(ctx)
-		assignmentID := string(assignment.AssignmentID)
-		workerID := string(assignment.WorkerID)
-		profileKey := ""
-		if agent.Role == events.AgentRoleSubAgent {
-			profileKey = agent.Name
-			if assignmentID == "" {
-				assignmentID = agent.SubAgentID
-			}
-			if workerID == "" {
-				workerID = agent.AgentID
-			}
-		}
-		if params.Options.WorkerContext != nil {
-			if assignmentID == "" {
-				assignmentID = params.Options.WorkerContext.AssignmentID
-			}
-			if workerID == "" {
-				workerID = params.Options.WorkerContext.WorkerID
-			}
+
+	// v0.2+: ALWAYS emit EnvelopeV2 via RunEvent. No legacy root/subagent hierarchy.
+	assignment := assignmentFromContext(ctx)
+	assignmentID := string(assignment.AssignmentID)
+	workerID := string(assignment.WorkerID)
+	profileKey := agent.Name
+	if params.Options.WorkerContext != nil {
+		if assignmentID == "" {
+			assignmentID = params.Options.WorkerContext.AssignmentID
 		}
 		if workerID == "" {
-			workerID = "worker-unassigned"
+			workerID = params.Options.WorkerContext.WorkerID
 		}
-		workerSeq := r.nextAgentSeq(params.RunID, workerID)
-		body := cloneEventPayload(payload)
-		if agent.Role == events.AgentRoleSubAgent {
-			body["visibility"] = "worker_private"
-			if typ == events.EventSubAgentUpdate {
-				typ = events.EventWorkerAssignmentUpdated
-			}
-		} else if _, exists := body["visibility"]; !exists {
-			body["visibility"] = "conversation"
-		}
-		env := events.EnvelopeV2{
-			ProtocolVersion: events.ProtocolVersionV2,
-			EventID:         fmt.Sprintf("evt_%s_%d", params.RunID, rootSeq),
-			RunID:           params.RunID,
-			SessionID:       params.Session.ID,
-			AssignmentID:    assignmentID,
-			Worker:          events.EventWorkerRef{ID: workerID, ProfileKey: profileKey},
-			RunSeq:          rootSeq,
-			WorkerSeq:       workerSeq,
-			Stream:          stream,
-			Type:            typ,
-			Payload:         body,
-			CreatedAt:       time.Now().UTC(),
-		}
-		note, err := jsonrpc.NewNotification(methods.RunEvent, env)
-		if err != nil {
-			return err
-		}
-		return r.writeNotification(note)
 	}
-
-	agentSeq := r.nextAgentSeq(params.RunID, agent.AgentID)
-	eventRunID := params.RunID
-	parentRunID := ""
-	if agent.Role == events.AgentRoleSubAgent && agent.SubAgentID != "" {
-		eventRunID = params.RunID + ":subagent:" + agent.SubAgentID
-		parentRunID = params.RunID
+	if workerID == "" {
+		workerID = "worker-unassigned"
 	}
-	env := events.Envelope{
-		ProtocolVersion: events.ProtocolVersion,
+	workerSeq := r.nextAgentSeq(params.RunID, workerID)
+	body := cloneEventPayload(payload)
+	if _, exists := body["visibility"]; !exists {
+		body["visibility"] = "conversation"
+	}
+	env := events.EnvelopeV2{
+		ProtocolVersion: events.ProtocolVersionV2,
 		EventID:         fmt.Sprintf("evt_%s_%d", params.RunID, rootSeq),
-		RootRunID:       params.RunID,
-		RunID:           eventRunID,
-		ParentRunID:     parentRunID,
+		RunID:           params.RunID,
 		SessionID:       params.Session.ID,
-		RootSeq:         rootSeq,
-		AgentSeq:        agentSeq,
-		Agent:           agent,
+		AssignmentID:    assignmentID,
+		Worker:          events.EventWorkerRef{ID: workerID, ProfileKey: profileKey},
+		RunSeq:          rootSeq,
+		WorkerSeq:       workerSeq,
 		Stream:          stream,
 		Type:            typ,
-		Payload:         payload,
+		Payload:         body,
 		CreatedAt:       time.Now().UTC(),
 	}
-	note, err := jsonrpc.NewNotification(methods.AgentEvent, env)
+	note, err := jsonrpc.NewNotification(methods.RunEvent, env)
 	if err != nil {
 		return err
 	}

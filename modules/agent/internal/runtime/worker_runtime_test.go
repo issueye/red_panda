@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ import (
 func TestNewCreatesConfiguredWorkerPoolWithoutStartingProcess(t *testing.T) {
 	t.Setenv("RED_PANDA_WORKER_POOL_SIZE", "99")
 	// If New eagerly starts a child process this invalid command makes the test fail.
-	t.Setenv("RED_PANDA_SUBAGENT_COMMAND", "definitely-not-a-red-panda-binary")
+	t.Setenv("RED_PANDA_WORKER_COMMAND", "definitely-not-a-red-panda-binary")
 	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -40,12 +41,12 @@ func TestHandleReplyReturnsEntryAssignmentIdentity(t *testing.T) {
 
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	sendRequest(t, context.Background(), rt, "reply-worker-entry", methods.AgentReply, methods.ReplyParams{
+	sendRequest(t, context.Background(), rt, "run-worker-entry", methods.RunExecute, methods.RunExecuteParams{
 		RunID:   "run-worker-entry",
 		Session: methods.ReplySession{ID: "session-worker-entry"},
 		Input:   methods.ReplyInput{Text: "hello"},
 	})
-	response := waitForResponse(t, lines, jsonrpc.ID("reply-worker-entry"))
+	response := waitForResponse(t, lines, jsonrpc.ID("run-worker-entry"))
 	var accepted methods.RunExecuteResult
 	if err := json.Unmarshal(response.Result, &accepted); err != nil {
 		t.Fatal(err)
@@ -134,15 +135,12 @@ func TestDelegatedWorkerReplyHidesDelegateAndLegacyRunTools(t *testing.T) {
 			ProviderName: "openai_compatible", Model: "worker-model", ToolPolicy: "strict",
 			ToolAllowlist: []string{"workspace.read_file"}, ToolDenylist: []string{"shell.exec"},
 		}},
-		WorkerProfiles: []methods.WorkerProfileRef{{
-			Key: "reviewer", Enabled: true, SystemPrompt: "Review with evidence.", DefaultMaxTurns: 7,
-		}},
 	}}
 	child := delegatedWorkerReply(parent, "inspect runtime", "reviewer", 0)
 	definitions := agenttools.AvailableToolsForOptions((agenttools.ToolRunner{}).AvailableTools(), child.Options)
 	communication := map[string]bool{}
 	for _, definition := range definitions {
-		if definition.Name == "worker.delegate" || definition.Name == "worker.delegate" {
+		if definition.Name == "worker.delegate" {
 			t.Fatalf("delegated Worker exposes forbidden tool %q", definition.Name)
 		}
 		communication[definition.Name] = true
@@ -199,6 +197,79 @@ func TestForgedNestedWorkerDelegateIsRejectedByPool(t *testing.T) {
 	}, protocoltools.Call{Name: "worker.delegate", Arguments: map[string]any{"task": "forged nested work"}})
 	if !errors.Is(err, worker.ErrNestedDelegation) {
 		t.Fatalf("forged nested delegate error = %v, want %v", err, worker.ErrNestedDelegation)
+	}
+}
+
+func TestDelegatedAssignmentRetriesWithoutStoppingSiblingWorker(t *testing.T) {
+	executor := &retryIsolationExecutor{
+		entryStarted: make(chan struct{}),
+		otherStarted: make(chan struct{}),
+		otherRelease: make(chan struct{}),
+	}
+	pool, err := worker.NewPool(worker.Config{Size: 4}, func(worker.WorkerID) (worker.Executor, error) {
+		return executor, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer func() {
+		close(executor.otherRelease)
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), time.Second)
+		defer closeCancel()
+		_ = pool.Close(closeCtx)
+	}()
+
+	entry, err := pool.SubmitEntry(ctx, worker.SubmitRequest{RunID: "run-retry", Task: "entry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-executor.entryStarted
+	sibling, err := pool.Delegate(ctx, entry.AssignmentID, worker.SubmitRequest{RunID: "run-retry", Task: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-executor.otherStarted
+
+	var output strings.Builder
+	rt := &Runtime{
+		out: &output, nextSeq: map[string]uint64{}, agentSeq: map[string]map[string]uint64{},
+		workerPool: pool,
+	}
+	reply := methods.ReplyParams{RunID: "run-retry", Session: methods.ReplySession{ID: "session-retry"}}
+	assignment, result, err := rt.executeDelegatedAssignment(ctx, agenttools.ToolRunContext{
+		RunID: "run-retry", SessionID: "session-retry", AssignmentID: string(entry.AssignmentID), Reply: &reply,
+	}, workerExecutionSpec{Kind: workerExecutionDelegated, Parent: reply, ProfileKey: "reviewer", Task: "retry", MaxTurns: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != worker.AssignmentCompleted || assignment.Attempt != 2 || assignment.RetryOf == "" {
+		t.Fatalf("retry result = assignment:%+v result:%+v", assignment, result)
+	}
+	snapshot := pool.Snapshot()
+	siblingSnapshot := findRuntimeAssignment(t, snapshot, sibling.AssignmentID)
+	if siblingSnapshot.Status != worker.AssignmentRunning {
+		t.Fatalf("sibling assignment was affected by retry: %+v", siblingSnapshot)
+	}
+	failed := 0
+	completedRetry := 0
+	for _, item := range snapshot.Assignments {
+		if item.Task != "retry" {
+			continue
+		}
+		if item.Status == worker.AssignmentFailed && item.Attempt == 1 {
+			failed++
+		}
+		if item.Status == worker.AssignmentCompleted && item.Attempt == 2 && item.RetryOf != "" {
+			completedRetry++
+		}
+	}
+	if failed != 1 || completedRetry != 1 {
+		t.Fatalf("retry ledger mismatch: %+v", snapshot.Assignments)
+	}
+	if !strings.Contains(output.String(), `"retrying":true`) || !strings.Contains(output.String(), `"attempt":2`) {
+		t.Fatalf("retry events are not visible: %s", output.String())
 	}
 }
 
@@ -452,7 +523,7 @@ type reusableRuntimeProcess struct {
 	lifetime context.Context
 }
 
-func (p *reusableRuntimeProcess) Start(context.Context, methods.ReplyParams, func(events.Envelope)) error {
+func (p *reusableRuntimeProcess) Start(context.Context, methods.ReplyParams, func(events.EnvelopeV2)) error {
 	return nil
 }
 
@@ -519,4 +590,179 @@ func TestLazyProcessExecutorReusesHealthyProcessAndRebuildsDeadProcess(t *testin
 	case <-time.After(time.Second):
 		t.Fatal("executor close did not cancel process lifetime")
 	}
+}
+
+type retryIsolationExecutor struct {
+	mu            sync.Mutex
+	retryAttempts int
+	entryStarted  chan struct{}
+	otherStarted  chan struct{}
+	otherRelease  chan struct{}
+}
+
+func (e *retryIsolationExecutor) Execute(ctx context.Context, request worker.ExecuteRequest, _ worker.EventSink) (worker.ExecuteResult, error) {
+	switch request.Task {
+	case "entry":
+		close(e.entryStarted)
+		<-ctx.Done()
+		return worker.ExecuteResult{}, ctx.Err()
+	case "other":
+		close(e.otherStarted)
+		select {
+		case <-ctx.Done():
+			return worker.ExecuteResult{}, ctx.Err()
+		case <-e.otherRelease:
+			return worker.ExecuteResult{Output: "other complete"}, nil
+		}
+	case "retry":
+		e.mu.Lock()
+		e.retryAttempts++
+		attempt := e.retryAttempts
+		e.mu.Unlock()
+		if attempt == 1 {
+			return worker.ExecuteResult{}, errors.New("transient worker timeout")
+		}
+		return worker.ExecuteResult{Output: "retry complete"}, nil
+	default:
+		return worker.ExecuteResult{}, nil
+	}
+}
+
+func (e *retryIsolationExecutor) Cancel(context.Context, worker.AssignmentID, string) error {
+	return nil
+}
+func (e *retryIsolationExecutor) Reset(context.Context) error { return nil }
+func (e *retryIsolationExecutor) Healthy() bool               { return true }
+func (e *retryIsolationExecutor) Close(context.Context) error { return nil }
+
+func findRuntimeAssignment(t *testing.T, snapshot worker.PoolSnapshot, id worker.AssignmentID) worker.AssignmentSnapshot {
+	t.Helper()
+	for _, item := range snapshot.Assignments {
+		if item.ID == id {
+			return item
+		}
+	}
+	t.Fatalf("assignment %s not found in snapshot: %+v", id, snapshot.Assignments)
+	return worker.AssignmentSnapshot{}
+}
+
+// ---- minimal test helpers (v0.2 worker focused) ----
+
+func readJSONLines(t *testing.T, r io.Reader, out chan<- []byte) {
+	t.Helper()
+	dec := json.NewDecoder(r)
+	for {
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return
+		}
+		select {
+		case out <- raw:
+		default:
+			out <- raw
+		}
+	}
+}
+
+func sendRequest(t *testing.T, ctx context.Context, rt *Runtime, id jsonrpc.ID, method string, params any) {
+	t.Helper()
+	rawParams, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	req, err := jsonrpc.NewRequest(id, method, json.RawMessage(rawParams))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	line, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request line: %v", err)
+	}
+	// Drive the runtime the same way real Gateway does: write a JSON-RPC line
+	// to its stdin reader. Most tests construct Runtime with a pipe reader.
+	// We cannot easily reach the private 'in'; instead use the exported handleLine
+	// which all current paths go through for unit tests.
+	if err := rt.handleLine(ctx, line); err != nil {
+		t.Fatalf("handleLine: %v", err)
+	}
+}
+
+func waitForResponse(t *testing.T, lines <-chan []byte, id jsonrpc.ID) jsonrpc.Response {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	target := ""
+	switch v := any(id).(type) {
+	case string:
+		target = v
+	case jsonrpc.ID:
+		b, _ := json.Marshal(v)
+		target = string(b)
+	default:
+		target = fmt.Sprintf("%v", id)
+	}
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout waiting for response id=%v", id)
+		case raw := <-lines:
+			var resp jsonrpc.Response
+			if err := json.Unmarshal(raw, &resp); err == nil {
+				b, _ := json.Marshal(resp.ID)
+				s := string(b)
+				if s == target || s == `"`+target+`"` || strings.Contains(string(raw), target) {
+					return resp
+				}
+			}
+		}
+	}
+}
+
+func waitForEventType(t *testing.T, lines <-chan []byte, typ events.EventType) events.EnvelopeV2 {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout waiting for event type %s", typ)
+		case raw := <-lines:
+			var note jsonrpc.Notification
+			if err := json.Unmarshal(raw, &note); err != nil || note.Method != "run.event" {
+				continue
+			}
+			var ev events.EnvelopeV2
+			if err := json.Unmarshal(note.Params, &ev); err == nil && ev.Type == typ {
+				return ev
+			}
+		}
+	}
+}
+
+func waitForEventsUntilFinish(t *testing.T, lines <-chan []byte) []events.EnvelopeV2 {
+	t.Helper()
+	var out []events.EnvelopeV2
+	deadline := time.After(8 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout waiting for finish; collected %d", len(out))
+		case raw := <-lines:
+			var note jsonrpc.Notification
+			if err := json.Unmarshal(raw, &note); err != nil || note.Method != "run.event" {
+				continue
+			}
+			var ev events.EnvelopeV2
+			if err := json.Unmarshal(note.Params, &ev); err == nil {
+				out = append(out, ev)
+				if ev.Type == events.EventFinish {
+					return out
+				}
+			}
+		}
+	}
+}
+
+func waitForResponseAndEvent(t *testing.T, lines <-chan []byte, id jsonrpc.ID, typ events.EventType) events.EnvelopeV2 {
+	t.Helper()
+	_ = waitForResponse(t, lines, id)
+	return waitForEventType(t, lines, typ)
 }

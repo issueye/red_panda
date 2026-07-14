@@ -8,31 +8,26 @@ import (
 )
 
 const (
-	CoreInitialize      = "core.initialize"
-	CorePing            = "core.ping"
-	CoreShutdown        = "core.shutdown"
-	AgentTools          = "agent.tools"
-	AgentReply          = "agent.reply"
-	AgentCancel         = "agent.cancel"
-	AgentSubAgents      = "agent.subagents"
-	AgentSubAgentCancel = "agent.subagent.cancel"
-	AgentSkills         = "agent.skills"
-	AgentSkillLoad      = "agent.skill.load"
-	AgentSkillCreate    = "agent.skill.create"
-	AgentSkillUpdate    = "agent.skill.update"
-	AgentSkillDelete    = "agent.skill.delete"
-	MCPDiscover         = "mcp.discover"
-	PermissionResolve   = "permission.resolve"
-	AgentEvent          = "agent.event"
-	// Gateway-backed state tools share one wire shape (checklist R1b):
-	//   Params:  { run_id, session_id?, workspace_root?, tool_call_id, tool_name, arguments }
-	//   Result:  { status, output?, …domain payload }
-	// Method names stay domain-specific for compatibility; Runtime uses callGatewayResult.
+	CoreInitialize = "core.initialize"
+	CorePing       = "core.ping"
+	CoreShutdown   = "core.shutdown"
+
+	// Skills management remains under agent.* namespace for catalog operations.
+	AgentSkills        = "agent.skills"
+	AgentSkillLoad     = "agent.skill.load"
+	AgentSkillCreate   = "agent.skill.create"
+	AgentSkillUpdate   = "agent.skill.update"
+	AgentSkillDelete   = "agent.skill.delete"
+	MCPDiscover        = "mcp.discover"
+	PermissionResolve  = "permission.resolve"
+
+	// Gateway-backed state tools (memory/todo/goal/context) — stable internal RPCs.
 	MemoryToolExecute  = "memory.tool.execute"
 	TodoToolExecute    = "todo.tool.execute"
 	GoalToolExecute    = "goal.tool.execute"
 	ContextToolExecute = "context.tool.execute"
 
+	// v0.2 primary execution protocol (no legacy subagent/root model).
 	RunExecute             = "run.execute"
 	RunCancel              = "run.cancel"
 	RunEvent               = "run.event"
@@ -129,8 +124,7 @@ type WorkerMessage struct {
 	ExpiresAt        time.Time       `json:"expires_at"`
 }
 
-// RunExecuteParams starts one top-level Run. Session and Input reuse neutral
-// value objects, while RunExecuteOptions excludes all v0.1 SubAgent controls.
+// RunExecuteParams starts one top-level Run under the v0.2 Worker model.
 type RunExecuteParams struct {
 	RunID   string            `json:"run_id"`
 	Session ReplySession      `json:"session"`
@@ -164,6 +158,7 @@ type RunExecuteOptions struct {
 	WebHTTPProxy        string                        `json:"web_http_proxy,omitempty"`
 	MaxToolTurns        int                           `json:"max_tool_turns,omitempty"`
 	LogLLMRequests      bool                          `json:"log_llm_requests,omitempty"`
+	WorkerPoolSize      int                           `json:"worker_pool_size,omitempty"`
 	WorkerProfiles      []WorkerProfileRef            `json:"worker_profiles,omitempty"`
 	WorkerContext       *WorkerExecutionContext       `json:"worker_context,omitempty"`
 	DebugTools          bool                          `json:"debug_tools,omitempty"`
@@ -342,8 +337,6 @@ type ReplyOptions struct {
 	ToolDenylist      []string       `json:"tool_denylist,omitempty"`
 	EmitToolEvents    bool           `json:"emit_tool_events"`
 	RequirePermission bool           `json:"require_permission,omitempty"`
-	SpawnSubAgents    bool           `json:"spawn_subagents,omitempty"`
-	SubAgentBackend   string         `json:"subagent_backend,omitempty"`
 	MemoryContext     *MemoryContext `json:"memory_context,omitempty"`
 	// TodoContext is the session checklist injected into provider messages.
 	TodoContext *TodoContext `json:"todo_context,omitempty"`
@@ -373,19 +366,15 @@ type ReplyOptions struct {
 	// LogLLMRequests writes each outbound provider request body to the local
 	// diagnostic log directory (API keys are never written). Toggle from Desktop settings.
 	LogLLMRequests bool `json:"log_llm_requests,omitempty"`
-	// AgentDefinitions is the Gateway-managed specialist catalog for this reply.
-	// Runtime merges SystemPrompt / DefaultMaxTurns / Phase / NameZH over builtin
-	// goal specialists so Settings edits are the execution source of truth.
-	AgentDefinitions []AgentDefinitionRef `json:"agent_definitions,omitempty"`
 	// WorkerProfiles is the v0.2 execution-policy snapshot. Runtime keeps it
 	// internally after decoding run.execute so delegated Assignments can apply
 	// provider/model/tool policy without consulting Gateway again.
 	WorkerProfiles []WorkerProfileRef `json:"worker_profiles,omitempty"`
-	// DebugTools exposes ops-only tools (subagent.pool_*, skill.create/update/delete)
+	// DebugTools exposes ops-only tools (worker.pool_*, skill.create/update/delete)
 	// to the provider. Can also be enabled via RED_PANDA_DEBUG_TOOLS=1.
 	DebugTools bool `json:"debug_tools,omitempty"`
-	// SpecialistContext is role/brief system text for subagents, goal specialists,
-	// and skill runners. It is NOT long-term memory — use MemoryContext for that.
+	// SpecialistContext is role/brief system text for delegated workers and skills.
+	// It is NOT long-term memory — use MemoryContext for that.
 	SpecialistContext *SpecialistContext `json:"specialist_context,omitempty"`
 	// WorkerContext is trusted IPC metadata used by delegated Runtime processes.
 	WorkerContext *WorkerExecutionContext `json:"worker_context,omitempty"`
@@ -394,18 +383,7 @@ type ReplyOptions struct {
 	MCPServers []protocolmcp.MCPServerConfig `json:"mcp_servers,omitempty"`
 }
 
-// AgentDefinitionRef is a compact specialist profile attached to agent.reply.
-type AgentDefinitionRef struct {
-	Key             string `json:"key"`
-	Name            string `json:"name,omitempty"`
-	NameZH          string `json:"name_zh,omitempty"`
-	Phase           string `json:"phase,omitempty"`
-	SystemPrompt    string `json:"system_prompt,omitempty"`
-	DefaultMaxTurns int    `json:"default_max_turns,omitempty"`
-	Enabled         bool   `json:"enabled"`
-}
-
-// SpecialistContext carries ephemeral role instructions for child runs.
+// SpecialistContext carries ephemeral role instructions for delegated workers and skills.
 type SpecialistContext struct {
 	// Kind is a free-form label: specialist | worker | skill.
 	Kind    string `json:"kind,omitempty"`
@@ -617,43 +595,6 @@ type ReplyAccepted struct {
 type CancelParams struct {
 	RunID  string `json:"run_id"`
 	Reason string `json:"reason,omitempty"`
-}
-
-type SubAgentsParams struct {
-	RunID      string `json:"run_id,omitempty"`
-	SubAgentID string `json:"subagent_id,omitempty"`
-}
-
-type SubAgentRecord struct {
-	SubAgentID      string `json:"subagent_id"`
-	Name            string `json:"name"`
-	Backend         string `json:"backend"`
-	Status          string `json:"status"`
-	RootRunID       string `json:"root_run_id"`
-	ParentRunID     string `json:"parent_run_id,omitempty"`
-	ParentSessionID string `json:"parent_session_id,omitempty"`
-	ChildRunID      string `json:"child_run_id,omitempty"`
-	Summary         string `json:"summary,omitempty"`
-	Error           string `json:"error,omitempty"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
-}
-
-type SubAgentsResult struct {
-	Items []SubAgentRecord `json:"items"`
-}
-
-type SubAgentCancelParams struct {
-	RunID      string `json:"run_id"`
-	SubAgentID string `json:"subagent_id"`
-	Reason     string `json:"reason,omitempty"`
-}
-
-type SubAgentCancelResult struct {
-	Accepted   bool   `json:"accepted"`
-	RunID      string `json:"run_id"`
-	SubAgentID string `json:"subagent_id"`
-	Cancelled  bool   `json:"cancelled"`
 }
 
 // Managed skill discovery and management (workspace .codex/skills).

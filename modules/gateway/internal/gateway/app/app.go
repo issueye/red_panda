@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,6 +44,17 @@ func Run(ctx context.Context, cfg Config) error {
 
 	hub := eventhub.New()
 	repos := repository.NewSet(db)
+
+	// Recover any runs that were left in "running"/"waiting_permission" after
+	// an unclean shutdown (desktop crash, force quit, power loss, etc.).
+	// This releases the global concurrent-run budget so the UI does not show
+	// phantom "已达到最大并发运行数" when there are no actual sessions.
+	if n, err := repos.Runs.RecoverStaleRuns(); err != nil {
+		return fmt.Errorf("recover stale runs: %w", err)
+	} else if n > 0 {
+		log.Printf("recovered %d stale run(s) on startup (freed concurrent budget)", n)
+	}
+
 	var services service.Set
 	runtime := runtimeclient.New(agentCommand(cfg.AgentCommand), cfg.AgentArgs, cfg.Version, func(event events.EnvelopeV2) {
 		services.Run.HandleRuntimeEvent(event)

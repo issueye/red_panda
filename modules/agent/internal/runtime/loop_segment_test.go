@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"redpanda/agent/internal/provider"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -58,14 +59,14 @@ type maxTurnsOnceProvider struct {
 
 func (*maxTurnsOnceProvider) Name() string { return "max-turns-test" }
 
-func (p *maxTurnsOnceProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+func (p *maxTurnsOnceProvider) Complete(_ context.Context, req provider.ProviderRequest, emit func(provider.ProviderChunk) error) error {
 	p.calls++
 	// 移除工具后（retryFinalAnswer）生成文本。
 	if len(req.Tools) == 0 {
-		_ = emit(ProviderChunk{Delta: "synthesized after max turns"})
-		return emit(ProviderChunk{Final: true})
+		_ = emit(provider.ProviderChunk{Delta: "synthesized after max turns"})
+		return emit(provider.ProviderChunk{Final: true})
 	}
-	return emit(ProviderChunk{ToolCalls: []tools.Call{{
+	return emit(provider.ProviderChunk{ToolCalls: []tools.Call{{
 		ID:        "tool_max_turns",
 		Name:      "workspace.list",
 		Risk:      tools.RiskLow,
@@ -115,7 +116,7 @@ func TestEmitRunFinishPayloadIncludesLoopEndReason(t *testing.T) {
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
 	rt.provider = &echoFinishProvider{}
 
-	sendRequest(t, context.Background(), rt, "reply_loop_reason", methods.AgentReply, methods.ReplyParams{
+	sendRequest(t, context.Background(), rt, "run_loop_reason", methods.RunExecute, methods.RunExecuteParams{
 		RunID: "run_loop_reason",
 		Session: methods.ReplySession{
 			ID:         "session_loop_reason",
@@ -123,9 +124,9 @@ func TestEmitRunFinishPayloadIncludesLoopEndReason(t *testing.T) {
 		},
 		Input: methods.ReplyInput{Text: "hello"},
 	})
-	waitForResponse(t, lines, "reply_loop_reason")
+	waitForResponse(t, lines, "run_loop_reason")
 	eventsOut := waitForEventsUntilFinish(t, lines)
-	var finish events.Envelope
+	var finish events.EnvelopeV2
 	for _, ev := range eventsOut {
 		if ev.Type == events.EventFinish {
 			finish = ev
@@ -146,6 +147,6 @@ type echoFinishProvider struct{}
 func (*echoFinishProvider) Name() string { return "echo-finish" }
 
 func (*echoFinishProvider) Complete(_ context.Context, _ ProviderRequest, emit func(ProviderChunk) error) error {
-	_ = emit(ProviderChunk{Delta: "hi"})
-	return emit(ProviderChunk{Final: true})
+	_ = emit(provider.ProviderChunk{Delta: "hi"})
+	return emit(provider.ProviderChunk{Final: true})
 }

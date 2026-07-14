@@ -14,9 +14,38 @@ export const defaultRunSettings = {
   webHttpProxy: '',
   maxToolTurns: 12,
   maxConcurrentRuns: 3,
+  // Worker pool size controls how many reusable delegated specialists (via worker.delegate) can run concurrently.
+  // Valid range: 1-8. Default 8. Larger values allow more parallel analysis but use more memory/CPU.
+  workerPoolSize: 8,
   // When true, Agent Runtime writes each LLM request payload to local diagnostic logs.
   logLlmRequests: false,
 };
+
+export function normalizeStoredRunSettings(settings) {
+  const current = { ...defaultRunSettings, ...(settings || {}) };
+  const modelOverride = String(current.model || '').trim();
+  if (current.providerProfileId && /^\d+$/.test(modelOverride)) {
+    current.model = '';
+  }
+  // Upgrade users who had the old default (2) to the new default (8).
+  // Only upgrade exact old default; explicit user values (1,3,4,...) are respected.
+  if (current.workerPoolSize === 2) {
+    current.workerPoolSize = defaultRunSettings.workerPoolSize;
+  }
+  // Clamp worker pool size to valid range (0 = use default, 1-8 otherwise)
+  current.workerPoolSize = clampWorkerPoolSize(current.workerPoolSize);
+  return current;
+}
+
+function clampWorkerPoolSize(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    return 0; // 0 means "use runtime default (2)"
+  }
+  if (n < 1) return 1;
+  if (n > 8) return 8;
+  return Math.floor(n);
+}
 
 export function splitOptionList(value) {
   if (!value) {
@@ -36,7 +65,7 @@ export function splitOptionList(value) {
  * @param {object} [overrides] extra options (create_goal, goal_objective, flags from parseCommand, …)
  */
 export function buildRunStartOptions(settings, workspace, text, overrides = {}) {
-  const current = { ...defaultRunSettings, ...(settings || {}) };
+  const current = normalizeStoredRunSettings(settings);
   const textStr = String(text || '');
   const requirePermission = overrides.require_permission != null
     ? Boolean(overrides.require_permission)
@@ -48,7 +77,7 @@ export function buildRunStartOptions(settings, workspace, text, overrides = {}) 
     tool_policy: current.toolPolicy,
     permission_mode: current.permissionMode,
     provider_profile_id: current.providerProfileId,
-    model: current.model.trim(),
+    model: String(current.model || '').trim(),
     tool_allowlist: splitOptionList(current.toolAllowlist),
     tool_denylist: splitOptionList(current.toolDenylist),
     web_search_max_results: Number.isFinite(Number(current.webSearchResults))
@@ -66,6 +95,7 @@ export function buildRunStartOptions(settings, workspace, text, overrides = {}) 
     max_concurrent_runs: Number.isFinite(Number(current.maxConcurrentRuns))
       ? Number(current.maxConcurrentRuns)
       : 0,
+    worker_pool_size: clampWorkerPoolSize(current.workerPoolSize),
     log_llm_requests: Boolean(current.logLlmRequests),
     require_permission: requirePermission,
     // Regular conversations must not enter the Goal pipeline implicitly.

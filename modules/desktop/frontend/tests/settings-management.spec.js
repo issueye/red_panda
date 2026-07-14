@@ -11,14 +11,15 @@ test('settings exposes six keyboard-accessible management modules', async ({ pag
   const dialog = page.getByRole('dialog', { name: '设置' });
   const tabs = dialog.getByRole('tab');
   await expect(tabs).toHaveCount(6);
+  await expect(dialog.getByRole('navigation', { name: '项目设置菜单' })).toBeVisible();
   await expect(dialog.getByRole('tab', { name: '供应商' })).toHaveAttribute('aria-selected', 'true');
 
   await dialog.getByRole('tab', { name: '供应商' }).focus();
-  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
   await expect(dialog.getByRole('tab', { name: 'Worker' })).toBeFocused();
   await expect(dialog.getByRole('tabpanel', { name: 'Worker 配置' })).toBeVisible();
 
-  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
   await expect(dialog.getByRole('tab', { name: '技能' })).toBeFocused();
   await expect(dialog.getByRole('tabpanel', { name: '技能管理' })).toBeVisible();
 
@@ -28,7 +29,23 @@ test('settings exposes six keyboard-accessible management modules', async ({ pag
 
   await page.keyboard.press('End');
   await expect(dialog.getByRole('tab', { name: '其他' })).toBeFocused();
-  await expect(dialog.getByRole('tabpanel', { name: '其他设置' })).toContainText('运行与代理');
+  await expect(dialog.getByRole('tabpanel', { name: '其他设置' })).toContainText('运行');
+});
+
+test('settings drawer uses 85 percent width with navigation on the left', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  const dialog = page.getByRole('dialog', { name: '设置' });
+  const navigation = dialog.getByRole('navigation', { name: '项目设置菜单' });
+  const content = dialog.getByRole('tabpanel', { name: '供应商管理' });
+
+  const [dialogBox, navigationBox, contentBox] = await Promise.all([
+    dialog.boundingBox(),
+    navigation.boundingBox(),
+    content.boundingBox(),
+  ]);
+
+  expect(Math.abs(dialogBox.width - 1020)).toBeLessThanOrEqual(1);
+  expect(navigationBox.x).toBeLessThan(contentBox.x);
 });
 
 test('skill configs can be managed and persist locally', async ({ page }) => {

@@ -5,6 +5,29 @@ import { todosFromToolFinishedPayload, todosFromUpdatedEvent } from './todos.js'
 export const WORKER_PROTOCOL_VERSION = '2026-07-13';
 const TERMINAL_ASSIGNMENT_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const ACTIVE_ASSIGNMENT_STATUSES = new Set(['queued', 'running', 'cancelling', 'waiting_permission']);
+
+function assignmentStatusForTerminalRun(runStatus) {
+  if (runStatus === 'cancelled') return 'cancelled';
+  if (runStatus === 'failed') return 'failed';
+  return 'completed';
+}
+
+export function reconcileAssignmentsWithRuns(assignments = [], runs = []) {
+  const runsById = new Map((runs || []).map((run) => [run.id, run]));
+  return (assignments || []).map((assignment) => {
+    if (!ACTIVE_ASSIGNMENT_STATUSES.has(assignment?.status)) return assignment;
+    const run = runsById.get(assignment.runId);
+    if (!run || !TERMINAL_RUN_STATUSES.has(run.status)) return assignment;
+    const status = assignmentStatusForTerminalRun(run.status);
+    return {
+      ...assignment,
+      status,
+      summary: assignment.summary || (status === 'completed' ? '随运行完成' : '随运行结束'),
+      finishedAt: assignment.finishedAt || run.finishedAt,
+    };
+  });
+}
 
 export function appendWorkerText(items, event, text) {
   const previous = items[items.length - 1];
@@ -89,6 +112,10 @@ function assignmentFromEvent(event, current) {
     originWorkerId: body.origin_worker_id || current?.originWorkerId || '',
     profileKey: body.profile_key || event.worker?.profile_key || current?.profileKey || '',
     task: body.task || current?.task || '',
+    attempt: Number(body.attempt) || current?.attempt || 1,
+    retryOf: body.retry_of || current?.retryOf || '',
+    retrying: Boolean(body.retrying),
+    retryInMs: Number(body.retry_in_ms) || current?.retryInMs || 0,
     status,
     result: body.result || current?.result || '',
     error: body.error || current?.error || '',
@@ -246,19 +273,24 @@ export function reduceRunEvent(runtime, event) {
   if (event.type === 'finish' || event.type === 'error') {
     const runEventsByRun = { ...next.runEventsByRun };
     delete runEventsByRun[runId];
+    const runStatus = event.payload?.status || (event.type === 'error' ? 'failed' : 'completed');
+    const finishedAt = event.created_at || new Date().toISOString();
+    const runs = updateRunByID(next.runs, runId, {
+      status: runStatus,
+      lastEventType: event.type, lastRunSeq: runSeq,
+      error: event.payload?.error || event.payload?.message || '',
+      finishedAt,
+    });
+    const assignments = reconcileAssignmentsWithRuns(Object.values(next.assignmentsById || {}), runs);
     next = {
       ...next,
       running: false,
       currentRunId: next.currentRunId === runId ? '' : next.currentRunId,
       runEventsByRun,
+      assignmentsById: Object.fromEntries(assignments.map((assignment) => [assignment.id, assignment])),
       permissions: next.permissions.map((item) => item.runId === runId && item.status === 'pending'
         ? { ...item, status: 'closed', runSeq } : item),
-      runs: updateRunByID(next.runs, runId, {
-        status: event.payload?.status || (event.type === 'error' ? 'failed' : 'completed'),
-        lastEventType: event.type, lastRunSeq: runSeq,
-        error: event.payload?.error || event.payload?.message || '',
-        finishedAt: event.created_at || new Date().toISOString(),
-      }),
+      runs,
     };
     effects.push({ type: 'clear_global_permissions_for_run', runId });
     return { runtime: next, effects };

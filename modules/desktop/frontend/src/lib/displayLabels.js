@@ -138,4 +138,3 @@ export function displayWorkerProfileName(value) {
 export function displayEventKind(value) {
   return displayFrom(eventKindLabel, value);
 }
-  draining: '排空中',

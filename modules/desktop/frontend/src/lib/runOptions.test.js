@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildRunStartOptions, defaultRunSettings, splitOptionList } from './runOptions.js';
+import {
+  buildRunStartOptions,
+  defaultRunSettings,
+  normalizeStoredRunSettings,
+  splitOptionList,
+} from './runOptions.js';
 
 test('splitOptionList trims empty entries', () => {
   assert.deepEqual(
@@ -34,6 +39,26 @@ test('buildRunStartOptions includes provider profile and tool policy fields', ()
   assert.equal(options.subagent_backend, undefined);
 });
 
+test('numeric legacy model override is cleared when a provider profile is selected', () => {
+  const normalized = normalizeStoredRunSettings({
+    providerProfileId: 'provider_step',
+    model: '8',
+  });
+  assert.equal(normalized.model, '');
+
+  const options = buildRunStartOptions(normalized, { root_path: 'D:/workspace' }, 'test');
+  assert.equal(options.provider_profile_id, 'provider_step');
+  assert.equal(options.model, '');
+});
+
+test('named model override remains available for provider profiles', () => {
+  const normalized = normalizeStoredRunSettings({
+    providerProfileId: 'provider_step',
+    model: 'step-3.7-flash-202607',
+  });
+  assert.equal(normalized.model, 'step-3.7-flash-202607');
+});
+
 test('buildRunStartOptions passes web tool tuning fields', () => {
   const options = buildRunStartOptions({
     webSearchResults: '5',
@@ -62,6 +87,15 @@ test('buildRunStartOptions falls back to default web tuning', () => {
   assert.equal(options.max_concurrent_runs, 3);
   assert.equal(options.log_llm_requests, false);
   assert.equal(options.goals_enabled, false);
+  assert.equal(options.worker_pool_size, 8);
+});
+
+test('buildRunStartOptions passes worker_pool_size', () => {
+  const options = buildRunStartOptions({ workerPoolSize: 6 }, { root: 'D:/ws' }, 'analyze');
+  assert.equal(options.worker_pool_size, 6);
+
+  const options2 = buildRunStartOptions({ workerPoolSize: '4' }, { root: 'D:/ws' }, 'analyze');
+  assert.equal(options2.worker_pool_size, 4);
 });
 
 test('buildRunStartOptions keeps regular conversations out of the goal pipeline', () => {

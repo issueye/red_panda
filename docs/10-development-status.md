@@ -73,7 +73,7 @@ Updated: 2026-07-13
 14. Implemented `subagent_backend=runtime_process`: parent `red-panda-agent` starts an independent child `red-panda-agent` over internal stdio JSON-RPC, runs the child task, and bridges child `agent.event` messages back as subagent events on the parent `root_run_id/root_seq` channel.
 15. Added `RED_PANDA_SUBAGENT_COMMAND` to override the child `red-panda-agent` command.
 16. Implemented `subagent_backend=process_pool`: parent Runtime keeps a reusable pool of child `red-panda-agent` processes; successful child runs return to the pool, while cancelled or failed child runs close and discard the child.
-17. Added `RED_PANDA_SUBAGENT_POOL_SIZE` for the reusable child process pool size, with default `2` and maximum `8`.
+17. Added `RED_PANDA_SUBAGENT_POOL_SIZE` for the reusable child process pool size, with default `8` (changed from 2) and maximum `8`.
 18. Implemented workspace/session/message HTTP APIs.
 19. Implemented workspace tree/file/diff APIs with path traversal protection, size limits, binary detection, and non-Git fallback.
 20. Implemented Desktop chat, permission cards, subagent panel, tool cards, workspace file panel, and RunActivityPanel.

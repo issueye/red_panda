@@ -59,24 +59,27 @@ export function ConversationView({
       {showComposer ? (
         <div className="conversation-footer">
           <div className="composer-strips">
-            <GoalComposerStrip
-              busy={goalBusy}
-              expanded={goalExpanded}
-              goal={goal}
-              loading={goalLoading}
-              onCancel={onGoalCancel}
-              onContinue={onGoalContinue}
-              onToggleExpanded={onGoalExpandToggle}
-              sessionId={goalSessionId}
-            />
-            <TodoComposerStrip
-              expanded={todosExpanded}
-              items={todos}
-              loading={todosLoading}
-              onRefresh={onTodosRefresh}
-              onToggleExpanded={onTodosExpandToggle}
-              openCount={todoOpenCount}
-            />
+            {goal ? (
+              <GoalComposerStrip
+                busy={goalBusy}
+                expanded={goalExpanded}
+                goal={goal}
+                loading={goalLoading}
+                onCancel={onGoalCancel}
+                onContinue={onGoalContinue}
+                onToggleExpanded={onGoalExpandToggle}
+                sessionId={goalSessionId}
+              />
+            ) : (
+              <TodoComposerStrip
+                expanded={todosExpanded}
+                items={todos}
+                loading={todosLoading}
+                onRefresh={onTodosRefresh}
+                onToggleExpanded={onTodosExpandToggle}
+                openCount={todoOpenCount}
+              />
+            )}
           </div>
           <ChatComposer
             onCancel={onCancel}

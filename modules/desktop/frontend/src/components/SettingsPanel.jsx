@@ -129,7 +129,11 @@ export function SettingsPanel({
   }
 
   const updateSetting = (key, value) => {
-    onChange({ ...settings, [key]: value });
+    onChange({
+      ...settings,
+      [key]: value,
+      ...(key === 'providerProfileId' ? { model: '' } : {}),
+    });
   };
   const updateProfileDraft = (key, value) => {
     setProfileDraft((current) => ({ ...current, [key]: value }));
@@ -444,8 +448,8 @@ export function SettingsPanel({
   function handleTabsKeyDown(event) {
     const currentIndex = SETTINGS_TABS.findIndex((tab) => tab.id === activeTab);
     let nextIndex = currentIndex;
-    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
-    else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
     else if (event.key === 'Home') nextIndex = 0;
     else if (event.key === 'End') nextIndex = SETTINGS_TABS.length - 1;
     else return;
@@ -595,7 +599,7 @@ export function SettingsPanel({
       >
         <header className="settings-header">
           <div>
-            <strong>设置</strong>
+            <strong>项目设置</strong>
             <span>{activeTabLabel}</span>
           </div>
           <IconButton label="关闭设置" onClick={onClose} ref={closeButtonRef}>
@@ -603,35 +607,47 @@ export function SettingsPanel({
           </IconButton>
         </header>
 
-        <div aria-label="设置分类" className="settings-tabs" onKeyDown={handleTabsKeyDown} role="tablist">
-          {SETTINGS_TABS.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                aria-controls="settings-tab-panel"
-                aria-selected={activeTab === tab.id}
-                className={activeTab === tab.id ? 'settings-tab active' : 'settings-tab'}
-                data-settings-tab={tab.id}
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                role="tab"
-                tabIndex={activeTab === tab.id ? 0 : -1}
-                type="button"
-              >
-                <Icon aria-hidden="true" size={16} />
-                <span>{tab.shortLabel}</span>
-              </button>
-            );
-          })}
-        </div>
+        <div className="settings-body">
+          <nav className="settings-sidebar" aria-label="项目设置菜单">
+            <span className="settings-nav-title">项目设置</span>
+            <div
+              aria-label="设置分类"
+              aria-orientation="vertical"
+              className="settings-tabs"
+              onKeyDown={handleTabsKeyDown}
+              role="tablist"
+            >
+              {SETTINGS_TABS.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    aria-controls="settings-tab-panel"
+                    aria-label={tab.shortLabel}
+                    aria-selected={activeTab === tab.id}
+                    className={activeTab === tab.id ? 'settings-tab active' : 'settings-tab'}
+                    data-settings-tab={tab.id}
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    role="tab"
+                    tabIndex={activeTab === tab.id ? 0 : -1}
+                    type="button"
+                  >
+                    <Icon aria-hidden="true" size={17} />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
 
-        <div
-          aria-label={activeTabLabel}
-          className="settings-content"
-          id="settings-tab-panel"
-          role="tabpanel"
-        >
-          {activeContent}
+          <div
+            aria-label={activeTabLabel}
+            className="settings-content"
+            id="settings-tab-panel"
+            role="tabpanel"
+          >
+            {activeContent}
+          </div>
         </div>
 
         <footer className="settings-footer">

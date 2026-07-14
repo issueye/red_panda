@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { classNames } from '../lib/format.js';
 import { buildToolOutputSummary, displayToolOutput } from '../lib/toolResultDisplay.js';
+import { shouldMarkToolStale } from '../lib/toolSelfManaged.js';
 import { IconButton } from './ui/button.jsx';
 
 /**
@@ -207,7 +208,7 @@ export function ToolCallCard({ item }) {
   }, [isRunning, item.durationMs, item.startedAt, nowMs]);
 
   const duration = formatDuration(isRunning ? elapsedMs : item.durationMs);
-  const isStale = isRunning && elapsedMs >= 25000;
+  const isStale = isRunning && shouldMarkToolStale(item.name, elapsedMs);
 
   return (
     <article

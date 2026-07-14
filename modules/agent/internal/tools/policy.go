@@ -13,9 +13,12 @@ import (
 // opsOnlyTools 会注册给桌面端、命令行和调试用途，但默认不暴露给提供方工具架构（检查项 O1/O3）。
 // 可通过 RED_PANDA_DEBUG_TOOLS=1、ReplyOptions.DebugTools 或显式 tool_allowlist 项启用。
 var opsOnlyTools = map[string]struct{}{
-	"skill.create": {},
-	"skill.update": {},
-	"skill.delete": {},
+	"skill.create":       {},
+	"skill.update":       {},
+	"skill.delete":       {},
+	"worker.pool_status": {},
+	"worker.pool_resize": {},
+	"worker.pool_reset":  {},
 }
 
 func isOpsOnlyTool(name string) bool {
@@ -150,7 +153,6 @@ var goalModeDefaultAllowlist = []string{
 	"worker.delegate",
 	"worker.list",
 	"worker.cancel",
-	"worker.pool_status",
 	"worker.send",
 	"worker.receive",
 	"skill.list",

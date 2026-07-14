@@ -16,6 +16,10 @@ test('createEmptySessionRuntime has stable defaults', () => {
   assert.equal(rt.running, false);
   assert.deepEqual(rt.assignmentsById, {});
   assert.deepEqual(rt.assignmentOrder, []);
+  assert.deepEqual(rt.conversationTabs, [{
+    id: 'main', kind: 'main', title: '主对话', closable: false,
+  }]);
+  assert.equal(rt.activeConversationTab, 'main');
 });
 
 test('patchSessionRuntimeMap updates one session only', () => {

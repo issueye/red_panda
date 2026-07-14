@@ -9,13 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"redpanda/agent/internal/provider"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
 
 type chainedToolProvider struct {
-	requests []ProviderRequest
+	requests []provider.ProviderRequest
 }
 
 func TestRecoveryAnswerForWorkerDoesNotDuplicateToolOutput(t *testing.T) {
@@ -27,9 +28,21 @@ func TestRecoveryAnswerForWorkerDoesNotDuplicateToolOutput(t *testing.T) {
 			Output: "large file contents",
 		},
 	}}
-	child := recoveryAnswerForRun(methods.ReplyParams{RunID: "root:Worker:analyst"}, history)
+	// v0.2: delegated worker is identified by WorkerContext (not legacy RunID suffix).
+	childParams := methods.ReplyParams{
+		RunID: "run-delegated",
+		Options: methods.ReplyOptions{
+			WorkerContext: &methods.WorkerExecutionContext{
+				WorkerID:     "worker-02",
+				AssignmentID: "assignment-042",
+				RunID:        "run-delegated",
+				ProxyMessages: true,
+			},
+		},
+	}
+	child := recoveryAnswerForRun(childParams, history)
 	if strings.Contains(child, "large file contents") || !strings.Contains(child, "工具卡片") {
-		t.Fatalf("child recovery should be concise: %q", child)
+		t.Fatalf("delegated worker recovery should be concise: %q", child)
 	}
 	root := recoveryAnswerForRun(methods.ReplyParams{RunID: "root"}, history)
 	if !strings.Contains(root, "large file contents") {
@@ -41,32 +54,36 @@ func (*chainedToolProvider) Name() string {
 	return "chained-tool-test"
 }
 
-func (p *chainedToolProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
-	req.ToolHistory = append([]ToolExchange(nil), req.ToolHistory...)
+func (p *chainedToolProvider) Complete(_ context.Context, req provider.ProviderRequest, emit func(provider.ProviderChunk) error) error {
+	req.ToolHistory = append([]provider.ToolExchange(nil), req.ToolHistory...)
 	p.requests = append(p.requests, req)
 
 	switch len(req.ToolHistory) {
 	case 0:
-		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+		return emit(provider.ProviderChunk{ToolCalls: []tools.Call{{
 			ID:        "tool_chain_list",
 			Name:      "workspace.list",
 			Risk:      tools.RiskLow,
 			Arguments: map[string]any{"path": ".", "max_depth": 1},
 		}}})
 	case 1:
-		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+		return emit(provider.ProviderChunk{ToolCalls: []tools.Call{{
 			ID:        "tool_chain_read",
 			Name:      "workspace.read_file",
 			Risk:      tools.RiskLow,
 			Arguments: map[string]any{"path": "note.txt"},
 		}}})
 	default:
-		if err := emit(ProviderChunk{Delta: "tool chain completed"}); err != nil {
+		if err := emit(provider.ProviderChunk{Delta: "tool chain completed"}); err != nil {
 			return err
 		}
-		return emit(ProviderChunk{Final: true})
+		return emit(provider.ProviderChunk{Final: true})
 	}
 }
+
+type ProviderRequest = provider.ProviderRequest
+type ProviderChunk = provider.ProviderChunk
+type ToolExchange = provider.ToolExchange
 
 func TestRuntimeProviderExecutesChainedToolCalls(t *testing.T) {
 	tempDir := t.TempDir()
@@ -85,7 +102,7 @@ func TestRuntimeProviderExecutesChainedToolCalls(t *testing.T) {
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
 	rt.provider = provider
 
-	sendRequest(t, context.Background(), rt, "reply_chain", methods.AgentReply, methods.ReplyParams{
+	sendRequest(t, context.Background(), rt, "run_chain", methods.RunExecute, methods.RunExecuteParams{
 		RunID: "run_chain_test",
 		Session: methods.ReplySession{
 			ID:         "session_chain_test",
@@ -94,7 +111,7 @@ func TestRuntimeProviderExecutesChainedToolCalls(t *testing.T) {
 		Input: methods.ReplyInput{Text: "inspect note.txt"},
 	})
 
-	waitForResponse(t, lines, "reply_chain")
+	waitForResponse(t, lines, "run_chain")
 	runEvents := waitForEventsUntilFinish(t, lines)
 
 	var started, finished int
@@ -237,7 +254,7 @@ func TestRuntimeRecoversWhenProviderReturnsEmptyAfterTools(t *testing.T) {
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
 	rt.provider = provider
 
-	sendRequest(t, context.Background(), rt, "reply_empty", methods.AgentReply, methods.ReplyParams{
+	sendRequest(t, context.Background(), rt, "run_empty", methods.RunExecute, methods.RunExecuteParams{
 		RunID: "run_empty_after_tools",
 		Session: methods.ReplySession{
 			ID:         "session_empty_after_tools",
@@ -246,7 +263,7 @@ func TestRuntimeRecoversWhenProviderReturnsEmptyAfterTools(t *testing.T) {
 		Input: methods.ReplyInput{Text: "list then go silent"},
 	})
 
-	waitForResponse(t, lines, "reply_empty")
+	waitForResponse(t, lines, "run_empty")
 	runEvents := waitForEventsUntilFinish(t, lines)
 
 	var recovered string
@@ -281,7 +298,7 @@ func TestRuntimeRejectsToolCallMarkupAsFinalAnswer(t *testing.T) {
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
 	rt.provider = &toolCallOnlyFinalProvider{}
 
-	sendRequest(t, context.Background(), rt, "reply_invalid_final", methods.AgentReply, methods.ReplyParams{
+	sendRequest(t, context.Background(), rt, "run_invalid_final", methods.RunExecute, methods.RunExecuteParams{
 		RunID: "run_invalid_final",
 		Session: methods.ReplySession{
 			ID:         "session_invalid_final",
@@ -290,7 +307,7 @@ func TestRuntimeRejectsToolCallMarkupAsFinalAnswer(t *testing.T) {
 		Input: methods.ReplyInput{Text: "analyze project"},
 	})
 
-	waitForResponse(t, lines, "reply_invalid_final")
+	waitForResponse(t, lines, "run_invalid_final")
 	runEvents := waitForEventsUntilFinish(t, lines)
 
 	var recovered string
@@ -307,7 +324,8 @@ func TestRuntimeRejectsToolCallMarkupAsFinalAnswer(t *testing.T) {
 		}
 	}
 	if recovered == "" {
-		t.Fatalf("expected deterministic fallback summary, events=%#v", summarizeEventTypes(runEvents))
+		// v0.2: simple fallback; do not depend on removed summarizeEventTypes helper
+		t.Fatalf("expected deterministic fallback summary")
 	}
 	finish := runEvents[len(runEvents)-1]
 	if finish.Type != events.EventFinish || finish.Payload["status"] != "completed" {
@@ -332,7 +350,7 @@ func TestRuntimeProviderContinuesAfterToolFailure(t *testing.T) {
 	rt := New(strings.NewReader(""), writer, io.Discard, "test")
 	rt.provider = provider
 
-	sendRequest(t, context.Background(), rt, "reply_recover", methods.AgentReply, methods.ReplyParams{
+	sendRequest(t, context.Background(), rt, "run_recover", methods.RunExecute, methods.RunExecuteParams{
 		RunID: "run_recover_test",
 		Session: methods.ReplySession{
 			ID:         "session_recover_test",
@@ -341,7 +359,7 @@ func TestRuntimeProviderContinuesAfterToolFailure(t *testing.T) {
 		Input: methods.ReplyInput{Text: "read missing then recover"},
 	})
 
-	waitForResponse(t, lines, "reply_recover")
+	waitForResponse(t, lines, "run_recover")
 	runEvents := waitForEventsUntilFinish(t, lines)
 
 	var toolFailed, toolFinished int

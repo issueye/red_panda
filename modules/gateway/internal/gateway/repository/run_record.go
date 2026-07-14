@@ -98,6 +98,7 @@ func applyRunEventProjection(row *model.RunRecord, event events.EnvelopeV2, now 
 	if event.Type == events.EventError {
 		row.Status = firstNonEmpty(stringPayload(event.Payload, "status"), "failed")
 		row.Error = firstNonEmpty(stringPayload(event.Payload, "message"), row.Error)
+		row.FinishedAt = &now
 	}
 	if event.Type == events.EventFinish {
 		row.Status = firstNonEmpty(stringPayload(event.Payload, "status"), "completed")
@@ -165,6 +166,22 @@ func (r RunRecordRepository) ListActiveBySession(sessionID string, limit int) ([
 		Limit(limit).
 		Find(&rows).Error
 	return rows, err
+}
+
+// RecoverStaleRuns marks any runs that are still in a non-terminal state as failed.
+// This must be called on gateway startup to release the concurrent run budget after
+// an unclean shutdown or desktop restart.
+func (r RunRecordRepository) RecoverStaleRuns() (int64, error) {
+	now := time.Now().UTC()
+	res := r.db.Model(&model.RunRecord{}).
+		Where("status IN ?", []string{"running", "waiting_permission"}).
+		Updates(map[string]any{
+			"status":      "failed",
+			"error":       "gateway restarted while run was active (stale run recovered)",
+			"finished_at": now,
+			"updated_at":  now,
+		})
+	return res.RowsAffected, res.Error
 }
 
 // Finish marks a run as terminal so it no longer consumes the concurrent budget.

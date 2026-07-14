@@ -156,6 +156,8 @@ func (p *Pool) submit(ctx context.Context, request SubmitRequest, callerID Assig
 		OriginWorkerID: origin,
 		ProfileKey:     request.ProfileKey,
 		Task:           request.Task,
+		Attempt:        maxInt(request.Attempt, 1),
+		RetryOf:        request.RetryOf,
 		Status:         AssignmentQueued,
 		CreatedAt:      now,
 		cancel:         cancel,
@@ -172,7 +174,8 @@ func (p *Pool) submit(ctx context.Context, request SubmitRequest, callerID Assig
 	worker.currentAssignmentID = id
 	p.wg.Add(1)
 	go p.execute(execCtx, worker, assignment, request.EventSink)
-	return AssignmentRef{AssignmentID: id, WorkerID: worker.ID, OriginWorkerID: origin}, nil
+	return AssignmentRef{AssignmentID: id, WorkerID: worker.ID, OriginWorkerID: origin,
+		Attempt: assignment.Attempt, RetryOf: assignment.RetryOf}, nil
 }
 
 func (p *Pool) nextReadyWorkerLocked() *Worker {
@@ -520,6 +523,8 @@ func snapshotAssignment(assignment *Assignment) AssignmentSnapshot {
 		OriginWorkerID: assignment.OriginWorkerID,
 		ProfileKey:     assignment.ProfileKey,
 		Task:           assignment.Task,
+		Attempt:        assignment.Attempt,
+		RetryOf:        assignment.RetryOf,
 		Status:         assignment.Status,
 		Result:         assignment.Result,
 		Error:          assignment.Error,
@@ -533,10 +538,19 @@ func assignmentResult(assignment *Assignment) AssignmentResult {
 	return AssignmentResult{
 		AssignmentID: assignment.ID,
 		WorkerID:     assignment.WorkerID,
+		Attempt:      assignment.Attempt,
+		RetryOf:      assignment.RetryOf,
 		Status:       assignment.Status,
 		Output:       assignment.Result,
 		Error:        assignment.Error,
 	}
+}
+
+func maxInt(value, fallback int) int {
+	if value > fallback {
+		return value
+	}
+	return fallback
 }
 
 func (p *Pool) Close(ctx context.Context) error {

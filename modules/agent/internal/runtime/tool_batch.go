@@ -28,7 +28,7 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 
 	for index, call := range calls {
 		items[index] = toolBatchItem{index: index, call: call}
-		if call.Name == "worker.delegate" || call.Name == "worker.delegate" {
+		if call.Name == "worker.delegate" {
 			parallel = append(parallel, index)
 		} else {
 			serial = append(serial, index)

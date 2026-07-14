@@ -23,10 +23,10 @@ import {
 } from './hooks/useSessionBootstrap.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { apiJson, gatewayBase } from './lib/api.js';
-import { displayRuntimeMode } from './lib/displayLabels.js';
-import { defaultRunSettings } from './lib/runOptions.js';
+import { displayRuntimeMode, displayStatus, displayWorkerProfileName } from './lib/displayLabels.js';
+import { defaultRunSettings, normalizeStoredRunSettings } from './lib/runOptions.js';
 import { isRunTerminalEvent } from './lib/runEventLifecycle.js';
-import { reduceRunEvent, upsertByID } from './lib/reduceRunEvent.js';
+import { reconcileAssignmentsWithRuns, reduceRunEvent, upsertByID } from './lib/reduceRunEvent.js';
 import {
   collectResumeCursors,
   collectSessionRunStatus,
@@ -66,7 +66,7 @@ function loadRunSettings() {
     if (!saved) {
       return defaultRunSettings;
     }
-    return { ...defaultRunSettings, ...JSON.parse(saved) };
+    return normalizeStoredRunSettings(JSON.parse(saved));
   } catch {
     return defaultRunSettings;
   }
@@ -112,6 +112,10 @@ function normalizeAssignment(item = {}) {
     originWorkerId: item.origin_worker_id || item.originWorkerId || '',
     profileKey: item.profile_key || item.profileKey || '',
     task: item.task || '',
+    attempt: Number(item.attempt) || 1,
+    retryOf: item.retry_of || item.retryOf || '',
+    retrying: Boolean(item.retrying),
+    retryInMs: Number(item.retry_in_ms ?? item.retryInMs) || 0,
     status: item.status || 'queued',
     result: item.result || '',
     error: item.error || '',
@@ -247,6 +251,8 @@ export function App() {
     goalHydrated = false,
     goalExpanded = false,
     goalBusy = false,
+    conversationTabs = [{ id: 'main', kind: 'main', title: '主对话', closable: false }],
+    activeConversationTab = 'main',
   } = runtime;
 
   function patchCurrentRuntime(updater) {
@@ -270,6 +276,23 @@ export function App() {
     () => assignmentOrder.map((id) => assignmentsById[id]).filter(Boolean),
     [assignmentOrder, assignmentsById],
   );
+  const displayedConversationTabs = useMemo(() => conversationTabs.map((tab) => {
+    if (tab.kind !== 'worker') return tab;
+    const assignment = assignmentsById[tab.assignmentId];
+    if (!assignment) return tab;
+    const title = displayWorkerProfileName(
+      assignment.profileKey || assignment.workerId || assignment.id,
+    );
+    return {
+      ...tab,
+      title,
+      workerId: assignment.workerId || tab.workerId,
+      runId: assignment.runId || tab.runId,
+      task: assignment.task || tab.task,
+      status: assignment.status,
+      statusLabel: displayStatus(assignment.status),
+    };
+  }), [assignmentsById, conversationTabs]);
   const pendingPermissions = useMemo(
     () => permissions.filter((item) => item.status === 'pending' || item.status === 'resolved' || !item.status),
     [permissions],
@@ -441,10 +464,11 @@ export function App() {
       const assignmentItems = Array.isArray(result?.assignments)
         ? result.assignments.map(normalizeAssignment)
         : [];
-      if (assignmentItems.length === 0) return;
       patchRuntime(sessionId, (rt) => ({
         ...rt,
-        assignmentsById: Object.fromEntries(assignmentItems.map((item) => [item.id, item])),
+        assignmentsById: Object.fromEntries(
+          reconcileAssignmentsWithRuns(assignmentItems, rt.runs).map((item) => [item.id, item]),
+        ),
         assignmentOrder: assignmentItems.map((item) => item.id),
       }));
     }).catch(() => {});
@@ -627,12 +651,54 @@ export function App() {
     });
   }
 
+  function openWorkerConversation(assignment) {
+    if (!assignment?.id) return;
+    const tabId = `worker:${assignment.id}`;
+    const title = displayWorkerProfileName(
+      assignment.profileKey || assignment.workerId || assignment.id,
+    );
+    patchCurrentRuntime((rt) => {
+      const tabs = rt.conversationTabs || [{
+        id: 'main', kind: 'main', title: '主对话', closable: false,
+      }];
+      const nextTab = {
+        id: tabId,
+        kind: 'worker',
+        assignmentId: assignment.id,
+        workerId: assignment.workerId || '',
+        runId: assignment.runId || '',
+        task: assignment.task || '',
+        title,
+        status: assignment.status,
+        statusLabel: displayStatus(assignment.status),
+        closable: true,
+      };
+      return {
+        ...rt,
+        conversationTabs: tabs.some((tab) => tab.id === tabId)
+          ? tabs.map((tab) => (tab.id === tabId ? { ...tab, ...nextTab } : tab))
+          : [...tabs, nextTab],
+        activeConversationTab: tabId,
+      };
+    });
+  }
+
+  function closeConversationTab(tabId) {
+    if (!tabId || tabId === 'main') return;
+    patchCurrentRuntime((rt) => ({
+      ...rt,
+      conversationTabs: (rt.conversationTabs || []).filter((tab) => tab.id !== tabId),
+      activeConversationTab: rt.activeConversationTab === tabId ? 'main' : rt.activeConversationTab,
+    }));
+  }
+
   const rightPanelContent = rightPanelTab === 'workspace' ? (
     <WorkspacePanel apiJson={apiJson} workspace={workspace} />
   ) : rightPanelTab === 'workers' ? (
     <WorkerPanel
       assignments={assignments}
       onCancelAssignment={cancelAssignment}
+      onOpenAssignment={openWorkerConversation}
       workers={workers}
     />
   ) : rightPanelTab === 'memory' ? (
@@ -731,13 +797,23 @@ export function App() {
           workspaces={recentWorkspaces}
         />
         <ChatPanel
+          activeConversationTab={activeConversationTab}
+          conversationTabs={displayedConversationTabs}
           draft={draft}
           messages={messages}
           onCancel={cancelRun}
+          onCloseConversationTab={closeConversationTab}
           onDraftChange={setDraft}
-          onProviderProfileChange={(id) => setRunSettings((current) => ({ ...current, providerProfileId: id }))}
+          onProviderProfileChange={(id) => setRunSettings((current) => ({
+            ...current,
+            providerProfileId: id,
+            model: '',
+          }))}
           onResolvePermission={resolvePermission}
           onSend={sendTask}
+          onSelectConversationTab={(tabId) => patchCurrentRuntime((rt) => ({
+            ...rt, activeConversationTab: tabId,
+          }))}
           onTodosExpandToggle={() => patchCurrentRuntime((rt) => ({
             ...rt,
             todosExpanded: !rt.todosExpanded,

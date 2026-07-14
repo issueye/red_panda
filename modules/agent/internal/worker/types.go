@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	DefaultPoolSize        = 2
+	DefaultPoolSize        = 8
 	MaxPoolSize            = 8
 	DefaultMailboxCapacity = 64
 	DefaultMaxMessageBytes = 64 << 10
@@ -112,6 +112,8 @@ type Assignment struct {
 	OriginWorkerID WorkerID
 	ProfileKey     string
 	Task           string
+	Attempt        int
+	RetryOf        AssignmentID
 	Status         AssignmentStatus
 	Result         string
 	Error          string
@@ -129,6 +131,8 @@ type SubmitRequest struct {
 	RunID      string
 	ProfileKey string
 	Task       string
+	Attempt    int
+	RetryOf    AssignmentID
 	EventSink  EventSink
 }
 
@@ -136,11 +140,15 @@ type AssignmentRef struct {
 	AssignmentID   AssignmentID
 	WorkerID       WorkerID
 	OriginWorkerID WorkerID
+	Attempt        int
+	RetryOf        AssignmentID
 }
 
 type AssignmentResult struct {
 	AssignmentID AssignmentID
 	WorkerID     WorkerID
+	Attempt      int
+	RetryOf      AssignmentID
 	Status       AssignmentStatus
 	Output       string
 	Error        string
@@ -163,6 +171,8 @@ type AssignmentSnapshot struct {
 	OriginWorkerID WorkerID         `json:"origin_worker_id,omitempty"`
 	ProfileKey     string           `json:"profile_key,omitempty"`
 	Task           string           `json:"task"`
+	Attempt        int              `json:"attempt,omitempty"`
+	RetryOf        AssignmentID     `json:"retry_of,omitempty"`
 	Status         AssignmentStatus `json:"status"`
 	Result         string           `json:"result,omitempty"`
 	Error          string           `json:"error,omitempty"`

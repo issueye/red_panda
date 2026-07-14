@@ -7,9 +7,8 @@ const ProtocolVersionV2 = "2026-07-13"
 type AgentRole string
 
 const (
-	AgentRoleRoot     AgentRole = "root"
-	AgentRoleSubAgent AgentRole = "subagent"
-	AgentRoleWorker   AgentRole = "worker"
+	AgentRoleRoot   AgentRole = "root"
+	AgentRoleWorker AgentRole = "worker"
 )
 
 type EventType string
@@ -23,7 +22,6 @@ const (
 	EventToolFinished            EventType = "tool_finished"
 	EventToolFailed              EventType = "tool_failed"
 	EventPermissionRequest       EventType = "permission_required"
-	EventSubAgentUpdate          EventType = "subagent_update"
 	EventMemoryInjected          EventType = "memory_injected"
 	EventTodoUpdated             EventType = "todo_updated"
 	EventGoalUpdated             EventType = "goal_updated"
@@ -45,12 +43,10 @@ const (
 )
 
 type AgentRef struct {
-	AgentID       string    `json:"agent_id"`
-	Role          AgentRole `json:"role"`
-	SubAgentID    string    `json:"subagent_id,omitempty"`
-	ParentAgentID string    `json:"parent_agent_id,omitempty"`
-	Path          []string  `json:"path"`
-	Name          string    `json:"name,omitempty"`
+	AgentID string    `json:"agent_id"`
+	Role    AgentRole `json:"role"`
+	Path    []string  `json:"path"`
+	Name    string    `json:"name,omitempty"`
 }
 
 type StreamRef struct {
@@ -76,9 +72,13 @@ type Envelope struct {
 	CreatedAt       time.Time      `json:"created_at"`
 }
 
-// EnvelopeV2 is the peer Worker event envelope. It deliberately has no
-// root/parent run or agent hierarchy fields: an event belongs to one Run and
-// is attributed by Assignment and Worker identifiers.
+// Envelope is the legacy v0.1 hierarchical event envelope (root/subagent model).
+// It is retained ONLY for deserializing historical stored events. v0.2+ code MUST NOT produce Envelope.
+// All new events and wire traffic use EnvelopeV2 exclusively.
+type _deprecatedLegacyEnvelopeMarker struct{}
+
+// EnvelopeV2 is the canonical v0.2 Worker event envelope. It has no root/parent hierarchy.
+// An event belongs to exactly one Run and is attributed by Assignment + Worker.
 type EventWorkerRef struct {
 	ID         string `json:"id"`
 	ProfileKey string `json:"profile_key,omitempty"`

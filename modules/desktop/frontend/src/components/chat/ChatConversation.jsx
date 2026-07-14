@@ -16,6 +16,7 @@ import { Markdown } from '../ui/Markdown.jsx';
 import { RunningPanda } from '../ui/RunningPanda.jsx';
 
 function displayMessageAgent(message) {
+  if (message.agentLabel) return message.agentLabel;
   const agent = message.agent || message.role;
   if (message.role === 'user') return '我';
   if (agent === 'gateway' || agent === 'system') return '系统';

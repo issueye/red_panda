@@ -39,8 +39,8 @@ type runtimeProcess struct {
 	running   bool
 }
 
-func NewProcess(ctx context.Context, params methods.ReplyParams, subAgentID string) (Process, error) {
-	return NewProcessWithRequestHandler(ctx, params, subAgentID, nil)
+func NewProcess(ctx context.Context, params methods.ReplyParams, assignmentID string) (Process, error) {
+	return NewProcessWithRequestHandler(ctx, params, assignmentID, nil)
 }
 
 func NewProcessWithRequestHandler(
