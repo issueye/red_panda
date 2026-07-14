@@ -102,6 +102,15 @@ const workers = [
 const assignments = [
   { id: 'assignment-planner', runId: 'run_restore', workerId: 'worker-02', profileKey: 'goal-planner', status: 'running', task: 'Reading restored context', workerSeq: 3 },
   { id: 'assignment-archive', runId: 'run_restore', workerId: 'worker-01', profileKey: 'archivist', status: 'completed', summary: 'Finished', workerSeq: 2 },
+  ...Array.from({ length: 6 }, (_, index) => ({
+    id: `assignment-history-${index + 1}`,
+    runId: 'run_restore',
+    workerId: `worker-history-${index + 1}`,
+    profileKey: index % 2 === 0 ? 'goal-verifier' : 'goal-implementer',
+    status: 'completed',
+    summary: `Archived result ${index + 1}`,
+    workerSeq: index + 4,
+  })),
 ];
 
 function WorkflowFixture() {

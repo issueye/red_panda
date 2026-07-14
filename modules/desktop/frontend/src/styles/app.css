@@ -2961,9 +2961,7 @@ textarea:focus-visible {
 
 .worker-panel-content {
   overflow-x: hidden;
-  overflow-y: auto;
-  padding-right: 4px;
-  scrollbar-gutter: stable;
+  overflow-y: hidden;
 }
 
 .panel-header {
@@ -3074,16 +3072,63 @@ textarea:focus-visible {
 
 .worker-section-label {
   align-items: center;
-  border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
   display: flex;
   flex: 0 0 auto;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  margin-top: 2px;
-  padding: 10px 2px 0;
+  padding: 0 2px;
   width: 100%;
+}
+
+.worker-section-heading {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.worker-section-summary {
+  color: var(--color-text-soft);
+  flex: 0 0 auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.worker-workspace {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-height: 0;
+}
+
+.worker-workspace-list {
+  max-height: min(30vh, 220px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.worker-assignment-region {
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 10px;
+}
+
+.worker-assignment-scroll {
+  flex: 1 1 auto;
+  min-height: 96px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .activity-summary-grid {
