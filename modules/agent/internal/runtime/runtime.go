@@ -435,7 +435,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		toolHistory = append(toolHistory, provider.ToolExchange{Call: invocation.Call, Result: result})
 	}
 
-	// 绑定 Goal 时执行多分段流程；也支持通过 goal.write 在运行中途绑定。
+	// Bound Goals use the controller loop; goal.create may bind mid-run.
 	seg := r.runWithGoalLoop(ctx, params, providerInput, toolHistory, messageID, streamID, &streamSeq)
 	goalStreamNeedsFinal := r.deferGoalStreamFinal(params.RunID)
 	if goalStreamNeedsFinal && ctx.Err() == nil {

@@ -161,7 +161,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	definitions := []ptools.Definition{
 		{Name: "workspace.read_file"},
 		{Name: "shell.exec"},
-		{Name: "goal.write"},
+		{Name: "goal.create"},
 		{Name: "context.read"},
 		{Name: "worker.delegate"},
 		{Name: "memory.create"},
@@ -177,7 +177,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	for _, d := range filtered {
 		names[d.Name] = true
 	}
-	for _, keep := range []string{"workspace.read_file", "shell.exec", "goal.write", "context.read", "worker.delegate", "skill.run", "web.search"} {
+	for _, keep := range []string{"workspace.read_file", "shell.exec", "goal.create", "context.read", "worker.delegate", "skill.run", "web.search"} {
 		if !names[keep] {
 			t.Fatalf("goal mode should keep %s: %#v", keep, names)
 		}
@@ -208,7 +208,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	if !openNames["memory.create"] {
 		t.Fatalf("non-goal chat should expose memory.create: %#v", openNames)
 	}
-	if openNames["goal.write"] {
-		t.Fatalf("goals disabled should hide goal.write: %#v", openNames)
+	if openNames["goal.create"] {
+		t.Fatalf("goals disabled should hide goal.create: %#v", openNames)
 	}
 }

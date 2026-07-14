@@ -37,12 +37,7 @@ func (r *Runtime) seedRunGoalFromParams(params methods.ReplyParams) {
 			SessionID:         params.Session.ID,
 			Title:             gc.Title,
 			Objective:         gc.Objective,
-			SuccessCriteria:   gc.SuccessCriteria,
 			Status:            firstNonEmpty(gc.Status, "active"),
-			PipelinePhase:     gc.PipelinePhase,
-			AnalysisSummary:   gc.AnalysisSummary,
-			CheckpointSummary: gc.CheckpointSummary,
-			ProgressNote:      gc.ProgressNote,
 			UsedToolTurns:     gc.UsedToolTurns,
 			MaxTotalToolTurns: firstPositive(gc.MaxTotalToolTurns, 96),
 			UsedSegments:      gc.UsedSegments,
@@ -50,6 +45,19 @@ func (r *Runtime) seedRunGoalFromParams(params methods.ReplyParams) {
 			MaxToolTurnsSeg:   firstPositive(gc.MaxToolTurnsSeg, effectiveProviderToolTurns(params.Options), 12),
 			UsedWallTimeSec:   gc.UsedWallTimeSec,
 			MaxWallTimeSec:    gc.MaxWallTimeSec,
+			Criteria:          gc.Criteria,
+			Constraints:       gc.Constraints,
+			Strategy:          gc.Strategy,
+			CurrentActionID:   gc.CurrentActionID,
+			CurrentAction:     gc.CurrentAction,
+			Actions:           gc.Actions,
+			LastObservation:   gc.LastObservation,
+			LastAssessment:    gc.LastAssessment,
+			LastDecision:      gc.LastDecision,
+			Iteration:         gc.Iteration,
+			MaxIterations:     gc.MaxIterations,
+			StagnationCount:   gc.StagnationCount,
+			MaxStagnation:     gc.MaxStagnation,
 		}
 		if state.Goal.ID == "" {
 			state.Goal.ID = params.Options.GoalID
@@ -124,12 +132,12 @@ func (r *Runtime) applyGoalToolResult(runID string, toolName string, result meth
 	if prev != nil && prev.BoundToThisRun && g.Status == "active" {
 		state.BoundToThisRun = true
 	}
-	// goal.write 或 goal.update 可在运行中途激活目标。
-	if (toolName == "goal.write" || toolName == "goal.update") && g.Status == "active" {
+	// goal.create can activate a Goal in the middle of a regular run.
+	if toolName == "goal.create" && g.Status == "active" {
 		state.BoundToThisRun = true
 		state.WasBoundToThisRun = true
 	}
-	if toolName == "goal.complete" || g.Status == "cancelled" {
+	if toolName == "goal.finish" || g.Status == "cancelled" {
 		state.BoundToThisRun = false
 		state.Terminal = true
 	}
@@ -168,12 +176,7 @@ func goalDTOToContext(g methods.GoalDTO) *methods.GoalContext {
 		GoalID:            g.ID,
 		Title:             g.Title,
 		Objective:         g.Objective,
-		SuccessCriteria:   g.SuccessCriteria,
 		Status:            g.Status,
-		PipelinePhase:     g.PipelinePhase,
-		AnalysisSummary:   g.AnalysisSummary,
-		CheckpointSummary: g.CheckpointSummary,
-		ProgressNote:      g.ProgressNote,
 		UsedToolTurns:     g.UsedToolTurns,
 		MaxTotalToolTurns: g.MaxTotalToolTurns,
 		UsedSegments:      g.UsedSegments,
@@ -182,30 +185,62 @@ func goalDTOToContext(g methods.GoalDTO) *methods.GoalContext {
 		UsedWallTimeSec:   g.UsedWallTimeSec,
 		MaxWallTimeSec:    g.MaxWallTimeSec,
 		Context:           formatGoalContextFromDTO(g),
+		Criteria:          g.Criteria,
+		Constraints:       g.Constraints,
+		Strategy:          g.Strategy,
+		CurrentActionID:   g.CurrentActionID,
+		CurrentAction:     g.CurrentAction,
+		Actions:           g.Actions,
+		LastObservation:   g.LastObservation,
+		LastAssessment:    g.LastAssessment,
+		LastDecision:      g.LastDecision,
+		Iteration:         g.Iteration,
+		MaxIterations:     g.MaxIterations,
+		StagnationCount:   g.StagnationCount,
+		MaxStagnation:     g.MaxStagnation,
 	}
 }
 
 func formatGoalContextFromDTO(g methods.GoalDTO) string {
 	var b strings.Builder
-	b.WriteString("Active goal (lifecycle: goal.checkpoint / goal.complete; micro-steps: todo.write; findings: context.write):\n")
+	b.WriteString("Goal controller state (plan -> act -> observe -> assess -> decide):\n")
 	b.WriteString(fmt.Sprintf("- id: %s\n", g.ID))
-	b.WriteString(fmt.Sprintf("- status: %s phase: %s\n", g.Status, g.PipelinePhase))
+	b.WriteString(fmt.Sprintf("- status: %s\n", g.Status))
 	b.WriteString(fmt.Sprintf("- objective: %s\n", g.Objective))
-	if g.SuccessCriteria != "" {
-		b.WriteString(fmt.Sprintf("- success_criteria: %s\n", g.SuccessCriteria))
+	if len(g.Criteria) > 0 {
+		b.WriteString("- criteria:\n")
+		for _, criterion := range g.Criteria {
+			status := criterion.Status
+			if status == "" {
+				status = "unknown"
+			}
+			b.WriteString(fmt.Sprintf("  - [%s] %s\n", status, criterion.Description))
+		}
 	}
-	if g.CheckpointSummary != "" {
-		b.WriteString(fmt.Sprintf("- checkpoint: %s\n", g.CheckpointSummary))
+	if g.Strategy != "" {
+		b.WriteString(fmt.Sprintf("- strategy: %s\n", g.Strategy))
 	}
-	b.WriteString(fmt.Sprintf("- budget: %d/%d root tool turns, segments used %d (max %d/run)\n",
-		g.UsedToolTurns, g.MaxTotalToolTurns, g.UsedSegments, g.MaxSegmentsPerRun))
-	b.WriteString("- stores: todo.*=session checklist; context.*=this goal's scratchpad; memory.*=durable prefs across goals; goal.checkpoint=short recovery summary\n")
+	if g.CurrentAction != "" {
+		b.WriteString(fmt.Sprintf("- current_action: %s (%s)\n", g.CurrentAction, g.CurrentActionID))
+	}
+	if g.LastObservation != "" {
+		b.WriteString(fmt.Sprintf("- last_observation: %s\n", g.LastObservation))
+	}
+	if g.LastAssessment != nil {
+		b.WriteString(fmt.Sprintf("- last_assessment: %s — %s\n", g.LastAssessment.Verdict, g.LastAssessment.Summary))
+		if g.LastAssessment.Gap != "" {
+			b.WriteString(fmt.Sprintf("- remaining_gap: %s\n", g.LastAssessment.Gap))
+		}
+	}
+	b.WriteString(fmt.Sprintf("- control: iteration %d/%d, stagnation %d/%d\n", g.Iteration, g.MaxIterations, g.StagnationCount, g.MaxStagnation))
+	b.WriteString(fmt.Sprintf("- budget: %d/%d root tool turns\n", g.UsedToolTurns, g.MaxTotalToolTurns))
+	b.WriteString("- tools: goal.plan chooses actions; goal.observe records facts; goal.assess decides against criteria; goal.finish terminalizes only after satisfied\n")
 	return b.String()
 }
 
 // runWithGoalLoop 为根回复执行一个或多个提供方分段。
 // 未绑定运行使用 maxSeg=1（旧版单分段）；绑定 Goal 的运行会在 no_tools 或 max_turns 时
-// 打开更多分段，直至预算耗尽或调用 goal.complete。
+// 打开更多分段，直至达到本次 run 上限、预算耗尽或调用 goal.finish。
 func (r *Runtime) runWithGoalLoop(
 	ctx context.Context,
 	params methods.ReplyParams,
@@ -347,21 +382,10 @@ func (r *Runtime) runWithGoalLoop(
 	return last
 }
 
-// goalRunSegmentLimit 让绑定 Goal 持续推进，无需用户在任意分段边界手动启动新运行。
-// 持久化的单次运行值仍是最小分块大小；剩余预算可扩展同一运行，但仍受总工具回合和墙钟时间限制。
+// goalRunSegmentLimit is a hard per-run transport cap. Goal progress is measured
+// by assessments and actions, never by silently expanding provider segments.
 func goalRunSegmentLimit(goal methods.GoalDTO, completedThisRun int) int {
-	limit := firstPositive(goal.MaxSegmentsPerRun, defaultGoalMaxSegmentsPerRun)
-	remaining := goal.MaxTotalToolTurns - goal.UsedToolTurns
-	if goal.MaxTotalToolTurns <= 0 || remaining <= 0 {
-		return limit
-	}
-	perSegment := firstPositive(goal.MaxToolTurnsSeg, 1)
-	needed := (remaining + perSegment - 1) / perSegment
-	want := completedThisRun + needed
-	if want > limit {
-		return want
-	}
-	return limit
+	return firstPositive(goal.MaxSegmentsPerRun, defaultGoalMaxSegmentsPerRun)
 }
 
 func (r *Runtime) reportGoalBudgetExhausted(params methods.ReplyParams, goalID string, segmentIndex, deltaTurns int) {
@@ -425,12 +449,15 @@ func goalContinuationPrompt(original string, state *runGoalState, nextSeg int, r
 	b.WriteString("\n\n[System] Goal segment boundary reached (")
 	b.WriteString(string(reason))
 	b.WriteString(fmt.Sprintf("). Continuing segment %d for the active goal. ", nextSeg+1))
-	b.WriteString("Do not claim the goal is finished without goal.complete after evaluation. ")
-	b.WriteString("Continue execute/verify for the current todo step, or advance todos, then checkpoint.\n")
+	b.WriteString("Do not claim the Goal is finished without a persisted satisfied assessment. ")
+	b.WriteString("Continue the active action, record the real result with goal.observe, then call goal.assess against every criterion. ")
+	b.WriteString("If the action did not reduce the gap, revise the strategy instead of repeating it.\n")
 	if state != nil {
-		if state.Goal.CheckpointSummary != "" {
-			b.WriteString("Last checkpoint: ")
-			b.WriteString(state.Goal.CheckpointSummary)
+		if state.Goal.LastAssessment != nil {
+			b.WriteString("Last assessment: ")
+			b.WriteString(state.Goal.LastAssessment.Verdict)
+			b.WriteString(" - ")
+			b.WriteString(state.Goal.LastAssessment.Summary)
 			b.WriteString("\n")
 		}
 		if state.Goal.Objective != "" {

@@ -126,14 +126,14 @@ go test ./modules/agent/internal/runtime/ -run "AvailableTools|Policy|Goal|Speci
 
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **R5** | Checkpoint vs GoalNote 职责文档 + policy 文案 | 语义重叠 | L | done | memory/todo/goal/context 工具 description + GoalContext header + goal pipeline policy 写清四层职责 | `TestStateStoreToolDescriptionsClarifyBoundaries` 绿 | R3 |
-| **R5b** |（可选）弱化扁平字段写入 | 语义重叠 | M | todo | 引导模型少写 `progress_note` 重复内容；或 checkpoint 时自动抽一条 handoff note | 无双写风暴；兼容旧字段读取 | R5 |
+| **R5** | Goal 状态与 GoalNote 职责文档 + policy 文案 | 语义重叠 | L | done | Goal contract/actions/evidence 记录控制状态；context notes 记录跨行动工作材料 | `TestStateStoreToolDescriptionsClarifyBoundaries` 绿 | R3 |
+| **R5b** | 删除旧流水线扁平投影 | 语义重叠 | M | done | 移除 phase/checkpoint/progress/evaluation 重复字段；V2 只保留 assessment、decision、events | 生产代码无旧字段和双写路径 | R5 |
 | **O5b** | Specialist 阶段简化（产品决策） | 过度 | H | todo | **需产品拍板**：v1 保留 5 专家 vs 收成 3（analyze/execute/verify）。若收成 3：phase 枚举、builtin seed、UI 同步 | 决策记录进 docs；实现与测一致 | R2 |
 
 **建议提交：**
 
 1. `docs/runtime: clarify memory vs todo vs goal vs context notes`（R5）  
-2. 仅在产品确认后：`refactor(goal): simplify specialist phases`（O5b）
+2. `refactor(goal): align specialist capabilities with Goal actions`（O5b）
 
 ---
 
@@ -238,6 +238,6 @@ L / M / H — <why>
 
 ## 备注
 
-- 本清单 **不包含** 新功能开发；若 Goal CAS/budget（docs/34）与本清单冲突，**正确性（34）优先于收敛**。  
+- 本清单 **不包含** 新功能开发；若与 Goal V2 规范（docs/37）冲突，以 docs/37 为准。
 - 协议兼容脚本：`scripts/protocol-compat.ps1` 在 Wave 1–2 合并后应至少跑一轮。  
 - 与上下文共享相关的已完成修复（session_id inject、specialist allowlist、read session 绑定）**不在本清单重做**，视为 baseline。

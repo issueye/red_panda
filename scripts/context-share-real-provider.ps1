@@ -50,13 +50,13 @@ try {
     options = @{ provider_profile_id=$profile.id; tool_policy="allow_all"; permission_mode="trusted"; goals_enabled=$true }
   }
   $goalID = $goal.id
-  Write-Host "goal: $goalID  status: $($goal.status)  phase: $($goal.pipeline_phase)"
+  Write-Host "goal: $goalID  status: $($goal.status)  iteration: $($goal.iteration)"
 
   # The start endpoint starts a run; give it time to execute, then poll goal state.
   Start-Sleep -Seconds 8
 
   $goalAfter = Invoke-Api "GET" "/api/v1/sessions/$($session.id)/goals/$goalID"
-  Write-Host "goal after run: status=$($goalAfter.status) phase=$($goalAfter.pipeline_phase) used_turns=$($goalAfter.used_tool_turns)/$($goalAfter.max_total_tool_turns)"
+  Write-Host "goal after run: status=$($goalAfter.status) decision=$($goalAfter.last_decision) used_turns=$($goalAfter.used_tool_turns)/$($goalAfter.max_total_tool_turns)"
 
   # ===== Verify: did the model call context.write? Check via goal state and notes =====
   # We check the runs for this goal and inspect tool calls for context.write/read.
@@ -80,7 +80,7 @@ try {
     ok = $true
     goal = $goalID
     final_status = $goalAfter.status
-    final_phase = $goalAfter.pipeline_phase
+    final_decision = $goalAfter.last_decision
     context_tool_invoked = $contextToolSeen
     runs = $goalRuns.Count
   } | ConvertTo-Json -Compress

@@ -165,6 +165,8 @@ function WorkflowFixture() {
             conversationTabs={conversationTabs}
             draft=""
             goal={goal}
+            goalExpanded={Boolean(goal)}
+            goalSessionId="local-design"
             messages={messages}
             onCloseConversationTab={closeConversationTab}
             onResolvePermission={resolvePermission}
@@ -193,7 +195,27 @@ function WorkflowFixture() {
         <button data-testid="fixture-normal-mode" onClick={() => setGoal(null)} type="button">Normal</button>
         <button
           data-testid="fixture-goal-mode"
-          onClick={() => setGoal({ id: 'goal_fixture', objective: 'Verify Goal mode', status: 'running' })}
+          onClick={() => setGoal({
+            id: 'goal_fixture', title: '交付目标驱动执行', objective: '让 Goal 根据结果差距持续选择行动，直到证据证明目标达成',
+            status: 'active', strategy: '先验证控制器闭环，再补齐界面与回归测试',
+            currentActionId: 'action-ui', currentAction: '验证 outcome dashboard 的信息层级',
+            criteria: [
+              { id: 'controller', description: '控制器能根据 evidence 选择下一行动', status: 'met', evidence: 'Gateway V2 feedback-loop tests passed' },
+              { id: 'runtime', description: 'Runtime 不依赖固定 pipeline phase', status: 'met', evidence: 'Agent full test suite passed' },
+              { id: 'desktop', description: 'Desktop 清楚展示标准、行动和剩余差距', status: 'not_met', evidence: '等待视觉验收' },
+            ],
+            actions: [
+              { id: 'action-api', key: 'api', title: '重构 Goal 控制器 API', status: 'done', acceptance: 'V2 tools and persistence pass tests', sortOrder: 0 },
+              { id: 'action-ui', key: 'ui', title: '验证 outcome dashboard', status: 'active', acceptance: 'Desktop layout is readable on desktop and mobile', sortOrder: 1 },
+              { id: 'action-e2e', key: 'e2e', title: '完成端到端回归', status: 'queued', acceptance: 'All module and UI tests pass', sortOrder: 2 },
+            ],
+            lastAssessment: {
+              verdict: 'progress', summary: '后端和 Runtime 已完成，界面仍需视觉验收',
+              gap: '确认窄屏无溢出且评估证据易扫描', decision: '完成 Desktop 截图与交互检查',
+            },
+            iteration: 3, maxIterations: 20, stagnationCount: 0, maxStagnation: 3,
+            usedToolTurns: 31, maxTotalToolTurns: 96, usedWallTimeSec: 210, maxWallTimeSec: 1800,
+          })}
           type="button"
         >Goal</button>
       </footer>

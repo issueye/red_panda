@@ -13,13 +13,13 @@ const (
 	CoreShutdown   = "core.shutdown"
 
 	// Skills management remains under agent.* namespace for catalog operations.
-	AgentSkills        = "agent.skills"
-	AgentSkillLoad     = "agent.skill.load"
-	AgentSkillCreate   = "agent.skill.create"
-	AgentSkillUpdate   = "agent.skill.update"
-	AgentSkillDelete   = "agent.skill.delete"
-	MCPDiscover        = "mcp.discover"
-	PermissionResolve  = "permission.resolve"
+	AgentSkills       = "agent.skills"
+	AgentSkillLoad    = "agent.skill.load"
+	AgentSkillCreate  = "agent.skill.create"
+	AgentSkillUpdate  = "agent.skill.update"
+	AgentSkillDelete  = "agent.skill.delete"
+	MCPDiscover       = "mcp.discover"
+	PermissionResolve = "permission.resolve"
 
 	// Gateway-backed state tools (memory/todo/goal/context) — stable internal RPCs.
 	MemoryToolExecute  = "memory.tool.execute"
@@ -472,52 +472,116 @@ type TodoToolExecuteResult struct {
 
 // GoalContext is model-facing goal state for one reply turn.
 type GoalContext struct {
-	GoalID            string `json:"goal_id"`
-	Title             string `json:"title,omitempty"`
-	Objective         string `json:"objective"`
-	SuccessCriteria   string `json:"success_criteria,omitempty"`
-	Status            string `json:"status"`
-	PipelinePhase     string `json:"pipeline_phase,omitempty"`
-	AnalysisSummary   string `json:"analysis_summary,omitempty"`
-	CheckpointSummary string `json:"checkpoint_summary,omitempty"`
-	ProgressNote      string `json:"progress_note,omitempty"`
-	CurrentStep       string `json:"current_step,omitempty"`
-	UsedToolTurns     int    `json:"used_tool_turns"`
-	MaxTotalToolTurns int    `json:"max_total_tool_turns"`
-	UsedSegments      int    `json:"used_segments"`
-	MaxSegmentsPerRun int    `json:"max_segments_per_run"`
-	MaxToolTurnsSeg   int    `json:"max_tool_turns_per_segment"`
-	UsedWallTimeSec   int    `json:"used_wall_time_sec"`
-	MaxWallTimeSec    int    `json:"max_wall_time_sec"`
-	Context           string `json:"context,omitempty"`
+	GoalID            string             `json:"goal_id"`
+	Title             string             `json:"title,omitempty"`
+	Objective         string             `json:"objective"`
+	Status            string             `json:"status"`
+	UsedToolTurns     int                `json:"used_tool_turns"`
+	MaxTotalToolTurns int                `json:"max_total_tool_turns"`
+	UsedSegments      int                `json:"used_segments"`
+	MaxSegmentsPerRun int                `json:"max_segments_per_run"`
+	MaxToolTurnsSeg   int                `json:"max_tool_turns_per_segment"`
+	UsedWallTimeSec   int                `json:"used_wall_time_sec"`
+	MaxWallTimeSec    int                `json:"max_wall_time_sec"`
+	Context           string             `json:"context,omitempty"`
+	Criteria          []GoalCriterionDTO `json:"criteria,omitempty"`
+	Constraints       []string           `json:"constraints,omitempty"`
+	Strategy          string             `json:"strategy,omitempty"`
+	CurrentActionID   string             `json:"current_action_id,omitempty"`
+	CurrentAction     string             `json:"current_action,omitempty"`
+	Actions           []GoalActionDTO    `json:"actions,omitempty"`
+	LastObservation   string             `json:"last_observation,omitempty"`
+	LastAssessment    *GoalAssessmentDTO `json:"last_assessment,omitempty"`
+	LastDecision      string             `json:"last_decision,omitempty"`
+	Iteration         int                `json:"iteration"`
+	MaxIterations     int                `json:"max_iterations"`
+	StagnationCount   int                `json:"stagnation_count"`
+	MaxStagnation     int                `json:"max_stagnation"`
+}
+
+// GoalCriterionDTO is one independently assessable condition in a Goal
+// contract. Status is unknown|met|not_met|blocked.
+type GoalCriterionDTO struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Status      string `json:"status,omitempty"`
+	Evidence    string `json:"evidence,omitempty"`
+}
+
+// GoalActionDTO is a Goal-owned action in the controller's revisable queue.
+type GoalActionDTO struct {
+	ID          string `json:"id"`
+	Key         string `json:"key"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Acceptance  string `json:"acceptance,omitempty"`
+	Status      string `json:"status"`
+	Result      string `json:"result,omitempty"`
+	Evidence    string `json:"evidence,omitempty"`
+	Attempt     int    `json:"attempt"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+// GoalAssessmentDTO is the persisted output of one feedback-control cycle.
+type GoalAssessmentDTO struct {
+	Verdict      string             `json:"verdict"` // progress|satisfied|blocked|no_progress
+	Summary      string             `json:"summary"`
+	Gap          string             `json:"gap,omitempty"`
+	Decision     string             `json:"decision,omitempty"`
+	Criteria     []GoalCriterionDTO `json:"criteria,omitempty"`
+	ActionID     string             `json:"action_id,omitempty"`
+	ActionStatus string             `json:"action_status,omitempty"`
+	Evidence     string             `json:"evidence,omitempty"`
+}
+
+// GoalEventDTO is one append-only controller or lifecycle journal entry.
+type GoalEventDTO struct {
+	ID        string         `json:"id"`
+	GoalID    string         `json:"goal_id"`
+	RunID     string         `json:"run_id,omitempty"`
+	Seq       int            `json:"seq"`
+	Kind      string         `json:"kind"`
+	Summary   string         `json:"summary"`
+	Payload   map[string]any `json:"payload,omitempty"`
+	CreatedAt string         `json:"created_at"`
 }
 
 // GoalDTO is the shared goal shape for tools, HTTP, and events.
 type GoalDTO struct {
-	ID                string `json:"id"`
-	SessionID         string `json:"session_id"`
-	Title             string `json:"title,omitempty"`
-	Objective         string `json:"objective"`
-	SuccessCriteria   string `json:"success_criteria,omitempty"`
-	Status            string `json:"status"`
-	PipelinePhase     string `json:"pipeline_phase,omitempty"`
-	PauseReason       string `json:"pause_reason,omitempty"`
-	FailReason        string `json:"fail_reason,omitempty"`
-	AnalysisSummary   string `json:"analysis_summary,omitempty"`
-	CheckpointSummary string `json:"checkpoint_summary,omitempty"`
-	ProgressNote      string `json:"progress_note,omitempty"`
-	ReportMarkdown    string `json:"report_markdown,omitempty"`
-	UsedToolTurns     int    `json:"used_tool_turns"`
-	MaxTotalToolTurns int    `json:"max_total_tool_turns"`
-	UsedSegments      int    `json:"used_segments"`
-	MaxSegmentsPerRun int    `json:"max_segments_per_run"`
-	MaxToolTurnsSeg   int    `json:"max_tool_turns_per_segment"`
-	UsedWallTimeSec   int    `json:"used_wall_time_sec"`
-	MaxWallTimeSec    int    `json:"max_wall_time_sec"`
-	ActiveRunID       string `json:"active_run_id,omitempty"`
-	LastRunID         string `json:"last_run_id,omitempty"`
-	CreatedAt         string `json:"created_at,omitempty"`
-	UpdatedAt         string `json:"updated_at,omitempty"`
+	ID                string             `json:"id"`
+	SessionID         string             `json:"session_id"`
+	Title             string             `json:"title,omitempty"`
+	Objective         string             `json:"objective"`
+	Status            string             `json:"status"`
+	PauseReason       string             `json:"pause_reason,omitempty"`
+	FailReason        string             `json:"fail_reason,omitempty"`
+	ReportMarkdown    string             `json:"report_markdown,omitempty"`
+	UsedToolTurns     int                `json:"used_tool_turns"`
+	MaxTotalToolTurns int                `json:"max_total_tool_turns"`
+	UsedSegments      int                `json:"used_segments"`
+	MaxSegmentsPerRun int                `json:"max_segments_per_run"`
+	MaxToolTurnsSeg   int                `json:"max_tool_turns_per_segment"`
+	UsedWallTimeSec   int                `json:"used_wall_time_sec"`
+	MaxWallTimeSec    int                `json:"max_wall_time_sec"`
+	ActiveRunID       string             `json:"active_run_id,omitempty"`
+	LastRunID         string             `json:"last_run_id,omitempty"`
+	CreatedAt         string             `json:"created_at,omitempty"`
+	UpdatedAt         string             `json:"updated_at,omitempty"`
+	Criteria          []GoalCriterionDTO `json:"criteria,omitempty"`
+	Constraints       []string           `json:"constraints,omitempty"`
+	Strategy          string             `json:"strategy,omitempty"`
+	CurrentActionID   string             `json:"current_action_id,omitempty"`
+	CurrentAction     string             `json:"current_action,omitempty"`
+	Actions           []GoalActionDTO    `json:"actions,omitempty"`
+	LastObservation   string             `json:"last_observation,omitempty"`
+	LastAssessment    *GoalAssessmentDTO `json:"last_assessment,omitempty"`
+	LastDecision      string             `json:"last_decision,omitempty"`
+	OutcomeSummary    string             `json:"outcome_summary,omitempty"`
+	Iteration         int                `json:"iteration"`
+	MaxIterations     int                `json:"max_iterations"`
+	StagnationCount   int                `json:"stagnation_count"`
+	MaxStagnation     int                `json:"max_stagnation"`
+	Version           int                `json:"version"`
 }
 
 // GoalToolExecuteParams is Runtime -> Gateway for goal.* tools.

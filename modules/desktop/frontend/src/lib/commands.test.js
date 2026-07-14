@@ -77,8 +77,9 @@ test('buildStartGoalInput includes binding instructions', () => {
     objective: '实现登录',
     successCriteria: '能登录',
   });
-  assert.match(text, /已由用户指令创建/);
-  assert.match(text, /不要重新 goal\.write/);
+  assert.match(text, /已由用户创建/);
+  assert.match(text, /goal\.observe/);
+  assert.match(text, /不要创建第二个 Goal/);
 });
 
 test('listCommands exposes goal entries', () => {

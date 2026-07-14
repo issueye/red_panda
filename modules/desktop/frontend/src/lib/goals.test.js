@@ -1,65 +1,73 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  formatGoalActionProgress,
   formatGoalBudget,
-  formatGoalBudgetAdvanced,
+  formatGoalControlBudget,
   goalCanCancel,
   goalCanContinue,
-  goalShouldAutoContinue,
   goalDisplayTitle,
   goalFromUpdatedEvent,
+  goalShouldAutoContinue,
   normalizeGoal,
   normalizeGoalList,
   pickFocusGoal,
 } from './goals.js';
 
-describe('goals helpers', () => {
-  it('normalizes and picks focus goal', () => {
-    const items = normalizeGoalList({
-      items: [
-        { id: 'g1', status: 'succeeded', objective: 'done' },
-        { id: 'g2', status: 'paused', title: '续跑', pause_reason: 'awaiting_continue' },
-        { id: 'g3', status: 'active', objective: 'working' },
-      ],
+describe('Goal V2 helpers', () => {
+  it('normalizes the outcome contract and controller projection', () => {
+    const goal = normalizeGoal({
+      id: 'g1', status: 'active', objective: 'Ship behavior',
+      criteria: [{ id: 'c1', description: 'Works', status: 'met', evidence: 'test' }],
+      constraints: ['No API break'], strategy: 'Close the riskiest gap first',
+      current_action_id: 'a1', current_action: 'Run integration test',
+      actions: [{ id: 'a1', key: 'test', title: 'Run integration test', status: 'active', sort_order: 0 }],
+      last_assessment: { verdict: 'progress', summary: 'Implementation works', gap: 'Run full suite' },
+      iteration: 2, max_iterations: 10, stagnation_count: 0, max_stagnation: 3,
     });
-    assert.equal(pickFocusGoal(items).id, 'g3');
-    assert.equal(pickFocusGoal(items.filter((g) => g.status !== 'active')).id, 'g2');
+    assert.equal(goal.criteria[0].status, 'met');
+    assert.equal(goal.actions[0].title, 'Run integration test');
+    assert.equal(goal.lastAssessment.verdict, 'progress');
+    assert.equal(goal.currentActionId, 'a1');
   });
 
-  it('continue/cancel gates', () => {
-    assert.equal(goalCanContinue(normalizeGoal({ status: 'paused' })), true);
-    const auto = normalizeGoal({
-      status: 'paused',
-      pause_reason: 'awaiting_continue',
-      used_tool_turns: 71,
-      max_total_tool_turns: 96,
-    });
-    assert.equal(goalShouldAutoContinue(auto), true);
-    assert.equal(goalCanContinue(auto), false);
-    assert.equal(goalCanContinue(normalizeGoal({ status: 'active' })), false);
+  it('picks active then paused goal', () => {
+    const items = normalizeGoalList({ items: [
+      { id: 'done', status: 'succeeded' }, { id: 'paused', status: 'paused' }, { id: 'active', status: 'active' },
+    ] });
+    assert.equal(pickFocusGoal(items).id, 'active');
+    assert.equal(pickFocusGoal(items.filter((item) => item.status !== 'active')).id, 'paused');
+  });
+
+  it('auto-continues only an evidence-backed progress assessment', () => {
+    const base = {
+      status: 'paused', pause_reason: 'awaiting_continue', iteration: 2, max_iterations: 10,
+      stagnation_count: 0, max_stagnation: 3, used_tool_turns: 20, max_total_tool_turns: 96,
+    };
+    const progress = normalizeGoal({ ...base, last_assessment: { verdict: 'progress', summary: 'gap reduced' } });
+    assert.equal(goalShouldAutoContinue(progress), true);
+    assert.equal(goalCanContinue(progress), false);
+    assert.equal(goalShouldAutoContinue(normalizeGoal(base)), false);
+    assert.equal(goalCanContinue(normalizeGoal(base)), true);
+    assert.equal(goalShouldAutoContinue(normalizeGoal({ ...base, last_assessment: { verdict: 'blocked' } })), false);
     assert.equal(goalCanCancel(normalizeGoal({ status: 'active' })), true);
     assert.equal(goalCanCancel(normalizeGoal({ status: 'succeeded' })), false);
   });
 
-  it('parses goal_updated payload', () => {
-    const goal = goalFromUpdatedEvent({
-      action: 'checkpoint',
-      goal: { id: 'g1', status: 'active', objective: 'x', used_tool_turns: 3, max_total_tool_turns: 96 },
+  it('formats action and controller budgets without transport segments', () => {
+    const goal = normalizeGoal({
+      actions: [{ status: 'done' }, { status: 'active' }],
+      iteration: 2, max_iterations: 10, stagnation_count: 1, max_stagnation: 3,
+      used_tool_turns: 7, max_total_tool_turns: 96, used_wall_time_sec: 30, max_wall_time_sec: 1800,
     });
-    assert.equal(goal.id, 'g1');
-    assert.equal(formatGoalBudget(goal), '3/96 轮');
-    assert.equal(goalDisplayTitle(goal), 'x');
+    assert.equal(formatGoalActionProgress(goal), '行动 1/2');
+    assert.equal(formatGoalBudget(goal), '迭代 2/10 · 工具 7/96');
+    assert.equal(formatGoalControlBudget(goal), '迭代 2/10 · 工具 7/96 · 停滞 1/3 · 耗时 30/1800s');
   });
 
-  it('keeps advanced budget details out of the compact bar', () => {
-    const goal = normalizeGoal({
-      used_tool_turns: 4,
-      max_total_tool_turns: 48,
-      used_segments: 2,
-      max_segments_per_run: 3,
-      max_tool_turns_per_segment: 12,
-    });
-    assert.equal(formatGoalBudget(goal), '4/48 轮');
-    assert.equal(formatGoalBudgetAdvanced(goal), '段 2/3 · 每段≤12 轮');
+  it('parses goal_updated payload and display title', () => {
+    const goal = goalFromUpdatedEvent({ action: 'assess', goal: { id: 'g1', status: 'active', objective: 'Deliver result' } });
+    assert.equal(goal.id, 'g1');
+    assert.equal(goalDisplayTitle(goal), 'Deliver result');
   });
 });

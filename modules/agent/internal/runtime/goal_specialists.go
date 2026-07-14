@@ -8,12 +8,12 @@ import (
 	"redpanda/protocol/methods"
 )
 
-// goalSpecialist 是内置 Goal 流程角色（文档 32，第 2.10 节）。
+// goalSpecialist 是内置 Goal 执行角色。
 // 当 worker.delegate 的 profile_key 匹配 Key（如 goal-analyst）时应用。
 type goalSpecialist struct {
 	Key             string
 	NameZH          string
-	Phase           string
+	Capability      string
 	DefaultMaxTurns int
 	// 非空时作为允许列表：仅暴露这些工具，拒绝列表仍然生效。
 	Allowlist []string
@@ -53,10 +53,10 @@ func withContextShareTools(base ...string) []string {
 	return out
 }
 
-// builtinGoalSpecialists 是五个阶段的内置专家，Key 与 Worker Profiles 匹配。
+// builtinGoalSpecialists 是按当前行动需求选择的内置专家，Key 与 Worker Profiles 匹配。
 var builtinGoalSpecialists = map[string]goalSpecialist{
 	"goal-analyst": {
-		Key: "goal-analyst", NameZH: "目标分析师", Phase: "analyze",
+		Key: "goal-analyst", NameZH: "目标分析师", Capability: "analyze",
 		DefaultMaxTurns: 12, CapMaxTurns: 24,
 		Allowlist:     withContextShareTools(append(append([]string{}, workspaceReadTools...), "web.search", "web.fetch")...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec"),
@@ -87,46 +87,46 @@ Preferred final report shape (JSON in a fenced block is ideal):
 If the request is trivial one-shot Q&A, set "trivial": true and explain why a Goal is unnecessary.`,
 	},
 	"goal-planner": {
-		Key: "goal-planner", NameZH: "目标规划师", Phase: "plan",
+		Key: "goal-planner", NameZH: "目标规划师", Capability: "plan",
 		DefaultMaxTurns: 8, CapMaxTurns: 12,
 		Allowlist:     withContextShareTools(workspaceReadTools...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec", "web.search", "web.fetch"),
 		SystemPrompt: `You are goal-planner for red_panda (目标规划师).
 
-Role: turn analysis into an executable plan. Read-only for workspace files.
+Role: turn the current Goal contract, evidence, and gaps into a revisable action queue. Read-only for workspace files.
 
 Rules:
-- Do NOT write files or claim tools that create goals/todos (parent owns goal.write / todo.write).
+- Do NOT write files or mutate controller state (parent owns goal.plan / goal.assess).
 - Use context.read for prior analyst findings; context.write for plan decisions on the shared scratchpad.
-- Steps must be verifiable and ordered; keep granularity practical.
-- success_criteria must be checkable (tests, files, behaviors).
+- Actions must be verifiable and ordered; keep granularity practical.
+- Contract criteria must be independently checkable through tests, files, or observable behavior.
 
 Preferred final report JSON:
 {
   "title": "...",
   "objective": "...",
-  "success_criteria": "multi-line criteria",
-  "steps": [{"id":"1","content":"...","verify_hint":"..."}],
+  "criteria": [{"id":"criterion-1","description":"..."}],
+  "actions": [{"key":"action-1","title":"...","acceptance":"..."}],
   "notes": "..."
 }`,
 	},
 	"goal-implementer": {
-		Key: "goal-implementer", NameZH: "目标实施者", Phase: "execute",
+		Key: "goal-implementer", NameZH: "目标实施者", Capability: "implement",
 		DefaultMaxTurns: 24, CapMaxTurns: 48,
 		// 没有允许列表时，暴露除拒绝列表外的全部工具。
 		ExtraDenylist: []string{"web.search", "web.fetch", "skill.run", "skill.create", "skill.update", "skill.delete"},
 		SystemPrompt: `You are goal-implementer for red_panda (目标实施者).
 
-Role: implement ONLY the current assigned step. Prefer minimal diffs.
+Role: implement ONLY the current assigned Goal action. Prefer minimal diffs.
 
 Rules:
-- Stay inside the step scope; do not rewrite unrelated modules.
+- Stay inside the action scope; do not rewrite unrelated modules.
 - Do NOT call goal.* / todo.* / Worker.* (parent owns session state).
 - End with a concrete ImplementationReport the verifier can check.
 
 Preferred final report JSON:
 {
-  "step_id": "...",
+  "action_id": "...",
   "done_claim": true,
   "changes": [{"path":"...","summary":"..."}],
   "commands_run": ["..."],
@@ -135,52 +135,56 @@ Preferred final report JSON:
 }`,
 	},
 	"goal-verifier": {
-		Key: "goal-verifier", NameZH: "目标验证者", Phase: "verify",
+		Key: "goal-verifier", NameZH: "目标验证者", Capability: "verify",
 		DefaultMaxTurns: 12, CapMaxTurns: 16,
 		Allowlist:     withContextShareTools(append(append([]string{}, workspaceReadTools...), "shell.exec")...),
 		ExtraDenylist: append([]string{}, workspaceWriteTools...),
 		SystemPrompt: `You are goal-verifier for red_panda (目标验证者).
 
-Role: skeptically verify the current step with evidence (read/tests/commands).
+Role: skeptically verify the current Goal action with evidence (read/tests/commands).
 
 Rules:
 - Prefer evidence over the implementer's claims.
-- Do NOT edit product source in v1 (no write/edit/apply_patch).
+- Do NOT edit product source (no write/edit/apply_patch).
 - shell.exec is only for tests/builds that validate the step.
 - Use context.read for implementer handoff notes; context.write for verification outcomes.
 - Do NOT call goal.* / todo.* / Worker.*.
 
 Preferred final report JSON:
 {
-  "step_id": "...",
+  "action_id": "...",
   "passed": true,
   "evidence": [{"kind":"test|read|command","detail":"..."}],
   "failures": [],
-  "retry_suggestion": "..."
+  "retry_suggestion": "...",
+  "assessment_summary": "short verdict suitable for goal.assess",
+  "evidence": "concise evidence suitable for goal.assess"
 }`,
 	},
 	"goal-evaluator": {
-		Key: "goal-evaluator", NameZH: "目标终评官", Phase: "evaluate",
+		Key: "goal-evaluator", NameZH: "目标终评官", Capability: "evaluate",
 		DefaultMaxTurns: 8, CapMaxTurns: 12,
 		Allowlist:     withContextShareTools(workspaceReadTools...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec", "web.search", "web.fetch"),
 		SystemPrompt: `You are goal-evaluator for red_panda (目标终评官).
 
-Role: evaluate the whole goal against success_criteria and draft the user-facing completion report.
+Role: evaluate the whole Goal against every contract criterion and draft the user-facing completion report.
 
 Rules:
 - Read-only for workspace files and shell. Do not write files or run shell.
 - Use context.read for shared findings across the goal; context.write for the final evaluation notes.
 - Compare evidence from prior specialist reports and the workspace.
-- Do NOT call goal.complete (parent does after publishing the report).
+- Do NOT call goal.finish (parent does after persisting a satisfied assessment).
 
 Preferred final report JSON:
 {
   "verdict": "succeeded|partial|failed",
   "criteria": [{"item":"...","result":"met|partial|not_met|blocked","evidence":"..."}],
-  "steps_summary": [{"id":"...","status":"completed","note":"..."}],
+  "actions_summary": [{"id":"...","status":"done","note":"..."}],
   "risks": ["..."],
   "followups": ["..."],
+  "assessment_summary": "final verdict against the contract criteria",
+  "evidence": "concrete evidence covering the criteria",
   "report_markdown": "## 目标完成报告\\n..."
 }`,
 	},
@@ -217,8 +221,8 @@ func resolveGoalSpecialist(profiles []methods.WorkerProfileRef, name string) (go
 		if profile.DefaultMaxTurns > 0 {
 			base.DefaultMaxTurns = profile.DefaultMaxTurns
 		}
-		if phase := strings.TrimSpace(profile.Phase); phase != "" {
-			base.Phase = phase
+		if capability := strings.TrimSpace(profile.Phase); capability != "" {
+			base.Capability = capability
 		}
 		if nameZH := strings.TrimSpace(profile.NameZH); nameZH != "" {
 			base.NameZH = nameZH
@@ -246,18 +250,6 @@ func (r *Runtime) validateGoalSpecialistPhase(runID string, spec goalSpecialist)
 	state := r.getRunGoal(runID)
 	if state == nil || strings.TrimSpace(state.Goal.ID) == "" || state.Terminal {
 		return fmt.Errorf("%s requires an active goal", spec.Key)
-	}
-	current := strings.TrimSpace(state.Goal.PipelinePhase)
-	if current == "" {
-		current = "analyze"
-	}
-	if current != spec.Phase {
-		return fmt.Errorf(
-			"%s is only valid in goal phase %q; current phase is %q",
-			spec.Key,
-			spec.Phase,
-			current,
-		)
 	}
 	return nil
 }
@@ -315,9 +307,9 @@ func (r *Runtime) applyGoalSpecialist(child *methods.ReplyParams, spec goalSpeci
 		roleBlock = fmt.Sprintf("You are specialist %q.", spec.Key)
 	}
 	budgetNote := fmt.Sprintf(
-		"\n\nSpecialist key=%s phase=%s (%s). Tool-turn budget=%d. "+
+		"\n\nSpecialist key=%s capability=%s (%s). Tool-turn budget=%d. "+
 			"Return one final report for the parent. Do not nest Workers.",
-		spec.Key, spec.Phase, spec.NameZH, maxTurns,
+		spec.Key, spec.Capability, spec.NameZH, maxTurns,
 	)
 
 	// 注入父目标共享笔记摘要，避免专家缺少上下文。摘要包含 goal_id，

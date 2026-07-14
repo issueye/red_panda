@@ -26,9 +26,6 @@ func (r GoalRepository) Create(row model.Goal) (model.Goal, error) {
 	if row.Status == "" {
 		row.Status = "pending"
 	}
-	if row.PipelinePhase == "" {
-		row.PipelinePhase = "analyze"
-	}
 	applyGoalBudgetDefaults(&row)
 	row.CreatedAt = now
 	row.UpdatedAt = now
@@ -106,53 +103,6 @@ func (r GoalRepository) FindByLastRunID(runID string) (model.Goal, error) {
 	return row, err
 }
 
-// CASStatus updates only when current status matches fromStatus.
-func (r GoalRepository) CASStatus(id string, fromStatus string, patch model.Goal) (bool, error) {
-	patch.UpdatedAt = time.Now().UTC()
-	updates := map[string]any{
-		"status":             patch.Status,
-		"pipeline_phase":     patch.PipelinePhase,
-		"pause_reason":       patch.PauseReason,
-		"fail_reason":        patch.FailReason,
-		"analysis_summary":   patch.AnalysisSummary,
-		"checkpoint_summary": patch.CheckpointSummary,
-		"progress_note":      patch.ProgressNote,
-		"report_json":        patch.ReportJSON,
-		"report_markdown":    patch.ReportMarkdown,
-		"active_run_id":      patch.ActiveRunID,
-		"last_run_id":        patch.LastRunID,
-		"used_tool_turns":    patch.UsedToolTurns,
-		"used_segments":      patch.UsedSegments,
-		"used_wall_time_sec": patch.UsedWallTimeSec,
-		"updated_at":         patch.UpdatedAt,
-		"finished_at":        patch.FinishedAt,
-		"started_at":         patch.StartedAt,
-		"title":              patch.Title,
-		"objective":          patch.Objective,
-		"success_criteria":   patch.SuccessCriteria,
-	}
-	res := r.db.Model(&model.Goal{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Updates(updates)
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
-}
-
-func (r GoalRepository) AddToolTurns(id string, delta int) error {
-	if delta <= 0 {
-		return nil
-	}
-	return r.db.Model(&model.Goal{}).
-		Where("id = ?", id).
-		Updates(map[string]any{
-			"used_tool_turns": gorm.Expr("used_tool_turns + ?", delta),
-			"used_segments":   gorm.Expr("used_segments + ?", 1),
-			"updated_at":      time.Now().UTC(),
-		}).Error
-}
-
 // RecordSegment inserts one accounting record and increments Goal counters in
 // the same transaction. Replaying the same (goal_id, run_id, segment_index) is a
 // successful no-op that does not change counters. New segments are rejected once
@@ -219,6 +169,71 @@ func (r GoalRepository) CountSegmentsForRun(goalID, runID string) (int64, error)
 	return n, err
 }
 
+func (r GoalRepository) ListActions(goalID string) ([]model.GoalAction, error) {
+	var rows []model.GoalAction
+	err := r.db.Where("goal_id = ?", goalID).
+		Order("sort_order asc, created_at asc").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r GoalRepository) ReplaceActions(goal model.Goal, actions []model.GoalAction) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("goal_id = ?", goal.ID).Delete(&model.GoalAction{}).Error; err != nil {
+			return err
+		}
+		for i := range actions {
+			actions[i].GoalID = goal.ID
+			actions[i].SessionID = goal.SessionID
+			if err := tx.Create(&actions[i]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (r GoalRepository) UpdateAction(action model.GoalAction) error {
+	action.UpdatedAt = time.Now().UTC()
+	return r.db.Model(&model.GoalAction{}).
+		Where("id = ? AND goal_id = ?", action.ID, action.GoalID).
+		Updates(map[string]any{
+			"title": action.Title, "description": action.Description,
+			"acceptance": action.Acceptance, "status": action.Status,
+			"result": action.Result, "evidence": action.Evidence,
+			"attempt": action.Attempt, "sort_order": action.SortOrder,
+			"finished_at": action.FinishedAt, "updated_at": action.UpdatedAt,
+		}).Error
+}
+
+func (r GoalRepository) AppendEvent(event model.GoalEvent) (model.GoalEvent, error) {
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var maxSeq int
+		if err := tx.Model(&model.GoalEvent{}).
+			Where("goal_id = ?", event.GoalID).
+			Select("COALESCE(MAX(seq), 0)").Scan(&maxSeq).Error; err != nil {
+			return err
+		}
+		event.Seq = maxSeq + 1
+		if event.ID == "" {
+			event.ID = fmt.Sprintf("goal_event_%s_%d", event.GoalID, event.Seq)
+		}
+		event.CreatedAt = time.Now().UTC()
+		return tx.Create(&event).Error
+	})
+	return event, err
+}
+
+func (r GoalRepository) ListEvents(goalID string, limit int) ([]model.GoalEvent, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var rows []model.GoalEvent
+	err := r.db.Where("goal_id = ?", goalID).
+		Order("seq desc").Limit(limit).Find(&rows).Error
+	return rows, err
+}
+
 // TransitionStatus applies a terminal/pause transition only from one of the
 // expected states and, when provided, only for the run currently owning it.
 func (r GoalRepository) TransitionStatus(id, sessionID string, from []string, activeRunID string, updates map[string]any) (bool, error) {
@@ -267,5 +282,18 @@ func applyGoalBudgetDefaults(row *model.Goal) {
 	}
 	if row.MaxWallTimeSec <= 0 {
 		row.MaxWallTimeSec = 1800
+	}
+	if row.MaxIterations <= 0 {
+		row.MaxIterations = 20
+	} else if row.MaxIterations > 100 {
+		row.MaxIterations = 100
+	}
+	if row.MaxStagnation <= 0 {
+		row.MaxStagnation = 3
+	} else if row.MaxStagnation > 10 {
+		row.MaxStagnation = 10
+	}
+	if row.Version <= 0 {
+		row.Version = 1
 	}
 }

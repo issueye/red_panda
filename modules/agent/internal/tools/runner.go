@@ -332,7 +332,7 @@ func (ToolRunner) AvailableTools() []ptools.Definition {
 		{
 			Name:        "todo.write",
 			DisplayName: "Update todos",
-			Description: "Session checklist only (this chat). REQUIRED for multi-step work: plan steps shown above the chat input. Prefer full list each call; at most one in_progress. Do NOT use for durable preferences (memory.*) or long-horizon Goal findings (context.* / goal.checkpoint). Skip only for trivial one-shot Q&A.",
+			Description: "Optional session checklist for non-Goal multi-step chat work. Goal execution uses goal.plan actions instead. Prefer a full list each call and at most one in_progress.",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
@@ -359,74 +359,103 @@ func (ToolRunner) AvailableTools() []ptools.Definition {
 			},
 		},
 		{
-			Name:        "goal.write",
+			Name:        "goal.create",
 			DisplayName: "Create goal",
-			Description: "Create a long-horizon Goal (objective + budgets + pipeline). Use after analysis when work spans multiple segments/runs. Then use todo.write for micro-steps and context.write for findings. Not for short checklists alone.",
+			Description: "Create and activate an outcome contract. Define independently assessable success criteria and optional constraints. Use only when no Goal is already bound.",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"title":            map[string]any{"type": "string"},
-					"objective":        map[string]any{"type": "string"},
-					"success_criteria": map[string]any{"type": "string"},
-					"analysis_summary": map[string]any{"type": "string"},
-					"activate":         map[string]any{"type": "boolean"},
+					"title":       map[string]any{"type": "string"},
+					"objective":   map[string]any{"type": "string"},
+					"strategy":    map[string]any{"type": "string"},
+					"constraints": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"criteria": map[string]any{"type": "array", "items": map[string]any{
+						"type": "object", "properties": map[string]any{
+							"id": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"},
+						}, "required": []string{"description"},
+					}},
+					"max_iterations": map[string]any{"type": "integer"},
+					"max_stagnation": map[string]any{"type": "integer"},
 				},
-				"required": []string{"objective"},
+				"required": []string{"objective", "criteria"},
 			},
 		},
 		{
-			Name:        "goal.update",
-			DisplayName: "Update goal",
-			Description: "Update goal fields, pipeline_phase, or action=cancel. Use activate=true to activate a pending goal.",
+			Name:        "goal.plan",
+			DisplayName: "Plan goal actions",
+			Description: "Choose or revise the Goal strategy and Goal-owned action queue based on current evidence. The queue is adaptive, not a fixed up-front phase plan; at most one action may be active.",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"goal_id":          map[string]any{"type": "string"},
-					"title":            map[string]any{"type": "string"},
-					"objective":        map[string]any{"type": "string"},
-					"success_criteria": map[string]any{"type": "string"},
-					"analysis_summary": map[string]any{"type": "string"},
-					"pipeline_phase":   map[string]any{"type": "string"},
-					"activate":         map[string]any{"type": "boolean"},
-					"action":           map[string]any{"type": "string", "description": "cancel to cancel the goal"},
+					"goal_id":  map[string]any{"type": "string"},
+					"strategy": map[string]any{"type": "string"},
+					"decision": map[string]any{"type": "string", "description": "Why this is the best next plan given current evidence."},
+					"actions": map[string]any{"type": "array", "items": map[string]any{
+						"type": "object", "properties": map[string]any{
+							"key": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"},
+							"description": map[string]any{"type": "string"}, "acceptance": map[string]any{"type": "string"},
+							"status": map[string]any{"type": "string", "description": "queued | active | done | blocked | dropped"},
+						}, "required": []string{"title", "acceptance"},
+					}},
 				},
 				"required": []string{"goal_id"},
 			},
 		},
 		{
-			Name:        "goal.checkpoint",
-			DisplayName: "Goal checkpoint",
-			Description: "Save a short progress snapshot on the Goal (status recovery across continues). Prefer one concise summary. Structured findings belong in context.write (kind=finding|decision|handoff); durable user preferences belong in memory.create.",
+			Name:        "goal.observe",
+			DisplayName: "Record goal observation",
+			Description: "Record what actually happened after an action. Done or blocked actions require concrete evidence. This records facts; use goal.assess separately to decide what they mean for the outcome.",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"goal_id":            map[string]any{"type": "string"},
-					"summary":            map[string]any{"type": "string"},
-					"progress_note":      map[string]any{"type": "string"},
-					"pipeline_phase":     map[string]any{"type": "string"},
-					"checkpoint_summary": map[string]any{"type": "string"},
+					"goal_id":       map[string]any{"type": "string"},
+					"action_id":     map[string]any{"type": "string", "description": "Goal action id or key; defaults to the active action."},
+					"action_status": map[string]any{"type": "string", "description": "active | done | blocked | dropped"},
+					"observation":   map[string]any{"type": "string"},
+					"evidence":      map[string]any{"type": "string"},
 				},
-				"required": []string{"summary"},
+				"required": []string{"goal_id", "observation"},
 			},
 		},
 		{
-			Name:        "goal.complete",
-			DisplayName: "Complete goal",
-			Description: "Mark goal succeeded or failed AFTER final evaluation and user-facing completion report. Requires summary.",
+			Name:        "goal.assess",
+			DisplayName: "Assess goal outcome",
+			Description: "Close one controller iteration by assessing every success criterion against evidence and deciding whether the Goal is progressing, satisfied, blocked, or making no progress.",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"goal_id":         map[string]any{"type": "string"},
-					"status":          map[string]any{"type": "string", "description": "succeeded | failed"},
-					"summary":         map[string]any{"type": "string"},
-					"report_markdown": map[string]any{"type": "string"},
-					"report":          map[string]any{"type": "object"},
+					"goal_id":       map[string]any{"type": "string"},
+					"verdict":       map[string]any{"type": "string", "description": "progress | satisfied | blocked | no_progress"},
+					"summary":       map[string]any{"type": "string"},
+					"gap":           map[string]any{"type": "string"},
+					"decision":      map[string]any{"type": "string", "description": "Next decision; required for progress."},
+					"action_id":     map[string]any{"type": "string"},
+					"action_status": map[string]any{"type": "string"},
+					"evidence":      map[string]any{"type": "string"},
+					"criteria": map[string]any{"type": "array", "items": map[string]any{
+						"type": "object", "properties": map[string]any{
+							"id": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "description": "unknown | met | not_met | blocked"},
+							"evidence": map[string]any{"type": "string"},
+						}, "required": []string{"id", "status", "evidence"},
+					}},
 				},
-				"required": []string{"status", "summary"},
+				"required": []string{"goal_id", "verdict", "summary", "evidence", "criteria"},
+			},
+		},
+		{
+			Name:        "goal.finish",
+			DisplayName: "Finish goal",
+			Description: "Finalize the Goal with an outcome report. succeeded requires a persisted satisfied assessment in which every criterion is met with evidence.",
+			Risk:        ptools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object", "properties": map[string]any{
+					"goal_id": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "description": "succeeded | failed"},
+					"summary": map[string]any{"type": "string"}, "report_markdown": map[string]any{"type": "string"},
+				}, "required": []string{"goal_id", "status", "summary", "report_markdown"},
 			},
 		},
 		{
@@ -577,7 +606,7 @@ func (ToolRunner) AvailableTools() []ptools.Definition {
 		{
 			Name:        "context.write",
 			DisplayName: "Write goal note",
-			Description: "Append a structured note on the active Goal scratchpad (finding/decision/risk/fact/handoff). Survives segment boundaries and specialist handoffs. Use goal.checkpoint for a short progress snapshot; use memory.create only for lasting preferences across goals.",
+			Description: "Append a structured note on the active Goal scratchpad (finding/decision/risk/fact/handoff). Survives segment boundaries and specialist handoffs. Controller progress belongs in goal.observe/goal.assess; use memory.create only for lasting preferences across goals.",
 			Risk:        ptools.RiskHigh,
 			Parameters: map[string]any{
 				"type": "object",
@@ -759,7 +788,7 @@ func toolTimeoutFor(name string) time.Duration {
 		return 0
 	case "memory.list", "memory.create", "memory.update", "memory.delete",
 		"todo.write", "todo_write", "todo.list",
-		"goal.write", "goal.update", "goal.checkpoint", "goal.complete", "goal.list":
+		"goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish", "goal.list":
 		return defaultGatewayToolTimeout
 	default:
 		// MCP 工具在内部管理启动、初始化和调用超时（文档 19）。
@@ -876,7 +905,7 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 		return runner.WorkerReceive(ctx, runCtx, call)
 	case "todo.write", "todo_write", "todo.list":
 		return runner.runTodoTool(ctx, runCtx, call)
-	case "goal.write", "goal.update", "goal.checkpoint", "goal.complete", "goal.list":
+	case "goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish", "goal.list":
 		return runner.runGoalTool(ctx, runCtx, call)
 	case "context.read", "context.search", "context.write", "context.replace", "context.delete":
 		return runner.runContextTool(ctx, runCtx, call)

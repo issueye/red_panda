@@ -35,13 +35,16 @@ func newContextTestService(t *testing.T) (ContextService, GoalService, string) {
 	return NewContextService(repos), NewGoalService(repos), session.ID
 }
 
-// createActiveGoal helper: writes a goal and activates it bound to runID.
+// createActiveGoal creates a V2 contract bound to runID.
 func createActiveGoal(t *testing.T, goalSvc GoalService, sessionID, runID string) string {
 	t.Helper()
 	write, err := goalSvc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
-		RunID: runID, SessionID: sessionID, ToolCallID: "g_" + runID, ToolName: "goal.write",
+		RunID: runID, SessionID: sessionID, ToolCallID: "g_" + runID, ToolName: "goal.create",
 		Arguments: map[string]any{
-			"objective": "test goal", "success_criteria": "done", "activate": true,
+			"objective": "test goal", "criteria": []any{
+				map[string]any{"id": "behavior", "description": "The behavior works"},
+				map[string]any{"id": "quality", "description": "Relevant tests pass"},
+			},
 		},
 	})
 	if err != nil {
@@ -104,9 +107,10 @@ func TestContextWriteRejectsTerminalGoal(t *testing.T) {
 	goalID := createActiveGoal(t, goalSvc, session, "run_root")
 
 	// Complete the goal → terminal.
+	prepareGoalForCompletion(t, goalSvc, session, goalID)
 	_, err := goalSvc.ExecuteRuntimeTool(methods.GoalToolExecuteParams{
-		RunID: "run_root", SessionID: session, ToolCallID: "gc", ToolName: "goal.complete",
-		Arguments: map[string]any{"goal_id": goalID, "status": "succeeded", "summary": "Goal accomplished"},
+		RunID: "run_root", SessionID: session, ToolCallID: "gc", ToolName: "goal.finish",
+		Arguments: goalCompletionArgs(goalID, "succeeded", "Goal accomplished"),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -42,7 +42,7 @@ func (s GoalService) ListBySession(sessionID string) ([]methods.GoalDTO, error) 
 	}
 	out := make([]methods.GoalDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, goalDTO(row))
+		out = append(out, s.goalDTO(row))
 	}
 	return out, nil
 }
@@ -55,7 +55,7 @@ func (s GoalService) Get(sessionID, goalID string) (methods.GoalDTO, error) {
 	if sessionID != "" && row.SessionID != sessionID {
 		return methods.GoalDTO{}, fmt.Errorf("goal not found")
 	}
-	return goalDTO(row), nil
+	return s.goalDTO(row), nil
 }
 
 func (s GoalService) CancelGoal(sessionID, goalID string) (methods.GoalDTO, error) {
@@ -69,7 +69,7 @@ func (s GoalService) CancelGoal(sessionID, goalID string) (methods.GoalDTO, erro
 	switch row.Status {
 	case "succeeded", "failed", "cancelled":
 		// Idempotent: terminal Goals are left unchanged.
-		return goalDTO(row), nil
+		return s.goalDTO(row), nil
 	}
 	lastRunID := row.ActiveRunID
 	if lastRunID == "" {
@@ -93,9 +93,10 @@ func (s GoalService) CancelGoal(sessionID, goalID string) (methods.GoalDTO, erro
 	if !changed {
 		// Concurrent complete/fail/cancel won the CAS; surface the winner without
 		// error so callers treat cancel as best-effort terminalization.
-		return goalDTO(updated), nil
+		return s.goalDTO(updated), nil
 	}
-	return goalDTO(updated), nil
+	_ = s.appendGoalEvent(updated, lastRunID, "cancelled", "Goal cancelled", map[string]any{"previous_status": row.Status})
+	return s.goalDTO(updated), nil
 }
 
 func (s GoalService) ExecuteRuntimeTool(params methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
@@ -104,14 +105,16 @@ func (s GoalService) ExecuteRuntimeTool(params methods.GoalToolExecuteParams) (m
 	}
 	name := strings.TrimSpace(params.ToolName)
 	switch name {
-	case "goal.write":
-		return s.executeWrite(params)
-	case "goal.update":
-		return s.executeUpdate(params)
-	case "goal.checkpoint":
-		return s.executeCheckpoint(params)
-	case "goal.complete":
-		return s.executeComplete(params)
+	case "goal.create":
+		return s.executeCreateV2(params)
+	case "goal.plan":
+		return s.executePlanV2(params)
+	case "goal.observe":
+		return s.executeObserveV2(params)
+	case "goal.assess":
+		return s.executeAssessV2(params)
+	case "goal.finish":
+		return s.executeFinishV2(params)
 	case "goal.list":
 		return s.executeList(params)
 	case "segment_end":
@@ -135,31 +138,17 @@ func (s GoalService) FormatGoalContext(sessionID string, goalID string) (*method
 	if row.SessionID != sessionID && sessionID != "" {
 		return nil, nil
 	}
-	ctx := formatGoalContextText(row)
+	dto := s.goalDTO(row)
+	ctx := formatGoalContextV2(dto)
 	if utf8.RuneCountInString(ctx) > goalContextLimit {
 		runes := []rune(ctx)
 		ctx = string(runes[:goalContextLimit]) + "…"
-	}
-	currentStep := ""
-	if todos, tErr := s.repos.Todos.ListOpenBySession(sessionID); tErr == nil {
-		for _, t := range todos {
-			if t.Status == "in_progress" {
-				currentStep = t.Content
-				break
-			}
-		}
 	}
 	return &methods.GoalContext{
 		GoalID:            row.ID,
 		Title:             row.Title,
 		Objective:         row.Objective,
-		SuccessCriteria:   row.SuccessCriteria,
 		Status:            row.Status,
-		PipelinePhase:     row.PipelinePhase,
-		AnalysisSummary:   row.AnalysisSummary,
-		CheckpointSummary: row.CheckpointSummary,
-		ProgressNote:      row.ProgressNote,
-		CurrentStep:       currentStep,
 		UsedToolTurns:     row.UsedToolTurns,
 		MaxTotalToolTurns: row.MaxTotalToolTurns,
 		UsedSegments:      row.UsedSegments,
@@ -168,6 +157,19 @@ func (s GoalService) FormatGoalContext(sessionID string, goalID string) (*method
 		UsedWallTimeSec:   row.UsedWallTimeSec,
 		MaxWallTimeSec:    row.MaxWallTimeSec,
 		Context:           ctx,
+		Criteria:          dto.Criteria,
+		Constraints:       dto.Constraints,
+		Strategy:          dto.Strategy,
+		CurrentActionID:   dto.CurrentActionID,
+		CurrentAction:     dto.CurrentAction,
+		Actions:           dto.Actions,
+		LastObservation:   dto.LastObservation,
+		LastAssessment:    dto.LastAssessment,
+		LastDecision:      dto.LastDecision,
+		Iteration:         dto.Iteration,
+		MaxIterations:     dto.MaxIterations,
+		StagnationCount:   dto.StagnationCount,
+		MaxStagnation:     dto.MaxStagnation,
 	}, nil
 }
 
@@ -216,21 +218,25 @@ func (s GoalService) CreateUserInitiated(sessionID, objective, title, successCri
 		return methods.GoalDTO{}, fmt.Errorf("title too long")
 	}
 	now := time.Now().UTC()
+	criteriaItems := []methods.GoalCriterionDTO{{ID: "criterion-1", Description: criteria, Status: "unknown"}}
+	criteriaJSON, _ := json.Marshal(criteriaItems)
 	row := model.Goal{
-		SessionID:       sessionID,
-		Title:           title,
-		Objective:       objective,
-		SuccessCriteria: criteria,
-		Status:          "pending",
-		PipelinePhase:   "analyze",
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		SessionID:    sessionID,
+		Title:        title,
+		Objective:    objective,
+		Status:       "pending",
+		CriteriaJSON: string(criteriaJSON),
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	created, err := s.repos.Goals.Create(row)
 	if err != nil {
 		return methods.GoalDTO{}, err
 	}
-	return goalDTO(created), nil
+	_ = s.appendGoalEvent(created, "", "created", "Goal contract created by user", map[string]any{
+		"objective": created.Objective, "criteria": criteriaItems,
+	})
+	return s.goalDTO(created), nil
 }
 
 // BindToRun activates or resumes a goal for a run. Explicit only (no default bind).
@@ -286,9 +292,6 @@ func (s GoalService) BindToRun(sessionID, runID, goalID string, continueGoal boo
 	if row.StartedAt == nil {
 		row.StartedAt = &now
 	}
-	if row.PipelinePhase == "" {
-		row.PipelinePhase = "analyze"
-	}
 	row.UpdatedAt = now
 	changed, err := s.repos.Goals.TransitionStatus(row.ID, sessionID, []string{fromStatus}, fromActiveRunID, map[string]any{
 		"status":        row.Status,
@@ -307,12 +310,13 @@ func (s GoalService) BindToRun(sessionID, runID, goalID string, continueGoal boo
 	if err != nil {
 		return methods.GoalDTO{}, err
 	}
+	_ = s.appendGoalEvent(updated, runID, "bound", "Goal execution lease acquired", map[string]any{"from_status": fromStatus})
 	// Persist run.goal_id best-effort.
 	if run, rErr := s.repos.Runs.Get(runID); rErr == nil {
 		run.GoalID = updated.ID
 		_ = s.repos.DB.Model(&model.RunRecord{}).Where("id = ?", runID).Update("goal_id", updated.ID).Error
 	}
-	return goalDTO(updated), nil
+	return s.goalDTO(updated), nil
 }
 
 func (s GoalService) PauseByRun(runID, reason string) error {
@@ -333,9 +337,13 @@ func (s GoalService) PauseByRun(runID, reason string) error {
 	row.LastRunID = runID
 	row.ActiveRunID = ""
 	row.UpdatedAt = now
-	_, err = s.repos.Goals.TransitionStatus(row.ID, row.SessionID, []string{"active"}, runID, map[string]any{
+	changed, err := s.repos.Goals.TransitionStatus(row.ID, row.SessionID, []string{"active"}, runID, map[string]any{
 		"status": "paused", "pause_reason": reason, "last_run_id": runID, "active_run_id": "",
 	})
+	if err == nil && changed {
+		row.Status = "paused"
+		_ = s.appendGoalEvent(row, runID, "paused", "Goal execution paused", map[string]any{"reason": reason})
+	}
 	return err
 }
 
@@ -353,9 +361,12 @@ func (s GoalService) PauseBySession(sessionID, reason string) error {
 	}
 	row.ActiveRunID = ""
 	row.UpdatedAt = now
-	_, err = s.repos.Goals.TransitionStatus(row.ID, sessionID, []string{"active"}, activeRunID, map[string]any{
+	changed, err := s.repos.Goals.TransitionStatus(row.ID, sessionID, []string{"active"}, activeRunID, map[string]any{
 		"status": "paused", "pause_reason": reason, "last_run_id": row.LastRunID, "active_run_id": "",
 	})
+	if err == nil && changed {
+		_ = s.appendGoalEvent(row, activeRunID, "paused", "Goal execution paused", map[string]any{"reason": reason})
+	}
 	return err
 }
 
@@ -403,7 +414,7 @@ func (s GoalService) OnRootRunTerminal(runID, sessionID, finishStatus string) er
 	row.LastRunID = runID
 	row.ActiveRunID = ""
 	row.UpdatedAt = now
-	_, err = s.repos.Goals.TransitionStatus(row.ID, row.SessionID, []string{"active"}, runID, map[string]any{
+	changed, err := s.repos.Goals.TransitionStatus(row.ID, row.SessionID, []string{"active"}, runID, map[string]any{
 		"status":             row.Status,
 		"pause_reason":       row.PauseReason,
 		"fail_reason":        row.FailReason,
@@ -412,6 +423,15 @@ func (s GoalService) OnRootRunTerminal(runID, sessionID, finishStatus string) er
 		"finished_at":        row.FinishedAt,
 		"used_wall_time_sec": row.UsedWallTimeSec,
 	})
+	if err == nil && changed {
+		kind := "paused"
+		if row.Status == "failed" {
+			kind = "failed"
+		}
+		_ = s.appendGoalEvent(row, runID, kind, "Root run ended", map[string]any{
+			"finish_status": finishStatus, "pause_reason": row.PauseReason, "fail_reason": row.FailReason,
+		})
+	}
 	return err
 }
 
@@ -445,9 +465,12 @@ func (s GoalService) forcePauseStale(row model.Goal, reason string) error {
 	}
 	row.ActiveRunID = ""
 	row.UpdatedAt = now
-	_, err := s.repos.Goals.TransitionStatus(row.ID, row.SessionID, []string{"active"}, activeRunID, map[string]any{
+	changed, err := s.repos.Goals.TransitionStatus(row.ID, row.SessionID, []string{"active"}, activeRunID, map[string]any{
 		"status": "paused", "pause_reason": reason, "last_run_id": row.LastRunID, "active_run_id": "",
 	})
+	if err == nil && changed {
+		_ = s.appendGoalEvent(row, activeRunID, "paused", "Stale execution lease repaired", map[string]any{"reason": reason})
+	}
 	return err
 }
 
@@ -461,300 +484,6 @@ func (s GoalService) resolveGoalForRun(runID, sessionID string) (model.Goal, err
 		return g, nil
 	}
 	return s.repos.Goals.FindByLastRunID(runID)
-}
-
-func (s GoalService) executeWrite(params methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
-	objective := strings.TrimSpace(stringArgFromMap(params.Arguments, "objective"))
-	if objective == "" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("objective is required")
-	}
-	if utf8.RuneCountInString(objective) > goalMaxObjectiveRune {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("objective too long")
-	}
-	n, err := s.repos.Goals.CountBySession(params.SessionID)
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	if n >= goalMaxSessionRows {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("session goal limit %d reached", goalMaxSessionRows)
-	}
-	activate := boolArgFromMap(params.Arguments, "activate", false)
-	criteria := strings.TrimSpace(stringArgFromMap(params.Arguments, "success_criteria"))
-	if activate && criteria == "" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("success_criteria is required when activate=true")
-	}
-	if utf8.RuneCountInString(criteria) > goalMaxCriteriaRune {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("success_criteria too long")
-	}
-	title := strings.TrimSpace(stringArgFromMap(params.Arguments, "title"))
-	if title == "" {
-		title = truncateRunes(objective, 40)
-	}
-	if utf8.RuneCountInString(title) > goalMaxTitleRune {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("title too long")
-	}
-	if activate {
-		if _, err := s.repos.Goals.GetActiveBySession(params.SessionID); err == nil {
-			return methods.GoalToolExecuteResult{}, fmt.Errorf("active goal exists")
-		}
-	}
-	now := time.Now().UTC()
-	row := model.Goal{
-		SessionID:        params.SessionID,
-		Title:            title,
-		Objective:        objective,
-		SuccessCriteria:  criteria,
-		Status:           "pending",
-		PipelinePhase:    "plan",
-		AnalysisSummary:  strings.TrimSpace(stringArgFromMap(params.Arguments, "analysis_summary")),
-		SourceRunID:      params.RunID,
-		SourceToolCallID: params.ToolCallID,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
-	if activate {
-		row.Status = "active"
-		row.ActiveRunID = params.RunID
-		row.LastRunID = params.RunID
-		row.StartedAt = &now
-		if row.AnalysisSummary != "" {
-			row.PipelinePhase = "plan"
-		} else {
-			row.PipelinePhase = "analyze"
-		}
-	}
-	created, err := s.repos.Goals.Create(row)
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	if activate {
-		_ = s.repos.DB.Model(&model.RunRecord{}).Where("id = ?", params.RunID).Update("goal_id", created.ID).Error
-	}
-	dto := goalDTO(created)
-	return methods.GoalToolExecuteResult{
-		Status: "completed",
-		Output: runtimeGoalOutput("goal.write", &dto, nil, map[string]any{"action": "write", "activate": activate}),
-		Goal:   &dto,
-	}, nil
-}
-
-func (s GoalService) executeUpdate(params methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
-	goalID := strings.TrimSpace(stringArgFromMap(params.Arguments, "goal_id"))
-	if goalID == "" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal_id is required")
-	}
-	row, err := s.repos.Goals.Get(goalID)
-	if err != nil || row.SessionID != params.SessionID {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal not found")
-	}
-	if action := strings.ToLower(strings.TrimSpace(stringArgFromMap(params.Arguments, "action"))); action == "cancel" {
-		if row.Status == "active" && row.ActiveRunID != params.RunID {
-			return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is not bound to this run")
-		}
-		// Capture before CancelGoal clears active_run_id (invariant: cancel stops the run).
-		boundRunID := row.ActiveRunID
-		dto, err := s.CancelGoal(params.SessionID, goalID)
-		if err != nil {
-			return methods.GoalToolExecuteResult{}, err
-		}
-		res := methods.GoalToolExecuteResult{
-			Status: "completed",
-			Output: runtimeGoalOutput("goal.update", &dto, nil, map[string]any{"action": "cancel"}),
-			Goal:   &dto,
-		}
-		if boundRunID != "" && dto.Status == "cancelled" {
-			res.CancelRunID = boundRunID
-		}
-		return res, nil
-	}
-	if row.Status == "succeeded" || row.Status == "failed" || row.Status == "cancelled" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is terminal")
-	}
-	if row.Status == "active" && row.ActiveRunID != params.RunID {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is not bound to this run")
-	}
-	// CAS filter must use the pre-mutation binding: only already-active goals
-	// pin active_run_id. pending/paused activate must not require a prior bind.
-	casActiveRunID := ""
-	if row.Status == "active" {
-		casActiveRunID = row.ActiveRunID
-	}
-	fromStatuses := []string{row.Status}
-	if v := strings.TrimSpace(stringArgFromMap(params.Arguments, "title")); v != "" {
-		row.Title = truncateRunes(v, goalMaxTitleRune)
-	}
-	if v := strings.TrimSpace(stringArgFromMap(params.Arguments, "objective")); v != "" {
-		row.Objective = v
-	}
-	if v := strings.TrimSpace(stringArgFromMap(params.Arguments, "success_criteria")); v != "" {
-		row.SuccessCriteria = v
-	}
-	if v := strings.TrimSpace(stringArgFromMap(params.Arguments, "analysis_summary")); v != "" {
-		row.AnalysisSummary = v
-	}
-	if v := strings.TrimSpace(stringArgFromMap(params.Arguments, "pipeline_phase")); v != "" {
-		row.PipelinePhase = normalizePipelinePhase(v)
-	}
-	if boolArgFromMap(params.Arguments, "activate", false) {
-		if row.Status == "pending" || row.Status == "paused" {
-			if active, aErr := s.repos.Goals.GetActiveBySession(params.SessionID); aErr == nil && active.ID != row.ID {
-				return methods.GoalToolExecuteResult{}, fmt.Errorf("active goal exists")
-			}
-			if row.SuccessCriteria == "" {
-				return methods.GoalToolExecuteResult{}, fmt.Errorf("success_criteria required to activate")
-			}
-			now := time.Now().UTC()
-			row.Status = "active"
-			row.ActiveRunID = params.RunID
-			row.LastRunID = params.RunID
-			row.PauseReason = ""
-			if row.StartedAt == nil {
-				row.StartedAt = &now
-			}
-		}
-	}
-	changed, err := s.repos.Goals.TransitionStatus(row.ID, params.SessionID,
-		fromStatuses, casActiveRunID, map[string]any{
-			"title":            row.Title,
-			"objective":        row.Objective,
-			"success_criteria": row.SuccessCriteria,
-			"analysis_summary": row.AnalysisSummary,
-			"pipeline_phase":   row.PipelinePhase,
-			"status":           row.Status,
-			"active_run_id":    row.ActiveRunID,
-			"last_run_id":      row.LastRunID,
-			"pause_reason":     row.PauseReason,
-			"started_at":       row.StartedAt,
-		})
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	if !changed {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal changed concurrently")
-	}
-	if row.Status == "active" {
-		if err := s.repos.DB.Model(&model.RunRecord{}).Where("id = ?", params.RunID).Update("goal_id", row.ID).Error; err != nil {
-			return methods.GoalToolExecuteResult{}, err
-		}
-	}
-	updated, err := s.repos.Goals.Get(row.ID)
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	dto := goalDTO(updated)
-	return methods.GoalToolExecuteResult{
-		Status: "completed",
-		Output: runtimeGoalOutput("goal.update", &dto, nil, map[string]any{"action": "update"}),
-		Goal:   &dto,
-	}, nil
-}
-
-func (s GoalService) executeCheckpoint(params methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
-	goalID := strings.TrimSpace(stringArgFromMap(params.Arguments, "goal_id"))
-	row, err := s.boundActiveGoal(params.SessionID, params.RunID, goalID)
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	summary := strings.TrimSpace(stringArgFromMap(params.Arguments, "summary"))
-	if summary == "" {
-		summary = strings.TrimSpace(stringArgFromMap(params.Arguments, "checkpoint_summary"))
-	}
-	if summary == "" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("summary is required")
-	}
-	row.CheckpointSummary = truncateRunes(summary, goalMaxObjectiveRune)
-	if note := strings.TrimSpace(stringArgFromMap(params.Arguments, "progress_note")); note != "" {
-		row.ProgressNote = truncateRunes(note, 2000)
-	}
-	if phase := strings.TrimSpace(stringArgFromMap(params.Arguments, "pipeline_phase")); phase != "" {
-		row.PipelinePhase = normalizePipelinePhase(phase)
-	}
-	changed, err := s.repos.Goals.TransitionStatus(row.ID, params.SessionID,
-		[]string{"active"}, params.RunID, map[string]any{
-			"checkpoint_summary": row.CheckpointSummary,
-			"progress_note":      row.ProgressNote,
-			"pipeline_phase":     row.PipelinePhase,
-		})
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	if !changed {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is no longer active for this run")
-	}
-	updated, err := s.repos.Goals.Get(row.ID)
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	dto := goalDTO(updated)
-	return methods.GoalToolExecuteResult{
-		Status: "completed",
-		Output: runtimeGoalOutput("goal.checkpoint", &dto, nil, map[string]any{"action": "checkpoint"}),
-		Goal:   &dto,
-	}, nil
-}
-
-func (s GoalService) executeComplete(params methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
-	goalID := strings.TrimSpace(stringArgFromMap(params.Arguments, "goal_id"))
-	row, err := s.boundActiveGoal(params.SessionID, params.RunID, goalID)
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	status := strings.ToLower(strings.TrimSpace(stringArgFromMap(params.Arguments, "status")))
-	if status == "" {
-		status = "succeeded"
-	}
-	if status != "succeeded" && status != "failed" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("status must be succeeded or failed")
-	}
-	summary := strings.TrimSpace(stringArgFromMap(params.Arguments, "summary"))
-	if summary == "" {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("summary is required")
-	}
-	now := time.Now().UTC()
-	row.Status = status
-	row.ProgressNote = truncateRunes(summary, 2000)
-	row.PipelinePhase = "report"
-	row.ActiveRunID = ""
-	row.LastRunID = params.RunID
-	row.FinishedAt = &now
-	if md := strings.TrimSpace(stringArgFromMap(params.Arguments, "report_markdown")); md != "" {
-		row.ReportMarkdown = truncateRunes(md, 16000)
-	}
-	if rep, ok := params.Arguments["report"]; ok && rep != nil {
-		raw, _ := json.Marshal(rep)
-		row.ReportJSON = string(raw)
-	}
-	if status == "failed" {
-		row.FailReason = summary
-	}
-	changed, err := s.repos.Goals.TransitionStatus(row.ID, params.SessionID,
-		[]string{"active"}, params.RunID, map[string]any{
-			"status":          row.Status,
-			"progress_note":   row.ProgressNote,
-			"pipeline_phase":  row.PipelinePhase,
-			"active_run_id":   "",
-			"last_run_id":     row.LastRunID,
-			"finished_at":     row.FinishedAt,
-			"report_markdown": row.ReportMarkdown,
-			"report_json":     row.ReportJSON,
-			"fail_reason":     row.FailReason,
-		})
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	if !changed {
-		return methods.GoalToolExecuteResult{}, fmt.Errorf("goal is no longer active for this run")
-	}
-	updated, err := s.repos.Goals.Get(row.ID)
-	if err != nil {
-		return methods.GoalToolExecuteResult{}, err
-	}
-	dto := goalDTO(updated)
-	return methods.GoalToolExecuteResult{
-		Status: "completed",
-		Output: runtimeGoalOutput("goal.complete", &dto, nil, map[string]any{"action": "complete", "result": status}),
-		Goal:   &dto,
-	}, nil
 }
 
 func (s GoalService) executeList(params methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
@@ -827,13 +556,7 @@ func (s GoalService) executeSegmentEnd(params methods.GoalToolExecuteParams) (me
 			return methods.GoalToolExecuteResult{}, err
 		}
 	}
-	if cp := strings.TrimSpace(stringArgFromMap(params.Arguments, "checkpoint_summary")); cp != "" && row.Status == "active" {
-		_ = s.repos.DB.Model(&model.Goal{}).
-			Where("id = ? AND status = ? AND active_run_id = ?", row.ID, "active", params.RunID).
-			Update("checkpoint_summary", truncateRunes(cp, goalMaxObjectiveRune)).Error
-		row, _ = s.repos.Goals.Get(row.ID)
-	}
-	dto := goalDTO(row)
+	dto := s.goalDTO(row)
 	return methods.GoalToolExecuteResult{
 		Status: "completed",
 		Output: runtimeGoalOutput("segment_end", &dto, nil, map[string]any{"action": "segment_end", "delta": delta, "recorded": recorded}),
@@ -875,20 +598,15 @@ func (s GoalService) goalForTool(sessionID, runID, goalID string) (model.Goal, e
 	return model.Goal{}, fmt.Errorf("goal not found")
 }
 
-func goalDTO(row model.Goal) methods.GoalDTO {
-	return methods.GoalDTO{
+func (s GoalService) goalDTO(row model.Goal) methods.GoalDTO {
+	dto := methods.GoalDTO{
 		ID:                row.ID,
 		SessionID:         row.SessionID,
 		Title:             row.Title,
 		Objective:         row.Objective,
-		SuccessCriteria:   row.SuccessCriteria,
 		Status:            row.Status,
-		PipelinePhase:     row.PipelinePhase,
 		PauseReason:       row.PauseReason,
 		FailReason:        row.FailReason,
-		AnalysisSummary:   row.AnalysisSummary,
-		CheckpointSummary: row.CheckpointSummary,
-		ProgressNote:      row.ProgressNote,
 		ReportMarkdown:    row.ReportMarkdown,
 		UsedToolTurns:     row.UsedToolTurns,
 		MaxTotalToolTurns: row.MaxTotalToolTurns,
@@ -901,27 +619,26 @@ func goalDTO(row model.Goal) methods.GoalDTO {
 		LastRunID:         row.LastRunID,
 		CreatedAt:         row.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:         row.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Criteria:          criteriaFromRow(row),
+		Constraints:       constraintsFromRow(row),
+		Strategy:          row.Strategy,
+		CurrentActionID:   row.CurrentActionID,
+		CurrentAction:     row.CurrentAction,
+		LastObservation:   row.LastObservation,
+		LastAssessment:    assessmentFromRow(row),
+		LastDecision:      row.LastDecision,
+		OutcomeSummary:    row.OutcomeSummary,
+		Iteration:         row.Iteration,
+		MaxIterations:     row.MaxIterations,
+		StagnationCount:   row.StagnationCount,
+		MaxStagnation:     row.MaxStagnation,
+		Version:           row.Version,
 	}
-}
-
-func formatGoalContextText(row model.Goal) string {
-	var b strings.Builder
-	b.WriteString("Active goal (update via goal.checkpoint / goal.complete; steps via todo.write):\n")
-	b.WriteString(fmt.Sprintf("- id: %s\n", row.ID))
-	b.WriteString(fmt.Sprintf("- status: %s phase: %s\n", row.Status, row.PipelinePhase))
-	b.WriteString(fmt.Sprintf("- objective: %s\n", row.Objective))
-	if row.SuccessCriteria != "" {
-		b.WriteString(fmt.Sprintf("- success_criteria: %s\n", row.SuccessCriteria))
+	actions, err := s.repos.Goals.ListActions(row.ID)
+	if err == nil {
+		dto.Actions = goalActionDTOs(actions)
 	}
-	if row.AnalysisSummary != "" {
-		b.WriteString(fmt.Sprintf("- analysis: %s\n", truncateRunes(row.AnalysisSummary, 400)))
-	}
-	if row.CheckpointSummary != "" {
-		b.WriteString(fmt.Sprintf("- checkpoint: %s\n", truncateRunes(row.CheckpointSummary, 400)))
-	}
-	b.WriteString(fmt.Sprintf("- budget: %d/%d root tool turns, segments used %d (max %d/run)\n",
-		row.UsedToolTurns, row.MaxTotalToolTurns, row.UsedSegments, row.MaxSegmentsPerRun))
-	return b.String()
+	return dto
 }
 
 func runtimeGoalOutput(tool string, goal *methods.GoalDTO, goals []methods.GoalDTO, meta map[string]any) string {
@@ -940,15 +657,6 @@ func runtimeGoalOutput(tool string, goal *methods.GoalDTO, goals []methods.GoalD
 		return tool + " ok"
 	}
 	return string(raw)
-}
-
-func normalizePipelinePhase(v string) string {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "analyze", "plan", "execute", "verify", "evaluate", "report":
-		return strings.ToLower(strings.TrimSpace(v))
-	default:
-		return "execute"
-	}
 }
 
 func boolArgFromMap(args map[string]any, key string, def bool) bool {

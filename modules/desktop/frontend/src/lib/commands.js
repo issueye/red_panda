@@ -2,7 +2,7 @@
  * Composer slash-command system.
  *
  * Commands are parsed client-side so Desktop can actively trigger Goal /
- * continue / cancel without waiting for the model to call goal.write.
+ * continue / cancel without waiting for the model to call goal.create.
  */
 
 /** @typedef {'run'|'start_goal'|'continue_goal'|'cancel_goal'|'help'|'error'} CommandAction */
@@ -227,14 +227,14 @@ export function buildStartGoalInput({ title, objective, successCriteria }) {
     `[启动目标] ${title || '未命名'}`,
     `目标：${objective}`,
     `成功标准：${successCriteria}`,
-    '阶段：analyze',
     '',
-    '本 Goal 已由用户指令创建并绑定到本次 run。请按 Goal 流水线执行：',
-    '1. 用 goal-analyst 做范围分析（若 trivial 可直接说明后 goal.complete）',
-    '2. 用 goal.update 补充 analysis_summary / success_criteria / pipeline_phase，并用 todo.write 写出步骤',
-    '3. 逐步 execute → verify，goal.checkpoint 记录进度',
-    '4. evaluate 后 goal.complete，并给用户完整报告',
-    '不要重新 goal.write 新建目标；当前会话已绑定本 Goal。',
+    '本 Goal 已由用户创建并绑定到本次 run。请作为目标控制器推进结果：',
+    '1. 对照成功标准找出当前最大的结果差距',
+    '2. 用 goal.plan 选择或修订最有价值的下一批 actions',
+    '3. 执行 action 后用 goal.observe 记录真实结果和证据',
+    '4. 用 goal.assess 逐条评估成功标准，并决定继续、调整、阻塞或已满足',
+    '5. 只有 persisted assessment=satisfied 且全部 criteria=met 时才能 goal.finish succeeded',
+    '不要创建第二个 Goal，也不要把 Session TODO 当作 Goal 完成条件。',
   ];
   return lines.join('\n');
 }

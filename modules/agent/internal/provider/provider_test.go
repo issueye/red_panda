@@ -325,22 +325,25 @@ func TestOpenAICompatibleMessagesInjectOrchestrationPolicyWhenWorkerToolAvailabl
 	}
 }
 
-func TestGoalPipelineDoesNotInjectParallelOrchestrationPolicy(t *testing.T) {
+func TestGoalControllerInjectsFeedbackPolicyWithoutTodoOrchestration(t *testing.T) {
 	messages := openAICompatibleMessages(ProviderRequest{
 		Input: methods.ReplyInput{Text: "分析并实现项目改动"},
 		Tools: []tools.Definition{
 			{Name: "worker.delegate"},
-			{Name: "goal.write"},
+			{Name: "goal.create"},
 			{Name: "todo.write"},
 		},
 	})
 
 	joined := fmt.Sprint(messages)
 	if strings.Contains(joined, "spawn multiple worker.delegate calls IN ONE TURN") {
-		t.Fatalf("goal pipeline must not receive parallel survey policy: %s", joined)
+		t.Fatalf("goal controller must not receive parallel survey policy: %s", joined)
 	}
-	if !strings.Contains(joined, "exactly ONE specialist") || !strings.Contains(joined, "pipeline_phase") {
-		t.Fatalf("goal pipeline should enforce sequential specialists: %s", joined)
+	if !strings.Contains(joined, "largest evidence-backed gap") || !strings.Contains(joined, "goal.assess") {
+		t.Fatalf("goal controller should inject feedback-loop policy: %s", joined)
+	}
+	if strings.Contains(joined, "Session task list") || strings.Contains(joined, "pipeline_phase") {
+		t.Fatalf("goal controller should not depend on todos or pipeline phases: %s", joined)
 	}
 }
 

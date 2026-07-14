@@ -123,7 +123,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 		{Name: "workspace.read_file"},
 		{Name: "workspace.write_file"},
 		{Name: "shell.exec"},
-		{Name: "goal.write"},
+		{Name: "goal.create"},
 		{Name: "todo.write"},
 		{Name: "worker.delegate"},
 		{Name: "web.search"},
@@ -148,7 +148,7 @@ func TestApplyGoalSpecialistAnalystIsReadOnly(t *testing.T) {
 			t.Fatalf("%s should be allowed for analyst: %#v", ctxTool, filtered)
 		}
 	}
-	for _, denied := range []string{"workspace.write_file", "shell.exec", "goal.write", "todo.write", "worker.delegate"} {
+	for _, denied := range []string{"workspace.write_file", "shell.exec", "goal.create", "todo.write", "worker.delegate"} {
 		if names[denied] {
 			t.Fatalf("%s should be denied for analyst: %#v", denied, filtered)
 		}
@@ -175,7 +175,7 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 	defs := []tools.Definition{
 		{Name: "workspace.write_file"},
 		{Name: "shell.exec"},
-		{Name: "goal.write"},
+		{Name: "goal.create"},
 		{Name: "todo.write"},
 		{Name: "web.search"},
 		{Name: "worker.delegate"},
@@ -193,7 +193,7 @@ func TestApplyGoalSpecialistImplementerAllowsWriteDeniesGoal(t *testing.T) {
 	if !names["context.read"] || !names["context.write"] {
 		t.Fatalf("implementer should allow context tools (no allowlist): %#v", filtered)
 	}
-	for _, denied := range []string{"goal.write", "todo.write", "web.search", "worker.delegate"} {
+	for _, denied := range []string{"goal.create", "todo.write", "web.search", "worker.delegate"} {
 		if names[denied] {
 			t.Fatalf("%s should be denied: %#v", denied, filtered)
 		}
@@ -233,7 +233,7 @@ func TestAllAllowlistedSpecialistsExposeContextShareTools(t *testing.T) {
 	for _, name := range contextShareTools {
 		defs = append(defs, tools.Definition{Name: name})
 	}
-	defs = append(defs, tools.Definition{Name: "workspace.read_file"}, tools.Definition{Name: "goal.write"})
+	defs = append(defs, tools.Definition{Name: "workspace.read_file"}, tools.Definition{Name: "goal.create"})
 
 	for _, key := range []string{"goal-analyst", "goal-planner", "goal-verifier", "goal-evaluator"} {
 		spec, ok := lookupGoalSpecialist(key)
@@ -255,8 +255,8 @@ func TestAllAllowlistedSpecialistsExposeContextShareTools(t *testing.T) {
 				t.Fatalf("%s missing %s in available tools: allowlist=%v filtered=%v", key, ctxTool, spec.Allowlist, names)
 			}
 		}
-		if names["goal.write"] {
-			t.Fatalf("%s must not expose goal.write", key)
+		if names["goal.create"] {
+			t.Fatalf("%s must not expose goal.create", key)
 		}
 	}
 }
@@ -270,24 +270,20 @@ func TestGoalSpecialistDisplayNameZH(t *testing.T) {
 	}
 }
 
-func TestGoalSpecialistMustMatchCurrentPipelinePhase(t *testing.T) {
+func TestGoalSpecialistSelectionFollowsActionNeeds(t *testing.T) {
 	rt := &Runtime{}
 	rt.setRunGoal("run_goal_phase", &runGoalState{
-		Goal: methods.GoalDTO{
-			ID:            "goal_1",
-			Status:        "active",
-			PipelinePhase: "analyze",
-		},
+		Goal:           methods.GoalDTO{ID: "goal_1", Status: "active", CurrentAction: "Implement the fix"},
 		BoundToThisRun: true,
 	})
 
 	analyst, _ := lookupGoalSpecialist("goal-analyst")
 	if err := rt.validateGoalSpecialistPhase("run_goal_phase", analyst); err != nil {
-		t.Fatalf("analyst should be valid in analyze: %v", err)
+		t.Fatalf("analyst should be available for an active Goal: %v", err)
 	}
 	planner, _ := lookupGoalSpecialist("goal-planner")
-	if err := rt.validateGoalSpecialistPhase("run_goal_phase", planner); err == nil || !strings.Contains(err.Error(), "current phase") {
-		t.Fatalf("planner should be rejected in analyze, got %v", err)
+	if err := rt.validateGoalSpecialistPhase("run_goal_phase", planner); err != nil {
+		t.Fatalf("planner should be selectable when the current action needs replanning: %v", err)
 	}
 }
 

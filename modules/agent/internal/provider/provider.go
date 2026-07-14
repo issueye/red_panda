@@ -608,44 +608,32 @@ Post-delegation rule:
 4. If an exact fact is missing, identify that gap and issue one narrowly scoped follow-up worker.delegate. Direct root-agent file reads are reserved for genuinely unassigned trivial scope or an explicit user request.
 5. Failed specialists do not invalidate successful reports from other specialists; reassign only the failed/missing scope and continue.`
 
-// rootAgentGoalPipelinePolicy 指导长程 Goal 工作（文档 32，第 2 / 2.10 节）。
-const rootAgentGoalPipelinePolicy = `Goal pipeline (goal.* + todo.*) — mandatory for multi-step user goals.
+// rootAgentGoalControllerPolicy drives Goal V2 as an evidence-based feedback
+// controller. It deliberately avoids a mandatory phase order: the next action
+// comes from the largest remaining outcome gap.
+const rootAgentGoalControllerPolicy = `Goal controller (Goal V2) — pursue the outcome, not a fixed workflow.
 
-For multi-step work you MUST use phase specialists via worker.delegate with these exact names
-(unless the request is trivial one-shot Q&A with no Goal):
-
-| Phase | worker.delegate name | Who writes goal/todo |
-| analyze | goal-analyst | root only |
-| plan | goal-planner (draft) then root goal.update + todo.write | root only |
-| execute | goal-implementer | root updates todos after |
-| verify | goal-verifier | root on pass/fail |
-| evaluate | goal-evaluator (report draft) | root goal.complete |
-
-Mandatory order:
-1. analyze — worker.delegate name="goal-analyst". If trivial=true, answer without Goal.
-2. plan — optional goal-planner draft; then goal.update(success_criteria, pipeline_phase="execute") + todo.write (one in_progress).
-3. For EACH todo step:
-   a. execute — worker.delegate name="goal-implementer" with current step in task
-   b. verify — worker.delegate name="goal-verifier"; require evidence
-   c. on pass: todo.write complete step + next in_progress + goal.checkpoint
-   d. on fail: retry implementer or replan
-4. evaluate — worker.delegate name="goal-evaluator"
-5. Publish completion report to the user, then goal.complete(status, summary, report_markdown).
+Controller loop:
+1. Read the injected Goal contract, action queue, observations, and last assessment.
+2. Identify the largest evidence-backed gap between current reality and the success criteria.
+3. Use goal.plan to choose or revise the smallest useful action queue. Keep at most one action active.
+4. Execute the active action directly or delegate a specialist chosen for that action's needs.
+5. Call goal.observe with the real result and concrete evidence. Do not turn a claim into evidence by restating it.
+6. Call goal.assess and assess EVERY criterion. Choose exactly one verdict:
+   - progress: evidence improved and a next decision is clear;
+   - satisfied: every criterion is met with concrete evidence;
+   - blocked: progress requires user/external input;
+   - no_progress: the action did not reduce the gap.
+7. On progress/no_progress, revise the strategy or actions and continue. On satisfied, call goal.finish succeeded with a concise outcome report.
 
 Hard rules:
-- Do NOT skip analyze/plan before large edits.
-- Do NOT put analyze+implement+verify into one generic worker.
-- Call exactly ONE specialist for the current pipeline_phase. Never dispatch later-phase specialists in the same tool batch.
-- After a specialist returns, update pipeline_phase before calling the next specialist; out-of-phase specialists are rejected by Runtime.
-- Do NOT goal.complete without a completion report summary.
-- Specialists cannot call goal.* / todo.* / nested worker.delegate; root owns session state.
-- Prefer specialist names exactly: goal-analyst, goal-planner, goal-implementer, goal-verifier, goal-evaluator.
-
-Where to write state (avoid overlap):
-- todo.write — live session checklist (micro-steps for this chat)
-- context.write — this Goal's shared findings/decisions/handoffs (across segments/specialists)
-- goal.checkpoint — short recovery summary only (not a findings dump)
-- memory.create — durable preferences/facts that should outlive this Goal`
+- There is no mandatory analyze/plan/execute/verify phase and no required specialist order.
+- Goal actions belong to goal.plan. Session todo.* is optional UI housekeeping and is never completion evidence.
+- The root run owns goal.* state. Workers may research, implement, or review but cannot mutate the Goal.
+- Prefer an independent review when success depends on behavior that can be tested or inspected.
+- Never call goal.finish succeeded unless the persisted last assessment is satisfied and every criterion is met.
+- Repeated no_progress must change the approach; do not repeat the same action with different wording.
+- context.* stores detailed findings; Goal observations/assessments store controller decisions; memory.* stores durable cross-goal knowledge.`
 
 // rootAgentTodoPolicy 注入给暴露 todo.write 的根运行。
 // 它引导模型使用结构化清单，而非自由文本计划或 memory.kind=task。
@@ -679,26 +667,26 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		"role":    "system",
 		"content": currentTimeContextMessage(time.Now()),
 	})
-	goalPipeline := hasToolNamed(req.Tools, "goal.write")
-	if hasToolNamed(req.Tools, "worker.delegate") && !goalPipeline {
+	goalController := hasToolNamed(req.Tools, "goal.create")
+	if hasToolNamed(req.Tools, "worker.delegate") && !goalController {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": rootAgentOrchestrationPolicy,
 		})
 	}
-	if hasSuccessfulWorkerResult(req.ToolHistory) && !goalPipeline {
+	if hasSuccessfulWorkerResult(req.ToolHistory) && !goalController {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": rootAgentPostDelegationPolicy,
 		})
 	}
-	if goalPipeline {
+	if goalController {
 		messages = append(messages, map[string]any{
 			"role":    "system",
-			"content": rootAgentGoalPipelinePolicy,
+			"content": rootAgentGoalControllerPolicy,
 		})
 	}
-	if hasToolNamed(req.Tools, "todo.write") {
+	if hasToolNamed(req.Tools, "todo.write") && !goalController {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": rootAgentTodoPolicy,
@@ -722,13 +710,13 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 			"role":    "system",
 			"content": strings.TrimSpace(req.Options.GoalContext.Context),
 		})
-		// 用户或命令可能已创建并绑定 Goal，此时优先更新而不是写入。
+		// 用户或命令可能已创建并绑定 Goal，此时继续现有控制器状态。
 		if id := strings.TrimSpace(req.Options.GoalContext.GoalID); id != "" {
 			messages = append(messages, map[string]any{
 				"role": "system",
-				"content": "A session Goal is already bound to this run (id=" + id + "). " +
-					"Do NOT call goal.write to create another. Use goal.update / goal.checkpoint / goal.complete and todo.write. " +
-					"Start from the current pipeline_phase (usually analyze) with the phase specialists.",
+				"content": "A Goal is already bound to this run (id=" + id + "). " +
+					"Do NOT create another. Continue from its criteria, evidence, action queue, and last assessment. " +
+					"Use goal.plan / goal.observe / goal.assess / goal.finish as the feedback loop requires.",
 			})
 		}
 	}

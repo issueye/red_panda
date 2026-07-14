@@ -220,6 +220,11 @@ test('autoContinueDedupeKey and shouldAttemptAutoContinue policy gates', () => {
     pauseReason: 'awaiting_continue',
     usedToolTurns: 3,
     maxTotalToolTurns: 10,
+    iteration: 1,
+    maxIterations: 10,
+    stagnationCount: 0,
+    maxStagnation: 3,
+    lastAssessment: { verdict: 'progress', summary: 'gap reduced' },
     updatedAt: 't1',
   };
   assert.equal(autoContinueDedupeKey('s1', goal), 's1:g1:t1');

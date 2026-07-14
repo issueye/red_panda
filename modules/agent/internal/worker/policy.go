@@ -20,10 +20,11 @@ var DelegatedDenylist = []string{
 	"todo.write",
 	"todo.list",
 	"todo_write",
-	"goal.write",
-	"goal.update",
-	"goal.checkpoint",
-	"goal.complete",
+	"goal.create",
+	"goal.plan",
+	"goal.observe",
+	"goal.assess",
+	"goal.finish",
 	"goal.list",
 }
 

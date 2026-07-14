@@ -20,12 +20,12 @@ const (
 )
 
 var contextAllowedKinds = map[string]struct{}{
-	"finding":   {},
-	"decision":  {},
-	"risk":      {},
-	"fact":      {},
-	"handoff":   {},
-	"note":      {},
+	"finding":  {},
+	"decision": {},
+	"risk":     {},
+	"fact":     {},
+	"handoff":  {},
+	"note":     {},
 }
 
 // ContextService exposes the goal scratchpad to the runtime via context.* tools.
@@ -152,7 +152,7 @@ func (s ContextService) executeWrite(params methods.ContextToolExecuteParams) (m
 		Kind:      kind,
 		Title:     title,
 		Body:      body,
-		Phase:     goal.PipelinePhase,
+		Phase:     goal.CurrentActionID,
 		Source:    sourceForRun(params.RunID, goal.ActiveRunID),
 		RunID:     params.RunID,
 		Pinned:    boolArgFromMap(params.Arguments, "pinned", false),
@@ -187,7 +187,7 @@ func (s ContextService) executeReplace(params methods.ContextToolExecuteParams) 
 		Kind:      kind,
 		Title:     title,
 		Body:      body,
-		Phase:     goal.PipelinePhase,
+		Phase:     goal.CurrentActionID,
 		Source:    sourceForRun(params.RunID, goal.ActiveRunID),
 		RunID:     params.RunID,
 		Pinned:    boolArgFromMap(params.Arguments, "pinned", false),

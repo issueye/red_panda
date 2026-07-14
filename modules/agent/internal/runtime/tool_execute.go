@@ -105,16 +105,16 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		})
 	}
 	switch call.Name {
-	case "goal.write", "goal.update", "goal.checkpoint", "goal.complete":
+	case "goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish":
 		if state := r.getRunGoal(params.RunID); state != nil && state.Goal.ID != "" {
 			_ = r.emitEvent(ctx, params, events.EventGoalUpdated, nil, map[string]any{
-				"session_id":     params.Session.ID,
-				"run_id":         params.RunID,
-				"tool_call_id":   call.ID,
-				"action":         strings.TrimPrefix(call.Name, "goal."),
-				"goal":           state.Goal,
-				"pipeline_phase": state.Goal.PipelinePhase,
-				"status":         state.Goal.Status,
+				"session_id":   params.Session.ID,
+				"run_id":       params.RunID,
+				"tool_call_id": call.ID,
+				"action":       strings.TrimPrefix(call.Name, "goal."),
+				"goal":         state.Goal,
+				"iteration":    state.Goal.Iteration,
+				"status":       state.Goal.Status,
 			})
 		}
 	}

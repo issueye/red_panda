@@ -18,10 +18,10 @@ type goalContinueRequest struct {
 }
 
 type goalStartRequest struct {
-	Objective       string         `json:"objective"`
-	Title           string         `json:"title"`
-	SuccessCriteria string         `json:"success_criteria"`
-	Options         map[string]any `json:"options"`
+	Objective string         `json:"objective"`
+	Title     string         `json:"title"`
+	Criterion string         `json:"success_criteria"`
+	Options   map[string]any `json:"options"`
 }
 
 func (g GoalController) ListBySession(c *gin.Context) {
@@ -47,6 +47,15 @@ func (g GoalController) ListNotes(c *gin.Context) {
 	items, err := g.Services.Context.ListNotes(c.Param("id"), c.Param("goalId"), 0)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"ok": false, "error": gin.H{"code": "goal_notes_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, gin.H{"items": items, "count": len(items)}))
+}
+
+func (g GoalController) ListJournal(c *gin.Context) {
+	items, err := g.Services.Goal.ListJournal(c.Param("id"), c.Param("goalId"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"ok": false, "error": gin.H{"code": "goal_journal_failed", "message": err.Error()}})
 		return
 	}
 	c.JSON(http.StatusOK, envelope(c, gin.H{"items": items, "count": len(items)}))
@@ -101,7 +110,7 @@ func (g GoalController) Start(c *gin.Context) {
 		c.Param("id"),
 		req.Objective,
 		req.Title,
-		req.SuccessCriteria,
+		req.Criterion,
 		req.Options,
 	)
 	if err != nil {

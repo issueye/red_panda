@@ -336,10 +336,11 @@ func TestStateStoreToolDescriptionsClarifyBoundaries(t *testing.T) {
 		byName[def.Name] = def.Description
 	}
 	checks := map[string][]string{
-		"memory.create":   {"durable", "todo.write", "context.write"},
-		"todo.write":      {"Session checklist", "memory", "context"},
-		"goal.checkpoint": {"context.write", "memory.create"},
-		"context.write":   {"scratchpad", "goal.checkpoint", "memory.create"},
+		"memory.create": {"durable", "todo.write", "context.write"},
+		"todo.write":    {"session checklist", "goal.plan"},
+		"goal.observe":  {"actually happened", "goal.assess"},
+		"goal.assess":   {"every success criterion", "satisfied"},
+		"context.write": {"scratchpad", "goal.observe", "memory.create"},
 	}
 	for name, needles := range checks {
 		desc := byName[name]

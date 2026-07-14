@@ -57,8 +57,8 @@ func TestRunWithGoalLoopOpensMultipleSegmentsWhenBound(t *testing.T) {
 			GoalContext: &methods.GoalContext{
 				GoalID:            "goal_multi_1",
 				Objective:         "do many steps",
-				SuccessCriteria:   "all done",
 				Status:            "active",
+				Criteria:          []methods.GoalCriterionDTO{{ID: "criterion-1", Description: "all done", Status: "unknown"}},
 				MaxSegmentsPerRun: 3,
 				MaxTotalToolTurns: 3,
 			},
@@ -82,7 +82,7 @@ func TestRunWithGoalLoopOpensMultipleSegmentsWhenBound(t *testing.T) {
 	}
 }
 
-func TestGoalRunSegmentLimitExtendsToRemainingBudget(t *testing.T) {
+func TestGoalRunSegmentLimitIsHardPerRunCap(t *testing.T) {
 	goal := methods.GoalDTO{
 		UsedToolTurns:     71,
 		MaxTotalToolTurns: 96,
@@ -90,12 +90,12 @@ func TestGoalRunSegmentLimitExtendsToRemainingBudget(t *testing.T) {
 		MaxToolTurnsSeg:   12,
 	}
 	if got := goalRunSegmentLimit(goal, 0); got != 4 {
-		t.Fatalf("initial segment limit = %d, want configured minimum 4", got)
+		t.Fatalf("initial segment limit = %d, want hard cap 4", got)
 	}
-	// 若早期分段消耗少于上限，则扩大限制以持续推进运行，避免暂停等待用户确认。
+	// Remaining total budget must not silently expand the current run.
 	goal.UsedToolTurns = 73
-	if got := goalRunSegmentLimit(goal, 4); got != 6 {
-		t.Fatalf("expanded segment limit = %d, want 6", got)
+	if got := goalRunSegmentLimit(goal, 4); got != 4 {
+		t.Fatalf("segment limit = %d, want configured hard cap 4", got)
 	}
 }
 
@@ -150,7 +150,7 @@ func TestMidRunGoalActivateExpandsSegments(t *testing.T) {
 		t.Fatalf("seed state = %#v", state)
 	}
 	// 通过 applyGoalToolResult 激活目标。
-	rt.applyGoalToolResult(params.RunID, "goal.write", methods.GoalToolExecuteResult{
+	rt.applyGoalToolResult(params.RunID, "goal.create", methods.GoalToolExecuteResult{
 		Status: "completed",
 		Goal: &methods.GoalDTO{
 			ID:                "g_new",
@@ -163,7 +163,7 @@ func TestMidRunGoalActivateExpandsSegments(t *testing.T) {
 	if state == nil || !state.BoundToThisRun || state.Goal.ID != "g_new" {
 		t.Fatalf("after activate = %#v", state)
 	}
-	rt.applyGoalToolResult(params.RunID, "goal.complete", methods.GoalToolExecuteResult{
+	rt.applyGoalToolResult(params.RunID, "goal.finish", methods.GoalToolExecuteResult{
 		Status: "completed",
 		Goal: &methods.GoalDTO{
 			ID:     "g_new",
@@ -261,8 +261,8 @@ func TestBoundGoalMultiSegmentSingleRootFinalAndFinish(t *testing.T) {
 			GoalContext: &methods.GoalContext{
 				GoalID:            "goal_stream_final",
 				Objective:         "exercise multi-segment final ordering",
-				SuccessCriteria:   "one root final",
 				Status:            "active",
+				Criteria:          []methods.GoalCriterionDTO{{ID: "criterion-1", Description: "one root final", Status: "unknown"}},
 				MaxSegmentsPerRun: 3,
 				MaxTotalToolTurns: 3,
 				MaxToolTurnsSeg:   1,

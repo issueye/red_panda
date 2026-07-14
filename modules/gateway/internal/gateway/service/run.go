@@ -541,7 +541,7 @@ func (r RunService) StartGoal(ctx context.Context, sessionID, objective, title, 
 	if displayTitle == "" {
 		displayTitle = truncateRunes(goal.Objective, 40)
 	}
-	criteria := goal.SuccessCriteria
+	criteria := criteriaText(goal.Criteria)
 	if criteria == "" {
 		criteria = "完成用户所述目标，并通过合理验证（测试/检查/可演示结果）。"
 	}
@@ -552,13 +552,13 @@ func (r RunService) StartGoal(ctx context.Context, sessionID, objective, title, 
 	b.WriteString(goal.Objective)
 	b.WriteString("\n成功标准：")
 	b.WriteString(criteria)
-	b.WriteString("\n阶段：analyze\n\n")
-	b.WriteString("本 Goal 已由用户指令创建并绑定到本次 run。请按 Goal 流水线执行：\n")
-	b.WriteString("1. 用 goal-analyst 做范围分析（若 trivial 可直接说明后 goal.complete）\n")
-	b.WriteString("2. 用 goal.update 补充 analysis_summary / success_criteria / pipeline_phase，并用 todo.write 写出步骤\n")
-	b.WriteString("3. 逐步 execute → verify，goal.checkpoint 记录进度\n")
-	b.WriteString("4. evaluate 后 goal.complete，并给用户完整报告\n")
-	b.WriteString("不要重新 goal.write 新建目标；当前会话已绑定本 Goal。\n")
+	b.WriteString("\n本 Goal 已由用户创建并绑定到本次 run。请作为目标控制器推进结果：\n")
+	b.WriteString("1. 读取 Goal contract 和现有证据，识别当前结果与成功标准之间最大的差距\n")
+	b.WriteString("2. 用 goal.plan 选择或修订最有价值的下一批 actions；计划可以随证据改变，不要求预先冻结\n")
+	b.WriteString("3. 执行当前 action 后用 goal.observe 记录真实结果和证据\n")
+	b.WriteString("4. 用 goal.assess 对每条 criterion 作证据化判断，并决定继续、调整、阻塞或已满足\n")
+	b.WriteString("5. 只有 persisted assessment=satisfied 且所有 criteria=met 时才能 goal.finish succeeded\n")
+	b.WriteString("不要创建第二个 Goal，也不要把 Session TODO 当作 Goal 完成条件。\n")
 
 	opts := map[string]any{}
 	for k, v := range options {
@@ -607,22 +607,24 @@ func (r RunService) ContinueGoal(ctx context.Context, sessionID, goalID, extraTe
 	b.WriteString("[继续目标] ")
 	b.WriteString(title)
 	b.WriteString("\n")
-	if goal.CheckpointSummary != "" {
-		b.WriteString("检查点：")
-		b.WriteString(goal.CheckpointSummary)
+	if goal.LastAssessment != nil {
+		b.WriteString("上次评估：")
+		b.WriteString(goal.LastAssessment.Verdict)
+		b.WriteString(" - ")
+		b.WriteString(goal.LastAssessment.Summary)
 		b.WriteString("\n")
 	}
-	if goal.SuccessCriteria != "" {
+	if criteria := criteriaText(goal.Criteria); criteria != "" {
 		b.WriteString("成功标准：")
-		b.WriteString(goal.SuccessCriteria)
+		b.WriteString(criteria)
 		b.WriteString("\n")
 	}
-	if goal.PipelinePhase != "" {
-		b.WriteString("阶段：")
-		b.WriteString(goal.PipelinePhase)
+	if goal.CurrentAction != "" {
+		b.WriteString("当前行动：")
+		b.WriteString(goal.CurrentAction)
 		b.WriteString("\n")
 	}
-	b.WriteString("请从检查点继续，不要无故整单重做分析，除非范围已变化。\n")
+	b.WriteString("请从已持久化的 evidence、assessment 和 action queue 继续；先判断差距是否变化，再选择下一行动。\n")
 	if strings.TrimSpace(extraText) != "" {
 		b.WriteString("用户补充：")
 		b.WriteString(strings.TrimSpace(extraText))

@@ -1,15 +1,18 @@
-import { ChevronDown, ChevronRight, Play, RefreshCw, Square } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2, ChevronDown, ChevronRight, Circle, CircleX, GripVertical, Play, RefreshCw, Square, Target } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiJson } from '../../lib/api.js';
 import {
   formatGoalBudget,
-  formatGoalBudgetAdvanced,
+  formatGoalActionProgress,
+  formatGoalControlBudget,
+  goalActionStatusLabel,
   goalCanCancel,
   goalCanContinue,
+  goalCriterionStatusLabel,
   goalDisplayTitle,
   goalPauseReasonLabel,
-  goalPhaseLabel,
   goalStatusLabel,
+  goalVerdictLabel,
 } from '../../lib/goals.js';
 import {
   goalNoteHeadline,
@@ -18,6 +21,30 @@ import {
 } from '../../lib/goalNotes.js';
 import { classNames } from '../../lib/format.js';
 import { Button, IconButton } from '../ui/button.jsx';
+
+const GOAL_POSITION_STORAGE_KEY = 'red_panda_goal_strip_position_v1';
+const GOAL_DRAG_MARGIN = 8;
+
+function readStoredGoalPosition() {
+  if (typeof window === 'undefined') return { x: 0, y: 0 };
+  try {
+    const value = JSON.parse(window.localStorage.getItem(GOAL_POSITION_STORAGE_KEY) || '{}');
+    return {
+      x: Number.isFinite(value.x) ? value.x : 0,
+      y: Number.isFinite(value.y) ? value.y : 0,
+    };
+  } catch {
+    return { x: 0, y: 0 };
+  }
+}
+
+function storeGoalPosition(position) {
+  try {
+    window.localStorage.setItem(GOAL_POSITION_STORAGE_KEY, JSON.stringify(position));
+  } catch {
+    // Position persistence is optional in restricted webviews.
+  }
+}
 
 /**
  * Collapsible goal strip above the todo list / chat composer.
@@ -33,6 +60,11 @@ export function GoalComposerStrip({
   onContinue,
   onCancel,
 }) {
+  const rootRef = useRef(null);
+  const dragRef = useRef(null);
+  const positionRef = useRef(readStoredGoalPosition());
+  const [position, setPosition] = useState(positionRef.current);
+  const [dragging, setDragging] = useState(false);
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesError, setNotesError] = useState('');
@@ -62,6 +94,100 @@ export function GoalComposerStrip({
     }
   }, [goal?.id, sessionId]);
 
+  const applyPosition = useCallback((next, persist = false) => {
+    const normalized = { x: Math.round(next.x), y: Math.round(next.y) };
+    positionRef.current = normalized;
+    setPosition(normalized);
+    if (persist) storeGoalPosition(normalized);
+  }, []);
+
+  const constrainCurrentPosition = useCallback((persist = false) => {
+    const root = rootRef.current;
+    const bounds = root?.closest('.conversation-view')?.getBoundingClientRect();
+    const target = expanded
+      ? root?.querySelector('.goal-composer-panel')
+      : root?.querySelector('.goal-composer-bar');
+    const rect = target?.getBoundingClientRect();
+    if (!bounds || !rect) return;
+    let dx = 0;
+    let dy = 0;
+    if (rect.left < bounds.left + GOAL_DRAG_MARGIN) dx = bounds.left + GOAL_DRAG_MARGIN - rect.left;
+    if (rect.right > bounds.right - GOAL_DRAG_MARGIN) dx = bounds.right - GOAL_DRAG_MARGIN - rect.right;
+    if (rect.top < bounds.top + GOAL_DRAG_MARGIN) dy = bounds.top + GOAL_DRAG_MARGIN - rect.top;
+    if (rect.bottom > bounds.bottom - GOAL_DRAG_MARGIN) dy = bounds.bottom - GOAL_DRAG_MARGIN - rect.bottom;
+    if (dx || dy) {
+      applyPosition({ x: positionRef.current.x + dx, y: positionRef.current.y + dy }, persist);
+    }
+  }, [applyPosition, expanded]);
+
+  const handleDragPointerDown = useCallback((event) => {
+    if (event.button !== 0) return;
+    const root = rootRef.current;
+    const bounds = root?.closest('.conversation-view')?.getBoundingClientRect();
+    const target = expanded
+      ? root?.querySelector('.goal-composer-panel')
+      : root?.querySelector('.goal-composer-bar');
+    const rect = target?.getBoundingClientRect();
+    if (!bounds || !rect) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: positionRef.current,
+      rect,
+      bounds,
+    };
+    setDragging(true);
+  }, [expanded]);
+
+  const handleDragPointerMove = useCallback((event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    const minX = drag.origin.x + drag.bounds.left + GOAL_DRAG_MARGIN - drag.rect.left;
+    const maxX = drag.origin.x + drag.bounds.right - GOAL_DRAG_MARGIN - drag.rect.right;
+    const minY = drag.origin.y + drag.bounds.top + GOAL_DRAG_MARGIN - drag.rect.top;
+    const maxY = drag.origin.y + drag.bounds.bottom - GOAL_DRAG_MARGIN - drag.rect.bottom;
+    applyPosition({
+      x: Math.min(maxX, Math.max(minX, drag.origin.x + deltaX)),
+      y: Math.min(maxY, Math.max(minY, drag.origin.y + deltaY)),
+    });
+  }, [applyPosition]);
+
+  const finishDragging = useCallback((event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setDragging(false);
+    storeGoalPosition(positionRef.current);
+  }, []);
+
+  const resetPosition = useCallback(() => {
+    applyPosition({ x: 0, y: 0 }, true);
+  }, [applyPosition]);
+
+  const handleDragKeyDown = useCallback((event) => {
+    if (event.key === 'Home') {
+      event.preventDefault();
+      resetPosition();
+      return;
+    }
+    const amount = event.shiftKey ? 32 : 12;
+    const delta = {
+      ArrowLeft: [-amount, 0],
+      ArrowRight: [amount, 0],
+      ArrowUp: [0, -amount],
+      ArrowDown: [0, amount],
+    }[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    applyPosition({ x: positionRef.current.x + delta[0], y: positionRef.current.y + delta[1] });
+    requestAnimationFrame(() => constrainCurrentPosition(true));
+  }, [applyPosition, constrainCurrentPosition, resetPosition]);
+
   useEffect(() => {
     if (!expanded || !goal?.id) return undefined;
     let cancelled = false;
@@ -74,21 +200,31 @@ export function GoalComposerStrip({
     };
   }, [expanded, goal?.id, goal?.updatedAt, loadNotes]);
 
+  useEffect(() => {
+    const constrain = () => constrainCurrentPosition(true);
+    const frame = requestAnimationFrame(constrain);
+    window.addEventListener('resize', constrain);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', constrain);
+    };
+  }, [constrainCurrentPosition, goal?.id]);
+
   if (!loading && !goal) {
     return null;
   }
 
   const title = goalDisplayTitle(goal);
   const status = goal?.status || '';
-  const phase = goal?.pipelinePhase || '';
   const budget = formatGoalBudget(goal);
+  const actionProgress = formatGoalActionProgress(goal);
   const pauseLabel = goal?.pauseReason ? goalPauseReasonLabel(goal.pauseReason) : '';
   const canContinue = goalCanContinue(goal);
   const canCancelGoal = goalCanCancel(goal);
 
   const summaryBits = [];
   if (status) summaryBits.push(goalStatusLabel(status));
-  if (phase) summaryBits.push(goalPhaseLabel(phase));
+  if (actionProgress) summaryBits.push(actionProgress);
   if (budget) summaryBits.push(budget);
   if (pauseLabel && status === 'paused') summaryBits.push(pauseLabel);
 
@@ -96,17 +232,39 @@ export function GoalComposerStrip({
 
   return (
     <div
-      className={classNames('goal-composer-strip', expanded && 'is-expanded', status && `is-${status}`)}
+      className={classNames(
+        'goal-composer-strip',
+        expanded && 'is-expanded',
+        dragging && 'is-dragging',
+        status && `is-${status}`,
+      )}
       data-testid="goal-composer-strip"
+      ref={rootRef}
+      style={{ transform: `translate3d(${position.x}px, ${position.y}px, 0)` }}
     >
       <div className="goal-composer-panel">
         <div className="goal-composer-bar">
+          <button
+            aria-label="拖动目标信息"
+            className="goal-composer-drag-handle"
+            data-testid="goal-drag-handle"
+            onDoubleClick={resetPosition}
+            onKeyDown={handleDragKeyDown}
+            onPointerCancel={finishDragging}
+            onPointerDown={handleDragPointerDown}
+            onPointerMove={handleDragPointerMove}
+            onPointerUp={finishDragging}
+            title="拖动目标信息；双击或按 Home 复位"
+            type="button"
+          >
+            <GripVertical aria-hidden size={14} />
+          </button>
           <button
             aria-expanded={expanded}
             className="goal-composer-toggle"
             data-testid="goal-composer-toggle"
             onClick={onToggleExpanded}
-            title="长程目标（分析 → 步骤 → 执行验证 → 报告）"
+            title="目标驱动执行：行动、证据与结果评估"
             type="button"
           >
             <Chevron aria-hidden className="goal-composer-chevron" size={14} />
@@ -144,35 +302,78 @@ export function GoalComposerStrip({
         {expanded && goal ? (
           <div className="goal-composer-detail" data-testid="goal-composer-detail">
             {goal.objective ? (
-              <p className="goal-composer-block">
-                <strong>目标</strong>
+              <p className="goal-composer-block goal-contract-objective">
+                <strong><Target aria-hidden size={14} /> 期望结果</strong>
                 <span>{goal.objective}</span>
               </p>
             ) : null}
-            {goal.successCriteria ? (
-              <p className="goal-composer-block">
-                <strong>成功标准</strong>
-                <span>{goal.successCriteria}</span>
+            {goal.criteria.length > 0 ? (
+              <section className="goal-contract-section" data-testid="goal-criteria">
+                <div className="goal-detail-heading">
+                  <strong>成功标准</strong>
+                  <span>{goal.criteria.filter((item) => item.status === 'met').length}/{goal.criteria.length} 已满足</span>
+                </div>
+                <ul className="goal-criteria-list">
+                  {goal.criteria.map((criterion) => (
+                    <li className={classNames('goal-criterion', `is-${criterion.status}`)} key={criterion.id}>
+                      {criterion.status === 'met' ? <CheckCircle2 aria-hidden size={14} />
+                        : criterion.status === 'not_met' || criterion.status === 'blocked'
+                          ? <CircleX aria-hidden size={14} /> : <Circle aria-hidden size={14} />}
+                      <div>
+                        <strong>{criterion.description}</strong>
+                        <span>{goalCriterionStatusLabel(criterion.status)}</span>
+                        {criterion.evidence ? <small>{criterion.evidence}</small> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+            {goal.currentAction ? (
+              <p className="goal-composer-block is-current-step" data-testid="goal-current-action">
+                <strong>当前行动</strong>
+                <span>{goal.currentAction}</span>
               </p>
             ) : null}
-            {goal.checkpointSummary ? (
-              <p className="goal-composer-block">
-                <strong>检查点</strong>
-                <span>{goal.checkpointSummary}</span>
+            {goal.actions.length > 0 ? (
+              <section className="goal-contract-section" data-testid="goal-actions">
+                <div className="goal-detail-heading"><strong>行动队列</strong><span>{actionProgress}</span></div>
+                <ol className="goal-action-list">
+                  {goal.actions.map((action) => (
+                    <li className={classNames('goal-action-item', `is-${action.status}`)} key={action.id || action.key}>
+                      <span className="goal-action-index">{action.sortOrder + 1}</span>
+                      <div>
+                        <strong>{action.title}</strong>
+                        <span>{goalActionStatusLabel(action.status)}</span>
+                        {action.acceptance ? <small>验收：{action.acceptance}</small> : null}
+                        {action.result ? <small>结果：{action.result}</small> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
+            {goal.lastAssessment ? (
+              <div className={classNames('goal-evaluation', `is-${goal.lastAssessment.verdict}`)} data-testid="goal-assessment">
+                {goal.lastAssessment.verdict === 'satisfied' || goal.lastAssessment.verdict === 'progress'
+                  ? <CheckCircle2 aria-hidden size={15} /> : <CircleX aria-hidden size={15} />}
+                <div>
+                  <strong>最近评估：{goalVerdictLabel(goal.lastAssessment.verdict)}</strong>
+                  <span>{goal.lastAssessment.summary}</span>
+                  {goal.lastAssessment.gap ? <small>剩余差距：{goal.lastAssessment.gap}</small> : null}
+                  {goal.lastAssessment.decision ? <small>下一决策：{goal.lastAssessment.decision}</small> : null}
+                </div>
+              </div>
+            ) : null}
+            {goal.strategy ? (
+              <p className="goal-composer-block"><strong>当前策略</strong><span>{goal.strategy}</span></p>
+            ) : null}
+            {formatGoalControlBudget(goal) ? (
+              <p className="goal-composer-block" data-testid="goal-control-budget">
+                <strong>控制预算</strong><span>{formatGoalControlBudget(goal)}</span>
               </p>
             ) : null}
-            {goal.progressNote ? (
-              <p className="goal-composer-block">
-                <strong>进度</strong>
-                <span>{goal.progressNote}</span>
-              </p>
-            ) : null}
-            {formatGoalBudgetAdvanced(goal) ? (
-              <p className="goal-composer-block" data-testid="goal-budget-advanced">
-                <strong>高级预算</strong>
-                <span>{formatGoalBudgetAdvanced(goal)}</span>
-              </p>
-            ) : null}
+            {goal.outcomeSummary ? <p className="goal-composer-block"><strong>结果</strong><span>{goal.outcomeSummary}</span></p> : null}
             {goal.reportMarkdown ? (
               <pre className="goal-composer-report">{goal.reportMarkdown}</pre>
             ) : null}
