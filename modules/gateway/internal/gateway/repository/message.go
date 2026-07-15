@@ -68,20 +68,27 @@ func (r MessageRepository) AddWithMetadata(sessionID string, role string, conten
 }
 
 func (r MessageRepository) AddOrAppend(sessionID string, role string, text string, runID string) (model.Message, error) {
+	return r.AddOrAppendWithMetadata(sessionID, role, text, runID, "")
+}
+
+// AddOrAppendWithMetadata keeps streamed output attributable to the same
+// Worker. A run can contain multiple Workers, so metadata changes start a new
+// persisted message instead of merging their text into one row.
+func (r MessageRepository) AddOrAppendWithMetadata(sessionID string, role string, text string, runID string, metadataJSON string) (model.Message, error) {
 	if !isAppendableDeltaRole(role) {
-		return r.Add(sessionID, role, text, runID)
+		return r.addWithMetadata(sessionID, role, text, runID, metadataJSON)
 	}
 
 	var last model.Message
 	err := r.db.Where("session_id = ?", sessionID).Order("seq desc").First(&last).Error
 	if err == gorm.ErrRecordNotFound {
-		return r.Add(sessionID, role, text, runID)
+		return r.addWithMetadata(sessionID, role, text, runID, metadataJSON)
 	}
 	if err != nil {
 		return model.Message{}, err
 	}
-	if last.Role != role || last.RunID != runID {
-		return r.Add(sessionID, role, text, runID)
+	if last.Role != role || last.RunID != runID || last.MetadataJSON != metadataJSON {
+		return r.addWithMetadata(sessionID, role, text, runID, metadataJSON)
 	}
 
 	var content []methods.ContentBlock
@@ -102,6 +109,27 @@ func (r MessageRepository) AddOrAppend(sessionID string, role string, text strin
 	}
 	last.ContentJSON = string(encoded)
 	return last, r.db.Save(&last).Error
+}
+
+func (r MessageRepository) addWithMetadata(sessionID string, role string, text string, runID string, metadataJSON string) (model.Message, error) {
+	if metadataJSON == "" {
+		return r.Add(sessionID, role, text, runID)
+	}
+	seq, err := r.nextSeq(sessionID)
+	if err != nil {
+		return model.Message{}, err
+	}
+	content, err := json.Marshal([]methods.ContentBlock{{Type: "text", Text: text}})
+	if err != nil {
+		return model.Message{}, err
+	}
+	now := time.Now().UTC()
+	message := model.Message{
+		ID: newMessageID(now), SessionID: sessionID, Role: role,
+		ContentJSON: string(content), Seq: seq, RunID: runID,
+		MetadataJSON: metadataJSON, CreatedAt: now,
+	}
+	return message, r.db.Create(&message).Error
 }
 
 func isAppendableDeltaRole(role string) bool {

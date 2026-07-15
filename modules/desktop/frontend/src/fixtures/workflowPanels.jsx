@@ -17,6 +17,9 @@ const messages = [
     id: 'message_assistant_restore',
     role: 'assistant',
     agent: 'worker',
+    assignmentId: 'assignment-entry',
+    workerId: 'worker-01',
+    profileKey: 'entry',
     runSeq: 4,
     text: 'Restored messages, tools, permissions, and Worker assignments.',
   },
@@ -87,15 +90,6 @@ const permissions = [
     workerId: 'worker-02',
     assignmentId: 'assignment-planner',
     runSeq: 6,
-  },
-];
-
-const workers = [
-  {
-    id: 'worker-01', state: 'ready', healthy: true, currentAssignmentId: '',
-  },
-  {
-    id: 'worker-02', state: 'busy', healthy: true, currentAssignmentId: 'assignment-planner', profileKey: 'goal-planner',
   },
 ];
 
@@ -194,7 +188,6 @@ function WorkflowFixture() {
             assignments={assignments}
             onCancelAssignment={(assignment) => setLastAssignment(`${assignment.id}:${assignment.status}`)}
             onOpenAssignment={openAssignment}
-            workers={workers}
           />
         </aside>
       </main>

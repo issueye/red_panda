@@ -6,6 +6,7 @@ import { selectDirectory } from '../lib/desktopShell.js';
 import { buildRunStartOptions } from '../lib/runOptions.js';
 import { createEmptySessionRuntime } from '../lib/sessionRuntime.js';
 import { normalizeRun, normalizeSession } from '../lib/sessionNormalize.js';
+import { goalShouldResumeAfterCompact } from '../lib/goals.js';
 
 /**
  * Session lifecycle + run actions (docs/36 C2).
@@ -297,7 +298,7 @@ export function useSessionActions({
                 id: `compact_pause_${Date.now()}`,
                 role: 'assistant',
                 agent: 'system',
-                text: '已暂停当前会话与关联 Worker Assignment，并完成上下文摘要。可继续发送下一条消息。',
+                text: '已暂停当前运行并完成上下文摘要。',
               },
             ]
           : prev.messages,
@@ -315,13 +316,32 @@ export function useSessionActions({
       if (!silent) {
         // Manual compact stays quiet; auto path can toast via caller.
       }
-      await hydrateGoals?.(sessionId);
+      const resumedGoal = await hydrateGoals?.(sessionId);
+      if (goalShouldResumeAfterCompact(resumedGoal)) {
+        appendDiagnosticLog('info', `摘要完成，恢复 Goal ${resumedGoal.id}`, {
+          source: 'compact',
+          detail: { sessionId, goalId: resumedGoal.id },
+        });
+        await continueGoal?.('', { goals_enabled: true }, resumedGoal, sessionId);
+        patchRuntime(sessionId, (prev) => ({
+          ...prev,
+          messages: [
+            ...prev.messages,
+            {
+              id: `compact_resume_${Date.now()}`,
+              role: 'assistant',
+              agent: 'system',
+              text: '上下文摘要完成，Goal 已自动恢复。',
+            },
+          ],
+        }));
+      }
       return result.compaction || null;
     } catch (error) {
       patchRuntime(sessionId, (prev) => ({ ...prev, compacting: false }));
       throw error;
     }
-  }, [currentSessionIdRef, hydrateGoals, patchRuntime, pauseSessionForCompact, runSettings.providerProfileId]);
+  }, [continueGoal, currentSessionIdRef, hydrateGoals, patchRuntime, pauseSessionForCompact, runSettings.providerProfileId]);
 
   // Auto-compact when estimated context usage hits 90% of provider max_tokens.
   useEffect(() => {
@@ -431,6 +451,7 @@ export function useSessionActions({
         ...rt,
         draft: '',
         running: true,
+        runSeq: 0,
         messages: [
           ...rt.messages,
           { id: `user_${Date.now()}`, role: 'user', createdAt: new Date().toISOString(), text: display },
@@ -484,6 +505,7 @@ export function useSessionActions({
       ...rt,
       draft: '',
       running: true,
+      runSeq: 0,
       assignmentsById: {},
       assignmentOrder: [],
       messages: [
@@ -529,6 +551,7 @@ export function useSessionActions({
         ...rt,
         running: true,
         currentRunId: nextRunId || rt.currentRunId,
+        runSeq: nextRunId ? (Number(rt.runSeqByRun?.[nextRunId]) || 0) : rt.runSeq,
         runs: nextRunId
           ? [
               normalizeRun({

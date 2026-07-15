@@ -9,6 +9,7 @@ import {
   goalDisplayTitle,
   goalFromUpdatedEvent,
   goalShouldAutoContinue,
+  goalShouldResumeAfterCompact,
   normalizeGoal,
   normalizeGoalList,
   pickFocusGoal,
@@ -52,6 +53,12 @@ describe('Goal V2 helpers', () => {
     assert.equal(goalShouldAutoContinue(normalizeGoal({ ...base, last_assessment: { verdict: 'blocked' } })), false);
     assert.equal(goalCanCancel(normalizeGoal({ status: 'active' })), true);
     assert.equal(goalCanCancel(normalizeGoal({ status: 'succeeded' })), false);
+  });
+
+  it('resumes a Goal paused specifically for context compact', () => {
+    assert.equal(goalShouldResumeAfterCompact(normalizeGoal({ status: 'paused', pause_reason: 'session_compact' })), true);
+    assert.equal(goalShouldResumeAfterCompact(normalizeGoal({ status: 'paused', pause_reason: 'user_cancel' })), false);
+    assert.equal(goalShouldResumeAfterCompact(normalizeGoal({ status: 'active', pause_reason: 'session_compact' })), false);
   });
 
   it('formats action and controller budgets without transport segments', () => {

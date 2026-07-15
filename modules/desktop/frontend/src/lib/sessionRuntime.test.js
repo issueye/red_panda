@@ -16,6 +16,7 @@ test('createEmptySessionRuntime has stable defaults', () => {
   assert.equal(rt.running, false);
   assert.deepEqual(rt.assignmentsById, {});
   assert.deepEqual(rt.assignmentOrder, []);
+  assert.deepEqual(rt.runSeqByRun, {});
   assert.deepEqual(rt.conversationTabs, [{
     id: 'main', kind: 'main', title: '主对话', closable: false,
   }]);
@@ -44,6 +45,7 @@ test('collectResumeCursors aggregates active runs', () => {
       running: true,
       currentRunId: 'run_1',
       runSeq: 5,
+      runSeqByRun: { run_1: 5 },
       runs: [{ id: 'run_1', status: 'running', lastRunSeq: 4 }],
     }),
     s2: createEmptySessionRuntime({
@@ -57,6 +59,22 @@ test('collectResumeCursors aggregates active runs', () => {
   assert.equal(cursors.run_1, 5);
   assert.equal(cursors.run_2, 9);
   assert.equal(cursors.run_3, undefined);
+});
+
+test('collectResumeCursors keeps sequence cursors isolated per Run', () => {
+  const cursors = collectResumeCursors({
+    s1: createEmptySessionRuntime({
+      running: true,
+      currentRunId: 'run_followup',
+      runSeq: 1,
+      runSeqByRun: { run_goal: 172, run_followup: 1 },
+      runs: [
+        { id: 'run_goal', status: 'completed', lastRunSeq: 172 },
+        { id: 'run_followup', status: 'running', lastRunSeq: 1 },
+      ],
+    }),
+  });
+  assert.deepEqual(cursors, { run_followup: 1 });
 });
 
 test('collectSessionRunStatus and countActiveRuns', () => {

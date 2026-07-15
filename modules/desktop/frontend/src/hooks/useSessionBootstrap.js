@@ -77,6 +77,7 @@ export function useSessionBootstrap({
       const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
       const normalizedRuns = Array.isArray(serverRuns) ? serverRuns.map(normalizeRun) : [];
       const activeRun = latestActiveRun(serverRuns);
+      const runSeqByRun = Object.fromEntries(normalizedRuns.map((run) => [run.id, Number(run.lastRunSeq) || 0]));
       const todoItems = Array.isArray(todoData?.items)
         ? todoData.items.map(normalizeTodo)
         : [];
@@ -90,9 +91,21 @@ export function useSessionBootstrap({
       patchRuntime(sessionId, (prev) => {
         // Keep in-memory live projection when switching back to a still-running session.
         if (preserveLive && prev.hydrated && prev.running) {
+          const activeRunId = activeRun?.id || prev.currentRunId || '';
+          const activeRunSeq = Math.max(
+            Number(runSeqByRun[activeRunId]) || 0,
+            Number(prev.runSeqByRun?.[activeRunId]) || 0,
+          );
           return {
             ...prev,
             runs: normalizedRuns.length > 0 ? normalizedRuns : prev.runs,
+            currentRunId: activeRunId,
+            runSeq: activeRunSeq,
+            runSeqByRun: {
+              ...runSeqByRun,
+              ...(prev.runSeqByRun || {}),
+              ...(activeRunId ? { [activeRunId]: activeRunSeq } : {}),
+            },
             todos: todoData ? todoItems : prev.todos,
             todoOpenCount: todoData ? todoOpen : prev.todoOpenCount,
             todosHydrated: true,
@@ -114,7 +127,10 @@ export function useSessionBootstrap({
           runs: normalizedRuns,
           running: Boolean(activeRun) || prev.running,
           currentRunId: activeRun?.id || prev.currentRunId || '',
-          runSeq: latestRunSeq(serverRuns, prev.runSeq || 0),
+          runSeq: activeRun
+            ? Number(activeRun.last_run_seq) || 0
+            : latestRunSeq(serverRuns, 0),
+          runSeqByRun,
           todos: todoItems,
           todoOpenCount: todoOpen,
           todosHydrated: true,

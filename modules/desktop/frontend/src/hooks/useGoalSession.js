@@ -56,7 +56,7 @@ export async function hydrateSessionTodos(sessionId, patchRuntime, fetchJson = a
  * @param {typeof apiJson} [fetchJson]
  */
 export async function hydrateSessionGoals(sessionId, patchRuntime, fetchJson = apiJson) {
-  if (!sessionId || sessionId === 'local-design') return;
+  if (!sessionId || sessionId === 'local-design') return null;
   try {
     const data = await fetchJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`);
     const items = normalizeGoalList(data);
@@ -70,11 +70,13 @@ export async function hydrateSessionGoals(sessionId, patchRuntime, fetchJson = a
         ? (prev.goalExpanded || false)
         : prev.goalExpanded,
     }));
+    return focus;
   } catch {
     patchRuntime(sessionId, (prev) => ({
       ...prev,
       goalHydrated: true,
     }));
+    return null;
   }
 }
 
@@ -126,6 +128,7 @@ export async function continueSessionGoal({
       goalBusy: false,
       running: true,
       currentRunId: nextRunId || rt.currentRunId,
+      runSeq: nextRunId ? (Number(rt.runSeqByRun?.[nextRunId]) || 0) : rt.runSeq,
       draft: '',
     }));
     await hydrateGoals(sessionId);
@@ -242,9 +245,11 @@ export function useGoalSession({
     await hydrateSessionGoals(sessionId, patchRuntime);
   }, [patchRuntime]);
 
-  const continueGoal = useCallback(async (extraText = '', optionsOverrides = {}) => {
-    const sessionId = currentSessionIdRef.current;
-    const current = sessionRuntimesRef.current[sessionId]?.goal;
+  const continueGoal = useCallback(async (
+    extraText = '', optionsOverrides = {}, goalOverride = null, sessionIdOverride = '',
+  ) => {
+    const sessionId = sessionIdOverride || currentSessionIdRef.current;
+    const current = goalOverride || sessionRuntimesRef.current[sessionId]?.goal;
     return continueSessionGoal({
       sessionId,
       goal: current,

@@ -153,14 +153,16 @@ export function reduceRunEvent(runtime, event) {
   if (currentRun && TERMINAL_RUN_STATUSES.has(currentRun.status)) {
     return { runtime: prev, effects };
   }
-  if (runSeq > 0 && runSeq <= Number(prev.runSeq || 0) && event.event_id) {
+  const previousRunSeq = Number(prev.runSeqByRun?.[runId] ?? currentRun?.lastRunSeq ?? 0) || 0;
+  if (runSeq > 0 && runSeq <= previousRunSeq && event.event_id) {
     return { runtime: prev, effects };
   }
   let next = {
     ...prev,
-    runSeq: Math.max(Number(prev.runSeq) || 0, runSeq),
+    runSeq,
+    runSeqByRun: { ...(prev.runSeqByRun || {}), [runId]: runSeq },
     running: prev.running || event.type !== 'finish',
-    currentRunId: prev.currentRunId || runId,
+    currentRunId: runId,
     hydrated: true,
   };
 

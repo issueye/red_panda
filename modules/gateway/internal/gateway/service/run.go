@@ -791,7 +791,13 @@ func (r RunService) HandleRuntimeEvent(event events.EnvelopeV2) {
 	_ = r.repos.RunEvents.Save(event)
 	if (event.Type == events.EventMessageDelta || event.Type == events.EventReasoningDelta) && payloadString(event.Payload, "visibility") != "worker_private" {
 		if delta, ok := event.Payload["delta"].(string); ok && delta != "" {
-			_, _ = r.repos.Messages.AddOrAppend(event.SessionID, "assistant", delta, event.RunID)
+			metadata, _ := json.Marshal(map[string]any{
+				"assignment_id": event.AssignmentID,
+				"worker_id":     event.Worker.ID,
+				"profile_key":   event.Worker.ProfileKey,
+				"visibility":    payloadString(event.Payload, "visibility"),
+			})
+			_, _ = r.repos.Messages.AddOrAppendWithMetadata(event.SessionID, "assistant", delta, event.RunID, string(metadata))
 			_ = r.repos.Sessions.Touch(event.SessionID)
 		}
 	}

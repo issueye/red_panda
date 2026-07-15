@@ -21,6 +21,13 @@ const event = (type, runSeq, payload = {}) => ({
   payload,
 });
 
+const eventForRun = (runId, type, runSeq, payload = {}) => ({
+  ...event(type, runSeq, payload),
+  event_id: `evt_${runId}_${runSeq}`,
+  run_id: runId,
+  assignment_id: `assignment_${runId}`,
+});
+
 test('rejects legacy live event envelopes', () => {
   const base = createEmptySessionRuntime();
   const { runtime, effects } = reduceRunEvent(base, { root_run_id: 'run_1', root_seq: 1, type: 'finish' });
@@ -108,6 +115,32 @@ test('terminal Run state is irreversible', () => {
   assert.equal(late, finished);
   assert.equal(late.running, false);
   assert.equal(late.messages.length, 0);
+});
+
+test('new Run events are not suppressed by a completed Goal Run high sequence', () => {
+  const base = createEmptySessionRuntime({
+    running: true,
+    currentRunId: 'run_followup',
+    runSeq: 172,
+    runSeqByRun: { run_goal: 172 },
+    runs: [
+      { id: 'run_goal', status: 'completed', lastRunSeq: 172 },
+      { id: 'run_followup', status: 'running', lastRunSeq: 0 },
+    ],
+  });
+  const replied = reduceRunEvent(base, eventForRun('run_followup', 'message_delta', 1, {
+    delta: 'follow-up answer',
+  })).runtime;
+  assert.equal(replied.messages.at(-1).text, 'follow-up answer');
+  assert.equal(replied.runSeq, 1);
+  assert.equal(replied.runSeqByRun.run_goal, 172);
+  assert.equal(replied.runSeqByRun.run_followup, 1);
+
+  const finished = reduceRunEvent(replied, eventForRun('run_followup', 'finish', 2, {
+    status: 'completed',
+  })).runtime;
+  assert.equal(finished.running, false);
+  assert.equal(finished.currentRunId, '');
 });
 
 test('appendWorkerText merges consecutive deltas for one assignment', () => {

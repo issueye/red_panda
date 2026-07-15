@@ -74,6 +74,34 @@ func TestMessageRepositoryAddOrAppendAggregatesConsecutiveSubagentDeltas(t *test
 	assertMessageText(t, rows[0], "plan step")
 }
 
+func TestMessageRepositorySeparatesWorkerAttributedDeltas(t *testing.T) {
+	repo := newMessageTestRepository(t)
+	workerOne := `{"assignment_id":"assignment-1","worker_id":"worker-01","profile_key":"planner"}`
+	workerTwo := `{"assignment_id":"assignment-2","worker_id":"worker-02","profile_key":"reviewer"}`
+	if _, err := repo.AddOrAppendWithMetadata("session_1", "assistant", "plan ", "run_1", workerOne); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddOrAppendWithMetadata("session_1", "assistant", "ready", "run_1", workerOne); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddOrAppendWithMetadata("session_1", "assistant", "review", "run_1", workerTwo); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := repo.List("session_1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	assertMessageText(t, rows[0], "plan ready")
+	assertMessageText(t, rows[1], "review")
+	if rows[0].MetadataJSON != workerOne || rows[1].MetadataJSON != workerTwo {
+		t.Fatalf("worker metadata mismatch: %#v", rows)
+	}
+}
+
 func TestMessageRepositoryAddOrAppendDoesNotAppendUserMessages(t *testing.T) {
 	repo := newMessageTestRepository(t)
 	if _, err := repo.AddOrAppend("session_1", "user", "first", "run_1"); err != nil {

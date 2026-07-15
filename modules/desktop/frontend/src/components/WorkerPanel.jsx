@@ -11,61 +11,11 @@ function isActiveStatus(status) {
 }
 
 export function WorkerPanel({
-  workers = [], assignments = [], onCancelAssignment, onOpenAssignment,
+  assignments = [], onCancelAssignment, onOpenAssignment,
 }) {
-  const activeWorkers = workers.filter((worker) => {
-    const status = worker.state || 'ready';
-    return status === 'busy' || status === 'draining';
-  }).length;
-  const waitingWorkers = Math.max(workers.length - activeWorkers, 0);
-
   return (
     <section className="worker-panel-content" data-testid="worker-panel-content">
       <PanelHeader title="Worker" />
-      <section className="worker-workspace" data-testid="worker-workspace">
-        <div className="worker-section-heading">
-          <div className="worker-section-label" data-testid="worker-workspace-label">Worker 工作区</div>
-          <span className="worker-section-summary" data-testid="worker-workspace-summary">
-            {waitingWorkers} 等待 · {activeWorkers} 工作中
-          </span>
-        </div>
-        {workers.length === 0 ? <EmptyState title="Worker 池尚未就绪" /> : (
-          <div className="worker-list worker-workspace-list">
-            {workers.map((worker) => {
-              const status = worker.state || 'ready';
-              const active = status === 'busy' || status === 'draining';
-              const assignment = assignments.find((item) => item.id === worker.currentAssignmentId);
-              return (
-                <article
-                  className={classNames('worker-item', active && 'is-running', `status-${status}`)}
-                  data-status={status}
-                  data-testid="worker-item"
-                  key={worker.id}
-                >
-                  <span className={classNames('worker-icon', active && 'is-active')} aria-hidden="true">
-                    {active ? <Loader2 className="worker-spin" size={15} /> : <Bot size={16} />}
-                  </span>
-                  <button
-                    className="worker-main"
-                    disabled={!assignment}
-                    onClick={() => onOpenAssignment?.(assignment)}
-                    type="button"
-                  >
-                    <span className="worker-heading">
-                      <strong>{worker.id}</strong>
-                      <StatusBadge status={status} />
-                    </span>
-                    <span className="worker-meta">
-                      {worker.healthy === false ? '执行器异常' : (active ? '正在处理工作分配' : '等待工作分配')}
-                    </span>
-                    {worker.currentAssignmentId ? <small>{worker.currentAssignmentId}</small> : null}
-                  </button>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
       <section className="worker-assignment-region" data-testid="worker-assignment-region">
         <div className="worker-section-heading">
           <div className="worker-section-label" data-testid="worker-assignment-section-label">工作分配</div>

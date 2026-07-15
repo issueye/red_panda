@@ -116,6 +116,10 @@ export function goalShouldAutoContinue(goal) {
   return goal.maxTotalToolTurns <= 0 || goal.usedToolTurns < goal.maxTotalToolTurns;
 }
 
+export function goalShouldResumeAfterCompact(goal) {
+  return Boolean(goal && goal.status === 'paused' && goal.pauseReason === 'session_compact');
+}
+
 export function goalCanContinue(goal) {
   if (!goal || goalShouldAutoContinue(goal)) return false;
   return goal.status === 'paused' || goal.status === 'pending';

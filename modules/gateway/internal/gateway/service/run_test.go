@@ -607,6 +607,14 @@ func TestRunServiceAggregatesConversationMessagesAndHidesWorkerPrivateDeltas(t *
 	assertServiceMessage(t, rows[0], "user", "run_1", "prompt")
 	assertServiceMessage(t, rows[1], "assistant", "run_1", "hello world")
 	assertServiceMessage(t, rows[2], "assistant", "run_2", "new run")
+
+	history, err := NewSessionService(repos, nil).History("session_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if history[1].WorkerID != "worker-01" || history[1].AssignmentID != "assignment_run_1" || history[1].ProfileKey != "general" {
+		t.Fatalf("history lost Worker attribution: %#v", history[1])
+	}
 }
 
 func TestRunServiceApplyProviderProfile(t *testing.T) {
@@ -871,7 +879,7 @@ func useStdioRuntimeHelper(t *testing.T, capturePath string) *runtimeclient.Clie
 
 func messageDeltaEvent(eventID string, runID string, sessionID string, runSeq uint64, workerPrivate bool, delta string) events.EnvelopeV2 {
 	payload := map[string]any{"delta": delta}
-	profileKey := ""
+	profileKey := "general"
 	if workerPrivate {
 		payload["visibility"] = "worker_private"
 		profileKey = "planner"
@@ -880,7 +888,7 @@ func messageDeltaEvent(eventID string, runID string, sessionID string, runSeq ui
 		EventID:      eventID,
 		RunID:        runID,
 		SessionID:    sessionID,
-		AssignmentID: "assignment_" + eventID,
+		AssignmentID: "assignment_" + runID,
 		RunSeq:       runSeq,
 		WorkerSeq:    runSeq,
 		Worker:       events.EventWorkerRef{ID: "worker-01", ProfileKey: profileKey},

@@ -20,8 +20,10 @@ function displayMessageAgent(message) {
   const agent = message.agent || message.role;
   if (message.role === 'user') return '我';
   if (agent === 'gateway' || agent === 'system') return '系统';
-  if (message.profileKey) return message.profileKey;
-  if (message.workerId) return message.workerId;
+  if (message.workerId || message.profileKey) {
+    const worker = message.workerId || '未知 Worker';
+    return message.profileKey ? `Worker ${worker} · ${message.profileKey}` : `Worker ${worker}`;
+  }
   if (agent === 'assistant') return '助手';
   return agent;
 }

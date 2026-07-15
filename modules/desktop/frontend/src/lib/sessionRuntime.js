@@ -17,6 +17,8 @@ export function createEmptySessionRuntime(overrides = {}) {
     running: false,
     currentRunId: '',
     runSeq: 0,
+    // run_seq restarts at 1 for every Run; never compare it across Runs.
+    runSeqByRun: {},
     runEventsByRun: {},
     runEventsLoading: {},
     runEventsError: {},
@@ -85,13 +87,17 @@ export function collectResumeCursors(map) {
   for (const runtime of Object.values(map || {})) {
     for (const run of runtime.runs || []) {
       if (run.status === 'running' || run.status === 'waiting_permission') {
-        cursors[run.id] = Math.max(Number(cursors[run.id]) || 0, Number(run.lastRunSeq) || 0);
+        cursors[run.id] = Math.max(
+          Number(cursors[run.id]) || 0,
+          Number(runtime.runSeqByRun?.[run.id]) || 0,
+          Number(run.lastRunSeq) || 0,
+        );
       }
     }
     if (runtime.running && runtime.currentRunId) {
       cursors[runtime.currentRunId] = Math.max(
         Number(cursors[runtime.currentRunId]) || 0,
-        Number(runtime.runSeq) || 0,
+        Number(runtime.runSeqByRun?.[runtime.currentRunId]) || 0,
       );
     }
   }

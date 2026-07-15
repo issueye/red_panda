@@ -6,6 +6,7 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await expect(page.getByTestId('message-row')).toHaveCount(2);
   await expect(page.getByText('Restore previous session state')).toBeVisible();
   await expect(page.getByText('Restored messages, tools, permissions, and Worker assignments.')).toBeVisible();
+  await expect(page.getByText('Worker worker-01 · entry', { exact: true })).toBeVisible();
 
   await expect(page.getByTestId('tool-card')).toHaveCount(2);
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
@@ -45,7 +46,8 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await expect(denyPermission.getByTestId('permission-deny')).toHaveCount(0);
   await expect(page.getByTestId('permission-result')).toHaveText('perm_deny_restore:deny');
 
-  await expect(page.getByTestId('worker-item')).toHaveCount(2);
+  await expect(page.getByTestId('worker-workspace')).toHaveCount(0);
+  await expect(page.getByTestId('worker-item')).toHaveCount(0);
   await expect(page.getByTestId('worker-assignment')).toHaveCount(8);
   const planner = page.getByTestId('worker-assignment').filter({ hasText: 'worker-02' });
   const archivist = page.getByTestId('worker-assignment').filter({ hasText: 'worker-01' });
@@ -86,20 +88,15 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await expect(page.getByTestId('chat-tab-main')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Worker assignments stay readable inside a scrollable panel', async ({ page }) => {
+test('Worker panel only shows assignments in a scrollable region', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 
   const panel = page.getByTestId('worker-panel-content');
-  const workspace = page.getByTestId('worker-workspace');
-  const workspaceLabel = page.getByTestId('worker-workspace-label');
-  const workspaceSummary = page.getByTestId('worker-workspace-summary');
   const assignmentRegion = page.getByTestId('worker-assignment-region');
   const assignmentScroll = page.getByTestId('worker-assignment-scroll');
   const sectionLabel = page.getByTestId('worker-assignment-section-label');
   await expect(panel).toBeVisible();
-  await expect(workspace).toBeVisible();
-  await expect(workspaceLabel).toHaveText('Worker 工作区');
-  await expect(workspaceSummary).toHaveText('1 等待 · 1 工作中');
+  await expect(page.getByTestId('worker-workspace')).toHaveCount(0);
   await expect(sectionLabel).toHaveText('工作分配');
 
   const layout = await Promise.all([
@@ -128,14 +125,12 @@ test('Worker assignments stay readable inside a scrollable panel', async ({ page
   expect(layout[1].scrollHeight).toBeGreaterThan(layout[1].clientHeight);
   expect(layout[2].scrollWidth).toBeLessThanOrEqual(layout[2].clientWidth);
 
-  const before = await workspace.boundingBox();
+  const before = await assignmentRegion.boundingBox();
   await assignmentScroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await expect.poll(() => assignmentScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  const after = await workspace.boundingBox();
-  const assignmentBox = await assignmentRegion.boundingBox();
+  const after = await assignmentRegion.boundingBox();
   expect(after.y).toBe(before.y);
   expect(after.height).toBe(before.height);
-  expect(before.y + before.height).toBeLessThanOrEqual(assignmentBox.y + 1);
 });
 
 test('Conversation pauses following after manual scroll and can return to latest', async ({ page }) => {

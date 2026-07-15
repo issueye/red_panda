@@ -94,16 +94,6 @@ function loadRightPanelWidth() {
   }
 }
 
-function normalizeWorker(worker = {}) {
-  return {
-    id: worker.id || '', state: worker.state || 'ready', healthy: worker.healthy !== false,
-    currentAssignmentId: worker.current_assignment_id || worker.currentAssignmentId || '',
-    profileKey: worker.profile_key || worker.profileKey || '',
-    mailboxDepth: Number(worker.mailbox_depth ?? worker.mailboxDepth) || 0,
-    mailboxCapacity: Number(worker.mailbox_capacity ?? worker.mailboxCapacity) || 0,
-  };
-}
-
 function normalizeAssignment(item = {}) {
   return {
     id: item.id || '',
@@ -129,7 +119,6 @@ function normalizeAssignment(item = {}) {
 
 export function App() {
   const dialog = useDialog();
-  const [workers, setWorkers] = useState([]);
   const [sessionRuntimes, setSessionRuntimes] = useState(() => ({
     [INITIAL_BOOTSTRAP_SESSION_ID]: createEmptySessionRuntime({
       messages: initialMessages,
@@ -425,9 +414,6 @@ export function App() {
     // 网关事件按 session_id 写入对应会话投影，支持多会话并发 run。
     onEvent: (event) => {
       const payload = event.payload || {};
-      if (payload.worker?.id) {
-        setWorkers((items) => upsertByID(items, normalizeWorker(payload.worker)));
-      }
       if (isRunTerminalEvent(payload) && payload.session_id) {
         // A6: Gateway OnRootRunTerminal mutates Goal (pause/fail/budget) before
         // Publish; re-hydrate so the Goal strip matches persisted state without
@@ -463,8 +449,6 @@ export function App() {
     if (status !== 'connected') return;
     const sessionId = currentSessionId;
     request('worker.list', currentRunId ? { run_id: currentRunId } : {}).then((result) => {
-      const workerItems = Array.isArray(result?.workers) ? result.workers.map(normalizeWorker) : [];
-      setWorkers(workerItems);
       const assignmentItems = Array.isArray(result?.assignments)
         ? result.assignments.map(normalizeAssignment)
         : [];
@@ -711,7 +695,6 @@ export function App() {
       assignments={assignments}
       onCancelAssignment={cancelAssignment}
       onOpenAssignment={openWorkerConversation}
-      workers={workers}
     />
   ) : rightPanelTab === 'memory' ? (
     <MemoryPanel

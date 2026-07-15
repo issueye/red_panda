@@ -50,6 +50,33 @@ test('Gateway-backed desktop run renders chat tools and timeline @gateway-backed
   }
 });
 
+test('Gateway-backed desktop accepts a sequential Run after a high-sequence completed Run @run-sequence-regression', async ({ page }) => {
+  const gateway = await startGateway();
+  try {
+    await page.addInitScript(() => window.localStorage.clear());
+    await page.goto('/');
+    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
+
+    await page.getByTestId('chat-composer-input').fill('read file README.md');
+    await page.getByTestId('chat-composer-send').click();
+    await expect(page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' }))
+      .toHaveClass(/tool-completed/, { timeout: 20000 });
+    await expect(page.getByTestId('running-panda-row')).toHaveCount(0, { timeout: 20000 });
+
+    await page.getByTestId('chat-composer-input').fill('list files scripts');
+    await page.getByTestId('chat-composer-send').click();
+    await expect(page.getByTestId('tool-card').filter({ hasText: 'workspace.list' }))
+      .toHaveClass(/tool-completed/, { timeout: 20000 });
+    await expect(page.getByTestId('message-row').filter({ hasText: 'Tool workspace.list completed' }))
+      .toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('running-panda-row')).toHaveCount(0, { timeout: 20000 });
+  } finally {
+    await page.close().catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await gateway.stop();
+  }
+});
+
 test('Gateway-backed desktop renders denied tool failure path @gateway-backed', async ({ page }) => {
   const gateway = await startGateway();
   try {

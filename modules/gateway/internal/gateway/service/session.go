@@ -39,13 +39,17 @@ type SessionDTO struct {
 }
 
 type MessageDTO struct {
-	ID        string                 `json:"id"`
-	SessionID string                 `json:"session_id"`
-	Role      string                 `json:"role"`
-	Content   []methods.ContentBlock `json:"content"`
-	Seq       uint64                 `json:"seq"`
-	RunID     string                 `json:"run_id,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
+	ID           string                 `json:"id"`
+	SessionID    string                 `json:"session_id"`
+	Role         string                 `json:"role"`
+	Content      []methods.ContentBlock `json:"content"`
+	Seq          uint64                 `json:"seq"`
+	RunID        string                 `json:"run_id,omitempty"`
+	AssignmentID string                 `json:"assignment_id,omitempty"`
+	WorkerID     string                 `json:"worker_id,omitempty"`
+	ProfileKey   string                 `json:"profile_key,omitempty"`
+	Visibility   string                 `json:"visibility,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
 }
 
 type ForkPoint struct {
@@ -508,14 +512,22 @@ func messageDTO(row model.Message) (MessageDTO, error) {
 			return MessageDTO{}, err
 		}
 	}
+	var metadata struct {
+		AssignmentID string `json:"assignment_id"`
+		WorkerID     string `json:"worker_id"`
+		ProfileKey   string `json:"profile_key"`
+		Visibility   string `json:"visibility"`
+	}
+	if row.MetadataJSON != "" {
+		if err := json.Unmarshal([]byte(row.MetadataJSON), &metadata); err != nil {
+			return MessageDTO{}, err
+		}
+	}
 	return MessageDTO{
-		ID:        row.ID,
-		SessionID: row.SessionID,
-		Role:      row.Role,
-		Content:   content,
-		Seq:       row.Seq,
-		RunID:     row.RunID,
-		CreatedAt: row.CreatedAt,
+		ID: row.ID, SessionID: row.SessionID, Role: row.Role, Content: content,
+		Seq: row.Seq, RunID: row.RunID, AssignmentID: metadata.AssignmentID,
+		WorkerID: metadata.WorkerID, ProfileKey: metadata.ProfileKey,
+		Visibility: metadata.Visibility, CreatedAt: row.CreatedAt,
 	}, nil
 }
 
