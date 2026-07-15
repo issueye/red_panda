@@ -76,39 +76,15 @@ func (r *Runtime) seedRunGoalFromParams(params methods.ReplyParams) {
 }
 
 func (r *Runtime) setRunGoal(runID string, state *runGoalState) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.runGoals == nil {
-		r.runGoals = map[string]*runGoalState{}
-	}
-	if state == nil {
-		delete(r.runGoals, runID)
-		return
-	}
-	cp := *state
-	r.runGoals[runID] = &cp
+	r.runStates.SetGoal(runID, state)
 }
 
 func (r *Runtime) getRunGoal(runID string) *runGoalState {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	state := r.runGoals[runID]
-	if state == nil {
-		return nil
-	}
-	cp := *state
-	return &cp
-}
-
-func (r *Runtime) clearRunGoal(runID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.runGoals, runID)
+	return r.runStates.Goal(runID)
 }
 
 func (r *Runtime) clearRunSnapshots(runID string) {
-	r.clearRunTodos(runID)
-	r.clearRunGoal(runID)
+	r.runStates.ClearSnapshots(runID)
 }
 
 func (r *Runtime) applyGoalToolResult(runID string, toolName string, result methods.GoalToolExecuteResult) {
@@ -151,7 +127,7 @@ func (r *Runtime) applyGoalToolResult(runID string, toolName string, result meth
 }
 
 // lookupActiveReplyParams 是空操作钩子占位符；分段循环会通过 goalContextForRun
-// 从 runGoals 刷新 GoalContext。
+// 从 RunStateStore 刷新 GoalContext。
 func (r *Runtime) lookupActiveReplyParams(runID string) *methods.ReplyParams {
 	return nil
 }

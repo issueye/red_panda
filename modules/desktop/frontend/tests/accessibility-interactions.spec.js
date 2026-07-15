@@ -16,8 +16,8 @@ test('right panel tabs support keyboard navigation', async ({ page }) => {
 
   await page.getByRole('tab', { name: '工作区' }).focus();
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('tab', { name: '子代理' })).toBeFocused();
-  await expect(page.getByRole('tab', { name: '子代理' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: 'Worker' })).toBeFocused();
+  await expect(page.getByRole('tab', { name: 'Worker' })).toHaveAttribute('aria-selected', 'true');
 
   await page.keyboard.press('End');
   await expect(page.getByRole('tab', { name: '记忆' })).toBeFocused();

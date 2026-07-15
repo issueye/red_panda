@@ -22,6 +22,8 @@ const (
 )
 
 type HTTPCompatibleProvider struct {
+	providerConfig
+	// Exported fields preserve direct construction for tests and embedded clients.
 	BaseURL        string
 	APIKey         string
 	Model          string
@@ -37,48 +39,25 @@ func (p HTTPCompatibleProvider) Name() string {
 
 func (p HTTPCompatibleProvider) Complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
 	if override, ok := providerFromOptions(req.Options, p.Stream); ok {
-		return override.complete(ctx, req, emit)
+		return completeResolvedProvider(ctx, override, req, emit)
 	}
 	return p.complete(ctx, req, emit)
 }
 
 func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
-	maxAttempts := p.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = defaultProviderMaxAttempts
-	}
-	retryBaseDelay := p.RetryBaseDelay
-	if retryBaseDelay <= 0 {
-		retryBaseDelay = defaultProviderRetryBaseDelay
-	}
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		emitted := false
-		err := p.completeAttempt(ctx, req, func(chunk ProviderChunk) error {
-			emitted = true
-			return emit(chunk)
-		})
-		if err == nil {
-			return nil
-		}
-		if emitted || attempt == maxAttempts || !isRetryableProviderError(ctx, err) {
-			return err
-		}
-		if err := waitProviderRetry(ctx, retryBaseDelay*time.Duration(1<<(attempt-1))); err != nil {
-			return err
-		}
-	}
-	return nil
+	return completeWithRetry(ctx, p.config(), req, emit, p.completeAttempt)
 }
 
 func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	config := p.config()
 	model := req.Options.Model
 	if model == "" {
-		model = p.Model
+		model = config.Model
 	}
 	body := map[string]any{
 		"model":    model,
 		"messages": openAICompatibleMessages(req),
-		"stream":   p.Stream,
+		"stream":   config.Stream,
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = openAICompatibleTools(req.Tools)
@@ -88,8 +67,8 @@ func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req Provide
 	if err != nil {
 		return err
 	}
-	endpoint := openAICompatibleChatCompletionsURL(p.BaseURL)
-	if path, logErr := logLLMRequest(req.Options.LogLLMRequests, req.RunID, req.Session.ID, model, endpoint, rawBody); logErr != nil {
+	endpoint := openAICompatibleChatCompletionsURL(config.BaseURL)
+	if path, logErr := logLLMRequest(req.Options.LogLLMRequests, req.RunID, req.SessionID, model, endpoint, rawBody); logErr != nil {
 		// 诊断失败不能导致面向用户的请求失败。
 		fmt.Fprintf(os.Stderr, "red-panda-agent: llm request log failed: %v\n", logErr)
 	} else if path != "" {
@@ -100,10 +79,10 @@ func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req Provide
 		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if p.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
+	if config.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+config.APIKey)
 	}
-	resp, err := p.Client.Do(httpReq)
+	resp, err := config.Client.Do(httpReq)
 	if err != nil {
 		return err
 	}
@@ -112,7 +91,7 @@ func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req Provide
 		rawResp, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 		return providerHTTPError{StatusCode: resp.StatusCode, Body: string(rawResp)}
 	}
-	if p.Stream {
+	if config.Stream {
 		return p.completeStream(resp.Body, emit)
 	}
 	rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))

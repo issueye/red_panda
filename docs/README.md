@@ -10,6 +10,7 @@
 | [37-worker-pool-v0.2.0-refactor-design.md](37-worker-pool-v0.2.0-refactor-design.md) | **v0.2.0 breaking WorkerPool architecture proposal** |
 | [38-code-directness-optimization-plan.md](38-code-directness-optimization-plan.md) | **Active code-directness plan** (parallel coordinator simplification and compatibility cleanup) |
 | [39-provider-runtime-decoupling-plan.md](39-provider-runtime-decoupling-plan.md) | **Provider-Runtime decoupling plan** (injection, provider split, neutral contract follow-up) |
+| [40-centralization-abstraction-plan.md](40-centralization-abstraction-plan.md) | **Active centralization plan** (provider-neutral requests, RunStateStore, Settings resources) |
 | [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |

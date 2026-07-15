@@ -1,13 +1,34 @@
 export const emptyProfileDraft = {
   name: '',
   provider: 'openai_compatible',
-  baseUrl: '',
+  baseUrl: 'https://api.openai.com',
   model: '',
   maxTokens: '',
   apiKey: '',
   isDefault: false,
   active: true,
 };
+
+export const providerTypeOptions = [
+  { value: 'openai_compatible', label: 'OpenAI Chat 兼容' },
+  { value: 'openai_responses', label: 'OpenAI Responses' },
+  { value: 'anthropic', label: 'Anthropic Messages' },
+];
+
+const providerDefaultUrls = {
+  openai_compatible: 'https://api.openai.com',
+  openai_responses: 'https://api.openai.com',
+  anthropic: 'https://api.anthropic.com',
+};
+
+export function providerDefaultBaseUrl(provider) {
+  return providerDefaultUrls[provider] || '';
+}
+
+export function baseUrlAfterProviderChange(currentUrl, nextProvider) {
+  const knownDefaults = new Set(Object.values(providerDefaultUrls));
+  return !currentUrl || knownDefaults.has(currentUrl) ? providerDefaultBaseUrl(nextProvider) : currentUrl;
+}
 
 export function normalizeProviderProfile(item) {
   return {

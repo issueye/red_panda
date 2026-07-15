@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"redpanda/protocol/methods"
 )
 
 type providerContractStub struct{}
@@ -56,6 +54,9 @@ func TestProviderProductionFilesDoNotImportRuntime(t *testing.T) {
 				if strings.HasSuffix(path, "/internal/runtime") || strings.Contains(path, "/internal/runtime/") {
 					t.Errorf("production provider file %s imports runtime package %q", name, path)
 				}
+				if strings.HasSuffix(path, "/protocol/methods") {
+					t.Errorf("production provider file %s imports broad wire DTO package %q", name, path)
+				}
 			}
 		}
 	}
@@ -69,6 +70,8 @@ func TestProviderNamesRemainStable(t *testing.T) {
 	}{
 		{name: "echo", got: (EchoProvider{}).Name(), want: "echo"},
 		{name: "OpenAI compatible", got: (HTTPCompatibleProvider{}).Name(), want: "openai_compatible"},
+		{name: "OpenAI Responses", got: (OpenAIResponsesProvider{}).Name(), want: "openai_responses"},
+		{name: "Anthropic", got: (AnthropicProvider{}).Name(), want: "anthropic"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -82,7 +85,7 @@ func TestProviderNamesRemainStable(t *testing.T) {
 func TestProviderFromOptionsCompatibility(t *testing.T) {
 	tests := []struct {
 		name           string
-		options        methods.ReplyOptions
+		options        RequestOptions
 		fallbackStream bool
 		wantOK         bool
 		wantBaseURL    string
@@ -91,7 +94,7 @@ func TestProviderFromOptionsCompatibility(t *testing.T) {
 	}{
 		{
 			name: "empty provider defaults to OpenAI compatible",
-			options: methods.ReplyOptions{
+			options: RequestOptions{
 				ProviderBaseURL: " https://provider.example/v1/ ",
 				ProviderAPIKey:  " secret ",
 				Model:           " model-a ",
@@ -104,7 +107,7 @@ func TestProviderFromOptionsCompatibility(t *testing.T) {
 		},
 		{
 			name: "legacy HTTP compatible alias remains accepted",
-			options: methods.ReplyOptions{
+			options: RequestOptions{
 				ProviderName:    " HTTP_COMPATIBLE ",
 				ProviderBaseURL: "https://provider.example",
 			},
@@ -114,19 +117,31 @@ func TestProviderFromOptionsCompatibility(t *testing.T) {
 		},
 		{
 			name: "missing base URL disables override",
-			options: methods.ReplyOptions{
+			options: RequestOptions{
 				ProviderName: "openai_compatible",
 				Model:        "ignored",
 			},
 			wantOK: false,
 		},
 		{
-			name: "unknown provider disables override",
-			options: methods.ReplyOptions{
+			name: "Anthropic provider is accepted",
+			options: RequestOptions{
 				ProviderName:    "anthropic",
 				ProviderBaseURL: "https://provider.example",
 			},
-			wantOK: false,
+			wantOK:      true,
+			wantBaseURL: "https://provider.example",
+			wantModel:   "default",
+		},
+		{
+			name: "OpenAI Responses provider is accepted",
+			options: RequestOptions{
+				ProviderName:    "openai_responses",
+				ProviderBaseURL: "https://api.openai.com/v1",
+			},
+			wantOK:      true,
+			wantBaseURL: "https://api.openai.com/v1",
+			wantModel:   "default",
 		},
 	}
 
@@ -139,16 +154,32 @@ func TestProviderFromOptionsCompatibility(t *testing.T) {
 			if !ok {
 				return
 			}
-			if got.BaseURL != test.wantBaseURL || got.APIKey != test.wantAPIKey || got.Model != test.wantModel {
+			config := configForProvider(t, got)
+			if config.BaseURL != test.wantBaseURL || config.APIKey != test.wantAPIKey || config.Model != test.wantModel {
 				t.Fatalf("provider override = %#v, want base=%q key=%q model=%q", got, test.wantBaseURL, test.wantAPIKey, test.wantModel)
 			}
-			if got.Stream != test.fallbackStream {
-				t.Fatalf("Stream = %v, want fallback value %v", got.Stream, test.fallbackStream)
+			if config.Stream != test.fallbackStream {
+				t.Fatalf("Stream = %v, want fallback value %v", config.Stream, test.fallbackStream)
 			}
-			if got.Client == nil || got.Client.Timeout != 90*time.Second {
-				t.Fatalf("override client = %#v, want 90s timeout", got.Client)
+			if config.Client == nil || config.Client.Timeout != 90*time.Second {
+				t.Fatalf("override client = %#v, want 90s timeout", config.Client)
 			}
 		})
+	}
+}
+
+func configForProvider(t *testing.T, value Provider) providerConfig {
+	t.Helper()
+	switch item := value.(type) {
+	case HTTPCompatibleProvider:
+		return item.config()
+	case OpenAIResponsesProvider:
+		return item.providerConfig
+	case AnthropicProvider:
+		return item.providerConfig
+	default:
+		t.Fatalf("unexpected provider type %T", value)
+		return providerConfig{}
 	}
 }
 

@@ -88,7 +88,8 @@ function loadRightPanelWidth() {
     return RIGHT_PANEL_WIDTH_DEFAULT;
   }
   try {
-    return clampRightPanelWidth(window.localStorage.getItem(RIGHT_PANEL_WIDTH_KEY));
+    const saved = window.localStorage.getItem(RIGHT_PANEL_WIDTH_KEY);
+    return saved == null ? RIGHT_PANEL_WIDTH_DEFAULT : clampRightPanelWidth(saved);
   } catch {
     return RIGHT_PANEL_WIDTH_DEFAULT;
   }
@@ -128,9 +129,7 @@ export function App() {
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState('workspace');
   const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
-  const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(() => (
-    typeof window !== 'undefined' && !window.matchMedia('(max-width: 1100px)').matches
-  ));
+  const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(loadRightPanelWidth);
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [compactLayout, setCompactLayout] = useState(() => (
@@ -140,42 +139,16 @@ export function App() {
   const [runSettings, setRunSettings] = useState(loadRunSettings);
   const workspaceRootRef = useRef('');
   const getWorkspaceRoot = useCallback(() => workspaceRootRef.current, []);
-  const {
-    providerProfiles,
-    providerProfilesLoading,
-    providerProfilesError,
-    loadProviderProfiles,
-    createProviderProfile,
-    updateProviderProfile,
-    deleteProviderProfile,
-    workerProfiles,
-    workerProfilesLoading,
-    workerProfilesError,
-    loadWorkerProfiles,
-    createWorkerProfile,
-    updateWorkerProfile,
-    deleteWorkerProfile,
-    mcpServers,
-    mcpServersLoading,
-    mcpServersError,
-    mcpDiscoveryByServer,
-    loadMcpServers,
-    createMcpServer,
-    updateMcpServer,
-    deleteMcpServer,
-    discoverMcpServer,
-    skills,
-    skillsLoading,
-    skillsError,
-    loadSkills,
-    loadSkillDetail,
-    createSkill,
-    updateSkill,
-    deleteSkill,
-  } = useGatewayResources({
+  const gatewayResources = useGatewayResources({
     getWorkspaceRoot,
     setRunSettings,
   });
+  const { providers, workers, mcp, skills } = gatewayResources;
+  const providerProfiles = providers.items;
+  const loadProviderProfiles = providers.load;
+  const loadWorkerProfiles = workers.load;
+  const loadMcpServers = mcp.load;
+  const loadSkills = skills.load;
 
   const patchRuntime = useCallback((sessionId, updater) => {
     if (!sessionId) return;
@@ -594,7 +567,7 @@ export function App() {
 
   function selectRightPanelTab(tab) {
     setRightPanelTab(tab);
-    setWorkspacePanelExpanded(tab === 'workspace' && !compactLayout);
+    if (tab !== 'workspace') setWorkspacePanelExpanded(false);
     if (compactLayout) {
       if (!rightPanelDrawerOpen) rightPanelReturnFocusRef.current = document.activeElement;
       setRightPanelDrawerOpen(true);
@@ -635,7 +608,7 @@ export function App() {
     const tabList = event.currentTarget;
     const nextTab = rightPanelTabs[nextIndex];
     setRightPanelTab(nextTab.id);
-    setWorkspacePanelExpanded(nextTab.id === 'workspace' && !compactLayout);
+    if (nextTab.id !== 'workspace') setWorkspacePanelExpanded(false);
     window.requestAnimationFrame(() => {
       tabList.querySelector(`[data-right-panel-tab="${nextTab.id}"]`)?.focus();
     });
@@ -727,48 +700,20 @@ export function App() {
         status={status}
       />
       <SettingsPanel
-        workerProfiles={workerProfiles}
-        workerProfilesError={workerProfilesError}
-        workerProfilesLoading={workerProfilesLoading}
-        mcpServers={mcpServers}
-        mcpServersError={mcpServersError}
-        mcpServersLoading={mcpServersLoading}
-        mcpDiscoveryByServer={mcpDiscoveryByServer}
-        onCreateWorkerProfile={createWorkerProfile}
-        onCreateMcpServer={createMcpServer}
-        onCreateProviderProfile={createProviderProfile}
-        onCreateSkill={createSkill}
-        onDeleteWorkerProfile={deleteWorkerProfile}
-        onDeleteMcpServer={deleteMcpServer}
-        onDeleteProviderProfile={deleteProviderProfile}
-        onDeleteSkill={deleteSkill}
-        onDiscoverMcpServer={discoverMcpServer}
-        onLoadSkillDetail={loadSkillDetail}
         onChange={setRunSettings}
         onClose={() => setSettingsOpen(false)}
-        onRefreshWorkerProfiles={loadWorkerProfiles}
-        onRefreshMcpServers={loadMcpServers}
-        onRefreshProviderProfiles={loadProviderProfiles}
-        onRefreshSkills={loadSkills}
-        onUpdateWorkerProfile={updateWorkerProfile}
-        onUpdateMcpServer={updateMcpServer}
-        onUpdateProviderProfile={updateProviderProfile}
-        onUpdateSkill={updateSkill}
-        open={settingsOpen}
-        providerProfiles={providerProfiles}
-        providerProfilesError={providerProfilesError}
-        providerProfilesLoading={providerProfilesLoading}
-        settings={runSettings}
+        providers={providers}
+        workers={workers}
+        mcp={mcp}
         skills={skills}
-        skillsError={skillsError}
-        skillsLoading={skillsLoading}
+        open={settingsOpen}
+        settings={runSettings}
         workspaceRoot={currentWorkspaceRoot()}
       />
       <main
         className={[
           'workspace',
           rightPanelResizing ? 'is-resizing-right' : '',
-          workspacePanelExpanded && !compactLayout ? 'workspace-panel-expanded' : '',
         ].filter(Boolean).join(' ')}
         style={compactLayout ? undefined : { '--right-panel-width': `${rightPanelWidth}px` }}
       >
@@ -845,7 +790,7 @@ export function App() {
           tokenUsed={contextTokenBudget.used}
           tools={tools}
         />
-        {/* <div
+        <div
           aria-label="辅助面板"
           className="right-panel-rail"
           onKeyDown={handleRightPanelTabsKeyDown}
@@ -863,7 +808,7 @@ export function App() {
               {tab.label}
             </TabButton>
           ))}
-        </div> */}
+        </div>
         {rightPanelDrawerOpen ? (
           <button
             aria-label="关闭辅助面板"
@@ -874,12 +819,21 @@ export function App() {
             type="button"
           />
         ) : null}
+        {workspacePanelExpanded && !compactLayout ? (
+          <button
+            aria-label="返回右侧栏"
+            className="workspace-window-backdrop"
+            onClick={() => setWorkspacePanelExpanded(false)}
+            tabIndex={-1}
+            type="button"
+          />
+        ) : null}
         <aside
           aria-hidden={compactLayout && !rightPanelDrawerOpen ? 'true' : undefined}
           className={[
             'right-panel',
             rightPanelDrawerOpen ? 'drawer-open' : '',
-            workspacePanelExpanded && !compactLayout ? 'workspace-floating' : '',
+            workspacePanelExpanded && !compactLayout ? 'workspace-window' : '',
           ].filter(Boolean).join(' ')}
           inert={compactLayout && !rightPanelDrawerOpen ? '' : undefined}
           onKeyDown={(event) => {

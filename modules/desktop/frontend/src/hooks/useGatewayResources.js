@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { apiJson } from '../lib/api.js';
 import { normalizeAgentList } from '../lib/agents.js';
 import {
@@ -310,7 +310,15 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     }
   }, [getWorkspaceRoot]);
 
-  return {
+  const providers = useMemo(() => ({
+    items: providerProfiles,
+    loading: providerProfilesLoading,
+    error: providerProfilesError,
+    load: loadProviderProfiles,
+    create: createProviderProfile,
+    update: updateProviderProfile,
+    remove: deleteProviderProfile,
+  }), [
     providerProfiles,
     providerProfilesLoading,
     providerProfilesError,
@@ -318,7 +326,17 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     createProviderProfile,
     updateProviderProfile,
     deleteProviderProfile,
+  ]);
 
+  const workers = useMemo(() => ({
+    items: workerProfiles,
+    loading: workerProfilesLoading,
+    error: workerProfilesError,
+    load: loadWorkerProfiles,
+    create: createWorkerProfile,
+    update: updateWorkerProfile,
+    remove: deleteWorkerProfile,
+  }), [
     workerProfiles,
     workerProfilesLoading,
     workerProfilesError,
@@ -326,7 +344,19 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     createWorkerProfile,
     updateWorkerProfile,
     deleteWorkerProfile,
+  ]);
 
+  const mcp = useMemo(() => ({
+    items: mcpServers,
+    loading: mcpServersLoading,
+    error: mcpServersError,
+    discoveryById: mcpDiscoveryByServer,
+    load: loadMcpServers,
+    create: createMcpServer,
+    update: updateMcpServer,
+    remove: deleteMcpServer,
+    discover: discoverMcpServer,
+  }), [
     mcpServers,
     mcpServersLoading,
     mcpServersError,
@@ -336,7 +366,18 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     updateMcpServer,
     deleteMcpServer,
     discoverMcpServer,
+  ]);
 
+  const skillsResource = useMemo(() => ({
+    items: skills,
+    loading: skillsLoading,
+    error: skillsError,
+    load: loadSkills,
+    loadDetail: loadSkillDetail,
+    create: createSkill,
+    update: updateSkill,
+    remove: deleteSkill,
+  }), [
     skills,
     skillsLoading,
     skillsError,
@@ -345,5 +386,12 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     createSkill,
     updateSkill,
     deleteSkill,
-  };
+  ]);
+
+  return useMemo(() => ({
+    providers,
+    workers,
+    mcp,
+    skills: skillsResource,
+  }), [providers, workers, mcp, skillsResource]);
 }

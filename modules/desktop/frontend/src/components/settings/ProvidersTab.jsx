@@ -1,5 +1,10 @@
 // Split from SettingsPanel.jsx (checklist R7c)
-import { emptyProfileDraft, profileDraftFrom } from '../../lib/providerProfiles.js';
+import {
+  baseUrlAfterProviderChange,
+  emptyProfileDraft,
+  profileDraftFrom,
+  providerTypeOptions,
+} from '../../lib/providerProfiles.js';
 import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/button.jsx';
 import { ErrorMessage } from '../ui/feedback.jsx';
@@ -84,10 +89,24 @@ export function ProvidersTab({
                   value={profileDraft.name}
                 />
               </Field>
+              <Field className="settings-row" label="供应商类型">
+                <select
+                  onChange={(event) => {
+                    const provider = event.target.value;
+                    updateProfileDraft('provider', provider);
+                    updateProfileDraft('baseUrl', baseUrlAfterProviderChange(profileDraft.baseUrl, provider));
+                  }}
+                  value={profileDraft.provider}
+                >
+                  {providerTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </Field>
               <Field className="settings-row" label="配置模型">
                 <input
                   onChange={(event) => updateProfileDraft('model', event.target.value)}
-                  placeholder="gpt-4.1-mini"
+                  placeholder={profileDraft.provider === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4.1-mini'}
                   type="text"
                   value={profileDraft.model}
                 />
@@ -110,7 +129,7 @@ export function ProvidersTab({
               <Field className="settings-row settings-form-span" label="基础 URL">
                 <input
                   onChange={(event) => updateProfileDraft('baseUrl', event.target.value)}
-                  placeholder="https://api.openai.com"
+                  placeholder={profileDraft.provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com'}
                   type="text"
                   value={profileDraft.baseUrl}
                 />

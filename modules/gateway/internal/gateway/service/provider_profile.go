@@ -171,6 +171,8 @@ func normalizeProvider(value string) (string, error) {
 	switch provider {
 	case "openai_compatible", "http_compatible":
 		return "openai_compatible", nil
+	case "openai_responses", "anthropic":
+		return provider, nil
 	default:
 		return "", fmt.Errorf("unsupported provider %q", value)
 	}

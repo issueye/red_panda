@@ -112,15 +112,9 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		var requestedCalls []tools.Call
 		emittedText := false
 		flatHistory := flattenToolRounds(rounds)
-		err := r.provider.Complete(ctx, provider.ProviderRequest{
-			RunID:       params.RunID,
-			Session:     params.Session,
-			Input:       methods.ReplyInput{Text: input},
-			Options:     params.Options,
-			Tools:       agenttools.AvailableToolsForOptions(r.toolsForReply(ctx, params), params.Options),
-			ToolHistory: flatHistory,
-			ToolRounds:  rounds,
-		}, func(chunk provider.ProviderChunk) error {
+		definitions := agenttools.AvailableToolsForOptions(r.toolsForReply(ctx, params), params.Options)
+		request := newPromptComposer().compose(params, input, definitions, rounds)
+		err := r.provider.Complete(ctx, request, func(chunk provider.ProviderChunk) error {
 			return r.consumeProviderChunk(ctx, params, chunk, messageID, streamID, streamSeq, &requestedCalls, &emittedText)
 		})
 		turnsUsed++
@@ -302,16 +296,8 @@ func (r *Runtime) retryFinalAnswer(
 		"If some tools failed, still summarize what succeeded and what is known."
 	var answer strings.Builder
 	returnedToolCalls := false
-	err := r.provider.Complete(ctx, provider.ProviderRequest{
-		RunID:   params.RunID,
-		Session: params.Session,
-		Input:   methods.ReplyInput{Text: recoveryPrompt},
-		Options: params.Options,
-		// 强制生成文本答案，不允许再调用工具。
-		Tools:       nil,
-		ToolHistory: flattenToolRounds(rounds),
-		ToolRounds:  rounds,
-	}, func(chunk provider.ProviderChunk) error {
+	request := newPromptComposer().compose(params, recoveryPrompt, nil, rounds)
+	err := r.provider.Complete(ctx, request, func(chunk provider.ProviderChunk) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

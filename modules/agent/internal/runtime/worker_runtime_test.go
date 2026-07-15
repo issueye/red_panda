@@ -233,10 +233,7 @@ func TestDelegatedAssignmentRetriesWithoutStoppingSiblingWorker(t *testing.T) {
 	<-executor.otherStarted
 
 	var output strings.Builder
-	rt := &Runtime{
-		out: &output, nextSeq: map[string]uint64{}, agentSeq: map[string]map[string]uint64{},
-		workerPool: pool,
-	}
+	rt := &Runtime{out: &output, workerPool: pool}
 	reply := methods.ReplyParams{RunID: "run-retry", Session: methods.ReplySession{ID: "session-retry"}}
 	assignment, result, err := rt.executeDelegatedAssignment(ctx, agenttools.ToolRunContext{
 		RunID: "run-retry", SessionID: "session-retry", AssignmentID: string(entry.AssignmentID), Reply: &reply,

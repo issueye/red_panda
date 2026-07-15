@@ -61,18 +61,14 @@ type Runtime struct {
 	eventMu         sync.Mutex
 	initialized     bool
 	protocolVersion string
-	nextSeq         map[string]uint64
-	agentSeq        map[string]map[string]uint64
+	runStates       RunStateStore
 	gatewayPending  map[jsonrpc.ID]chan jsonrpc.Response
 	nextGatewayID   uint64
 	permissions     map[string]chan permission.ResolveParams
-	activeRuns      map[string]context.CancelFunc
 	provider        provider.Provider
 	tools           agenttools.ToolRunner
 	workerPool      *worker.Pool
 	mcp             *agentmcp.Manager
-	runTodos        map[string][]methods.TodoItemDTO
-	runGoals        map[string]*runGoalState
 }
 
 // Dependencies contains the replaceable collaborators used by Runtime.
@@ -96,14 +92,9 @@ func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version str
 		out:            out,
 		log:            log,
 		version:        version,
-		nextSeq:        map[string]uint64{},
-		agentSeq:       map[string]map[string]uint64{},
 		gatewayPending: map[jsonrpc.ID]chan jsonrpc.Response{},
 		permissions:    map[string]chan permission.ResolveParams{},
-		activeRuns:     map[string]context.CancelFunc{},
 		mcp:            agentmcp.NewManager(version, log),
-		runTodos:       map[string][]methods.TodoItemDTO{},
-		runGoals:       map[string]*runGoalState{},
 		provider:       modelProvider,
 		tools:          agenttools.ToolRunner{},
 	}
@@ -598,21 +589,11 @@ func (r *Runtime) handleCancel(req jsonrpc.Request) error {
 }
 
 func (r *Runtime) registerRun(runID string, cancel context.CancelFunc) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.activeRuns[runID]; exists {
-		return false
-	}
-	r.activeRuns[runID] = cancel
-	return true
+	return r.runStates.Register(runID, cancel)
 }
 
 func (r *Runtime) unregisterRun(runID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.activeRuns, runID)
-	delete(r.nextSeq, runID)
-	delete(r.agentSeq, runID)
+	r.runStates.Remove(runID)
 	if r.mcp != nil {
 		r.mcp.ClearBindings(runID)
 	}
@@ -623,9 +604,7 @@ func (r *Runtime) cancelRun(runID string) bool {
 }
 
 func (r *Runtime) cancelRunCount(runID string, reason string) int {
-	r.mu.Lock()
-	cancel := r.activeRuns[runID]
-	r.mu.Unlock()
+	cancel := r.runStates.Cancel(runID)
 
 	cancelledAssignments := 0
 	if r.workerPool != nil {
@@ -645,12 +624,7 @@ func (r *Runtime) cancelRunCount(runID string, reason string) int {
 
 // Close stops all active runs and releases Runtime-owned execution resources.
 func (r *Runtime) Close(ctx context.Context) error {
-	r.mu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(r.activeRuns))
-	for _, cancel := range r.activeRuns {
-		cancels = append(cancels, cancel)
-	}
-	r.mu.Unlock()
+	cancels := r.runStates.Cancels()
 	for _, cancel := range cancels {
 		cancel()
 	}
@@ -737,20 +711,11 @@ func cloneEventPayload(payload map[string]any) map[string]any {
 }
 
 func (r *Runtime) nextRootSeq(runID string) uint64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.nextSeq[runID]++
-	return r.nextSeq[runID]
+	return r.runStates.NextRunSeq(runID)
 }
 
 func (r *Runtime) nextAgentSeq(runID string, agentID string) uint64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.agentSeq[runID] == nil {
-		r.agentSeq[runID] = map[string]uint64{}
-	}
-	r.agentSeq[runID][agentID]++
-	return r.agentSeq[runID][agentID]
+	return r.runStates.NextWorkerSeq(runID, agentID)
 }
 
 func (r *Runtime) writeResponse(resp jsonrpc.Response) error {

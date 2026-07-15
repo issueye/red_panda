@@ -126,7 +126,8 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
           <div className="workspace-panel-actions">
             {canFloat ? (
               <Button
-                title={expanded ? '收回右侧' : '展开'}
+                aria-label={expanded ? '返回右侧栏' : '独立查看工作区'}
+                title={expanded ? '返回右侧栏' : '独立查看工作区'}
                 aria-pressed={expanded}
                 data-testid="workspace-panel-layout-toggle"
                 icon={expanded ? <PanelRightClose size={14} /> : <Maximize2 size={14} />}

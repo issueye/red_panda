@@ -8,29 +8,11 @@ import (
 )
 
 func (r *Runtime) setRunTodos(runID string, items []methods.TodoItemDTO) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.runTodos == nil {
-		r.runTodos = map[string][]methods.TodoItemDTO{}
-	}
-	copied := append([]methods.TodoItemDTO(nil), items...)
-	r.runTodos[runID] = copied
+	r.runStates.SetTodos(runID, items)
 }
 
 func (r *Runtime) getRunTodos(runID string) []methods.TodoItemDTO {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	items := r.runTodos[runID]
-	if len(items) == 0 {
-		return nil
-	}
-	return append([]methods.TodoItemDTO(nil), items...)
-}
-
-func (r *Runtime) clearRunTodos(runID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.runTodos, runID)
+	return r.runStates.Todos(runID)
 }
 
 func (r *Runtime) todoContextForRun(runID string) *methods.TodoContext {

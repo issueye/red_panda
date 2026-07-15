@@ -1,34 +1,32 @@
 import { expect, test } from '@playwright/test';
 
-test('workspace can expand into an 80 percent floating panel and collapse right', async ({ page }) => {
+test('workspace opens in a centered standalone panel and returns to the resizable sidebar', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
 
   const toggle = page.getByTestId('workspace-panel-layout-toggle');
-  await expect(toggle).toHaveText('收回右侧');
-  const initialPanel = page.locator('.right-panel.workspace-floating');
-  await expect(initialPanel).toBeVisible();
-  const initialBox = await initialPanel.boundingBox();
-  expect(initialBox.width).toBeGreaterThanOrEqual(1440 * 0.79);
-  expect(initialBox.width).toBeLessThanOrEqual(1440 * 0.81);
+  await expect(toggle).toHaveAccessibleName('独立查看工作区');
+  const sidebarBox = await page.locator('.right-panel').boundingBox();
+  expect(sidebarBox.width).toBe(300);
 
   await toggle.click();
-  await expect(page.locator('.right-panel.workspace-floating')).toHaveCount(0);
-  await expect(toggle).toHaveText('展开');
-
-  await toggle.click();
-  const panel = page.locator('.right-panel.workspace-floating');
+  const panel = page.locator('.right-panel.workspace-window');
   await expect(panel).toBeVisible();
-  await expect(toggle).toHaveText('收回右侧');
+  await expect(toggle).toHaveAccessibleName('返回右侧栏');
   const expandedBox = await panel.boundingBox();
-  expect(expandedBox.width).toBeGreaterThanOrEqual(1440 * 0.79);
-  expect(expandedBox.width).toBeLessThanOrEqual(1440 * 0.81);
+  expect(expandedBox.x).toBeGreaterThan(0);
+  expect(expandedBox.x + expandedBox.width).toBeLessThan(1440);
+  expect(expandedBox.width).toBeGreaterThan(1200);
+  const columns = await page.locator('.workspace-panel-grid').evaluate((element) => (
+    getComputedStyle(element).gridTemplateColumns
+  ));
+  expect(columns.split(' ')).toHaveLength(2);
 
   await page.keyboard.press('Escape');
-  await expect(page.locator('.right-panel.workspace-floating')).toHaveCount(0);
-  await expect(toggle).toHaveText('展开');
+  await expect(page.locator('.right-panel.workspace-window')).toHaveCount(0);
+  await expect(toggle).toHaveAccessibleName('独立查看工作区');
   const collapsedBox = await page.locator('.right-panel').boundingBox();
-  expect(collapsedBox.width).toBeLessThan(600);
+  expect(collapsedBox.width).toBe(300);
 });
 
 test('narrow app layout keeps right panel tools reachable without horizontal overflow', async ({ page }) => {

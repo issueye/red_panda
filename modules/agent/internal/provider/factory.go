@@ -7,14 +7,12 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"redpanda/protocol/methods"
 )
 
 func NewFromEnv(log io.Writer) Provider {
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER")))
 	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_BASE_URL")), "/")
-	if provider == "openai_compatible" || provider == "http_compatible" || baseURL != "" {
+	if provider != "" || baseURL != "" {
 		model := strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_MODEL"))
 		apiKey := strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_API_KEY"))
 		if model == "" {
@@ -24,40 +22,45 @@ func NewFromEnv(log io.Writer) Provider {
 			fmt.Fprintln(log, "provider base url is empty; falling back to echo provider")
 			return EchoProvider{}
 		}
-		return HTTPCompatibleProvider{
-			BaseURL: baseURL,
-			APIKey:  apiKey,
-			Model:   model,
-			Stream:  boolEnv("RED_PANDA_PROVIDER_STREAM"),
-			Client:  &http.Client{Timeout: 90 * time.Second},
+		resolved, ok := providerFromOptions(RequestOptions{
+			ProviderName: provider, ProviderBaseURL: baseURL,
+			ProviderAPIKey: apiKey, Model: model,
+		}, boolEnv("RED_PANDA_PROVIDER_STREAM"))
+		if ok {
+			return resolved
 		}
+		fmt.Fprintf(log, "unsupported provider %q; falling back to echo provider\n", provider)
 	}
 	return EchoProvider{}
 }
 
-func providerFromOptions(options methods.ReplyOptions, fallbackStream bool) (HTTPCompatibleProvider, bool) {
+func providerFromOptions(options RequestOptions, fallbackStream bool) (Provider, bool) {
 	baseURL := strings.TrimRight(strings.TrimSpace(options.ProviderBaseURL), "/")
 	if baseURL == "" {
-		return HTTPCompatibleProvider{}, false
+		return nil, false
 	}
 	provider := strings.ToLower(strings.TrimSpace(options.ProviderName))
 	if provider == "" {
 		provider = "openai_compatible"
 	}
-	if provider != "openai_compatible" && provider != "http_compatible" {
-		return HTTPCompatibleProvider{}, false
-	}
 	model := strings.TrimSpace(options.Model)
 	if model == "" {
 		model = "default"
 	}
-	return HTTPCompatibleProvider{
-		BaseURL: baseURL,
-		APIKey:  strings.TrimSpace(options.ProviderAPIKey),
-		Model:   model,
-		Stream:  fallbackStream,
-		Client:  &http.Client{Timeout: 90 * time.Second},
-	}, true
+	config := providerConfig{
+		BaseURL: baseURL, APIKey: strings.TrimSpace(options.ProviderAPIKey), Model: model,
+		Stream: fallbackStream, Client: &http.Client{Timeout: 90 * time.Second},
+	}
+	switch provider {
+	case "openai_compatible", "http_compatible":
+		return HTTPCompatibleProvider{providerConfig: config}, true
+	case "openai_responses":
+		return OpenAIResponsesProvider{providerConfig: config}, true
+	case "anthropic":
+		return AnthropicProvider{providerConfig: config}, true
+	default:
+		return nil, false
+	}
 }
 
 func boolEnv(key string) bool {

@@ -32,7 +32,7 @@ test('settings exposes six keyboard-accessible management modules', async ({ pag
   await expect(dialog.getByRole('tabpanel', { name: '其他设置' })).toContainText('运行');
 });
 
-test('settings drawer uses 85 percent width with navigation on the left', async ({ page }) => {
+test('settings opens as a centered modal with navigation on the left', async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 800 });
   const dialog = page.getByRole('dialog', { name: '设置' });
   const navigation = dialog.getByRole('navigation', { name: '项目设置菜单' });
@@ -44,8 +44,17 @@ test('settings drawer uses 85 percent width with navigation on the left', async 
     content.boundingBox(),
   ]);
 
-  expect(Math.abs(dialogBox.width - 1020)).toBeLessThanOrEqual(1);
+  expect(dialogBox.width).toBeLessThan(1200);
+  expect(Math.abs(dialogBox.x - ((1200 - dialogBox.width) / 2))).toBeLessThanOrEqual(1);
+  expect(Math.abs(dialogBox.y - ((800 - dialogBox.height) / 2))).toBeLessThanOrEqual(1);
   expect(navigationBox.x).toBeLessThan(contentBox.x);
+});
+
+test('settings modal closes when clicking the backdrop', async ({ page }) => {
+  const dialog = page.getByRole('dialog', { name: '设置' });
+  await expect(dialog).toBeVisible();
+  await page.locator('.settings-overlay').click({ position: { x: 8, y: 8 } });
+  await expect(dialog).toBeHidden();
 });
 
 test('skill configs can be managed and persist locally', async ({ page }) => {
@@ -66,14 +75,14 @@ test('skill configs can be managed and persist locally', async ({ page }) => {
 
 test('settings management layout remains usable on compact screens', async ({ page }) => {
   await page.setViewportSize({ width: 520, height: 760 });
-  await page.getByRole('tab', { name: '技能' }).click();
-  await page.getByRole('button', { name: '新建技能' }).click();
+  await page.getByRole('tab', { name: '其他' }).click();
 
   const panelBox = await page.getByRole('dialog', { name: '设置' }).boundingBox();
   expect(panelBox.x).toBe(0);
   expect(panelBox.width).toBe(520);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
-  await expect(page.getByRole('button', { name: '保存技能' })).toBeVisible();
+  await expect(page.getByRole('tabpanel', { name: '其他设置' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '关闭', exact: true })).toBeVisible();
 });
 
 test('MCP discovery shows read-only server health and tools', async ({ page }) => {

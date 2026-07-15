@@ -2,11 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+	baseUrlAfterProviderChange,
   normalizeProviderProfile,
   profileDraftFrom,
   providerProfileCreatePayload,
   providerProfileUpdatePayload,
 } from './providerProfiles.js';
+
+test('provider changes use official defaults without overwriting custom gateways', () => {
+  assert.equal(baseUrlAfterProviderChange('', 'anthropic'), 'https://api.anthropic.com');
+  assert.equal(baseUrlAfterProviderChange('https://api.openai.com', 'openai_responses'), 'https://api.openai.com');
+  assert.equal(baseUrlAfterProviderChange('https://gateway.example/v1', 'anthropic'), 'https://gateway.example/v1');
+});
 
 test('normalizeProviderProfile maps masked key state and defaults', () => {
   const profile = normalizeProviderProfile({
@@ -82,4 +89,15 @@ test('provider profile payloads use Gateway field names and omit blank update ke
   assert.equal(update.model, 'model-b');
   assert.equal(update.max_tokens, 0);
   assert.equal(update.active, true);
+
+  const anthropic = providerProfileCreatePayload({
+    name: 'Claude',
+    provider: 'anthropic',
+    baseUrl: 'https://api.anthropic.com',
+    model: 'claude-sonnet-4-5',
+    maxTokens: '',
+    apiKey: 'secret',
+    isDefault: false,
+  });
+  assert.equal(anthropic.provider, 'anthropic');
 });

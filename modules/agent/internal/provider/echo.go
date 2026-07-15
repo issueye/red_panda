@@ -22,7 +22,7 @@ func (EchoProvider) Name() string {
 
 func (EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
 	if override, ok := providerFromOptions(req.Options, false); ok {
-		return override.complete(ctx, req, emit)
+		return completeResolvedProvider(ctx, override, req, emit)
 	}
 	if len(req.ToolHistory) > 0 {
 		last := req.ToolHistory[len(req.ToolHistory)-1]
@@ -39,7 +39,7 @@ func (EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit func
 	if calls := echoToolCalls(req); len(calls) > 0 {
 		return emit(ProviderChunk{ToolCalls: calls})
 	}
-	text := req.Input.Text
+	text := req.Input
 	if text == "" {
 		text = "ok"
 	}
@@ -56,7 +56,7 @@ func (EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit func
 }
 
 func echoToolCalls(req ProviderRequest) []tools.Call {
-	text := strings.TrimSpace(req.Input.Text)
+	text := strings.TrimSpace(req.Input)
 	lower := strings.ToLower(text)
 	switch {
 	case strings.HasPrefix(lower, "read file "):

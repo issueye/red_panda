@@ -29,41 +29,19 @@ import {
 export function SettingsPanel({
   open,
   settings = {},
-  providerProfiles = [],
-  providerProfilesLoading = false,
-  providerProfilesError = '',
-  workerProfiles = [],
-  workerProfilesLoading = false,
-  workerProfilesError = '',
-  mcpServers = [],
-  mcpServersLoading = false,
-  mcpServersError = '',
-  mcpDiscoveryByServer = {},
-  skills = [],
-  skillsLoading = false,
-  skillsError = '',
+  providers = {},
+  workers = {},
+  mcp = {},
+  skills = {},
   workspaceRoot = '',
   onClose,
   onChange,
-  onCreateProviderProfile,
-  onUpdateProviderProfile,
-  onDeleteProviderProfile,
-  onRefreshProviderProfiles,
-  onCreateWorkerProfile,
-  onUpdateWorkerProfile,
-  onDeleteWorkerProfile,
-  onRefreshWorkerProfiles,
-  onCreateMcpServer,
-  onUpdateMcpServer,
-  onDeleteMcpServer,
-  onDiscoverMcpServer,
-  onRefreshMcpServers,
-  onCreateSkill,
-  onUpdateSkill,
-  onDeleteSkill,
-  onLoadSkillDetail,
-  onRefreshSkills,
 }) {
+  const providerProfiles = Array.isArray(providers.items) ? providers.items : [];
+  const workerProfiles = Array.isArray(workers.items) ? workers.items : [];
+  const mcpServers = Array.isArray(mcp.items) ? mcp.items : [];
+  const skillItems = Array.isArray(skills.items) ? skills.items : [];
+  const mcpDiscoveryByServer = mcp.discoveryById || {};
   const dialog = useDialog();
   const panelRef = useRef(null);
   const closeButtonRef = useRef(null);
@@ -84,8 +62,8 @@ export function SettingsPanel({
   const [diagnosticLogs, setDiagnosticLogs] = useState(() => getDiagnosticLogs());
   const visibleAgents = Array.isArray(workerProfiles) ? workerProfiles : [];
 
-  const visibleSkills = Array.isArray(skills) ? skills : [];
-  const visibleMcpServers = Array.isArray(mcpServers) ? mcpServers : [];
+  const visibleSkills = skillItems;
+  const visibleMcpServers = mcpServers;
   const selectedProfile = useMemo(
     () => providerProfiles.find((item) => item.id === settings.providerProfileId) || null,
     [providerProfiles, settings.providerProfileId],
@@ -152,10 +130,10 @@ export function SettingsPanel({
     try {
       const payload = { ...profileDraft };
       if (settings.providerProfileId) {
-        const updated = await onUpdateProviderProfile(settings.providerProfileId, payload);
+        const updated = await providers.update(settings.providerProfileId, payload);
         updateSetting('providerProfileId', updated.id);
       } else {
-        const created = await onCreateProviderProfile(payload);
+        const created = await providers.create(payload);
         updateSetting('providerProfileId', created.id);
       }
       setProfileDraft((current) => ({ ...current, apiKey: '' }));
@@ -183,7 +161,7 @@ export function SettingsPanel({
     setProfileSaving(true);
     setProfileError('');
     try {
-      await onDeleteProviderProfile(settings.providerProfileId);
+      await providers.remove(settings.providerProfileId);
       updateSetting('providerProfileId', '');
       setProfileDraft(emptyProfileDraft);
     } catch (error) {
@@ -206,11 +184,11 @@ export function SettingsPanel({
     setSkillError('');
     try {
       if (skillDraft.isNew) {
-        await onCreateSkill?.({ name, description, instructions });
+        await skills.create?.({ name, description, instructions });
       } else {
-        await onUpdateSkill?.(name, { description, instructions });
+        await skills.update?.(name, { description, instructions });
       }
-      const detail = await onLoadSkillDetail?.(name);
+      const detail = await skills.loadDetail?.(name);
       setSkillDraft({
         name: detail?.name || name,
         description: detail?.description || description,
@@ -235,7 +213,7 @@ export function SettingsPanel({
       isNew: false,
     });
     try {
-      const detail = await onLoadSkillDetail?.(skill.name);
+      const detail = await skills.loadDetail?.(skill.name);
       if (detail) {
         setSkillDraft({
           name: detail.name,
@@ -263,7 +241,7 @@ export function SettingsPanel({
     setSkillSaving(true);
     setSkillError('');
     try {
-      await onDeleteSkill?.(skill.name);
+      await skills.remove?.(skill.name);
       if (skillDraft?.name === skill.name) {
         setSkillDraft(null);
       }
@@ -276,7 +254,7 @@ export function SettingsPanel({
 
   async function refreshSkills() {
     setSkillError('');
-    await onRefreshSkills?.();
+    await skills.load?.();
   }
 
   async function saveMcpServer() {
@@ -285,14 +263,14 @@ export function SettingsPanel({
     setMcpError('');
     try {
       const saved = mcpDraft.id
-        ? await onUpdateMcpServer(mcpDraft.id, {
+        ? await mcp.update(mcpDraft.id, {
             name: mcpDraft.name,
             command: mcpDraft.command,
             args: mcpDraft.args,
             cwd: mcpDraft.cwd,
             enabled: mcpDraft.enabled,
           })
-        : await onCreateMcpServer(mcpDraft);
+        : await mcp.create(mcpDraft);
       setMcpDraft({ ...saved });
     } catch (error) {
       setMcpError(error.message);
@@ -314,7 +292,7 @@ export function SettingsPanel({
     setMcpSaving(true);
     setMcpError('');
     try {
-      await onDeleteMcpServer(server.id);
+      await mcp.remove(server.id);
       if (mcpDraft?.id === server.id) {
         setMcpDraft(null);
       }
@@ -329,7 +307,7 @@ export function SettingsPanel({
     setMcpSaving(true);
     setMcpError('');
     try {
-      const updated = await onUpdateMcpServer(server.id, { enabled });
+      const updated = await mcp.update(server.id, { enabled });
       if (mcpDraft?.id === server.id) {
         setMcpDraft({ ...updated });
       }
@@ -343,7 +321,7 @@ export function SettingsPanel({
   async function refreshMcpServers() {
     setMcpError('');
     try {
-      await onRefreshMcpServers();
+      await mcp.load();
     } catch (error) {
       setMcpError(error.message);
     }
@@ -356,7 +334,7 @@ export function SettingsPanel({
     setAgentError('');
     try {
       if (agentDraft.isNew) {
-        const created = await onCreateWorkerProfile?.({
+        const created = await workers.create?.({
           key: agentDraft.key,
           name: agentDraft.name,
           name_zh: agentDraft.name_zh,
@@ -368,7 +346,7 @@ export function SettingsPanel({
         });
         setAgentDraft(agentDraftFrom(created));
       } else {
-        const updated = await onUpdateWorkerProfile?.(agentDraft.id, {
+        const updated = await workers.update?.(agentDraft.id, {
           name: agentDraft.name,
           name_zh: agentDraft.name_zh,
           phase: agentDraft.builtin ? undefined : agentDraft.phase,
@@ -390,7 +368,7 @@ export function SettingsPanel({
     setAgentSaving(true);
     setAgentError('');
     try {
-      const updated = await onUpdateWorkerProfile?.(agent.id, { enabled });
+      const updated = await workers.update?.(agent.id, { enabled });
       if (agentDraft?.id === agent.id) {
         setAgentDraft(agentDraftFrom(updated));
       }
@@ -415,7 +393,7 @@ export function SettingsPanel({
     setAgentSaving(true);
     setAgentError('');
     try {
-      await onDeleteWorkerProfile?.(agent.id);
+      await workers.remove?.(agent.id);
       if (agentDraft?.id === agent.id) {
         setAgentDraft(null);
       }
@@ -429,7 +407,7 @@ export function SettingsPanel({
   async function refreshAgents() {
     setAgentError('');
     try {
-      await onRefreshWorkerProfiles?.();
+      await workers.load?.();
     } catch (error) {
       setAgentError(error.message);
     }
@@ -439,7 +417,7 @@ export function SettingsPanel({
     setMcpError('');
     setMcpDraft({ ...server });
     try {
-      await onDiscoverMcpServer(server.id);
+      await mcp.discover(server.id);
     } catch (error) {
       setMcpError(error.message);
     }
@@ -495,14 +473,14 @@ export function SettingsPanel({
   const providerContent = (
     <ProvidersTab
       deleteSelectedProfile={deleteSelectedProfile}
-      onRefreshProviderProfiles={onRefreshProviderProfiles}
+      onRefreshProviderProfiles={providers.load}
       profileDraft={profileDraft}
       profileError={profileError}
       profileSaving={profileSaving}
       providerProfileOptions={providerProfileOptions}
       providerProfiles={providerProfiles}
-      providerProfilesError={providerProfilesError}
-      providerProfilesLoading={providerProfilesLoading}
+      providerProfilesError={providers.error || ''}
+      providerProfilesLoading={providers.loading || false}
       saveProviderProfile={saveProviderProfile}
       selectedProfile={selectedProfile}
       setProfileDraft={setProfileDraft}
@@ -522,8 +500,8 @@ export function SettingsPanel({
       skillDraft={skillDraft}
       skillError={skillError}
       skillSaving={skillSaving}
-      skillsError={skillsError}
-      skillsLoading={skillsLoading}
+      skillsError={skills.error || ''}
+      skillsLoading={skills.loading || false}
       visibleSkills={visibleSkills}
       workspaceRoot={workspaceRoot}
     />
@@ -537,8 +515,8 @@ export function SettingsPanel({
       mcpDraft={mcpDraft}
       mcpError={mcpError}
       mcpSaving={mcpSaving}
-      mcpServersError={mcpServersError}
-      mcpServersLoading={mcpServersLoading}
+      mcpServersError={mcp.error || ''}
+      mcpServersLoading={mcp.loading || false}
       refreshMcpServers={refreshMcpServers}
       saveMcpServer={saveMcpServer}
       setMcpDraft={setMcpDraft}
@@ -553,8 +531,8 @@ export function SettingsPanel({
       agentDraft={agentDraft}
       agentError={agentError}
       agentSaving={agentSaving}
-      agentsError={workerProfilesError}
-      agentsLoading={workerProfilesLoading}
+      agentsError={workers.error || ''}
+      agentsLoading={workers.loading || false}
       deleteAgent={deleteAgent}
       refreshAgents={refreshAgents}
       saveAgent={saveAgent}
@@ -588,7 +566,13 @@ export function SettingsPanel({
   }[activeTab] || providerContent;
 
   return (
-    <div className="settings-overlay" role="presentation">
+    <div
+      className="settings-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      role="presentation"
+    >
       <aside
         aria-label="设置"
         className="settings-panel"
