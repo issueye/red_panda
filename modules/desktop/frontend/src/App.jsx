@@ -139,6 +139,9 @@ export function App() {
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState('workspace');
   const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
+  const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(() => (
+    typeof window !== 'undefined' && !window.matchMedia('(max-width: 1100px)').matches
+  ));
   const [rightPanelWidth, setRightPanelWidth] = useState(loadRightPanelWidth);
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [compactLayout, setCompactLayout] = useState(() => (
@@ -389,6 +392,7 @@ export function App() {
     const media = window.matchMedia('(max-width: 1100px)');
     const handleChange = (event) => {
       setCompactLayout(event.matches);
+      if (event.matches) setWorkspacePanelExpanded(false);
       if (!event.matches) setRightPanelDrawerOpen(false);
     };
     setCompactLayout(media.matches);
@@ -606,6 +610,7 @@ export function App() {
 
   function selectRightPanelTab(tab) {
     setRightPanelTab(tab);
+    setWorkspacePanelExpanded(tab === 'workspace' && !compactLayout);
     if (compactLayout) {
       if (!rightPanelDrawerOpen) rightPanelReturnFocusRef.current = document.activeElement;
       setRightPanelDrawerOpen(true);
@@ -646,6 +651,7 @@ export function App() {
     const tabList = event.currentTarget;
     const nextTab = rightPanelTabs[nextIndex];
     setRightPanelTab(nextTab.id);
+    setWorkspacePanelExpanded(nextTab.id === 'workspace' && !compactLayout);
     window.requestAnimationFrame(() => {
       tabList.querySelector(`[data-right-panel-tab="${nextTab.id}"]`)?.focus();
     });
@@ -693,7 +699,13 @@ export function App() {
   }
 
   const rightPanelContent = rightPanelTab === 'workspace' ? (
-    <WorkspacePanel apiJson={apiJson} workspace={workspace} />
+    <WorkspacePanel
+      apiJson={apiJson}
+      canFloat={!compactLayout}
+      expanded={workspacePanelExpanded}
+      onExpandedChange={setWorkspacePanelExpanded}
+      workspace={workspace}
+    />
   ) : rightPanelTab === 'workers' ? (
     <WorkerPanel
       assignments={assignments}
@@ -770,7 +782,11 @@ export function App() {
         workspaceRoot={currentWorkspaceRoot()}
       />
       <main
-        className={rightPanelResizing ? 'workspace is-resizing-right' : 'workspace'}
+        className={[
+          'workspace',
+          rightPanelResizing ? 'is-resizing-right' : '',
+          workspacePanelExpanded && !compactLayout ? 'workspace-panel-expanded' : '',
+        ].filter(Boolean).join(' ')}
         style={compactLayout ? undefined : { '--right-panel-width': `${rightPanelWidth}px` }}
       >
         <Sidebar
@@ -877,13 +893,21 @@ export function App() {
         ) : null}
         <aside
           aria-hidden={compactLayout && !rightPanelDrawerOpen ? 'true' : undefined}
-          className={rightPanelDrawerOpen ? 'right-panel drawer-open' : 'right-panel'}
+          className={[
+            'right-panel',
+            rightPanelDrawerOpen ? 'drawer-open' : '',
+            workspacePanelExpanded && !compactLayout ? 'workspace-floating' : '',
+          ].filter(Boolean).join(' ')}
           inert={compactLayout && !rightPanelDrawerOpen ? '' : undefined}
           onKeyDown={(event) => {
             if (compactLayout && event.key === 'Escape') closeRightPanelDrawer();
+            if (!compactLayout && workspacePanelExpanded && event.key === 'Escape') {
+              event.stopPropagation();
+              setWorkspacePanelExpanded(false);
+            }
           }}
         >
-          {!compactLayout ? (
+          {!compactLayout && !workspacePanelExpanded ? (
             <button
               aria-label="拖拽调整右侧面板宽度"
               aria-orientation="vertical"

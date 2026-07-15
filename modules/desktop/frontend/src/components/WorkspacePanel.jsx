@@ -1,8 +1,17 @@
-import { ExternalLink, FileText, Folder, GitCompare, RefreshCw } from 'lucide-react';
+import {
+  ExternalLink,
+  FileText,
+  Folder,
+  GitCompare,
+  Maximize2,
+  PanelRightClose,
+  RefreshCw,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { openInExplorer } from '../lib/desktopShell.js';
 import { Button } from './ui/button.jsx';
 import { ErrorMessage, InlineEmpty } from './ui/feedback.jsx';
+import { Markdown } from './ui/Markdown.jsx';
 import { PanelHeader } from './ui/panel.jsx';
 
 function flattenTree(node, depth = 0, items = []) {
@@ -21,7 +30,11 @@ function displayContent(file, diff) {
   return file.content || '';
 }
 
-export function WorkspacePanel({ apiJson, workspace }) {
+export function isMarkdownPath(path) {
+  return /\.(?:md|markdown)$/i.test(String(path || ''));
+}
+
+export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, onExpandedChange, workspace }) {
   const [tree, setTree] = useState(null);
   const [selectedPath, setSelectedPath] = useState('');
   const [file, setFile] = useState(null);
@@ -102,11 +115,25 @@ export function WorkspacePanel({ apiJson, workspace }) {
     await openInExplorer(absolute);
   }
 
+  const previewContent = loading ? '加载中...' : displayContent(file, diff);
+  const showMarkdown = !loading && !diff?.diff && !file?.binary && isMarkdownPath(selectedPath);
+
   return (
     <section className="workspace-panel-content">
       <PanelHeader
         action={(
           <div className="workspace-panel-actions">
+            {canFloat ? (
+              <Button
+                aria-pressed={expanded}
+                data-testid="workspace-panel-layout-toggle"
+                icon={expanded ? <PanelRightClose size={14} /> : <Maximize2 size={14} />}
+                onClick={() => onExpandedChange?.(!expanded)}
+                variant="soft"
+              >
+                {expanded ? '收回右侧' : '展开'}
+              </Button>
+            ) : null}
             <Button
               data-testid="workspace-panel-open-explorer"
               disabled={!workspaceRoot}
@@ -166,7 +193,11 @@ export function WorkspacePanel({ apiJson, workspace }) {
             </div>
           </div>
           <ErrorMessage as="div" className="workspace-error">{error}</ErrorMessage>
-          <pre>{loading ? '加载中...' : displayContent(file, diff)}</pre>
+          {showMarkdown ? (
+            <Markdown className="workspace-markdown-preview">{previewContent}</Markdown>
+          ) : (
+            <pre className="workspace-preview-source">{previewContent}</pre>
+          )}
         </div>
       </div>
     </section>
