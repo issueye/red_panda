@@ -27,7 +27,10 @@ tasks:
       - sh: npm version
         msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
     cmds:
-      - npm install
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/npm-with-node.ps1 -Command install
+        platforms: [windows]
+      - cmd: npm install
+        platforms: [linux, darwin]
 
   install:frontend:deps:bun:
     dir: frontend
@@ -111,7 +114,10 @@ tasks:
   frontend:run:npm:
     dir: frontend
     cmds:
-      - npm run {{.SCRIPT}} -q
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/npm-with-node.ps1 -Command run -Script {{.SCRIPT}}
+        platforms: [windows]
+      - cmd: npm run {{.SCRIPT}} -q
+        platforms: [linux, darwin]
     vars:
       SCRIPT: "{{.SCRIPT}}"
 
@@ -213,7 +219,10 @@ tasks:
   frontend:dev:npm:
     dir: frontend
     cmds:
-      - npm run dev -- --port {{.VITE_PORT}} --strictPort
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/npm-with-node.ps1 -Command run -Script dev -Port {{.VITE_PORT}}
+        platforms: [windows]
+      - cmd: npm run dev -- --port {{.VITE_PORT}} --strictPort
+        platforms: [linux, darwin]
 
   frontend:dev:yarn:
     dir: frontend
