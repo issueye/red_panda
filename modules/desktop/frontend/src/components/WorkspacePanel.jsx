@@ -121,34 +121,35 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
   return (
     <section className="workspace-panel-content">
       <PanelHeader
+        title="工作区"
         action={(
           <div className="workspace-panel-actions">
             {canFloat ? (
               <Button
+                title={expanded ? '收回右侧' : '展开'}
                 aria-pressed={expanded}
                 data-testid="workspace-panel-layout-toggle"
                 icon={expanded ? <PanelRightClose size={14} /> : <Maximize2 size={14} />}
                 onClick={() => onExpandedChange?.(!expanded)}
                 variant="soft"
-              >
-                {expanded ? '收回右侧' : '展开'}
-              </Button>
+              />
             ) : null}
             <Button
+              title="资源管理器"
               data-testid="workspace-panel-open-explorer"
               disabled={!workspaceRoot}
               icon={<ExternalLink size={14} />}
               onClick={() => revealInExplorer(workspaceRoot)}
               variant="ghost"
-            >
-              资源管理器
-            </Button>
-            <Button icon={<RefreshCw size={14} />} onClick={loadTree} variant="ghost">
-              刷新
-            </Button>
+            />
+            <Button
+              title="刷新"
+              icon={<RefreshCw size={14} />}
+              onClick={loadTree}
+              variant="ghost"
+            />
           </div>
         )}
-        title="工作区"
       />
 
       <div className="workspace-panel-grid">
@@ -179,17 +180,17 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
             <span>{selectedPath || '预览'}</span>
             <div className="workspace-preview-actions">
               <Button
+                title="打开位置"
                 data-testid="workspace-file-open-explorer"
                 disabled={!selectedPath && !workspaceRoot}
                 icon={<ExternalLink size={14} />}
                 onClick={() => revealInExplorer(selectedPath || workspaceRoot)}
                 variant="ghost"
-              >
-                打开位置
-              </Button>
-              <Button icon={<GitCompare size={14} />} onClick={loadDiff} variant="soft">
-                差异
-              </Button>
+              />
+              <Button
+                title="差异"
+                icon={<GitCompare size={14} />} onClick={loadDiff} variant="soft"
+              />
             </div>
           </div>
           <ErrorMessage as="div" className="workspace-error">{error}</ErrorMessage>

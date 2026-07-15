@@ -110,8 +110,6 @@ export function RunActivityPanel({
 
   return (
     <section className="activity-panel-content" data-testid="activity-panel">
-      <PanelHeader title="运行活动" />
-
       <div className="activity-summary-grid">
         <article className="activity-summary-card">
           <Activity size={15} />

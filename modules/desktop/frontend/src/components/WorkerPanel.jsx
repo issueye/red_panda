@@ -15,7 +15,6 @@ export function WorkerPanel({
 }) {
   return (
     <section className="worker-panel-content" data-testid="worker-panel-content">
-      <PanelHeader title="Worker" />
       <section className="worker-assignment-region" data-testid="worker-assignment-region">
         <div className="worker-section-heading">
           <div className="worker-section-label" data-testid="worker-assignment-section-label">工作分配</div>

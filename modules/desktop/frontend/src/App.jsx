@@ -845,7 +845,7 @@ export function App() {
           tokenUsed={contextTokenBudget.used}
           tools={tools}
         />
-        <div
+        {/* <div
           aria-label="辅助面板"
           className="right-panel-rail"
           onKeyDown={handleRightPanelTabsKeyDown}
@@ -863,7 +863,7 @@ export function App() {
               {tab.label}
             </TabButton>
           ))}
-        </div>
+        </div> */}
         {rightPanelDrawerOpen ? (
           <button
             aria-label="关闭辅助面板"

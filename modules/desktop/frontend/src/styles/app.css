@@ -59,6 +59,7 @@ html,
 body,
 #root {
   height: 100%;
+  width: 100%;
 }
 
 body {
@@ -393,8 +394,8 @@ textarea:focus-visible {
 .app-shell {
   display: grid;
   grid-template-rows: 48px 1fr 24px;
-  height: 100vh;
-  min-width: 980px;
+  height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
@@ -649,8 +650,9 @@ textarea:focus-visible {
 
 .workspace {
   --right-panel-width: 300px;
-  display: grid;
-  grid-template-columns: 240px minmax(280px, 1fr) var(--right-panel-width);
+  /* display: grid; */
+  /* grid-template-columns: 240px minmax(280px, 1fr) var(--right-panel-width); */
+  display: flex;
   min-height: 0;
 }
 
@@ -664,7 +666,7 @@ textarea:focus-visible {
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 300px;
   padding: 12px 10px;
 }
 
@@ -673,7 +675,7 @@ textarea:focus-visible {
   border-left: 1px solid var(--color-border);
   border-right: 0;
   gap: 0;
-  min-width: 0;
+  min-width: 370px;
   overflow: hidden;
   padding: 10px 12px 12px;
   position: relative;
@@ -1000,6 +1002,7 @@ textarea:focus-visible {
 }
 
 .chat-panel {
+  flex: 1;
   background: var(--color-surface);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -3960,7 +3963,7 @@ textarea:focus-visible {
   grid-template-columns: 22px minmax(0, 1fr);
   line-height: 1.4;
   min-height: 52px;
-  padding: 10px 12px;
+  padding: 4px 6px;
   text-align: left;
   width: 100%;
 }
@@ -4102,7 +4105,7 @@ textarea:focus-visible {
   border-top: 1px solid var(--color-border);
   display: grid;
   gap: 6px;
-  padding: 8px 12px 10px 44px;
+  padding: 4px 4px 4px 44px;
 }
 
 .tool-detail {
@@ -5097,10 +5100,12 @@ textarea:focus-visible {
 
 @media (max-width: 1100px) {
   .app-shell {
-    min-width: 0;
+    height: 100%;
+    width: 100%;
   }
 
   .workspace {
+    width: 100%;
     --right-panel-width: 0px;
     grid-template-columns: 220px minmax(0, 1fr);
     grid-template-rows: 52px minmax(0, 1fr);
@@ -5182,6 +5187,8 @@ textarea:focus-visible {
 
 @media (max-width: 760px) {
   .app-shell {
+    height: 100%;
+    width: 100%;
     grid-template-rows: 48px minmax(0, 1fr) 24px;
   }
 
