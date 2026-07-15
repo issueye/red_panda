@@ -376,6 +376,93 @@ func (p *Pool) CancelRun(ctx context.Context, runID, reason string) int {
 	return cancelled
 }
 
+// PauseDelegatedRun cooperatively suspends delegated assignments while leaving
+// the entry assignment (the main Worker) active.
+func (p *Pool) PauseDelegatedRun(ctx context.Context, runID, reason string) (int, error) {
+	type target struct {
+		id       AssignmentID
+		executor PausableExecutor
+	}
+	p.mu.Lock()
+	targets := make([]target, 0, len(p.runAssignments[runID]))
+	for id := range p.runAssignments[runID] {
+		assignment := p.assignments[id]
+		if assignment == nil || assignment.OriginWorkerID == "" || assignment.Status.Terminal() || assignment.Status == AssignmentPaused {
+			continue
+		}
+		worker := p.workerByID[assignment.WorkerID]
+		pausable, ok := worker.executor.(PausableExecutor)
+		if !ok {
+			p.mu.Unlock()
+			return 0, fmt.Errorf("%s executor does not support pause", worker.ID)
+		}
+		targets = append(targets, target{id: id, executor: pausable})
+	}
+	p.mu.Unlock()
+	sort.Slice(targets, func(i, j int) bool { return targets[i].id < targets[j].id })
+	paused := 0
+	var pauseErr error
+	for _, item := range targets {
+		if err := item.executor.Pause(ctx, item.id, reason); err != nil {
+			pauseErr = errors.Join(pauseErr, err)
+			continue
+		}
+		p.mu.Lock()
+		assignment := p.assignments[item.id]
+		if assignment != nil && !assignment.Status.Terminal() && assignment.Status != AssignmentPaused {
+			assignment.resumeStatus = assignment.Status
+			assignment.Status = AssignmentPaused
+			paused++
+		}
+		p.mu.Unlock()
+	}
+	return paused, pauseErr
+}
+
+func (p *Pool) ResumeDelegatedRun(ctx context.Context, runID string) (int, error) {
+	type target struct {
+		id       AssignmentID
+		executor PausableExecutor
+	}
+	p.mu.Lock()
+	var targets []target
+	for id := range p.runAssignments[runID] {
+		assignment := p.assignments[id]
+		if assignment == nil || assignment.Status != AssignmentPaused {
+			continue
+		}
+		worker := p.workerByID[assignment.WorkerID]
+		pausable, ok := worker.executor.(PausableExecutor)
+		if !ok {
+			p.mu.Unlock()
+			return 0, fmt.Errorf("%s executor does not support resume", worker.ID)
+		}
+		targets = append(targets, target{id: id, executor: pausable})
+	}
+	p.mu.Unlock()
+	sort.Slice(targets, func(i, j int) bool { return targets[i].id < targets[j].id })
+	resumed := 0
+	var resumeErr error
+	for _, item := range targets {
+		if err := item.executor.Resume(ctx, item.id); err != nil {
+			resumeErr = errors.Join(resumeErr, err)
+			continue
+		}
+		p.mu.Lock()
+		assignment := p.assignments[item.id]
+		if assignment != nil && assignment.Status == AssignmentPaused {
+			assignment.Status = assignment.resumeStatus
+			if assignment.Status == "" || assignment.Status == AssignmentPaused {
+				assignment.Status = AssignmentRunning
+			}
+			assignment.resumeStatus = ""
+			resumed++
+		}
+		p.mu.Unlock()
+	}
+	return resumed, resumeErr
+}
+
 func (p *Pool) Send(ctx context.Context, message WorkerMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -506,6 +593,8 @@ func (p *Pool) Snapshot() PoolSnapshot {
 			snapshot.Running++
 		case AssignmentWaitingPermission:
 			snapshot.WaitingPermission++
+		case AssignmentPaused:
+			snapshot.Paused++
 		}
 	}
 	p.mu.Unlock()

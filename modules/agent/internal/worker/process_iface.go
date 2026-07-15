@@ -13,3 +13,8 @@ type Process interface {
 	Cancel(ctx context.Context, runID string, reason string) error
 	Close(ctx context.Context) error
 }
+
+type PausableProcess interface {
+	Pause(ctx context.Context, runID string, reason string) error
+	Resume(ctx context.Context, runID string) error
+}

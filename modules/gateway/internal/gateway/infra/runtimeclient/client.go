@@ -156,6 +156,8 @@ func (c *Client) Initialize(ctx context.Context) error {
 		Capabilities: []methods.Capability{
 			{Name: methods.RunExecute, Version: 1},
 			{Name: methods.RunCancel, Version: 1},
+			{Name: methods.RunPause, Version: 1},
+			{Name: methods.RunResume, Version: 1},
 			{Name: methods.WorkerList, Version: 1},
 			{Name: methods.WorkerAssignmentCancel, Version: 1},
 			{Name: methods.WorkerMessageSend, Version: 1},
@@ -214,6 +216,42 @@ func (c *Client) CancelRun(ctx context.Context, params methods.RunCancelParams) 
 	var result methods.RunCancelResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return methods.RunCancelResult{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) PauseRun(ctx context.Context, params methods.RunPauseParams) (methods.RunPauseResult, error) {
+	if child := c.perRun(params.RunID); child != nil {
+		return child.PauseRun(ctx, params)
+	}
+	if err := c.Initialize(ctx); err != nil {
+		return methods.RunPauseResult{}, err
+	}
+	raw, err := c.call(ctx, methods.RunPause, params)
+	if err != nil {
+		return methods.RunPauseResult{}, err
+	}
+	var result methods.RunPauseResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.RunPauseResult{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) ResumeRun(ctx context.Context, params methods.RunResumeParams) (methods.RunResumeResult, error) {
+	if child := c.perRun(params.RunID); child != nil {
+		return child.ResumeRun(ctx, params)
+	}
+	if err := c.Initialize(ctx); err != nil {
+		return methods.RunResumeResult{}, err
+	}
+	raw, err := c.call(ctx, methods.RunResume, params)
+	if err != nil {
+		return methods.RunResumeResult{}, err
+	}
+	var result methods.RunResumeResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.RunResumeResult{}, err
 	}
 	return result, nil
 }

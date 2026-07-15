@@ -9,6 +9,7 @@ import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/button.jsx';
 import { ErrorMessage } from '../ui/feedback.jsx';
 import { Field } from '../ui/field.jsx';
+import { SelectMenu } from '../ui/select.jsx';
 import {
   ModuleHeader,
   SettingSelect,
@@ -90,18 +91,16 @@ export function ProvidersTab({
                 />
               </Field>
               <Field className="settings-row" label="供应商类型">
-                <select
-                  onChange={(event) => {
-                    const provider = event.target.value;
+                <SelectMenu
+                  ariaLabel="供应商类型"
+                  onChange={(provider) => {
                     updateProfileDraft('provider', provider);
                     updateProfileDraft('baseUrl', baseUrlAfterProviderChange(profileDraft.baseUrl, provider));
                   }}
+                  options={providerTypeOptions}
+                  testId="provider-type"
                   value={profileDraft.provider}
-                >
-                  {providerTypeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
+                />
               </Field>
               <Field className="settings-row" label="配置模型">
                 <input

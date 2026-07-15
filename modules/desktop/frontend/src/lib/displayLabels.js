@@ -18,6 +18,7 @@ const statusLabel = {
   failed: '失败',
   idle: '空闲',
   pending: '待处理',
+  paused: '已暂停',
   queued: '排队中',
   ready: '就绪',
   reset: '已重置',

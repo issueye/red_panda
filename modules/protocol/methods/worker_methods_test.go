@@ -11,6 +11,8 @@ func TestWorkerMethodNames(t *testing.T) {
 	want := map[string]string{
 		"run execute":              "run.execute",
 		"run cancel":               "run.cancel",
+		"run pause":                "run.pause",
+		"run resume":               "run.resume_execution",
 		"run event":                "run.event",
 		"worker list":              "worker.list",
 		"worker assignment cancel": "worker.assignment.cancel",
@@ -21,6 +23,8 @@ func TestWorkerMethodNames(t *testing.T) {
 	got := map[string]string{
 		"run execute":              RunExecute,
 		"run cancel":               RunCancel,
+		"run pause":                RunPause,
+		"run resume":               RunResume,
 		"run event":                RunEvent,
 		"worker list":              WorkerList,
 		"worker assignment cancel": WorkerAssignmentCancel,
@@ -46,6 +50,7 @@ func TestWorkerContractJSONRoundTrip(t *testing.T) {
 			Ready:      1,
 			Busy:       1,
 			Running:    1,
+			Paused:     1,
 			Workers: []WorkerRef{
 				{ID: "worker-01", State: WorkerStateBusy, CurrentAssignmentID: "assignment-01", ProfileKey: "planner", MailboxCapacity: 64, Healthy: true},
 				{ID: "worker-02", State: WorkerStateReady, MailboxCapacity: 64, Healthy: true},
@@ -92,7 +97,7 @@ func TestRequiredWorkerFieldsAreNotOmitted(t *testing.T) {
 		{"assignment", AssignmentRecord{}, []string{"id", "run_id", "worker_id", "task", "status", "created_at"}},
 		{"message", WorkerMessage{}, []string{"id", "run_id", "from_worker_id", "from_assignment_id", "to_worker_id", "to_assignment_id", "kind", "payload", "created_at", "expires_at"}},
 		{"message send", WorkerMessageSendParams{}, []string{"to_worker_id", "to_assignment_id", "kind", "payload"}},
-		{"pool", PoolSnapshot{}, []string{"configured", "ready", "busy", "draining", "unhealthy", "stopped", "queued", "running", "waiting_permission", "workers", "assignments"}},
+		{"pool", PoolSnapshot{}, []string{"configured", "ready", "busy", "draining", "unhealthy", "stopped", "queued", "running", "paused", "waiting_permission", "workers", "assignments"}},
 		{"assignment cancel", WorkerAssignmentCancelParams{}, []string{"run_id", "assignment_id"}},
 	}
 
@@ -235,6 +240,10 @@ func TestWorkerRPCPayloadsJSONRoundTrip(t *testing.T) {
 		{"run execute result", RunExecuteResult{Accepted: true, RunID: "run-01", AssignmentID: "assignment-01", WorkerID: "worker-01"}},
 		{"run cancel params", RunCancelParams{RunID: "run-01", Reason: "user request"}},
 		{"run cancel result", RunCancelResult{Accepted: true, RunID: "run-01", Cancelled: 2}},
+		{"run pause params", RunPauseParams{RunID: "run-01", Reason: "session compact", DelegatedOnly: true}},
+		{"run pause result", RunPauseResult{Accepted: true, RunID: "run-01", Paused: 2}},
+		{"run resume params", RunResumeParams{RunID: "run-01", DelegatedOnly: true}},
+		{"run resume result", RunResumeResult{Accepted: true, RunID: "run-01", Resumed: 2}},
 		{"worker list params", WorkerListParams{RunID: "run-01", WorkerID: "worker-01", AssignmentID: "assignment-01"}},
 		{"worker list result", WorkerListResult{Workers: []WorkerRef{{ID: "worker-01", Healthy: true}}, Assignments: []AssignmentRecord{}}},
 		{"assignment cancel params", WorkerAssignmentCancelParams{RunID: "run-01", AssignmentID: "assignment-01", Reason: "not needed"}},

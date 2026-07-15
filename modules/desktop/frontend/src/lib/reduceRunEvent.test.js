@@ -66,6 +66,22 @@ test('assignment terminal state is irreversible', () => {
   assert.deepEqual(late.assignmentOrder, ['assignment_1']);
 });
 
+test('paused assignment remains active and can return to running', () => {
+  const base = createEmptySessionRuntime({
+    running: true,
+    currentRunId: 'run_1',
+    runs: [{ id: 'run_1', status: 'running' }],
+  });
+  const paused = reduceRunEvent(base, event('worker_assignment_updated', 1, { status: 'paused' })).runtime;
+  assert.equal(paused.assignmentsById.assignment_1.status, 'paused');
+  assert.equal(paused.running, true);
+  assert.equal(paused.currentRunId, 'run_1');
+
+  const resumed = reduceRunEvent(paused, event('worker_assignment_updated', 2, { status: 'running' })).runtime;
+  assert.equal(resumed.assignmentsById.assignment_1.status, 'running');
+  assert.equal(resumed.currentRunId, 'run_1');
+});
+
 test('worker private text never enters main conversation', () => {
   const base = createEmptySessionRuntime();
   const next = reduceRunEvent(base, event('message_delta', 1, {

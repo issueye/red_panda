@@ -128,6 +128,16 @@ func (c *runtimeProcess) Cancel(ctx context.Context, runID string, reason string
 	return err
 }
 
+func (c *runtimeProcess) Pause(ctx context.Context, runID string, reason string) error {
+	_, err := c.call(ctx, methods.RunPause, methods.RunPauseParams{RunID: runID, Reason: reason})
+	return err
+}
+
+func (c *runtimeProcess) Resume(ctx context.Context, runID string) error {
+	_, err := c.call(ctx, methods.RunResume, methods.RunResumeParams{RunID: runID})
+	return err
+}
+
 // Healthy reports whether the reusable Runtime process can accept another run.
 func (c *runtimeProcess) Healthy() bool {
 	c.mu.Lock()

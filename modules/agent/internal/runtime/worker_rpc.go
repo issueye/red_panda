@@ -27,6 +27,50 @@ func (r *Runtime) handleRunCancel(req jsonrpc.Request) error {
 	return r.writeResponse(resp)
 }
 
+func (r *Runtime) handleRunPause(req jsonrpc.Request) error {
+	var params methods.RunPauseParams
+	if err := json.Unmarshal(req.Params, &params); err != nil || strings.TrimSpace(params.RunID) == "" {
+		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
+	}
+	paused := 0
+	var err error
+	if params.DelegatedOnly {
+		paused, err = r.workerPool.PauseDelegatedRun(context.Background(), params.RunID, params.Reason)
+	} else if r.runStates.Pause(params.RunID) {
+		paused = 1
+	}
+	if err != nil {
+		return r.writeResponse(jsonrpc.NewError(req.ID, -32020, err.Error()))
+	}
+	resp, err := jsonrpc.NewResult(req.ID, methods.RunPauseResult{Accepted: true, RunID: params.RunID, Paused: paused})
+	if err != nil {
+		return err
+	}
+	return r.writeResponse(resp)
+}
+
+func (r *Runtime) handleRunResume(req jsonrpc.Request) error {
+	var params methods.RunResumeParams
+	if err := json.Unmarshal(req.Params, &params); err != nil || strings.TrimSpace(params.RunID) == "" {
+		return r.writeResponse(jsonrpc.NewError(req.ID, -32602, "invalid params"))
+	}
+	resumed := 0
+	var err error
+	if params.DelegatedOnly {
+		resumed, err = r.workerPool.ResumeDelegatedRun(context.Background(), params.RunID)
+	} else if r.runStates.Resume(params.RunID) {
+		resumed = 1
+	}
+	if err != nil {
+		return r.writeResponse(jsonrpc.NewError(req.ID, -32021, err.Error()))
+	}
+	resp, err := jsonrpc.NewResult(req.ID, methods.RunResumeResult{Accepted: true, RunID: params.RunID, Resumed: resumed})
+	if err != nil {
+		return err
+	}
+	return r.writeResponse(resp)
+}
+
 func (r *Runtime) handleWorkerList(req jsonrpc.Request) error {
 	var params methods.WorkerListParams
 	if len(req.Params) > 0 {
@@ -105,6 +149,7 @@ func methodPoolSnapshot(snapshot worker.PoolSnapshot) methods.PoolSnapshot {
 		Configured: snapshot.Configured, Ready: snapshot.Ready, Busy: snapshot.Busy,
 		Draining: snapshot.Draining, Unhealthy: snapshot.Unhealthy, Stopped: snapshot.Stopped,
 		Queued: snapshot.Queued, Running: snapshot.Running, WaitingPermission: snapshot.WaitingPermission,
+		Paused:  snapshot.Paused,
 		Workers: []methods.WorkerRef{}, Assignments: []methods.AssignmentRecord{},
 	}
 	for _, item := range snapshot.Workers {

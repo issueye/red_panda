@@ -7,7 +7,7 @@ import { EmptyState } from './ui/feedback.jsx';
 import { PanelHeader } from './ui/panel.jsx';
 
 function isActiveStatus(status) {
-  return status === 'queued' || status === 'running' || status === 'cancelling' || status === 'waiting_permission';
+  return status === 'queued' || status === 'running' || status === 'cancelling' || status === 'waiting_permission' || status === 'paused';
 }
 
 export function WorkerPanel({

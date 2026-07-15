@@ -38,7 +38,7 @@ func TestSummarizeMessagesExcludesSubagentContent(t *testing.T) {
 	}
 }
 
-func TestPauseSessionForCompactCallsRunCancelDirectly(t *testing.T) {
+func TestPauseSessionForCompactPausesAndResumesDelegatedWorkers(t *testing.T) {
 	repos, _ := newSessionServiceTestFixture(t)
 	session, err := repos.Sessions.Create("compact active run", "D:\\workspace")
 	if err != nil {
@@ -52,14 +52,10 @@ func TestPauseSessionForCompactCallsRunCancelDirectly(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	capturePath := filepath.Join(t.TempDir(), "run-cancel-params.json")
+	capturePath := filepath.Join(t.TempDir(), "run-compact-params.json")
 	runtime := useStdioRuntimeHelper(t, capturePath)
 	service := NewSessionService(repos, runtime)
 
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		_ = repos.Runs.Finish("run_compact_v2", "cancelled", "session compact")
-	}()
 	paused, err := service.pauseSessionForCompact(session.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -67,16 +63,37 @@ func TestPauseSessionForCompactCallsRunCancelDirectly(t *testing.T) {
 	if paused != 1 {
 		t.Fatalf("paused = %d, want 1", paused)
 	}
-	raw, err := os.ReadFile(capturePath)
+	raw, err := os.ReadFile(capturePath + ".pause")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var params methods.RunCancelParams
+	var params methods.RunPauseParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		t.Fatal(err)
 	}
-	if params.RunID != "run_compact_v2" || params.Reason != "session compact pause" {
-		t.Fatalf("run.cancel params = %#v", params)
+	if params.RunID != "run_compact_v2" || params.Reason != "session compact" || !params.DelegatedOnly {
+		t.Fatalf("run.pause params = %#v", params)
+	}
+	if err := service.resumeSessionAfterCompact(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumeRaw, err := os.ReadFile(capturePath + ".resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumeParams methods.RunResumeParams
+	if err := json.Unmarshal(resumeRaw, &resumeParams); err != nil {
+		t.Fatal(err)
+	}
+	if resumeParams.RunID != "run_compact_v2" || !resumeParams.DelegatedOnly {
+		t.Fatalf("run.resume_execution params = %#v", resumeParams)
+	}
+	run, err := repos.Runs.Get("run_compact_v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "running" {
+		t.Fatalf("run status = %q, want running", run.Status)
 	}
 }
 
@@ -323,7 +340,7 @@ func newSessionServiceTestFixture(t *testing.T) (repository.Set, SessionService)
 }
 
 func TestSessionServiceCompactPausesActiveRuns(t *testing.T) {
-	repos, service := newSessionServiceTestFixture(t)
+	repos, _ := newSessionServiceTestFixture(t)
 	source, err := repos.Sessions.Create("compact-pause", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -346,7 +363,8 @@ func TestSessionServiceCompactPausesActiveRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Without a runtime client, pause must still force-finish the active run.
+	capturePath := filepath.Join(t.TempDir(), "compact-active-run.json")
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath))
 	result, err := service.Compact(source.ID, CompactSessionRequest{
 		KeepTailTurns: 1,
 		Mode:          "local",
@@ -361,15 +379,53 @@ func TestSessionServiceCompactPausesActiveRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if active != 0 {
-		t.Fatalf("active runs after compact = %d, want 0", active)
+	if active != 1 {
+		t.Fatalf("active runs after compact = %d, want 1", active)
 	}
 	run, err := repos.Runs.Get("run_active")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != "cancelled" {
-		t.Fatalf("run status = %q, want cancelled", run.Status)
+	if run.Status != "running" {
+		t.Fatalf("run status = %q, want running", run.Status)
+	}
+	if _, err := os.Stat(capturePath + ".pause"); err != nil {
+		t.Fatalf("pause RPC was not captured: %v", err)
+	}
+	if _, err := os.Stat(capturePath + ".resume"); err != nil {
+		t.Fatalf("resume RPC was not captured: %v", err)
+	}
+}
+
+func TestSessionServiceCompactResumesWorkersWhenSummaryFails(t *testing.T) {
+	repos, _ := newSessionServiceTestFixture(t)
+	source, err := repos.Sessions.Create("compact-resume-on-error", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Runs.Start(model.RunRecord{
+		ID: "run_resume_on_error", SessionID: source.ID, Status: "running", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	capturePath := filepath.Join(t.TempDir(), "compact-error.json")
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath))
+
+	if _, err := service.Compact(source.ID, CompactSessionRequest{Mode: "local"}); err == nil {
+		t.Fatal("compact succeeded without any messages")
+	}
+	if _, err := os.Stat(capturePath + ".pause"); err != nil {
+		t.Fatalf("pause RPC was not captured: %v", err)
+	}
+	if _, err := os.Stat(capturePath + ".resume"); err != nil {
+		t.Fatalf("resume RPC was not captured after compact failure: %v", err)
+	}
+	run, err := repos.Runs.Get("run_resume_on_error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "running" {
+		t.Fatalf("run status = %q, want running", run.Status)
 	}
 }
 

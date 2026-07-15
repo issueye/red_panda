@@ -30,6 +30,8 @@ const (
 	// v0.2 primary execution protocol (no legacy subagent/root model).
 	RunExecute             = "run.execute"
 	RunCancel              = "run.cancel"
+	RunPause               = "run.pause"
+	RunResume              = "run.resume_execution"
 	RunEvent               = "run.event"
 	WorkerList             = "worker.list"
 	WorkerAssignmentCancel = "worker.assignment.cancel"
@@ -53,6 +55,7 @@ type AssignmentStatus string
 const (
 	AssignmentStatusQueued            AssignmentStatus = "queued"
 	AssignmentStatusRunning           AssignmentStatus = "running"
+	AssignmentStatusPaused            AssignmentStatus = "paused"
 	AssignmentStatusWaitingPermission AssignmentStatus = "waiting_permission"
 	AssignmentStatusCompleted         AssignmentStatus = "completed"
 	AssignmentStatusFailed            AssignmentStatus = "failed"
@@ -105,6 +108,7 @@ type PoolSnapshot struct {
 	Queued            int                `json:"queued"`
 	Running           int                `json:"running"`
 	WaitingPermission int                `json:"waiting_permission"`
+	Paused            int                `json:"paused"`
 	Workers           []WorkerRef        `json:"workers"`
 	Assignments       []AssignmentRecord `json:"assignments"`
 }
@@ -209,6 +213,29 @@ type RunCancelResult struct {
 	Accepted  bool   `json:"accepted"`
 	RunID     string `json:"run_id"`
 	Cancelled int    `json:"cancelled"`
+}
+
+type RunPauseParams struct {
+	RunID         string `json:"run_id"`
+	Reason        string `json:"reason,omitempty"`
+	DelegatedOnly bool   `json:"delegated_only,omitempty"`
+}
+
+type RunPauseResult struct {
+	Accepted bool   `json:"accepted"`
+	RunID    string `json:"run_id"`
+	Paused   int    `json:"paused"`
+}
+
+type RunResumeParams struct {
+	RunID         string `json:"run_id"`
+	DelegatedOnly bool   `json:"delegated_only,omitempty"`
+}
+
+type RunResumeResult struct {
+	Accepted bool   `json:"accepted"`
+	RunID    string `json:"run_id"`
+	Resumed  int    `json:"resumed"`
 }
 
 type WorkerListParams struct {

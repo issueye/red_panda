@@ -199,6 +199,10 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 		return r.handleAgentSkillDelete(req)
 	case methods.RunCancel:
 		return r.handleRunCancel(req)
+	case methods.RunPause:
+		return r.handleRunPause(req)
+	case methods.RunResume:
+		return r.handleRunResume(req)
 	case methods.WorkerList:
 		return r.handleWorkerList(req)
 	case methods.WorkerAssignmentCancel:
@@ -248,6 +252,8 @@ func (r *Runtime) handleInitialize(req jsonrpc.Request) error {
 			{Name: methods.CorePing, Version: 1},
 			{Name: methods.RunExecute, Version: 1},
 			{Name: methods.RunCancel, Version: 1},
+			{Name: methods.RunPause, Version: 1},
+			{Name: methods.RunResume, Version: 1},
 			{Name: methods.RunEvent, Version: 1},
 			{Name: methods.WorkerList, Version: 1},
 			{Name: methods.WorkerAssignmentCancel, Version: 1},
@@ -649,6 +655,9 @@ func (r *Runtime) emitEvent(ctx context.Context, params methods.ReplyParams, typ
 // emitAgentEvent emits a v0.2 Worker-scoped event using EnvelopeV2.
 // The agent parameter is kept for minimal internal compatibility (Role/Name/Path) but hierarchy is ignored.
 func (r *Runtime) emitAgentEvent(ctx context.Context, params methods.ReplyParams, agent events.AgentRef, typ events.EventType, stream *events.StreamRef, payload map[string]any) error {
+	if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
+		return err
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

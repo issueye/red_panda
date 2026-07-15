@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { apiJson } from '../lib/api.js';
 import { appendDiagnosticLog } from '../lib/diagnosticLog.js';
-import { goalShouldResumeAfterCompact } from '../lib/goals.js';
 import { createEmptySessionRuntime } from '../lib/sessionRuntime.js';
 import { appendMessages, createSystemMessage } from './sessionActionHelpers.js';
 
-const ACTIVE_ASSIGNMENT_STATUSES = new Set(['running', 'waiting_permission', 'cancelling']);
+const ACTIVE_ASSIGNMENT_STATUSES = new Set(['queued', 'running', 'waiting_permission', 'cancelling', 'paused']);
 
-function mapAssignmentStatus(assignmentsById, activeStatuses, status, summary) {
+function mapAssignmentStatus(assignmentsById, assignmentIds, status, summary) {
   return Object.fromEntries(Object.entries(assignmentsById || {}).map(([id, item]) => [
     id,
-    activeStatuses.has(item.status) ? { ...item, status, summary } : item,
+    assignmentIds.has(id) ? { ...item, status, summary } : item,
   ]));
 }
 
@@ -19,9 +18,6 @@ export function useSessionCompactionActions({
   sessionRuntimesRef,
   currentSessionIdRef,
   patchRuntime,
-  request,
-  hydrateGoals,
-  continueGoal,
   runSettings,
   contextTokenBudget,
   compacting,
@@ -29,14 +25,14 @@ export function useSessionCompactionActions({
   const autoCompactBusyRef = useRef(false);
   const autoCompactSessionRef = useRef('');
 
-  const pauseSessionForCompact = useCallback(async (sessionId) => {
+  const pauseSessionForCompact = useCallback((sessionId) => {
     const runtime = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
     const runId = runtime.currentRunId || '';
-    const activeAssignments = Object.values(runtime.assignmentsById || {})
-      .filter((item) => ACTIVE_ASSIGNMENT_STATUSES.has(item?.status));
+    const delegatedAssignments = Object.values(runtime.assignmentsById || {})
+      .filter((item) => item?.originWorkerId && ACTIVE_ASSIGNMENT_STATUSES.has(item.status));
 
-    if (!runId && activeAssignments.length === 0 && !runtime.running) {
-      return { paused: false, runId: '', assignments: 0 };
+    if (!runId && delegatedAssignments.length === 0 && !runtime.running) {
+      return { paused: false, runId: '', assignments: [] };
     }
 
     appendDiagnosticLog('info', '摘要前暂停运行与 Worker 工作分配', {
@@ -44,62 +40,50 @@ export function useSessionCompactionActions({
       detail: {
         sessionId,
         runId,
-        assignmentCount: activeAssignments.length,
-        assignmentIds: activeAssignments.map((item) => item.id),
+        assignmentCount: delegatedAssignments.length,
+        assignmentIds: delegatedAssignments.map((item) => item.id),
       },
     });
 
     patchRuntime(sessionId, (previous) => ({
       ...previous,
       compacting: true,
-      running: false,
       assignmentsById: mapAssignmentStatus(
         previous.assignmentsById,
-        new Set(['running', 'waiting_permission']),
-        'cancelling',
-        '摘要前暂停',
+        new Set(delegatedAssignments.map((item) => item.id)),
+        'paused',
+        '上下文摘要期间暂停',
       ),
     }));
 
-    if (runId) {
-      await request('run.cancel', {
-        run_id: runId,
-        reason: 'session compact pause',
-      }).catch(() => null);
-    }
+    return {
+      paused: delegatedAssignments.length > 0,
+      runId,
+      assignments: delegatedAssignments.map((item) => ({ id: item.id, status: item.status })),
+    };
+  }, [patchRuntime, sessionRuntimesRef]);
 
-    const deadline = Date.now() + 12_000;
-    while (Date.now() < deadline) {
-      const latest = sessionRuntimesRef.current[sessionId] || createEmptySessionRuntime();
-      const stillActiveAssignments = Object.values(latest.assignmentsById || {})
-        .some((item) => ACTIVE_ASSIGNMENT_STATUSES.has(item?.status));
-      if (!latest.running && !stillActiveAssignments) break;
-      await new Promise((resolve) => window.setTimeout(resolve, 120));
-    }
-
+  const restoreAssignmentsAfterCompact = useCallback((sessionId, pauseInfo) => {
+    const original = new Map((pauseInfo.assignments || []).map((item) => [item.id, item.status]));
     patchRuntime(sessionId, (previous) => ({
       ...previous,
-      running: false,
-      currentRunId: '',
-      compacting: true,
-      assignmentsById: mapAssignmentStatus(
-        previous.assignmentsById,
-        ACTIVE_ASSIGNMENT_STATUSES,
-        'cancelled',
-        '已为上下文摘要暂停',
-      ),
+      assignmentsById: Object.fromEntries(Object.entries(previous.assignmentsById || {}).map(([id, item]) => [
+        id,
+        item.status === 'paused' && original.has(id)
+          ? { ...item, status: original.get(id), summary: '摘要完成，已恢复' }
+          : item,
+      ])),
     }));
-
-    return { paused: true, runId, assignments: activeAssignments.length };
-  }, [patchRuntime, request, sessionRuntimesRef]);
+  }, [patchRuntime]);
 
   const compactSession = useCallback(async ({ silent = false } = {}) => {
     const sessionId = currentSessionIdRef.current;
     if (!sessionId || sessionId === 'local-design') return null;
 
     patchRuntime(sessionId, (previous) => ({ ...previous, compacting: true }));
+    let pauseInfo = { paused: false, runId: '', assignments: [] };
     try {
-      const pauseInfo = await pauseSessionForCompact(sessionId);
+      pauseInfo = pauseSessionForCompact(sessionId);
       const compactBody = {
         keep_tail_turns: 3,
         mode: 'auto',
@@ -109,58 +93,43 @@ export function useSessionCompactionActions({
         source: 'compact',
         detail: { ...compactBody, paused: pauseInfo },
       });
-      const preview = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact/preview`, {
+      const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact`, {
         method: 'POST',
         body: JSON.stringify(compactBody),
       });
-      const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact`, {
-        method: 'POST',
-        body: JSON.stringify({ ...compactBody, summary: preview.preview?.summary }),
-      });
+      restoreAssignmentsAfterCompact(sessionId, pauseInfo);
       patchRuntime(sessionId, (previous) => ({
         ...previous,
         compacting: false,
-        running: false,
-        contextSummary: result.summary || preview.preview?.summary || null,
+        contextSummary: result.summary || null,
         contextSummaryEndSeq: Number(result.compaction?.source_end_seq) || 0,
         messages: pauseInfo.paused
           ? appendMessages(
               previous,
-              createSystemMessage('compact_pause', '已暂停当前运行并完成上下文摘要。'),
+              createSystemMessage('compact_resume', '上下文摘要完成，其他 Worker 已自动恢复。'),
             ).messages
           : previous.messages,
       }));
-      appendDiagnosticLog('info', `会话上下文摘要已更新（${preview.preview?.summary_method || 'unknown'}）`, {
+      appendDiagnosticLog('info', `会话上下文摘要已更新（${result.summary_method || 'unknown'}）`, {
         source: 'compact',
         detail: {
           sessionId,
           sourceEndSeq: result.compaction?.source_end_seq,
-          keepTailTurns: preview.preview?.keep_tail_turns,
-          summaryMethod: preview.preview?.summary_method,
-          pausedRuns: result.paused_runs ?? preview.paused_runs ?? 0,
+          keepTailTurns: result.keep_tail_turns,
+          summaryMethod: result.summary_method,
+          pausedRuns: result.paused_runs ?? 0,
         },
       });
       if (!silent) {
         // Manual compaction intentionally remains quiet.
       }
-      const resumedGoal = await hydrateGoals?.(sessionId);
-      if (goalShouldResumeAfterCompact(resumedGoal)) {
-        appendDiagnosticLog('info', `摘要完成，恢复 Goal ${resumedGoal.id}`, {
-          source: 'compact',
-          detail: { sessionId, goalId: resumedGoal.id },
-        });
-        await continueGoal?.('', { goals_enabled: true }, resumedGoal, sessionId);
-        patchRuntime(sessionId, (previous) => appendMessages(
-          previous,
-          createSystemMessage('compact_resume', '上下文摘要完成，Goal 已自动恢复。'),
-        ));
-      }
       return result.compaction || null;
     } catch (error) {
+      restoreAssignmentsAfterCompact(sessionId, pauseInfo);
       patchRuntime(sessionId, (previous) => ({ ...previous, compacting: false }));
       throw error;
     }
-  }, [continueGoal, currentSessionIdRef, hydrateGoals, patchRuntime, pauseSessionForCompact, runSettings.providerProfileId]);
+  }, [currentSessionIdRef, patchRuntime, pauseSessionForCompact, restoreAssignmentsAfterCompact, runSettings.providerProfileId]);
 
   useEffect(() => {
     if (!contextTokenBudget?.autoCompact) return;

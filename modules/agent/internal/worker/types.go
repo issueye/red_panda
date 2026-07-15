@@ -50,6 +50,7 @@ type AssignmentStatus string
 const (
 	AssignmentQueued            AssignmentStatus = "queued"
 	AssignmentRunning           AssignmentStatus = "running"
+	AssignmentPaused            AssignmentStatus = "paused"
 	AssignmentWaitingPermission AssignmentStatus = "waiting_permission"
 	AssignmentCompleted         AssignmentStatus = "completed"
 	AssignmentFailed            AssignmentStatus = "failed"
@@ -95,6 +96,12 @@ type Executor interface {
 	Healthy() bool
 }
 
+// PausableExecutor retains an active execution resource while suspended.
+type PausableExecutor interface {
+	Pause(context.Context, AssignmentID, string) error
+	Resume(context.Context, AssignmentID) error
+}
+
 type ExecutorFactory func(WorkerID) (Executor, error)
 
 type Worker struct {
@@ -120,6 +127,7 @@ type Assignment struct {
 	CreatedAt      time.Time
 	StartedAt      *time.Time
 	FinishedAt     *time.Time
+	resumeStatus   AssignmentStatus
 
 	cancel     context.CancelFunc
 	cancelDone chan struct{}
@@ -191,6 +199,7 @@ type PoolSnapshot struct {
 	Queued            int                  `json:"queued"`
 	Running           int                  `json:"running"`
 	WaitingPermission int                  `json:"waiting_permission"`
+	Paused            int                  `json:"paused"`
 	Workers           []WorkerSnapshot     `json:"workers"`
 	Assignments       []AssignmentSnapshot `json:"assignments"`
 }

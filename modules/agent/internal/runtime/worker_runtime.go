@@ -331,6 +331,38 @@ func (e *lazyProcessExecutor) Cancel(ctx context.Context, assignmentID worker.As
 	return process.Cancel(ctx, runID, reason)
 }
 
+func (e *lazyProcessExecutor) Pause(ctx context.Context, assignmentID worker.AssignmentID, reason string) error {
+	e.mu.Lock()
+	process := e.process
+	runID := e.activeRunID
+	delegated := e.activeAssignmentID == assignmentID && e.activeKind == workerExecutionDelegated
+	e.mu.Unlock()
+	if process == nil || !delegated || runID == "" {
+		return nil
+	}
+	pausable, ok := process.(worker.PausableProcess)
+	if !ok {
+		return fmt.Errorf("worker process does not support pause")
+	}
+	return pausable.Pause(ctx, runID, reason)
+}
+
+func (e *lazyProcessExecutor) Resume(ctx context.Context, assignmentID worker.AssignmentID) error {
+	e.mu.Lock()
+	process := e.process
+	runID := e.activeRunID
+	delegated := e.activeAssignmentID == assignmentID && e.activeKind == workerExecutionDelegated
+	e.mu.Unlock()
+	if process == nil || !delegated || runID == "" {
+		return nil
+	}
+	pausable, ok := process.(worker.PausableProcess)
+	if !ok {
+		return fmt.Errorf("worker process does not support resume")
+	}
+	return pausable.Resume(ctx, runID)
+}
+
 func (e *lazyProcessExecutor) Reset(ctx context.Context) error {
 	e.mu.Lock()
 	process := e.process

@@ -16,6 +16,8 @@ type RunState struct {
 	Todos      []methods.TodoItemDTO
 	Goal       *runGoalState
 	registered bool
+	paused     bool
+	resume     chan struct{}
 }
 
 // RunStateStore is the single lifecycle owner for Runtime's per-run state.
@@ -61,7 +63,53 @@ func (s *RunStateStore) Cancels() []context.CancelFunc {
 func (s *RunStateStore) Remove(runID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if state := s.runs[runID]; state != nil && state.paused {
+		close(state.resume)
+	}
 	delete(s.runs, runID)
+}
+
+func (s *RunStateStore) Pause(runID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.runs[runID]
+	if state == nil || !state.registered || state.paused {
+		return false
+	}
+	state.paused = true
+	state.resume = make(chan struct{})
+	return true
+}
+
+func (s *RunStateStore) Resume(runID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.runs[runID]
+	if state == nil || !state.paused {
+		return false
+	}
+	state.paused = false
+	close(state.resume)
+	state.resume = nil
+	return true
+}
+
+func (s *RunStateStore) WaitIfPaused(ctx context.Context, runID string) error {
+	for {
+		s.mu.RLock()
+		state := s.runs[runID]
+		if state == nil || !state.paused {
+			s.mu.RUnlock()
+			return nil
+		}
+		resume := state.resume
+		s.mu.RUnlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-resume:
+		}
+	}
 }
 
 func (s *RunStateStore) NextRunSeq(runID string) uint64 {

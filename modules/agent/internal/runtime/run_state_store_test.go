@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"redpanda/protocol/methods"
 )
@@ -93,6 +95,50 @@ func TestRunStateStoreRejectsDuplicateNilCancel(t *testing.T) {
 	}
 	if store.Register("run-1", nil) {
 		t.Fatal("duplicate nil-cancel registration was accepted")
+	}
+}
+
+func TestRunStateStorePauseBlocksUntilResume(t *testing.T) {
+	var store RunStateStore
+	if !store.Register("run-pause", nil) || !store.Pause("run-pause") {
+		t.Fatal("run was not registered and paused")
+	}
+	done := make(chan error, 1)
+	go func() { done <- store.WaitIfPaused(context.Background(), "run-pause") }()
+	select {
+	case err := <-done:
+		t.Fatalf("paused waiter returned early: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if !store.Resume("run-pause") {
+		t.Fatal("run was not resumed")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("paused waiter did not resume")
+	}
+}
+
+func TestRunStateStorePausedWaitHonorsCancellation(t *testing.T) {
+	var store RunStateStore
+	if !store.Register("run-cancel", nil) || !store.Pause("run-cancel") {
+		t.Fatal("run was not registered and paused")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- store.WaitIfPaused(ctx, "run-cancel") }()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("wait error = %v, want context canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled paused waiter did not return")
 	}
 }
 

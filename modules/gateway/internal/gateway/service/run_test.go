@@ -608,6 +608,44 @@ func TestRunServiceRuntimeHelperProcess(t *testing.T) {
 				t.Fatal(err)
 			}
 			return
+		case methods.RunPause:
+			if err := os.WriteFile(os.Getenv("RED_PANDA_RUNTIME_CAPTURE")+".pause", request.Params, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var params methods.RunPauseParams
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			response, err := jsonrpc.NewResult(request.ID, methods.RunPauseResult{
+				Accepted: true,
+				RunID:    params.RunID,
+				Paused:   1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := encoder.Encode(response); err != nil {
+				t.Fatal(err)
+			}
+		case methods.RunResume:
+			if err := os.WriteFile(os.Getenv("RED_PANDA_RUNTIME_CAPTURE")+".resume", request.Params, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var params methods.RunResumeParams
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			response, err := jsonrpc.NewResult(request.ID, methods.RunResumeResult{
+				Accepted: true,
+				RunID:    params.RunID,
+				Resumed:  1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := encoder.Encode(response); err != nil {
+				t.Fatal(err)
+			}
 		default:
 			if err := encoder.Encode(jsonrpc.NewError(request.ID, -32601, "method not found")); err != nil {
 				t.Fatal(err)

@@ -5,7 +5,7 @@ import { todosFromToolFinishedPayload, todosFromUpdatedEvent } from './todos.js'
 export const WORKER_PROTOCOL_VERSION = '2026-07-13';
 const TERMINAL_ASSIGNMENT_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
-const ACTIVE_ASSIGNMENT_STATUSES = new Set(['queued', 'running', 'cancelling', 'waiting_permission']);
+const ACTIVE_ASSIGNMENT_STATUSES = new Set(['queued', 'running', 'cancelling', 'waiting_permission', 'paused']);
 
 function assignmentStatusForTerminalRun(runStatus) {
   if (runStatus === 'cancelled') return 'cancelled';

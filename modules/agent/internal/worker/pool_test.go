@@ -13,6 +13,8 @@ import (
 type fakeExecutor struct {
 	mu         sync.Mutex
 	requests   []ExecuteRequest
+	paused     []AssignmentID
+	resumed    []AssignmentID
 	started    chan ExecuteRequest
 	release    chan struct{}
 	executeErr error
@@ -101,8 +103,20 @@ func (f *fakeExecutor) Execute(ctx context.Context, req ExecuteRequest, _ EventS
 }
 
 func (f *fakeExecutor) Cancel(context.Context, AssignmentID, string) error { return nil }
-func (f *fakeExecutor) Reset(context.Context) error                        { return nil }
-func (f *fakeExecutor) Healthy() bool                                      { return true }
+func (f *fakeExecutor) Pause(_ context.Context, id AssignmentID, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paused = append(f.paused, id)
+	return nil
+}
+func (f *fakeExecutor) Resume(_ context.Context, id AssignmentID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumed = append(f.resumed, id)
+	return nil
+}
+func (f *fakeExecutor) Reset(context.Context) error { return nil }
+func (f *fakeExecutor) Healthy() bool               { return true }
 func (f *fakeExecutor) Close(context.Context) error {
 	f.mu.Lock()
 	f.closed = true
@@ -596,6 +610,60 @@ func TestWaitingPermissionStateCanBeProjectedAndRestored(t *testing.T) {
 	if got := pool.Snapshot().Running; got != 1 {
 		t.Fatalf("Running = %d", got)
 	}
+}
+
+func TestPauseDelegatedRunKeepsEntryAliveAndResumesSameAssignment(t *testing.T) {
+	executors := []*fakeExecutor{newFakeExecutor(true), newFakeExecutor(true)}
+	next := 0
+	pool := mustPool(t, Config{Size: 2}, func(WorkerID) (Executor, error) {
+		executor := executors[next]
+		next++
+		return executor, nil
+	})
+
+	entry, err := pool.SubmitEntry(context.Background(), SubmitRequest{RunID: "run-pause", Task: "root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-executors[0].started
+	delegated, err := pool.Delegate(context.Background(), entry.AssignmentID, SubmitRequest{RunID: "run-pause", Task: "child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-executors[1].started
+
+	paused, err := pool.PauseDelegatedRun(context.Background(), "run-pause", "compact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paused != 1 {
+		t.Fatalf("paused = %d, want 1", paused)
+	}
+	snapshot := pool.Snapshot()
+	if snapshot.Paused != 1 || findAssignment(t, snapshot, entry.AssignmentID).Status != AssignmentRunning ||
+		findAssignment(t, snapshot, delegated.AssignmentID).Status != AssignmentPaused {
+		t.Fatalf("snapshot while paused = %+v", snapshot)
+	}
+
+	resumed, err := pool.ResumeDelegatedRun(context.Background(), "run-pause")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed != 1 {
+		t.Fatalf("resumed = %d, want 1", resumed)
+	}
+	if got := findAssignment(t, pool.Snapshot(), delegated.AssignmentID); got.Status != AssignmentRunning {
+		t.Fatalf("delegated assignment after resume = %+v", got)
+	}
+	close(executors[1].release)
+	result, err := pool.Wait(context.Background(), delegated.AssignmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != AssignmentCompleted || result.AssignmentID != delegated.AssignmentID {
+		t.Fatalf("delegated result = %+v", result)
+	}
+	close(executors[0].release)
 }
 
 func mustPool(t *testing.T, config Config, factory ExecutorFactory) *Pool {

@@ -102,6 +102,9 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 	}
 	turnsUsed := 0
 	for turn := 0; turn < maxTurns; turn++ {
+		if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
+			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+		}
 		// 循环中：从运行快照刷新 Todo 和 Goal 上下文。
 		if ctxTodos := r.todoContextForRun(params.RunID); ctxTodos != nil {
 			params.Options.TodoContext = ctxTodos
@@ -115,6 +118,9 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		definitions := agenttools.AvailableToolsForOptions(r.toolsForReply(ctx, params), params.Options)
 		request := newPromptComposer().compose(params, input, definitions, rounds)
 		err := r.provider.Complete(ctx, request, func(chunk provider.ProviderChunk) error {
+			if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
+				return err
+			}
 			return r.consumeProviderChunk(ctx, params, chunk, messageID, streamID, streamSeq, &requestedCalls, &emittedText)
 		})
 		turnsUsed++
@@ -155,6 +161,9 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 			return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
 		// 在历史记录中保留调用顺序；多个 worker.delegate 工作进程可并发执行。
+		if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
+			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+		}
 		exchanges, cancelled := r.executeToolBatch(ctx, params, requestedCalls)
 		if len(exchanges) > 0 {
 			rounds = append(rounds, exchanges)

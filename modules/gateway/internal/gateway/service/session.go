@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -142,8 +143,9 @@ type CompactSessionResult struct {
 	Summary          CompactSummary `json:"summary"`
 	KeepTailMessages int            `json:"keep_tail_messages"`
 	KeepTailTurns    int            `json:"keep_tail_turns"`
-	// PausedRuns is how many active root runs were paused before summary.
-	PausedRuns int `json:"paused_runs,omitempty"`
+	// PausedRuns is the number of delegated Worker assignments paused before summary.
+	PausedRuns    int    `json:"paused_runs,omitempty"`
+	SummaryMethod string `json:"summary_method,omitempty"`
 }
 
 type CompactPreviewResult struct {
@@ -161,13 +163,9 @@ func NewSessionService(repos repository.Set, runtime *runtimeclient.Client) Sess
 	return SessionService{repos: repos, runtime: runtime}
 }
 
-// pauseSessionForCompact stops every active run. Runtime owns cancellation of
-// all Assignments associated with each run.
-// When the runtime client is unavailable, active run records are force-finished.
+// pauseSessionForCompact suspends delegated Workers while each main Worker and
+// root Run remain alive. Paused Assignments retain their process and context.
 func (s SessionService) pauseSessionForCompact(sessionID string) (int, error) {
-	// Authoritative goal pause even when force-finish has no Runtime event.
-	_ = NewGoalService(s.repos).PauseBySession(sessionID, "session_compact")
-
 	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
 	if err != nil {
 		return 0, err
@@ -176,52 +174,45 @@ func (s SessionService) pauseSessionForCompact(sessionID string) (int, error) {
 		return 0, nil
 	}
 
-	// Without a runtime client we cannot stop live workers; mark records cancelled
-	// immediately so summary can proceed against a stable session snapshot.
 	if s.runtime == nil {
-		for _, run := range active {
-			_ = s.repos.Runs.Finish(run.ID, "cancelled", "paused for session compact")
-		}
-		return len(active), nil
+		return 0, fmt.Errorf("runtime is required to pause active workers")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), compactPauseTimeout)
 	defer cancel()
 
+	paused := 0
 	for _, run := range active {
-		_, _ = s.runtime.CancelRun(ctx, methods.RunCancelParams{
-			RunID:  run.ID,
-			Reason: "session compact pause",
+		result, pauseErr := s.runtime.PauseRun(ctx, methods.RunPauseParams{
+			RunID: run.ID, Reason: "session compact", DelegatedOnly: true,
 		})
+		if pauseErr != nil {
+			_ = s.resumeSessionAfterCompact(sessionID)
+			return paused, pauseErr
+		}
+		paused += result.Paused
 	}
+	return paused, nil
+}
 
-	deadline := time.Now().Add(compactPauseTimeout)
-	for time.Now().Before(deadline) {
-		count, countErr := s.repos.Runs.CountActiveBySession(sessionID)
-		if countErr != nil {
-			return len(active), countErr
-		}
-		if count == 0 {
-			return len(active), nil
-		}
-		select {
-		case <-ctx.Done():
-			// fall through to force-finish below
-		case <-time.After(100 * time.Millisecond):
-			continue
-		}
-		break
+func (s SessionService) resumeSessionAfterCompact(sessionID string) error {
+	if s.runtime == nil {
+		return nil
 	}
-
-	// Ensure compact is never blocked forever if finish events are delayed.
-	remaining, listErr := s.repos.Runs.ListActiveBySession(sessionID, 50)
-	if listErr != nil {
-		return len(active), listErr
+	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
+	if err != nil {
+		return err
 	}
-	for _, run := range remaining {
-		_ = s.repos.Runs.Finish(run.ID, "cancelled", "paused for session compact")
+	ctx, cancel := context.WithTimeout(context.Background(), compactPauseTimeout)
+	defer cancel()
+	var resumeErr error
+	for _, run := range active {
+		_, err := s.runtime.ResumeRun(ctx, methods.RunResumeParams{RunID: run.ID, DelegatedOnly: true})
+		if err != nil {
+			resumeErr = errors.Join(resumeErr, err)
+		}
 	}
-	return len(active), nil
+	return resumeErr
 }
 
 func (s SessionService) Create(name string, workspaceRoot string) (SessionDTO, error) {
@@ -341,6 +332,9 @@ func (s SessionService) CompactPreview(sessionID string, req CompactPreviewReque
 	if err != nil {
 		return CompactPreviewResult{}, fmt.Errorf("pause session for compact: %w", err)
 	}
+	if paused > 0 {
+		defer func() { _ = s.resumeSessionAfterCompact(sessionID) }()
+	}
 	plan, err := s.planCompaction(sessionID, req.SourceRange, req.KeepTailMessages, req.KeepTailTurns)
 	if err != nil {
 		return CompactPreviewResult{}, err
@@ -377,13 +371,17 @@ func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (Co
 	if err != nil {
 		return CompactSessionResult{}, fmt.Errorf("pause session for compact: %w", err)
 	}
+	if paused > 0 {
+		defer func() { _ = s.resumeSessionAfterCompact(sessionID) }()
+	}
 	plan, err := s.planCompaction(sessionID, req.SourceRange, req.KeepTailMessages, req.KeepTailTurns)
 	if err != nil {
 		return CompactSessionResult{}, err
 	}
 	summary := req.Summary
+	summaryMethod := "provided"
 	if strings.TrimSpace(summary.Summary) == "" {
-		built, _, buildErr := s.buildCompactSummary(sessionID, plan.SummarizeMessages, plan.StartSeq, plan.EndSeq, compactSummaryOptions{
+		built, method, buildErr := s.buildCompactSummary(sessionID, plan.SummarizeMessages, plan.StartSeq, plan.EndSeq, compactSummaryOptions{
 			Mode:              req.Mode,
 			ProviderProfileID: req.ProviderProfileID,
 		})
@@ -391,6 +389,7 @@ func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (Co
 			return CompactSessionResult{}, buildErr
 		}
 		summary = built
+		summaryMethod = method
 	} else {
 		summary = s.ensureOpenTasks(sessionID, summary)
 	}
@@ -430,6 +429,7 @@ func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (Co
 			KeepTailMessages: plan.KeepTailMessages,
 			KeepTailTurns:    plan.KeepTailTurns,
 			PausedRuns:       paused,
+			SummaryMethod:    summaryMethod,
 		}
 		return nil
 	})
