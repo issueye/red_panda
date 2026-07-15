@@ -291,6 +291,122 @@ func TestHTTPCompatibleProviderSendsMemoryAsSeparateSystemMessage(t *testing.T) 
 	}
 }
 
+func TestHTTPCompatibleProviderRetriesRecoverableHTTPError(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"recovered"}}]}`))
+	}))
+	defer server.Close()
+
+	provider := HTTPCompatibleProvider{
+		BaseURL:        server.URL,
+		Model:          "test-model",
+		Client:         server.Client(),
+		RetryBaseDelay: time.Millisecond,
+	}
+	var chunks []ProviderChunk
+	err := provider.Complete(context.Background(), ProviderRequest{}, func(chunk ProviderChunk) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+	if len(chunks) != 2 || chunks[0].Delta != "recovered" || !chunks[1].Final {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
+func TestHTTPCompatibleProviderRetriesClientTimeout(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		time.Sleep(20 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"too late"}}]}`))
+	}))
+	defer server.Close()
+
+	provider := HTTPCompatibleProvider{
+		BaseURL: server.URL,
+		Model:   "test-model",
+		Client: &http.Client{
+			Timeout: 5 * time.Millisecond,
+		},
+		RetryBaseDelay: time.Millisecond,
+	}
+	err := provider.Complete(context.Background(), ProviderRequest{}, func(ProviderChunk) error { return nil })
+	if err == nil {
+		t.Fatal("expected client timeout")
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+}
+
+func TestHTTPCompatibleProviderDoesNotRetryNonRecoverableHTTPError(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	provider := HTTPCompatibleProvider{
+		BaseURL:        server.URL,
+		Model:          "test-model",
+		Client:         server.Client(),
+		RetryBaseDelay: time.Millisecond,
+	}
+	err := provider.Complete(context.Background(), ProviderRequest{}, func(ProviderChunk) error { return nil })
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
+func TestHTTPCompatibleProviderDoesNotRetryAfterStreamingOutput(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: invalid-json\n\n"))
+	}))
+	defer server.Close()
+
+	provider := HTTPCompatibleProvider{
+		BaseURL:        server.URL,
+		Model:          "test-model",
+		Stream:         true,
+		Client:         server.Client(),
+		RetryBaseDelay: time.Millisecond,
+	}
+	var chunks []ProviderChunk
+	err := provider.Complete(context.Background(), ProviderRequest{}, func(chunk ProviderChunk) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected stream parsing error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if len(chunks) != 1 || chunks[0].Delta != "partial" {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
 func TestOpenAICompatibleMessagesInjectOrchestrationPolicyWhenWorkerToolAvailable(t *testing.T) {
 	messages := openAICompatibleMessages(ProviderRequest{
 		Input: methods.ReplyInput{Text: "分析桌面端和服务端"},

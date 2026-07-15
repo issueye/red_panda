@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -18,8 +20,10 @@ import (
 )
 
 const (
-	defaultListDepth   = 3
-	defaultGrepMatches = 50
+	defaultListDepth              = 3
+	defaultGrepMatches            = 50
+	defaultProviderMaxAttempts    = 3
+	defaultProviderRetryBaseDelay = 500 * time.Millisecond
 )
 
 type Provider interface {
@@ -327,11 +331,13 @@ func diffModelCall(runID string, rest string) tools.Call {
 }
 
 type HTTPCompatibleProvider struct {
-	BaseURL string
-	APIKey  string
-	Model   string
-	Stream  bool
-	Client  *http.Client
+	BaseURL        string
+	APIKey         string
+	Model          string
+	Stream         bool
+	Client         *http.Client
+	MaxAttempts    int
+	RetryBaseDelay time.Duration
 }
 
 func (p HTTPCompatibleProvider) Name() string {
@@ -346,6 +352,34 @@ func (p HTTPCompatibleProvider) Complete(ctx context.Context, req ProviderReques
 }
 
 func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	maxAttempts := p.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = defaultProviderMaxAttempts
+	}
+	retryBaseDelay := p.RetryBaseDelay
+	if retryBaseDelay <= 0 {
+		retryBaseDelay = defaultProviderRetryBaseDelay
+	}
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		emitted := false
+		err := p.completeAttempt(ctx, req, func(chunk ProviderChunk) error {
+			emitted = true
+			return emit(chunk)
+		})
+		if err == nil {
+			return nil
+		}
+		if emitted || attempt == maxAttempts || !isRetryableProviderError(ctx, err) {
+			return err
+		}
+		if err := waitProviderRetry(ctx, retryBaseDelay*time.Duration(1<<(attempt-1))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
 	model := req.Options.Model
 	if model == "" {
 		model = p.Model
@@ -385,7 +419,7 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		rawResp, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		return fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, string(rawResp))
+		return providerHTTPError{StatusCode: resp.StatusCode, Body: string(rawResp)}
 	}
 	if p.Stream {
 		return p.completeStream(resp.Body, emit)
@@ -395,6 +429,40 @@ func (p HTTPCompatibleProvider) complete(ctx context.Context, req ProviderReques
 		return err
 	}
 	return completeHTTPResponse(rawResp, emit)
+}
+
+type providerHTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e providerHTTPError) Error() string {
+	return fmt.Sprintf("provider returned HTTP %d: %s", e.StatusCode, e.Body)
+}
+
+func isRetryableProviderError(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	var httpErr providerHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode == http.StatusRequestTimeout ||
+			httpErr.StatusCode == http.StatusTooManyRequests ||
+			httpErr.StatusCode >= http.StatusInternalServerError
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+func waitProviderRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func openAICompatibleChatCompletionsURL(raw string) string {
