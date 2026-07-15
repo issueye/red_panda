@@ -110,7 +110,7 @@ export function RunActivityPanel({
 
   return (
     <section className="activity-panel-content" data-testid="activity-panel">
-      <div className="activity-summary-grid">
+      {/* <div className="activity-summary-grid">
         <article className="activity-summary-card">
           <Activity size={15} />
           <div>
@@ -132,7 +132,7 @@ export function RunActivityPanel({
             <span>待处理</span>
           </div>
         </article>
-      </div>
+      </div> */}
 
       {globalPendingCount > 0 ? (
         <div className="activity-section">
@@ -334,7 +334,7 @@ export function RunActivityPanel({
         </div>
       </div>
 
-      <div className="activity-section">
+      <div className="activity-section" style={{ height: '40%' }}>
         <div className="activity-section-title">
           <Wrench size={14} />
           <span>工具调用</span>
