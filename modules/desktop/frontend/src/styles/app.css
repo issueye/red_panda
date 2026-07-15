@@ -4538,7 +4538,7 @@ textarea:focus-visible {
   justify-content: flex-end;
   min-width: 0;
   position: fixed;
-  z-index: 20;
+  z-index: 41;
 }
 
 .settings-panel {
