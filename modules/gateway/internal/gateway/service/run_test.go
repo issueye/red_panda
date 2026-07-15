@@ -129,6 +129,81 @@ func TestRunServiceStartEnablesGoalsOnlyWhenExplicitlyRequested(t *testing.T) {
 	}
 }
 
+func TestRunServiceStartFinishesAdmittedRunWhenPreparationFails(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_prepare_failure", "Prepare failure", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runtime := useStdioRuntimeHelper(t, filepath.Join(t.TempDir(), "unused.json"))
+	service := NewRunService(repos, eventhub.New(), runtime)
+	_, err = service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "will fail before dispatch"},
+		Options:   map[string]any{"provider_profile_id": "missing_profile"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider profile missing_profile not found") {
+		t.Fatalf("error = %v, want missing provider failure", err)
+	}
+
+	runs, err := repos.Runs.ListBySession(session.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs len = %d, want 1", len(runs))
+	}
+	if runs[0].Status != "failed" || runs[0].FinishedAt == nil {
+		t.Fatalf("admitted run was not finished after preparation failure: %#v", runs[0])
+	}
+}
+
+func TestRunServiceStartPausesBoundGoalWhenDispatchFails(t *testing.T) {
+	repos, _ := newRunServiceTestFixture(t)
+	session, err := repos.Sessions.Ensure("session_dispatch_failure", "Dispatch failure", "D:/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal, err := NewGoalService(repos).CreateUserInitiated(session.ID, "dispatch must fail", "Dispatch", "runtime rejected")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runtime := runtimeclient.New(filepath.Join(t.TempDir(), "missing-runtime.exe"), nil, "test", nil, nil)
+	service := NewRunService(repos, eventhub.New(), runtime)
+	_, err = service.Start(context.Background(), protows.RunStartPayload{
+		SessionID: session.ID,
+		Input:     map[string]any{"text": "bind then dispatch"},
+		Options: map[string]any{
+			"goal_id":       goal.ID,
+			"goals_enabled": true,
+			"runtime_mode":  "single_core",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected runtime dispatch to fail")
+	}
+
+	runs, listErr := repos.Runs.ListBySession(session.ID, 10)
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(runs) != 1 || runs[0].Status != "failed" || runs[0].FinishedAt == nil {
+		t.Fatalf("run was not finished after dispatch failure: %#v", runs)
+	}
+	paused, getErr := repos.Goals.Get(goal.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if paused.Status != "paused" || paused.PauseReason != "run_failed" || paused.ActiveRunID != "" {
+		t.Fatalf("bound goal was not paused after dispatch failure: %#v", paused)
+	}
+	if paused.LastRunID != runs[0].ID {
+		t.Fatalf("goal last run = %q, want %q", paused.LastRunID, runs[0].ID)
+	}
+}
+
 func TestClampClientMaxToolTurnsNeverRaisesGoalBudget(t *testing.T) {
 	bound := methods.GoalDTO{MaxToolTurnsSeg: 12, MaxTotalToolTurns: 96, UsedToolTurns: 0}
 	if got := clampClientMaxToolTurns(48, bound); got != 12 {

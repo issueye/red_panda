@@ -75,7 +75,22 @@ type Runtime struct {
 	runGoals        map[string]*runGoalState
 }
 
+// Dependencies contains the replaceable collaborators used by Runtime.
+type Dependencies struct {
+	Provider provider.Provider
+}
+
 func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
+	return NewWithDependencies(in, out, log, version, Dependencies{})
+}
+
+// NewWithDependencies constructs a Runtime with explicitly supplied collaborators.
+// Missing dependencies retain the same environment-backed defaults used by New.
+func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version string, deps Dependencies) *Runtime {
+	modelProvider := deps.Provider
+	if modelProvider == nil {
+		modelProvider = provider.NewFromEnv(log)
+	}
 	rt := &Runtime{
 		in:             in,
 		out:            out,
@@ -89,7 +104,7 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 		mcp:            agentmcp.NewManager(version, log),
 		runTodos:       map[string][]methods.TodoItemDTO{},
 		runGoals:       map[string]*runGoalState{},
-		provider:       provider.NewFromEnv(log),
+		provider:       modelProvider,
 		tools:          agenttools.ToolRunner{},
 	}
 	rt.tools.MemoryExecutor = rt.executeMemoryTool

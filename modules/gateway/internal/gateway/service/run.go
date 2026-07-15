@@ -47,6 +47,13 @@ type StartRunResult struct {
 	RunSequence uint64 `json:"run_seq"`
 }
 
+type runAdmission struct {
+	runID       string
+	session     model.Session
+	inputText   string
+	runtimeMode string
+}
+
 type RunRecordDTO struct {
 	ID            string     `json:"id"`
 	SessionID     string     `json:"session_id"`
@@ -173,11 +180,37 @@ func (r RunService) Events(rootRunID string, afterSeq uint64, limit int) ([]RunE
 	return dtos, nil
 }
 
-func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) (StartRunResult, error) {
+func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) (result StartRunResult, err error) {
 	if r.runtime == nil {
 		return StartRunResult{}, fmt.Errorf("runtime client not configured")
 	}
 
+	admission, err := r.admitRun(payload)
+	if err != nil {
+		return StartRunResult{}, err
+	}
+
+	pauseGoalOnFailure := false
+	defer func() {
+		if err == nil {
+			return
+		}
+		if pauseGoalOnFailure {
+			_ = NewGoalService(r.repos).PauseByRun(admission.runID, "run_failed")
+		}
+		_ = r.repos.Runs.Finish(admission.runID, "failed", err.Error())
+	}()
+
+	params, pauseGoalOnFailure, err := r.prepareRun(admission, payload)
+	if err != nil {
+		return StartRunResult{}, err
+	}
+
+	result, err = r.dispatchRun(ctx, admission, params, payload.Subscribe)
+	return result, err
+}
+
+func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, error) {
 	runID := fmt.Sprintf("run_%d", time.Now().UnixNano())
 	sessionID := payload.SessionID
 	if sessionID == "" {
@@ -186,7 +219,7 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 	workspaceRoot := stringOption(payload.Options, "working_dir")
 	session, err := r.repos.Sessions.Ensure(sessionID, sessionID, workspaceRoot)
 	if err != nil {
-		return StartRunResult{}, err
+		return runAdmission{}, err
 	}
 
 	inputText := stringInput(payload.Input, "text")
@@ -195,34 +228,23 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 	// Atomic admission: session serial + global concurrent budget + reserve active slot.
 	if r.startMu != nil {
 		r.startMu.Lock()
+		defer r.startMu.Unlock()
 	}
 	sessionActive, err := r.repos.Runs.CountActiveBySession(session.ID)
 	if err != nil {
-		if r.startMu != nil {
-			r.startMu.Unlock()
-		}
-		return StartRunResult{}, err
+		return runAdmission{}, err
 	}
 	if sessionActive > 0 {
-		if r.startMu != nil {
-			r.startMu.Unlock()
-		}
-		return StartRunResult{}, fmt.Errorf("会话已有任务在运行中，请等待结束后再发送")
+		return runAdmission{}, fmt.Errorf("会话已有任务在运行中，请等待结束后再发送")
 	}
 
 	maxConcurrent := resolveMaxConcurrentRuns(payload.Options)
 	active, err := r.repos.Runs.CountActive()
 	if err != nil {
-		if r.startMu != nil {
-			r.startMu.Unlock()
-		}
-		return StartRunResult{}, err
+		return runAdmission{}, err
 	}
 	if int(active) >= maxConcurrent {
-		if r.startMu != nil {
-			r.startMu.Unlock()
-		}
-		return StartRunResult{}, fmt.Errorf(
+		return runAdmission{}, fmt.Errorf(
 			"已达到最大并发运行数 %d（当前活跃 %d），请等待其它会话完成或在设置中提高上限",
 			maxConcurrent, active,
 		)
@@ -237,35 +259,35 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		Input:         inputText,
 		StartedAt:     time.Now().UTC(),
 	}); err != nil {
-		if r.startMu != nil {
-			r.startMu.Unlock()
-		}
-		return StartRunResult{}, err
+		return runAdmission{}, err
 	}
-	if r.startMu != nil {
-		r.startMu.Unlock()
-	}
+	return runAdmission{
+		runID:       runID,
+		session:     session,
+		inputText:   inputText,
+		runtimeMode: runtimeMode,
+	}, nil
+}
 
-	conversation, err := r.buildRunConversation(session.ID)
+func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartPayload) (params methods.RunExecuteParams, pauseGoalOnFailure bool, err error) {
+	conversation, err := r.buildRunConversation(admission.session.ID)
 	if err != nil {
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-		return StartRunResult{}, err
+		return methods.RunExecuteParams{}, false, err
 	}
-	if _, err := r.repos.Messages.Add(session.ID, "user", inputText, runID); err != nil {
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-		return StartRunResult{}, err
+	if _, err := r.repos.Messages.Add(admission.session.ID, "user", admission.inputText, admission.runID); err != nil {
+		return methods.RunExecuteParams{}, false, err
 	}
 
-	params := methods.RunExecuteParams{
-		RunID: runID,
+	params = methods.RunExecuteParams{
+		RunID: admission.runID,
 		Session: methods.ReplySession{
-			ID:           session.ID,
-			Name:         session.Name,
-			WorkingDir:   session.WorkspaceRoot,
+			ID:           admission.session.ID,
+			Name:         admission.session.Name,
+			WorkingDir:   admission.session.WorkspaceRoot,
 			Conversation: conversation,
 		},
 		Input: methods.ReplyInput{
-			Text: inputText,
+			Text: admission.inputText,
 		},
 		Options: methods.RunExecuteOptions{
 			ProviderProfileID:   stringOption(payload.Options, "provider_profile_id"),
@@ -291,47 +313,39 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 	goalsEnabled := boolOption(payload.Options, "goals_enabled")
 	params.Options.GoalsEnabled = &goalsEnabled
 	if err := r.applyProviderProfile(&params); err != nil {
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-		return StartRunResult{}, err
+		return methods.RunExecuteParams{}, false, err
 	}
 	if err := r.applyMemoryContext(&params); err != nil {
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-		return StartRunResult{}, err
+		return methods.RunExecuteParams{}, false, err
 	}
 	if err := r.applyTodoContext(&params); err != nil {
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-		return StartRunResult{}, err
+		return methods.RunExecuteParams{}, false, err
 	}
 	if err := r.applyGoalBindingAndContext(&params, payload.Options); err != nil {
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-		return StartRunResult{}, err
+		return methods.RunExecuteParams{}, false, err
 	}
-	// From this point the Goal may be active and bound to runID. Any later
-	// admission failure must pause the Goal so it is not left stuck active.
+	// From this point the Goal may be active and bound to the admitted run.
 	if err := r.applyWorkerProfiles(&params); err != nil {
-		_ = NewGoalService(r.repos).PauseByRun(runID, "run_failed")
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-		return StartRunResult{}, err
+		return methods.RunExecuteParams{}, true, err
 	}
 	if err := r.applyMCPServers(&params); err != nil {
-		_ = NewGoalService(r.repos).PauseByRun(runID, "run_failed")
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
-		return StartRunResult{}, err
+		return methods.RunExecuteParams{}, true, err
 	}
+	return params, true, nil
+}
 
-	accepted, err := r.runtime.ExecuteWithMode(ctx, runtimeMode, params)
+func (r RunService) dispatchRun(ctx context.Context, admission runAdmission, params methods.RunExecuteParams, subscribe bool) (StartRunResult, error) {
+	accepted, err := r.runtime.ExecuteWithMode(ctx, admission.runtimeMode, params)
 	if err != nil {
-		_ = NewGoalService(r.repos).PauseByRun(runID, "run_failed")
-		_ = r.repos.Runs.Finish(runID, "failed", err.Error())
 		return StartRunResult{}, err
 	}
-	_ = r.repos.Sessions.Touch(session.ID)
+	_ = r.repos.Sessions.Touch(admission.session.ID)
 	return StartRunResult{
-		RunID:       firstNonEmpty(accepted.RunID, runID),
-		SessionID:   session.ID,
+		RunID:       firstNonEmpty(accepted.RunID, admission.runID),
+		SessionID:   admission.session.ID,
 		Accepted:    accepted.Accepted,
-		Subscribed:  payload.Subscribe,
-		RuntimeMode: runtimeMode,
+		Subscribed:  subscribe,
+		RuntimeMode: admission.runtimeMode,
 	}, nil
 }
 
