@@ -1,0 +1,41 @@
+{
+  "name": "run_workflow",
+  "description": "Execute a robotgo-flow desktop RPA workflow. HIGH RISK: drives real mouse/keyboard on the host Windows desktop.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path to workflow YAML."
+      },
+      "from_step": {
+        "type": "integer",
+        "description": "1-indexed step to start from.",
+        "minimum": 1
+      },
+      "debug": {
+        "type": "boolean",
+        "description": "Enable per-step debug screenshots."
+      },
+      "out_dir": {
+        "type": "string",
+        "description": "Screenshot output directory."
+      },
+      "inputs": {
+        "type": "object",
+        "description": "Runtime input values keyed by input name.",
+        "additionalProperties": { "type": "string" }
+      },
+      "timeout_sec": {
+        "type": "integer",
+        "description": "Hard timeout seconds (default 600).",
+        "minimum": 5
+      },
+      "dry_run": {
+        "type": "boolean",
+        "description": "Inspect and show planned CLI command without executing."
+      }
+    },
+    "required": ["path"]
+  }
+}

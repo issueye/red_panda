@@ -2,15 +2,11 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 	"unicode"
 
+	"redpanda/mcpkit"
 	protomcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -120,7 +116,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, runID string, workingDir stri
 	return m.CallTool(ctx, workingDir, binding.Config, binding.RawName, call.Arguments)
 }
 
-// callMCPTool 启动一次性 MCP stdio 会话，执行 tools/call 后清理资源。
+// CallTool 启动一次性 MCP stdio 会话，执行 tools/call 后清理资源。
 // 进程复用延后至 D3 实现。
 func (m *Manager) CallTool(
 	ctx context.Context,
@@ -135,141 +131,18 @@ func (m *Manager) CallTool(
 	if strings.TrimSpace(config.Command) == "" {
 		return "", fmt.Errorf("MCP server %s has empty command", config.Name)
 	}
-	if strings.TrimSpace(rawToolName) == "" {
-		return "", fmt.Errorf("MCP tool name is required")
-	}
 	timeouts := config.Timeouts.Normalized()
-	cmd := exec.Command(config.Command, config.Args...)
-	cmd.Env = append(os.Environ(), envPairs(config.Env)...)
-	if config.CWD != "" {
-		cmd.Dir = config.CWD
-		if !filepath.IsAbs(cmd.Dir) && workspaceRoot != "" {
-			cmd.Dir = filepath.Join(workspaceRoot, config.CWD)
-		}
-	} else if workspaceRoot != "" {
-		cmd.Dir = workspaceRoot
-	}
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return "", fmt.Errorf("start failed: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return "", fmt.Errorf("start failed: %w", err)
-	}
-	stderr := &boundedBuffer{max: mcpStderrLimit}
-	cmd.Stderr = stderr
-	process := &mcpProcess{
-		cmd:             cmd,
-		stdin:           stdin,
-		done:            make(chan struct{}),
-		startDone:       make(chan struct{}),
-		shutdownTimeout: durationMillis(timeouts.ShutdownMS),
-	}
-	m.registerProcess(process)
-	defer func() {
-		process.close(durationMillis(timeouts.ShutdownMS))
-		m.unregisterProcess(process)
-		if err != nil {
-			msg := redactMCPSecrets(err.Error(), config.Env)
-			if summary := stderr.String(); summary != "" {
-				msg = msg + " (stderr: " + redactMCPSecrets(summary, config.Env) + ")"
-			}
-			err = fmt.Errorf("%s", msg)
-		}
-	}()
-
-	startResult := make(chan error, 1)
-	go func() { startResult <- process.start() }()
-	select {
-	case err = <-startResult:
-		if err != nil {
-			return "", fmt.Errorf("start failed: %w", err)
-		}
-	case <-time.After(durationMillis(timeouts.StartMS)):
-		return "", fmt.Errorf("start timeout after %dms", timeouts.StartMS)
-	case <-ctx.Done():
-		return "", fmt.Errorf("start failed: %w", ctx.Err())
-	}
-
-	lines := make(chan []byte)
-	readErrors := make(chan error, 1)
-	stopReader := make(chan struct{})
-	defer close(stopReader)
-	go readMCPLines(stdout, lines, readErrors, stopReader)
-
-	initialize := map[string]any{
-		"jsonrpc": "2.0", "id": 1, "method": "initialize",
-		"params": map[string]any{
-			"protocolVersion": mcpProtocolVersion,
-			"capabilities":    map[string]any{},
-			"clientInfo":      map[string]any{"name": "red-panda-agent", "version": m.version},
-		},
-	}
-	if err = writeMCPMessage(stdin, initialize); err != nil {
-		return "", fmt.Errorf("initialize failed: %w", err)
-	}
-	var initResult map[string]any
-	if err = waitMCPResponse(ctx, lines, readErrors, process, 1, durationMillis(timeouts.InitializeMS), &initResult); err != nil {
-		return "", fmt.Errorf("initialize failed: %w", err)
-	}
-	if err = writeMCPMessage(stdin, map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"}); err != nil {
-		return "", fmt.Errorf("initialize failed: %w", err)
-	}
-
-	if arguments == nil {
-		arguments = map[string]any{}
-	}
-	callReq := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      3,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name":      rawToolName,
-			"arguments": arguments,
-		},
-	}
-	if err = writeMCPMessage(stdin, callReq); err != nil {
-		return "", fmt.Errorf("tools/call failed: %w", err)
-	}
-	var callResult struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-		IsError bool `json:"isError"`
-	}
-	if err = waitMCPResponse(ctx, lines, readErrors, process, 3, durationMillis(timeouts.CallMS), &callResult); err != nil {
-		return "", fmt.Errorf("tools/call failed: %w", err)
-	}
-	var parts []string
-	for _, block := range callResult.Content {
-		if strings.TrimSpace(block.Text) == "" {
-			continue
-		}
-		parts = append(parts, block.Text)
-	}
-	text := strings.Join(parts, "\n")
-	if callResult.IsError {
-		if text == "" {
-			text = "MCP tool returned isError"
-		}
-		return text, fmt.Errorf("%s", text)
-	}
-	if text == "" {
-		// 为活动记录和 UI 保留结构化的空成功结果。
-		raw, _ := json.Marshal(callResult)
-		text = string(raw)
-	}
-	if len(text) > maxToolOutputBytes {
-		text = text[:maxToolOutputBytes] + "\n…(truncated)"
-	}
-	return text, nil
+	return mcpkit.Call(ctx, sessionConfig(m, workspaceRoot, config), rawToolName, arguments, mcpkit.CallOptions{
+		StartMS:      timeouts.StartMS,
+		InitializeMS: timeouts.InitializeMS,
+		CallMS:       timeouts.CallMS,
+		ShutdownMS:   timeouts.ShutdownMS,
+		MaxOutput:    maxToolOutputBytes,
+		Tracker:      m.tracker,
+	})
 }
 
-// mcpCanonicalName 构建 mcp__server__tool 名称（设计文档 19，第 8.1 节）。
+// CanonicalName 构建 mcp__server__tool 名称（设计文档 19，第 8.1 节）。
 func CanonicalName(serverName, rawTool string) string {
 	server := strings.TrimSpace(serverName)
 	raw := strings.TrimSpace(rawTool)

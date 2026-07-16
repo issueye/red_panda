@@ -12,6 +12,7 @@
 | [39-provider-runtime-decoupling-plan.md](39-provider-runtime-decoupling-plan.md) | **Provider-Runtime decoupling plan** (injection, provider split, neutral contract follow-up) |
 | [40-centralization-abstraction-plan.md](40-centralization-abstraction-plan.md) | **Active centralization plan** (provider-neutral requests, RunStateStore, Settings resources) |
 | [41-redundancy-overimpl-optimization-plan.md](41-redundancy-overimpl-optimization-plan.md) | **Active redundancy / over-implementation plan** (default tool surface, state-tool pipeline, narrative) |
+| [42-robotgo-flow-mcp-skill.md](42-robotgo-flow-mcp-skill.md) | robotgo-flow MCP server + native skill integration |
 | [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |

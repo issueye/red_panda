@@ -82,9 +82,16 @@ func TestMCPDiscoverAppliesToolAllowlist(t *testing.T) {
 
 func TestMCPDiscoverRejectsInvalidStdoutAndCleansUp(t *testing.T) {
 	cleanup := filepath.Join(t.TempDir(), "cleanup")
-	result := runMCPDiscover(t, helperMCPConfig(t, "invalid", cleanup))
-	if result.Status != "failed" || !strings.Contains(result.Error, "invalid stdout JSON") {
-		t.Fatalf("expected invalid stdout failure, got %#v", result)
+	config := helperMCPConfig(t, "invalid", cleanup)
+	// mcp-go silently skips non-JSON stdout lines, so initialize fails via
+	// timeout / transport close rather than a dedicated parse error.
+	config.Timeouts.InitializeMS = 200
+	result := runMCPDiscover(t, config)
+	if result.Status != "failed" {
+		t.Fatalf("expected failed discovery for invalid stdout, got %#v", result)
+	}
+	if !strings.Contains(result.Error, "initialize failed") {
+		t.Fatalf("expected initialize failure, got %#v", result)
 	}
 	waitForFile(t, cleanup)
 }
@@ -233,12 +240,30 @@ func TestMCPHelperProcess(t *testing.T) {
 	if mode == "secret-stderr" {
 		_, _ = fmt.Fprintf(os.Stderr, "diagnostic=%s", os.Getenv("MCP_API_KEY"))
 	}
+	// Flush stderr before serving so the client drain can observe diagnostics
+	// even when initialize fails immediately.
+	_ = os.Stderr.Sync()
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	writeResult := func(id json.RawMessage, result any) {
+		_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": jsonRawOrNull(id), "result": result})
+	}
+	writeError := func(id json.RawMessage, code int, message string) {
+		_ = enc.Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      jsonRawOrNull(id),
+			"error":   map[string]any{"code": code, "message": message},
+		})
+	}
+
 	scanner := bufio.NewScanner(os.Stdin)
 	initialized := false
 	for scanner.Scan() {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
 			os.Exit(2)
@@ -255,14 +280,18 @@ func TestMCPHelperProcess(t *testing.T) {
 				continue
 			}
 			if mode == "secret-error" {
-				fmt.Fprintf(os.Stdout, `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"rejected %s"}}`+"\n", os.Getenv("MCP_API_KEY"))
+				writeError(request.ID, -32000, fmt.Sprintf("rejected %s", os.Getenv("MCP_API_KEY")))
 				continue
 			}
 			if mode == "invalid" {
 				fmt.Fprintln(os.Stdout, "not-json")
 				continue
 			}
-			fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"fake-mcp","version":"1.0.0"},"capabilities":{"tools":{}}}}`)
+			writeResult(request.ID, map[string]any{
+				"protocolVersion": "2024-11-05",
+				"serverInfo":      map[string]any{"name": "fake-mcp", "version": "1.0.0"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+			})
 		case "notifications/initialized":
 			initialized = true
 		case "tools/list":
@@ -270,49 +299,69 @@ func TestMCPHelperProcess(t *testing.T) {
 				continue
 			}
 			if !initialized {
-				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"not initialized"}}`)
+				writeError(request.ID, -32000, "not initialized")
 				continue
 			}
 			if mode == "multiple-tools" {
-				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read_file","description":"Read a file","inputSchema":{"type":"object"}},{"name":"write_file","description":"Write a file","inputSchema":{"type":"object"}}]}}`)
+				writeResult(request.ID, map[string]any{
+					"tools": []map[string]any{
+						{"name": "read_file", "description": "Read a file", "inputSchema": map[string]any{"type": "object"}},
+						{"name": "write_file", "description": "Write a file", "inputSchema": map[string]any{"type": "object"}},
+					},
+				})
 			} else {
-				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read_file","description":"Read a file","inputSchema":{"type":"object","properties":{"path":{"type":"string"}}}}]}}`)
+				writeResult(request.ID, map[string]any{
+					"tools": []map[string]any{
+						{
+							"name":        "read_file",
+							"description": "Read a file",
+							"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}},
+						},
+					},
+				})
 			}
 		case "tools/call":
 			if mode == "call-timeout" {
 				continue
 			}
 			if !initialized {
-				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"not initialized"}}`)
+				writeError(request.ID, -32000, "not initialized")
 				continue
 			}
 			if mode == "call-error" {
-				fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"permission denied by server"}],"isError":true}}`)
+				writeResult(request.ID, map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "permission denied by server"}},
+					"isError": true,
+				})
 				continue
 			}
-			// 成功 tools/call 的回显模式。
-			var full struct {
-				Params struct {
-					Name      string         `json:"name"`
-					Arguments map[string]any `json:"arguments"`
-				} `json:"params"`
+			var params struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
 			}
-			_ = json.Unmarshal(scanner.Bytes(), &full)
-			path, _ := full.Params.Arguments["path"].(string)
-			text := fmt.Sprintf("ok tool=%s path=%s", full.Params.Name, path)
-			payload, _ := json.Marshal(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      3,
-				"result": map[string]any{
-					"content": []map[string]any{{"type": "text", "text": text}},
-					"isError": false,
-				},
+			_ = json.Unmarshal(request.Params, &params)
+			path, _ := params.Arguments["path"].(string)
+			text := fmt.Sprintf("ok tool=%s path=%s", params.Name, path)
+			writeResult(request.ID, map[string]any{
+				"content": []map[string]any{{"type": "text", "text": text}},
+				"isError": false,
 			})
-			fmt.Fprintln(os.Stdout, string(payload))
 		}
 	}
 	if path := os.Getenv("RED_PANDA_MCP_CLEANUP"); path != "" {
 		_ = os.WriteFile(path, []byte("closed"), 0o600)
 	}
 	os.Exit(0)
+}
+
+// jsonRawOrNull returns id for encoding; empty becomes null for notifications.
+func jsonRawOrNull(id json.RawMessage) any {
+	if len(id) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(id, &v); err != nil {
+		return string(id)
+	}
+	return v
 }

@@ -1,0 +1,8 @@
+{
+  "name": "version",
+  "description": "Return robotgo-flow CLI version and resolved executable path.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}

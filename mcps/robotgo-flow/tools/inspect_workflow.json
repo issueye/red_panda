@@ -1,0 +1,14 @@
+{
+  "name": "inspect_workflow",
+  "description": "Read a robotgo-flow YAML workflow and return a structural summary without executing desktop automation.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path to workflow YAML file."
+      }
+    },
+    "required": ["path"]
+  }
+}

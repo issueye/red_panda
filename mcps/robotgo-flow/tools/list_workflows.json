@@ -1,0 +1,17 @@
+{
+  "name": "list_workflows",
+  "description": "List YAML workflow files under a directory (non-recursive by default).",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "directory": {
+        "type": "string",
+        "description": "Directory to scan. Defaults to ROBOTGO_FLOW_WORKFLOWS or cwd."
+      },
+      "recursive": {
+        "type": "boolean",
+        "description": "When true, walk subdirectories for *.yml / *.yaml."
+      }
+    }
+  }
+}

@@ -24,6 +24,7 @@ Desktop and Gateway use WebSocket for realtime interaction (no SSE). Root run an
 - `modules/gateway`: Gin/GORM/SQLite(no cgo) MVC Gateway with Runtime client, WebSocket channel, projections, provider profiles, MCP config CRUD.
 - `modules/desktop`: Wails v3 + React/Vite desktop (chat, permissions, tools, Workers, workspace/session restore, Activity, Settings).
 - `modules/cli`: placeholder for future debugging tools.
+- `modules/mcp-servers/robotgo-flow`: optional MCP stdio bridge to [robotgo-flow](https://gitee.com/znlgis/robotgo-flow) desktop RPA (see [docs/42](docs/42-robotgo-flow-mcp-skill.md)).
 
 ## Design Docs
 
