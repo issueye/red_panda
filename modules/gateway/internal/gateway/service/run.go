@@ -209,6 +209,20 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 	return result, err
 }
 
+func (r RunService) Cancel(ctx context.Context, runID string, reason string) error {
+	if r.runtime == nil {
+		return fmt.Errorf("runtime client not configured")
+	}
+	// Pause bound Goal before killing the process so force-finish still leaves a clean pause.
+	pauseReason := "user_cancel"
+	if strings.Contains(strings.ToLower(reason), "compact") {
+		pauseReason = "session_compact"
+	}
+	_ = NewGoalService(r.repos).PauseByRun(runID, pauseReason)
+	_, err := r.runtime.CancelRun(ctx, methods.RunCancelParams{RunID: runID, Reason: reason})
+	return err
+}
+
 func (r RunService) Workers(ctx context.Context, params methods.WorkerListParams) (methods.WorkerListResult, error) {
 	if r.runtime == nil {
 		return methods.WorkerListResult{}, fmt.Errorf("runtime client not configured")
