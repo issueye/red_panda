@@ -644,6 +644,13 @@ func TestPauseDelegatedRunKeepsEntryAliveAndResumesSameAssignment(t *testing.T) 
 		findAssignment(t, snapshot, delegated.AssignmentID).Status != AssignmentPaused {
 		t.Fatalf("snapshot while paused = %+v", snapshot)
 	}
+	paused, err = pool.PauseDelegatedRun(context.Background(), "run-pause", "compact retry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paused != 0 {
+		t.Fatalf("second pause = %d, want 0 for the already-paused assignment", paused)
+	}
 
 	resumed, err := pool.ResumeDelegatedRun(context.Background(), "run-pause")
 	if err != nil {

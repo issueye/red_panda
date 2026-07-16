@@ -6,13 +6,6 @@ import { appendMessages, createSystemMessage } from './sessionActionHelpers.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = new Set(['queued', 'running', 'waiting_permission', 'cancelling', 'paused']);
 
-function mapAssignmentStatus(assignmentsById, assignmentIds, status, summary) {
-  return Object.fromEntries(Object.entries(assignmentsById || {}).map(([id, item]) => [
-    id,
-    assignmentIds.has(id) ? { ...item, status, summary } : item,
-  ]));
-}
-
 export function useSessionCompactionActions({
   currentSessionId,
   sessionRuntimesRef,
@@ -45,36 +38,12 @@ export function useSessionCompactionActions({
       },
     });
 
-    patchRuntime(sessionId, (previous) => ({
-      ...previous,
-      compacting: true,
-      assignmentsById: mapAssignmentStatus(
-        previous.assignmentsById,
-        new Set(delegatedAssignments.map((item) => item.id)),
-        'paused',
-        '上下文摘要期间暂停',
-      ),
-    }));
-
     return {
       paused: delegatedAssignments.length > 0,
       runId,
       assignments: delegatedAssignments.map((item) => ({ id: item.id, status: item.status })),
     };
-  }, [patchRuntime, sessionRuntimesRef]);
-
-  const restoreAssignmentsAfterCompact = useCallback((sessionId, pauseInfo) => {
-    const original = new Map((pauseInfo.assignments || []).map((item) => [item.id, item.status]));
-    patchRuntime(sessionId, (previous) => ({
-      ...previous,
-      assignmentsById: Object.fromEntries(Object.entries(previous.assignmentsById || {}).map(([id, item]) => [
-        id,
-        item.status === 'paused' && original.has(id)
-          ? { ...item, status: original.get(id), summary: '摘要完成，已恢复' }
-          : item,
-      ])),
-    }));
-  }, [patchRuntime]);
+  }, [sessionRuntimesRef]);
 
   const compactSession = useCallback(async ({ silent = false } = {}) => {
     const sessionId = currentSessionIdRef.current;
@@ -97,13 +66,12 @@ export function useSessionCompactionActions({
         method: 'POST',
         body: JSON.stringify(compactBody),
       });
-      restoreAssignmentsAfterCompact(sessionId, pauseInfo);
       patchRuntime(sessionId, (previous) => ({
         ...previous,
         compacting: false,
         contextSummary: result.summary || null,
         contextSummaryEndSeq: Number(result.compaction?.source_end_seq) || 0,
-        messages: pauseInfo.paused
+        messages: Number(result.paused_runs) > 0
           ? appendMessages(
               previous,
               createSystemMessage('compact_resume', '上下文摘要完成，其他 Worker 已自动恢复。'),
@@ -125,11 +93,10 @@ export function useSessionCompactionActions({
       }
       return result.compaction || null;
     } catch (error) {
-      restoreAssignmentsAfterCompact(sessionId, pauseInfo);
       patchRuntime(sessionId, (previous) => ({ ...previous, compacting: false }));
       throw error;
     }
-  }, [currentSessionIdRef, patchRuntime, pauseSessionForCompact, restoreAssignmentsAfterCompact, runSettings.providerProfileId]);
+  }, [currentSessionIdRef, patchRuntime, pauseSessionForCompact, runSettings.providerProfileId]);
 
   useEffect(() => {
     if (!contextTokenBudget?.autoCompact) return;

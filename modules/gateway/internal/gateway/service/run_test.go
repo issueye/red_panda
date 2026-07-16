@@ -616,10 +616,14 @@ func TestRunServiceRuntimeHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(request.Params, &params); err != nil {
 				t.Fatal(err)
 			}
+			paused := 1
+			if os.Getenv("RED_PANDA_RUNTIME_PAUSED_COUNT") == "0" {
+				paused = 0
+			}
 			response, err := jsonrpc.NewResult(request.ID, methods.RunPauseResult{
 				Accepted: true,
 				RunID:    params.RunID,
-				Paused:   1,
+				Paused:   paused,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -630,6 +634,12 @@ func TestRunServiceRuntimeHelperProcess(t *testing.T) {
 		case methods.RunResume:
 			if err := os.WriteFile(os.Getenv("RED_PANDA_RUNTIME_CAPTURE")+".resume", request.Params, 0o600); err != nil {
 				t.Fatal(err)
+			}
+			if os.Getenv("RED_PANDA_RUNTIME_RESUME_ERROR") == "1" {
+				if err := encoder.Encode(jsonrpc.NewError(request.ID, -32021, "resume failed")); err != nil {
+					t.Fatal(err)
+				}
+				continue
 			}
 			var params methods.RunResumeParams
 			if err := json.Unmarshal(request.Params, &params); err != nil {

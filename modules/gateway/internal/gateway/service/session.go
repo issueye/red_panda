@@ -23,6 +23,11 @@ type SessionService struct {
 	runtime *runtimeclient.Client
 }
 
+type compactPauseState struct {
+	runIDs []string
+	paused int
+}
+
 type SessionDTO struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
@@ -165,54 +170,63 @@ func NewSessionService(repos repository.Set, runtime *runtimeclient.Client) Sess
 
 // pauseSessionForCompact suspends delegated Workers while each main Worker and
 // root Run remain alive. Paused Assignments retain their process and context.
-func (s SessionService) pauseSessionForCompact(sessionID string) (int, error) {
+func (s SessionService) pauseSessionForCompact(sessionID string) (compactPauseState, error) {
 	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
 	if err != nil {
-		return 0, err
+		return compactPauseState{}, err
 	}
 	if len(active) == 0 {
-		return 0, nil
+		return compactPauseState{}, nil
 	}
 
 	if s.runtime == nil {
-		return 0, fmt.Errorf("runtime is required to pause active workers")
+		return compactPauseState{}, fmt.Errorf("runtime is required to pause active workers")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), compactPauseTimeout)
 	defer cancel()
 
-	paused := 0
+	state := compactPauseState{runIDs: make([]string, 0, len(active))}
 	for _, run := range active {
+		state.runIDs = append(state.runIDs, run.ID)
 		result, pauseErr := s.runtime.PauseRun(ctx, methods.RunPauseParams{
 			RunID: run.ID, Reason: "session compact", DelegatedOnly: true,
 		})
 		if pauseErr != nil {
-			_ = s.resumeSessionAfterCompact(sessionID)
-			return paused, pauseErr
+			resumeErr := s.resumeRunsAfterCompact(state.runIDs)
+			return state, errors.Join(pauseErr, resumeErr)
 		}
-		paused += result.Paused
+		state.paused += result.Paused
 	}
-	return paused, nil
+	return state, nil
 }
 
-func (s SessionService) resumeSessionAfterCompact(sessionID string) error {
-	if s.runtime == nil {
+func (s SessionService) resumeRunsAfterCompact(runIDs []string) error {
+	if s.runtime == nil || len(runIDs) == 0 {
 		return nil
-	}
-	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
-	if err != nil {
-		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), compactPauseTimeout)
 	defer cancel()
 	var resumeErr error
-	for _, run := range active {
-		_, err := s.runtime.ResumeRun(ctx, methods.RunResumeParams{RunID: run.ID, DelegatedOnly: true})
+	for _, runID := range runIDs {
+		_, err := s.runtime.ResumeRun(ctx, methods.RunResumeParams{RunID: runID, DelegatedOnly: true})
 		if err != nil {
-			resumeErr = errors.Join(resumeErr, err)
+			resumeErr = errors.Join(resumeErr, fmt.Errorf("resume run %s: %w", runID, err))
 		}
 	}
 	return resumeErr
+}
+
+func (s SessionService) resumeSessionAfterCompact(sessionID string) error {
+	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
+	if err != nil {
+		return err
+	}
+	runIDs := make([]string, 0, len(active))
+	for _, run := range active {
+		runIDs = append(runIDs, run.ID)
+	}
+	return s.resumeRunsAfterCompact(runIDs)
 }
 
 func (s SessionService) Create(name string, workspaceRoot string) (SessionDTO, error) {
@@ -322,7 +336,7 @@ func (s SessionService) Fork(sessionID string, req ForkSessionRequest) (ForkSess
 	return result, err
 }
 
-func (s SessionService) CompactPreview(sessionID string, req CompactPreviewRequest) (CompactPreviewResult, error) {
+func (s SessionService) CompactPreview(sessionID string, req CompactPreviewRequest) (result CompactPreviewResult, err error) {
 	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
 		return CompactPreviewResult{}, err
 	}
@@ -332,9 +346,11 @@ func (s SessionService) CompactPreview(sessionID string, req CompactPreviewReque
 	if err != nil {
 		return CompactPreviewResult{}, fmt.Errorf("pause session for compact: %w", err)
 	}
-	if paused > 0 {
-		defer func() { _ = s.resumeSessionAfterCompact(sessionID) }()
-	}
+	defer func() {
+		if resumeErr := s.resumeRunsAfterCompact(paused.runIDs); resumeErr != nil {
+			err = errors.Join(err, fmt.Errorf("resume session after compact: %w", resumeErr))
+		}
+	}()
 	plan, err := s.planCompaction(sessionID, req.SourceRange, req.KeepTailMessages, req.KeepTailTurns)
 	if err != nil {
 		return CompactPreviewResult{}, err
@@ -356,11 +372,11 @@ func (s SessionService) CompactPreview(sessionID string, req CompactPreviewReque
 			SummaryMethod:    method,
 			Summary:          summary,
 		},
-		PausedRuns: paused,
+		PausedRuns: paused.paused,
 	}, nil
 }
 
-func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (CompactSessionResult, error) {
+func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (result CompactSessionResult, err error) {
 	source, err := s.repos.Sessions.Get(sessionID)
 	if err != nil {
 		return CompactSessionResult{}, err
@@ -371,9 +387,11 @@ func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (Co
 	if err != nil {
 		return CompactSessionResult{}, fmt.Errorf("pause session for compact: %w", err)
 	}
-	if paused > 0 {
-		defer func() { _ = s.resumeSessionAfterCompact(sessionID) }()
-	}
+	defer func() {
+		if resumeErr := s.resumeRunsAfterCompact(paused.runIDs); resumeErr != nil {
+			err = errors.Join(err, fmt.Errorf("resume session after compact: %w", resumeErr))
+		}
+	}()
 	plan, err := s.planCompaction(sessionID, req.SourceRange, req.KeepTailMessages, req.KeepTailTurns)
 	if err != nil {
 		return CompactSessionResult{}, err
@@ -398,7 +416,6 @@ func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (Co
 		return CompactSessionResult{}, err
 	}
 
-	var result CompactSessionResult
 	err = s.repos.DB.Transaction(func(tx *gorm.DB) error {
 		txRepos := repository.NewSet(tx)
 		if err := txRepos.Compactions.SupersedeAppliedInPlace(source.ID); err != nil {
@@ -428,7 +445,7 @@ func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (Co
 			Summary:          summary,
 			KeepTailMessages: plan.KeepTailMessages,
 			KeepTailTurns:    plan.KeepTailTurns,
-			PausedRuns:       paused,
+			PausedRuns:       paused.paused,
 			SummaryMethod:    summaryMethod,
 		}
 		return nil

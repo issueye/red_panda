@@ -60,8 +60,11 @@ func TestPauseSessionForCompactPausesAndResumesDelegatedWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paused != 1 {
-		t.Fatalf("paused = %d, want 1", paused)
+	if paused.paused != 1 {
+		t.Fatalf("paused = %d, want 1", paused.paused)
+	}
+	if len(paused.runIDs) != 1 || paused.runIDs[0] != "run_compact_v2" {
+		t.Fatalf("paused run ids = %#v", paused.runIDs)
 	}
 	raw, err := os.ReadFile(capturePath + ".pause")
 	if err != nil {
@@ -426,6 +429,72 @@ func TestSessionServiceCompactResumesWorkersWhenSummaryFails(t *testing.T) {
 	}
 	if run.Status != "running" {
 		t.Fatalf("run status = %q, want running", run.Status)
+	}
+}
+
+func TestSessionServiceCompactResumesRunsWhenPauseReportsZero(t *testing.T) {
+	repos, _ := newSessionServiceTestFixture(t)
+	source, err := repos.Sessions.Create("compact-resume-stale-pause", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"user goal", "assistant progress", "user more", "assistant more"} {
+		role := "user"
+		if strings.HasPrefix(text, "assistant") {
+			role = "assistant"
+		}
+		if _, err := repos.Messages.Add(source.ID, role, text, "run_stale_pause"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repos.Runs.Start(model.RunRecord{
+		ID: "run_stale_pause", SessionID: source.ID, Status: "running", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "compact-stale-pause.json")
+	t.Setenv("RED_PANDA_RUNTIME_PAUSED_COUNT", "0")
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath))
+	result, err := service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PausedRuns != 0 {
+		t.Fatalf("PausedRuns = %d, want 0", result.PausedRuns)
+	}
+	if _, err := os.Stat(capturePath + ".resume"); err != nil {
+		t.Fatalf("resume RPC was not sent for an active run after a zero-count pause: %v", err)
+	}
+}
+
+func TestSessionServiceCompactReportsResumeFailure(t *testing.T) {
+	repos, _ := newSessionServiceTestFixture(t)
+	source, err := repos.Sessions.Create("compact-resume-failure", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"user goal", "assistant progress", "user more", "assistant more"} {
+		role := "user"
+		if strings.HasPrefix(text, "assistant") {
+			role = "assistant"
+		}
+		if _, err := repos.Messages.Add(source.ID, role, text, "run_resume_failure"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repos.Runs.Start(model.RunRecord{
+		ID: "run_resume_failure", SessionID: source.ID, Status: "running", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "compact-resume-failure.json")
+	t.Setenv("RED_PANDA_RUNTIME_RESUME_ERROR", "1")
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath))
+	_, err = service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"})
+	if err == nil || !strings.Contains(err.Error(), "resume session after compact") {
+		t.Fatalf("compact error = %v, want explicit resume failure", err)
 	}
 }
 

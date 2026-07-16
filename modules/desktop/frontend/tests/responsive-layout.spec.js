@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('workspace opens in a centered standalone panel and returns to the resizable sidebar', async ({ page }) => {
+test('workspace opens as a dedicated modal without auxiliary tabs', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
 
@@ -10,9 +10,11 @@ test('workspace opens in a centered standalone panel and returns to the resizabl
   expect(sidebarBox.width).toBe(300);
 
   await toggle.click();
-  const panel = page.locator('.right-panel.workspace-window');
+  const panel = page.getByRole('dialog', { name: '工作区' });
   await expect(panel).toBeVisible();
-  await expect(toggle).toHaveAccessibleName('返回右侧栏');
+  await expect(toggle).toHaveAccessibleName('关闭工作区');
+  await expect(panel.locator('.right-panel-tabs')).toHaveCount(0);
+  await expect(panel.getByRole('tab')).toHaveCount(0);
   const expandedBox = await panel.boundingBox();
   expect(expandedBox.x).toBeGreaterThan(0);
   expect(expandedBox.x + expandedBox.width).toBeLessThan(1440);
@@ -23,10 +25,14 @@ test('workspace opens in a centered standalone panel and returns to the resizabl
   expect(columns.split(' ')).toHaveLength(2);
 
   await page.keyboard.press('Escape');
-  await expect(page.locator('.right-panel.workspace-window')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: '工作区' })).toHaveCount(0);
   await expect(toggle).toHaveAccessibleName('独立查看工作区');
   const collapsedBox = await page.locator('.right-panel').boundingBox();
   expect(collapsedBox.width).toBe(300);
+
+  await toggle.click();
+  await page.getByRole('button', { name: '返回右侧栏' }).click({ position: { x: 2, y: 2 } });
+  await expect(page.getByRole('dialog', { name: '工作区' })).toHaveCount(0);
 });
 
 test('narrow app layout keeps right panel tools reachable without horizontal overflow', async ({ page }) => {

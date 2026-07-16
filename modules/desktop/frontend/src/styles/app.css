@@ -680,29 +680,31 @@ textarea:focus-visible {
 }
 
 .workspace-window-backdrop {
-  background: rgba(15, 23, 42, 0.28);
+  background: rgba(15, 23, 42, 0.36);
   border: 0;
-  inset: 48px 0 24px;
+  inset: 0;
   padding: 0;
   position: fixed;
-  z-index: 19;
+  z-index: 40;
 }
 
 .right-panel.workspace-window {
+  background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  bottom: 48px;
+  bottom: 24px;
   box-shadow: var(--shadow-modal);
   flex-basis: auto;
-  left: 40px;
+  left: 24px;
   margin: auto;
-  max-width: 1440px;
-  padding: 10px 14px 14px;
+  max-width: 1280px;
+  padding: 12px 14px 14px;
   position: fixed;
-  right: 40px;
-  top: 72px;
-  width: auto;
-  z-index: 20;
+  right: 24px;
+  top: 24px;
+  transform: none;
+  width: min(1280px, calc(100vw - 48px));
+  z-index: 41;
 }
 
 .right-panel.workspace-window .workspace-panel-grid {
@@ -710,8 +712,15 @@ textarea:focus-visible {
   grid-template-rows: minmax(0, 1fr);
 }
 
-.right-panel.workspace-window .right-panel-tabs {
-  margin: 0 -2px;
+.right-panel.workspace-window .workspace-panel-content {
+  padding-top: 0;
+}
+
+.right-panel.workspace-window .panel-header {
+  border-bottom: 1px solid var(--color-border);
+  margin: -12px -14px 0;
+  min-height: 50px;
+  padding: 0 14px;
 }
 
 .right-panel-resizer {
@@ -3766,6 +3775,7 @@ textarea:focus-visible {
 
 .workspace-panel-grid {
   display: grid;
+  flex: 1 1 auto;
   gap: 10px;
   grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
   min-height: 0;
@@ -3805,21 +3815,25 @@ textarea:focus-visible {
   display: grid;
   font-size: 12px;
   gap: 6px;
-  grid-template-columns: 14px minmax(0, 1fr);
+  grid-template-columns: 12px 14px minmax(0, 1fr);
   min-height: 26px;
   text-align: left;
   width: 100%;
-}
-
-.tree-row:disabled {
-  color: var(--color-text-muted);
-  cursor: default;
 }
 
 .tree-row span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tree-row-disclosure {
+  align-items: center;
+  color: var(--color-text-soft);
+  display: inline-flex;
+  height: 14px;
+  justify-content: center;
+  width: 12px;
 }
 
 .tree-row:not(:disabled):hover {

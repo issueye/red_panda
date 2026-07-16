@@ -1,11 +1,13 @@
 import {
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
   FileText,
   Folder,
   GitCompare,
   Maximize2,
-  PanelRightClose,
   RefreshCw,
+  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { openInExplorer } from '../lib/desktopShell.js';
@@ -14,11 +16,12 @@ import { ErrorMessage, InlineEmpty } from './ui/feedback.jsx';
 import { Markdown } from './ui/Markdown.jsx';
 import { PanelHeader } from './ui/panel.jsx';
 
-function flattenTree(node, depth = 0, items = []) {
+export function flattenVisibleTree(node, collapsedPaths = new Set(), depth = 0, items = []) {
   if (!node) return items;
   items.push({ ...node, depth });
+  if (node.type === 'directory' && collapsedPaths.has(node.path)) return items;
   for (const child of node.children || []) {
-    flattenTree(child, depth + 1, items);
+    flattenVisibleTree(child, collapsedPaths, depth + 1, items);
   }
   return items;
 }
@@ -41,8 +44,12 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
   const [diff, setDiff] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [collapsedPaths, setCollapsedPaths] = useState(() => new Set());
 
-  const items = useMemo(() => flattenTree(tree).filter((item) => item.path !== ''), [tree]);
+  const items = useMemo(
+    () => flattenVisibleTree(tree, collapsedPaths).filter((item) => item.path !== ''),
+    [collapsedPaths, tree],
+  );
 
   async function loadTree() {
     if (!workspace) return;
@@ -93,6 +100,7 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
   }
 
   useEffect(() => {
+    setCollapsedPaths(new Set());
     loadTree();
   }, [workspace?.root_path, workspace?.root]);
 
@@ -115,6 +123,15 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
     await openInExplorer(absolute);
   }
 
+  function toggleDirectory(path) {
+    setCollapsedPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
+
   const previewContent = loading ? '加载中...' : displayContent(file, diff);
   const showMarkdown = !loading && !diff?.diff && !file?.binary && isMarkdownPath(selectedPath);
 
@@ -126,11 +143,11 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
           <div className="workspace-panel-actions">
             {canFloat ? (
               <Button
-                aria-label={expanded ? '返回右侧栏' : '独立查看工作区'}
-                title={expanded ? '返回右侧栏' : '独立查看工作区'}
+                aria-label={expanded ? '关闭工作区' : '独立查看工作区'}
+                title={expanded ? '关闭工作区' : '独立查看工作区'}
                 aria-pressed={expanded}
                 data-testid="workspace-panel-layout-toggle"
-                icon={expanded ? <PanelRightClose size={14} /> : <Maximize2 size={14} />}
+                icon={expanded ? <X size={15} /> : <Maximize2 size={14} />}
                 onClick={() => onExpandedChange?.(!expanded)}
                 variant="soft"
               />
@@ -158,18 +175,25 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
           {items.length === 0 ? <InlineEmpty as="div" className="workspace-empty">暂无文件</InlineEmpty> : null}
           {items.map((item) => {
             const isFile = item.type === 'file';
+            const isDirectory = item.type === 'directory';
+            const isExpanded = isDirectory && !collapsedPaths.has(item.path);
             const Icon = isFile ? FileText : Folder;
             return (
               <button
+                aria-expanded={isDirectory ? isExpanded : undefined}
                 className={item.path === selectedPath ? 'tree-row active' : 'tree-row'}
-                disabled={!isFile}
+                data-path={item.path}
+                data-testid="workspace-tree-row"
                 key={item.path}
-                onClick={() => openFile(item.path)}
+                onClick={() => (isDirectory ? toggleDirectory(item.path) : openFile(item.path))}
                 style={{ paddingLeft: `${8 + item.depth * 12}px` }}
                 title={item.path}
                 type="button"
               >
-                <Icon size={13} />
+                <span aria-hidden="true" className="tree-row-disclosure">
+                  {isDirectory ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
+                </span>
+                <Icon aria-hidden="true" size={13} />
                 <span>{item.name}</span>
               </button>
             );

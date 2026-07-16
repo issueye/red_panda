@@ -21,3 +21,19 @@ test('workspace renders Markdown files and keeps other content as source text', 
   await expect(page.locator('.workspace-markdown-preview')).toHaveCount(0);
   await expect(page.locator('.workspace-preview-source')).toHaveText('# Plain text');
 });
+
+test('workspace directories can be collapsed and expanded', async ({ page }) => {
+  await page.goto('/workspace-fixture.html');
+
+  const directory = page.getByRole('button', { name: 'docs' });
+  await expect(directory).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'guide.md' })).toBeVisible();
+
+  await directory.click();
+  await expect(directory).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'guide.md' })).toHaveCount(0);
+
+  await directory.click();
+  await expect(directory).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'guide.md' })).toBeVisible();
+});

@@ -28,6 +28,14 @@ async function apiJson(url) {
       children: [
         { name: 'report.md', path: 'report.md', type: 'file' },
         { name: 'notes.txt', path: 'notes.txt', type: 'file' },
+        {
+          name: 'docs',
+          path: 'docs',
+          type: 'directory',
+          children: [
+            { name: 'guide.md', path: 'docs/guide.md', type: 'file' },
+          ],
+        },
       ],
     };
   }

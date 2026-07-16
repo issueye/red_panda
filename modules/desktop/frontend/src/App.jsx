@@ -829,12 +829,15 @@ export function App() {
           />
         ) : null}
         <aside
+          aria-label={workspacePanelExpanded && !compactLayout ? '工作区' : '辅助面板'}
           aria-hidden={compactLayout && !rightPanelDrawerOpen ? 'true' : undefined}
+          aria-modal={workspacePanelExpanded && !compactLayout ? 'true' : undefined}
           className={[
             'right-panel',
             rightPanelDrawerOpen ? 'drawer-open' : '',
             workspacePanelExpanded && !compactLayout ? 'workspace-window' : '',
           ].filter(Boolean).join(' ')}
+          data-testid={workspacePanelExpanded && !compactLayout ? 'workspace-dialog' : undefined}
           inert={compactLayout && !rightPanelDrawerOpen ? '' : undefined}
           onKeyDown={(event) => {
             if (compactLayout && event.key === 'Escape') closeRightPanelDrawer();
@@ -843,6 +846,7 @@ export function App() {
               setWorkspacePanelExpanded(false);
             }
           }}
+          role={workspacePanelExpanded && !compactLayout ? 'dialog' : undefined}
         >
           {!compactLayout && !workspacePanelExpanded ? (
             <button
@@ -880,26 +884,32 @@ export function App() {
               <X size={17} />
             </IconButton>
           </div>
+          {!workspacePanelExpanded || compactLayout ? (
+            <div
+              aria-label="辅助面板"
+              className="right-panel-tabs"
+              onKeyDown={handleRightPanelTabsKeyDown}
+              role="tablist"
+            >
+              {rightPanelTabs.map((tab) => (
+                <TabButton
+                  active={rightPanelTab === tab.id}
+                  data-right-panel-tab={tab.id}
+                  data-testid={tab.testId || undefined}
+                  key={tab.id}
+                  onClick={() => selectRightPanelTab(tab.id)}
+                  panelId="right-panel-content"
+                >
+                  {tab.label}
+                </TabButton>
+              ))}
+            </div>
+          ) : null}
           <div
-            aria-label="辅助面板"
-            className="right-panel-tabs"
-            onKeyDown={handleRightPanelTabsKeyDown}
-            role="tablist"
+            className="right-panel-content"
+            id="right-panel-content"
+            role={workspacePanelExpanded && !compactLayout ? undefined : 'tabpanel'}
           >
-            {rightPanelTabs.map((tab) => (
-              <TabButton
-                active={rightPanelTab === tab.id}
-                data-right-panel-tab={tab.id}
-                data-testid={tab.testId || undefined}
-                key={tab.id}
-                onClick={() => selectRightPanelTab(tab.id)}
-                panelId="right-panel-content"
-              >
-                {tab.label}
-              </TabButton>
-            ))}
-          </div>
-          <div className="right-panel-content" id="right-panel-content" role="tabpanel">
             {rightPanelContent}
           </div>
         </aside>
