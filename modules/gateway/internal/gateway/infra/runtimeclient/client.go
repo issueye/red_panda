@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -582,9 +583,9 @@ func (c *Client) ensureStarted(ctx context.Context) error {
 	return c.ensureStartedStdio()
 }
 
-// runtimeTransport selects the gateway↔agent wire transport.
+// runtimeTransport selects the gateway↔agent wire transport (docs/41 W3-2).
 // Default is IPC (Windows named pipes / Unix domain sockets).
-// Set RED_PANDA_RUNTIME_IPC=0 (or "false"/"stdio") to force legacy stdio.
+// Set RED_PANDA_RUNTIME_IPC=0 (or "false"/"stdio") to force legacy stdio escape hatch.
 func runtimeTransport() string {
 	v := strings.TrimSpace(os.Getenv("RED_PANDA_RUNTIME_IPC"))
 	switch strings.ToLower(v) {
@@ -601,6 +602,8 @@ func (c *Client) ensureStartedStdio() error {
 		c.mu.Unlock()
 		return nil
 	}
+
+	log.Printf("runtimeclient: using legacy stdio transport (set RED_PANDA_RUNTIME_IPC unset/1 for default IPC)")
 
 	cmd := exec.Command(c.command, c.args...)
 	// Inject any extra environment (e.g. RED_PANDA_WORKER_POOL_SIZE) for this agent process.

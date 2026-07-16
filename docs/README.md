@@ -11,11 +11,12 @@
 | [38-code-directness-optimization-plan.md](38-code-directness-optimization-plan.md) | **Active code-directness plan** (parallel coordinator simplification and compatibility cleanup) |
 | [39-provider-runtime-decoupling-plan.md](39-provider-runtime-decoupling-plan.md) | **Provider-Runtime decoupling plan** (injection, provider split, neutral contract follow-up) |
 | [40-centralization-abstraction-plan.md](40-centralization-abstraction-plan.md) | **Active centralization plan** (provider-neutral requests, RunStateStore, Settings resources) |
+| [41-redundancy-overimpl-optimization-plan.md](41-redundancy-overimpl-optimization-plan.md) | **Active redundancy / over-implementation plan** (default tool surface, state-tool pipeline, narrative) |
 | [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |
 | [04-agent-runtime-design.md](04-agent-runtime-design.md) | Runtime / v0.1 subagent model (superseded for v0.2.0 by doc 37) |
-| [05-stdio-jsonrpc-multiplexing.md](05-stdio-jsonrpc-multiplexing.md) | Gateway↔Runtime protocol |
+| [05-stdio-jsonrpc-multiplexing.md](05-stdio-jsonrpc-multiplexing.md) | Gateway↔Runtime JSON-RPC (IPC default; stdio legacy) |
 | [06-desktop-gateway-integration.md](06-desktop-gateway-integration.md) | Desktop HTTP/WS contract |
 | [07-desktop-tech-ui-design.md](07-desktop-tech-ui-design.md) | Desktop stack & UI IA |
 

@@ -49,15 +49,25 @@ export const SETTINGS_TABS = [
   { id: 'other', label: '其他设置', shortLabel: '其他', icon: SlidersHorizontal },
 ];
 
-export const AGENT_PHASE_OPTIONS = [
-  ['analyze', '分析'],
-  ['plan', '规划'],
-  ['execute', '执行'],
-  ['verify', '验证'],
-  ['evaluate', '终评'],
+// Capability tags for Worker Profiles (API field is still `phase`, docs/41 W3-4).
+export const AGENT_CAPABILITY_OPTIONS = [
+  ['research', '调研'],
+  ['strategy', '策略'],
+  ['build', '实施'],
+  ['review', '验证'],
+  ['assess', '评估'],
   ['general', '通用'],
   ['custom', '自定义'],
+  // Legacy pipeline-era labels kept for custom profiles already using them.
+  ['analyze', '分析（旧）'],
+  ['plan', '规划（旧）'],
+  ['execute', '执行（旧）'],
+  ['verify', '验证（旧）'],
+  ['evaluate', '终评（旧）'],
 ];
+
+/** @deprecated use AGENT_CAPABILITY_OPTIONS */
+export const AGENT_PHASE_OPTIONS = AGENT_CAPABILITY_OPTIONS;
 
 export const emptySkillDraft = {
   name: '',

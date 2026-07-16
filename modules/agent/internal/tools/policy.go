@@ -10,7 +10,7 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-// opsOnlyTools 会注册给桌面端、命令行和调试用途，但默认不暴露给提供方工具架构（检查项 O1/O3）。
+// opsOnlyTools 会注册给桌面端、命令行和调试用途，但默认不暴露给提供方工具架构（检查项 O1/O3；docs/41 W1-2）。
 // 可通过 RED_PANDA_DEBUG_TOOLS=1、ReplyOptions.DebugTools 或显式 tool_allowlist 项启用。
 var opsOnlyTools = map[string]struct{}{
 	"skill.create":       {},
@@ -19,6 +19,10 @@ var opsOnlyTools = map[string]struct{}{
 	"worker.pool_status": {},
 	"worker.pool_resize": {},
 	"worker.pool_reset":  {},
+	// Worker mailbox messaging is advanced orchestration; default Goal/chat paths
+	// use worker.delegate + shared context.* instead (docs/41 W1-2).
+	"worker.send":    {},
+	"worker.receive": {},
 }
 
 func isOpsOnlyTool(name string) bool {
@@ -125,8 +129,9 @@ func ContainsString(items []string, value string) bool {
 	return false
 }
 
-// goalModeDefaultAllowlist 在目标处于活动状态时生效（检查项 O8）。
-// 它让长程任务保持聚焦，并排除记忆和仅限运维的工具。
+// goalModeDefaultAllowlist 在目标处于活动状态时生效（检查项 O8；docs/41 W0-3 / W1-1）。
+// 它让长程任务保持聚焦：排除 memory、会话 todo（与 goal.actions 语义重叠）、
+// 多写路径中的 edit/patch（默认主推 write_file + diff 预览）、以及运维/消息工具。
 // 若客户端也提供 tool_allowlist，则取二者交集。
 var goalModeDefaultAllowlist = []string{
 	"workspace.read_file",
@@ -134,12 +139,10 @@ var goalModeDefaultAllowlist = []string{
 	"workspace.stats",
 	"workspace.grep",
 	"workspace.write_file",
-	"workspace.edit_file",
 	"workspace.diff_file",
-	"workspace.apply_patch",
+	// workspace.edit_file / workspace.apply_patch: opt-in via client allowlist or non-goal chat.
 	"shell.exec",
-	"todo.write",
-	"todo.list",
+	// todo.* intentionally omitted: Goal uses goal.plan actions (docs/41 W0-3).
 	"goal.create",
 	"goal.plan",
 	"goal.observe",
@@ -154,8 +157,7 @@ var goalModeDefaultAllowlist = []string{
 	"worker.delegate",
 	"worker.list",
 	"worker.cancel",
-	"worker.send",
-	"worker.receive",
+	// worker.send/receive are ops-only (docs/41 W1-2).
 	"skill.list",
 	"skill.run",
 	"web.search",

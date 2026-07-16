@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  agentCapabilityLabel,
   agentDisplayName,
   agentDraftFrom,
   agentPhaseLabel,
@@ -9,8 +10,10 @@ import {
 } from './agents.js';
 
 describe('agents helpers', () => {
-  it('labels known phases', () => {
-    assert.equal(agentPhaseLabel('analyze'), '分析');
+  it('labels known capability tags', () => {
+    assert.equal(agentCapabilityLabel('research'), '调研');
+    assert.equal(agentCapabilityLabel('build'), '实施');
+    assert.equal(agentPhaseLabel('analyze'), '分析'); // legacy alias
     assert.equal(agentPhaseLabel('verify'), '验证');
   });
 

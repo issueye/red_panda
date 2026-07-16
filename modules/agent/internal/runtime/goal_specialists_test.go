@@ -88,12 +88,22 @@ func TestResolveGoalSpecialistDisabledDefinition(t *testing.T) {
 }
 
 func TestResolveGoalSpecialistFallsBackWithoutCatalog(t *testing.T) {
-	spec, ok := resolveGoalSpecialist(nil, "goal-planner")
-	if !ok || spec.Key != "goal-planner" {
+	spec, ok := resolveGoalSpecialist(nil, "goal-analyst")
+	if !ok || spec.Key != "goal-analyst" {
 		t.Fatalf("fallback missing: %#v", spec)
 	}
-	if !strings.Contains(spec.SystemPrompt, "goal-planner") {
+	if !strings.Contains(spec.SystemPrompt, "goal-analyst") {
 		t.Fatalf("expected builtin prompt, got %q", spec.SystemPrompt)
+	}
+	// W4-A: planner is catalog-only / default-disabled without Gateway enablement.
+	if _, ok := resolveGoalSpecialist(nil, "goal-planner"); ok {
+		t.Fatal("goal-planner must not resolve without catalog when default-disabled")
+	}
+	// Explicit enable in catalog restores planner.
+	if _, ok := resolveGoalSpecialist([]methods.WorkerProfileRef{{
+		Key: "goal-planner", Enabled: true, SystemPrompt: "PLANNER ON",
+	}}, "goal-planner"); !ok {
+		t.Fatal("enabled planner in catalog should resolve")
 	}
 }
 

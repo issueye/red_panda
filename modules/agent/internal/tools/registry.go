@@ -11,7 +11,7 @@ import (
 // that do not manage their own deadlines.
 const defaultLocalToolTimeout = 30 * time.Second
 
-// defaultGatewayToolTimeout limits memory, todo, and goal callbacks to Gateway.
+// defaultGatewayToolTimeout limits memory/todo/goal/context callbacks to Gateway.
 const defaultGatewayToolTimeout = 30 * time.Second
 
 type toolTimeoutClass uint8
@@ -658,7 +658,9 @@ func timeoutClassForStableTool(name string) toolTimeoutClass {
 		return selfManagedToolTimeout
 	case strings.HasPrefix(name, "memory."),
 		strings.HasPrefix(name, "todo."),
-		strings.HasPrefix(name, "goal."):
+		strings.HasPrefix(name, "goal."),
+		strings.HasPrefix(name, "context."):
+		// All four state domains are Gateway-mediated RPC tools (docs/41 W0-2).
 		return gatewayToolTimeout
 	default:
 		return localToolTimeout

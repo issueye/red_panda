@@ -25,9 +25,18 @@ func (r *Runtime) callGatewayResult(ctx context.Context, method string, params a
 	return nil
 }
 
+// callStateTool invokes the unified state.tool.execute RPC (docs/41 W2-1/W2-3)
+// and unmarshals into a domain-specific result type. Domain services still
+// return Memory/Todo/Goal/Context shapes so typed fields (Items, Goal, Notes)
+// remain available without a payload migration.
+func (r *Runtime) callStateTool(ctx context.Context, domain string, runID, sessionID, workspaceRoot, toolCallID, toolName string, arguments map[string]any, out any) error {
+	params := methods.NewStateToolParams(domain, runID, sessionID, workspaceRoot, toolCallID, toolName, arguments)
+	return r.callGatewayResult(ctx, methods.StateToolExecute, params, out)
+}
+
 func (r *Runtime) executeMemoryTool(ctx context.Context, req methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error) {
 	var result methods.MemoryToolExecuteResult
-	if err := r.callGatewayResult(ctx, methods.MemoryToolExecute, req, &result); err != nil {
+	if err := r.callStateTool(ctx, methods.StateToolDomainMemory, req.RunID, req.SessionID, req.WorkspaceRoot, req.ToolCallID, req.ToolName, req.Arguments, &result); err != nil {
 		return methods.MemoryToolExecuteResult{}, err
 	}
 	return result, nil
@@ -47,7 +56,7 @@ func (r *Runtime) todoExecutor(ctx context.Context, req methods.TodoToolExecuteP
 
 func (r *Runtime) executeTodoTool(ctx context.Context, req methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error) {
 	var result methods.TodoToolExecuteResult
-	if err := r.callGatewayResult(ctx, methods.TodoToolExecute, req, &result); err != nil {
+	if err := r.callStateTool(ctx, methods.StateToolDomainTodo, req.RunID, req.SessionID, req.WorkspaceRoot, req.ToolCallID, req.ToolName, req.Arguments, &result); err != nil {
 		return methods.TodoToolExecuteResult{}, err
 	}
 	return result, nil
@@ -58,10 +67,11 @@ func (r *Runtime) goalExecutor(ctx context.Context, req methods.GoalToolExecuteP
 	if err != nil {
 		return result, err
 	}
+	// goal.list is read-only and often returns multiple goals without a single
+	// snapshot to bind; every mutating tool (including internal segment_end)
+	// refreshes the per-run Goal projection when result.Goal is set.
 	name := strings.TrimSpace(req.ToolName)
-	if name != "goal.list" && name != "segment_end" {
-		r.applyGoalToolResult(req.RunID, name, result)
-	} else if name == "segment_end" {
+	if name != "goal.list" {
 		r.applyGoalToolResult(req.RunID, name, result)
 	}
 	return result, nil
@@ -69,7 +79,7 @@ func (r *Runtime) goalExecutor(ctx context.Context, req methods.GoalToolExecuteP
 
 func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error) {
 	var result methods.GoalToolExecuteResult
-	if err := r.callGatewayResult(ctx, methods.GoalToolExecute, req, &result); err != nil {
+	if err := r.callStateTool(ctx, methods.StateToolDomainGoal, req.RunID, req.SessionID, req.WorkspaceRoot, req.ToolCallID, req.ToolName, req.Arguments, &result); err != nil {
 		return methods.GoalToolExecuteResult{}, err
 	}
 	return result, nil
@@ -79,7 +89,7 @@ func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecu
 // 根运行和专业子代理均可使用它，因为 context.* 被有意排除在 Worker.RunDenylist 之外。
 func (r *Runtime) executeContextTool(ctx context.Context, req methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
 	var result methods.ContextToolExecuteResult
-	if err := r.callGatewayResult(ctx, methods.ContextToolExecute, req, &result); err != nil {
+	if err := r.callStateTool(ctx, methods.StateToolDomainContext, req.RunID, req.SessionID, req.WorkspaceRoot, req.ToolCallID, req.ToolName, req.Arguments, &result); err != nil {
 		return methods.ContextToolExecuteResult{}, err
 	}
 	return result, nil

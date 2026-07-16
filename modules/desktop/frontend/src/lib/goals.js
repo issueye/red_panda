@@ -1,5 +1,7 @@
 /** Goal V2 projection helpers. */
 
+import { mapListFromEnvelope } from './envelope.js';
+
 export const GOAL_STATUS_LABELS = {
   pending: '待启动', active: '推进中', paused: '已暂停',
   succeeded: '已达成', failed: '未达成', cancelled: '已取消',
@@ -81,9 +83,7 @@ export function normalizeGoal(raw = {}) {
 }
 
 export function normalizeGoalList(data) {
-  if (Array.isArray(data)) return data.map(normalizeGoal);
-  if (Array.isArray(data?.items)) return data.items.map(normalizeGoal);
-  return [];
+  return mapListFromEnvelope(data, normalizeGoal);
 }
 
 export function pickFocusGoal(items = []) {

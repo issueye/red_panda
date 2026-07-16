@@ -6,22 +6,23 @@ The current goal is a local, restorable, auditable three-layer AI Agent framewor
 
 1. Desktop handles user interaction.
 2. Gateway owns state, persistence, protocol routing, and process management.
-3. Agent Runtime owns provider calls, tool execution, permission requests, cancellation, and subagent runtime behavior.
+3. Agent Runtime owns provider calls, tool execution, permission requests, cancellation, and Worker pool execution.
 
 ## Architecture
 
-1. Desktop: Wails v3 + JavaScript + React + shadcn/ui-style components. It contains chat, workspace browsing, permission cards, tool cards, subagent state, user-visible subagent cancel, run activity, and the red panda logo.
-2. Gateway: Go + Gin + SQLite(no cgo) + GORM + MVC. It provides HTTP/WebSocket APIs, session persistence, workspace APIs, permission coordination, event routing, run/tool/permission projections, and Agent Runtime process management.
-3. Agent Runtime: Go subprocess connected to Gateway through newline-delimited stdio JSON-RPC. It runs providers, tools, permission gates, active run state, cancellation, the in-process `planner` subagent MVP, and the `runtime_process` / `process_pool` subagent backends.
+1. Desktop: Wails v3 + JavaScript + React + shadcn/ui-style components. Chat, workspace browsing, permission cards, tool cards, Worker assignments/cancel, Goal/Todo strips, run activity, and the red panda logo.
+2. Gateway: Go + Gin + SQLite(no cgo) + GORM + MVC. HTTP/WebSocket APIs, session persistence, workspace APIs, permission coordination, event routing, run/tool/permission projections, and Agent Runtime process management.
+3. Agent Runtime: Go subprocess connected to Gateway through **IPC by default** (Windows named pipes / Unix domain sockets; newline-delimited JSON-RPC). Providers, tools, permission gates, Goal feedback controller, and a reusable **Worker pool** for `worker.delegate` assignments. Legacy stdio is an escape hatch (`RED_PANDA_RUNTIME_IPC=0` / missing `RED_PANDA_IPC_ADDR`).
 
-Desktop and Gateway use WebSocket for realtime interaction. SSE is not used. Gateway and Agent Runtime use stdio JSON-RPC. Root agent and subagent output share the same root run channel and are ordered by `root_seq`.
+Desktop and Gateway use WebSocket for realtime interaction (no SSE). Root run and Worker assignment events share one run channel ordered by `run_seq` (EnvelopeV2).
 
 ## Go Workspace Modules
 
-- `modules/protocol`: JSON-RPC, WebSocket envelope, agent event, permission/tool DTOs, and MCP server config/CRUD DTOs.
-- `modules/agent`: stdio JSON-RPC Agent Runtime with Provider abstraction, ToolRunner, permission blocking, cancellation, in-process `planner`, and `runtime_process` / `process_pool` subagent backends.
-- `modules/gateway`: Gin/GORM/SQLite(no cgo) MVC Gateway with Runtime subprocess client, WebSocket run/permission channel, event replay, workspace/session/run/tool/permission APIs, and validated MCP config CRUD.
-- `modules/desktop`: Wails v3 + React/Vite desktop with chat, permissions, tool cards, subagents, workspace/session restore, activity inspection, and Gateway-backed MCP config management.
+- `modules/protocol`: JSON-RPC, WebSocket envelope, run/worker events, permission/tool DTOs, MCP/Skill/Goal/state-tool contracts.
+- `modules/ipc`: Cross-platform IPC session helpers used by Gateway↔Runtime and Worker process wiring.
+- `modules/agent`: Agent Runtime (IPC/stdio JSON-RPC), Provider abstraction, ToolRunner, WorkerPool, Goal/Todo/Memory/Context tools.
+- `modules/gateway`: Gin/GORM/SQLite(no cgo) MVC Gateway with Runtime client, WebSocket channel, projections, provider profiles, MCP config CRUD.
+- `modules/desktop`: Wails v3 + React/Vite desktop (chat, permissions, tools, Workers, workspace/session restore, Activity, Settings).
 - `modules/cli`: placeholder for future debugging tools.
 
 ## Design Docs
@@ -44,9 +45,9 @@ See [docs/README.md](docs/README.md) for the current index. Highlights:
 1. Start `bin/red-panda-gateway.exe`.
 2. Gateway finds `bin/red-panda-agent.exe` by default, or uses `RED_PANDA_AGENT_COMMAND`.
 3. Desktop or an external client connects to `ws://127.0.0.1:17888/api/v1/ws`.
-4. Client sends `run.start`; options may include `runtime_mode`, `tool_policy`, `permission_mode`, `spawn_subagents`, `subagent_backend`, `model`, `provider_profile_id`, `tool_allowlist`, and `tool_denylist`.
-5. Gateway calls `agent.reply` over stdio JSON-RPC. The default `runtime_mode` is `single_core`; `runtime_mode=per_run_process` starts a dedicated `red-panda-agent` process for that root run. When `provider_profile_id` is present, Gateway resolves the profile and sends the provider, model, base URL, and API key to Runtime for that run.
-6. Agent Runtime emits `agent.event`.
+4. Client sends `run.start`; options may include `runtime_mode`, `tool_policy`, `permission_mode`, `model`, `provider_profile_id`, `tool_allowlist`, `tool_denylist`, `worker_pool_size`, and Goal flags. Legacy `spawn_subagents` / `subagent_backend` are ignored (v0.2 Worker model).
+5. Gateway dispatches `run.execute` over the Runtime transport (default IPC). Desktop default `runtime_mode` is `per_run_process` (dedicated agent process per root run); `single_core` shares a long-lived process. When `provider_profile_id` is present, Gateway resolves the profile and sends provider settings to Runtime for that run.
+6. Agent Runtime emits `run.event` (EnvelopeV2).
 7. Gateway writes events to SQLite and broadcasts WebSocket `run.event`.
 8. New clients can use `run.resume` and `root_seq` to replay events.
 9. Tool calls, run status, and permission requests are projected to queryable HTTP tables.

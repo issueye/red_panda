@@ -1,5 +1,9 @@
 package service
 
+// Goal V2 feedback controller tool handlers (create/plan/observe/assess/finish)
+// and projection helpers. Lifecycle/bind/pause remain in goal.go (docs/41 W5-3).
+// File renamed from goal_v2.go — there is no dual V1 controller path.
+
 import (
 	"encoding/json"
 	"fmt"

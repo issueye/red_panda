@@ -53,23 +53,35 @@ func withContextShareTools(base ...string) []string {
 	return out
 }
 
+// defaultEnabledGoalSpecialists is the W4-A default roster (docs/41):
+// research → build → review. Planner/evaluator stay in the catalog for
+// opt-in re-enable via Gateway Worker Profiles.
+var defaultEnabledGoalSpecialists = map[string]bool{
+	"goal-analyst":     true,
+	"goal-implementer": true,
+	"goal-verifier":    true,
+	"goal-planner":     false,
+	"goal-evaluator":   false,
+}
+
 // builtinGoalSpecialists 是按当前行动需求选择的内置专家，Key 与 Worker Profiles 匹配。
 var builtinGoalSpecialists = map[string]goalSpecialist{
 	"goal-analyst": {
-		Key: "goal-analyst", NameZH: "目标分析师", Capability: "analyze",
+		Key: "goal-analyst", NameZH: "目标分析师", Capability: "research",
 		DefaultMaxTurns: 12, CapMaxTurns: 24,
 		Allowlist:     withContextShareTools(append(append([]string{}, workspaceReadTools...), "web.search", "web.fetch")...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec"),
 		SystemPrompt: `You are goal-analyst for red_panda (目标分析师).
 
-Role: analyze the user request and codebase only. Read-only for workspace files.
+Role: research the gap and suggest a revisable action queue. Read-only for workspace files.
+Parent owns goal.plan / goal.assess / goal.finish.
 
 Rules:
 - Do NOT modify files or run write/shell commands.
 - Do NOT call goal.* or todo.* tools.
 - Do NOT spawn nested Workers.
 - Use context.write / context.replace to persist key findings on the shared goal scratchpad.
-- Produce a clear final report the parent can trust.
+- Include concrete suggested actions with acceptance checks the parent can pass to goal.plan.
 
 Preferred final report shape (JSON in a fenced block is ideal):
 {
@@ -80,6 +92,7 @@ Preferred final report shape (JSON in a fenced block is ideal):
   "success_signals": ["..."],
   "risks": ["..."],
   "suggested_approach": "...",
+  "suggested_actions": [{"key":"action-1","title":"...","acceptance":"..."}],
   "trivial": false,
   "key_paths": ["..."]
 }
@@ -87,19 +100,19 @@ Preferred final report shape (JSON in a fenced block is ideal):
 If the request is trivial one-shot Q&A, set "trivial": true and explain why a Goal is unnecessary.`,
 	},
 	"goal-planner": {
-		Key: "goal-planner", NameZH: "目标规划师", Capability: "plan",
+		Key: "goal-planner", NameZH: "目标规划师", Capability: "strategy",
 		DefaultMaxTurns: 8, CapMaxTurns: 12,
 		Allowlist:     withContextShareTools(workspaceReadTools...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec", "web.search", "web.fetch"),
 		SystemPrompt: `You are goal-planner for red_panda (目标规划师).
 
 Role: turn the current Goal contract, evidence, and gaps into a revisable action queue. Read-only for workspace files.
+(Default-disabled in W4-A; parent usually plans via goal.plan using analyst suggestions.)
 
 Rules:
 - Do NOT write files or mutate controller state (parent owns goal.plan / goal.assess).
 - Use context.read for prior analyst findings; context.write for plan decisions on the shared scratchpad.
 - Actions must be verifiable and ordered; keep granularity practical.
-- Contract criteria must be independently checkable through tests, files, or observable behavior.
 
 Preferred final report JSON:
 {
@@ -111,7 +124,7 @@ Preferred final report JSON:
 }`,
 	},
 	"goal-implementer": {
-		Key: "goal-implementer", NameZH: "目标实施者", Capability: "implement",
+		Key: "goal-implementer", NameZH: "目标实施者", Capability: "build",
 		DefaultMaxTurns: 24, CapMaxTurns: 48,
 		// 没有允许列表时，暴露除拒绝列表外的全部工具。
 		ExtraDenylist: []string{"web.search", "web.fetch", "skill.run", "skill.create", "skill.update", "skill.delete"},
@@ -135,13 +148,15 @@ Preferred final report JSON:
 }`,
 	},
 	"goal-verifier": {
-		Key: "goal-verifier", NameZH: "目标验证者", Capability: "verify",
+		Key: "goal-verifier", NameZH: "目标验证者", Capability: "review",
 		DefaultMaxTurns: 12, CapMaxTurns: 16,
 		Allowlist:     withContextShareTools(append(append([]string{}, workspaceReadTools...), "shell.exec")...),
 		ExtraDenylist: append([]string{}, workspaceWriteTools...),
 		SystemPrompt: `You are goal-verifier for red_panda (目标验证者).
 
-Role: skeptically verify the current Goal action with evidence (read/tests/commands).
+Role: skeptically verify the current Goal action with evidence (read/tests/commands),
+and supply criterion-level hints for the parent goal.assess.
+Parent owns goal.assess / goal.finish.
 
 Rules:
 - Prefer evidence over the implementer's claims.
@@ -157,32 +172,30 @@ Preferred final report JSON:
   "evidence": [{"kind":"test|read|command","detail":"..."}],
   "failures": [],
   "retry_suggestion": "...",
+  "criteria_hints": [{"id":"criterion-1","status":"met|not_met|blocked","evidence":"..."}],
   "assessment_summary": "short verdict suitable for goal.assess",
-  "evidence": "concise evidence suitable for goal.assess"
+  "evidence_summary": "concise evidence suitable for goal.assess"
 }`,
 	},
 	"goal-evaluator": {
-		Key: "goal-evaluator", NameZH: "目标终评官", Capability: "evaluate",
+		Key: "goal-evaluator", NameZH: "目标终评官", Capability: "assess",
 		DefaultMaxTurns: 8, CapMaxTurns: 12,
 		Allowlist:     withContextShareTools(workspaceReadTools...),
 		ExtraDenylist: append(append([]string{}, workspaceWriteTools...), "shell.exec", "web.search", "web.fetch"),
 		SystemPrompt: `You are goal-evaluator for red_panda (目标终评官).
 
 Role: evaluate the whole Goal against every contract criterion and draft the user-facing completion report.
+(Default-disabled in W4-A; parent usually assesses via goal.assess using verifier evidence.)
 
 Rules:
 - Read-only for workspace files and shell. Do not write files or run shell.
 - Use context.read for shared findings across the goal; context.write for the final evaluation notes.
-- Compare evidence from prior specialist reports and the workspace.
 - Do NOT call goal.finish (parent does after persisting a satisfied assessment).
 
 Preferred final report JSON:
 {
   "verdict": "succeeded|partial|failed",
   "criteria": [{"item":"...","result":"met|partial|not_met|blocked","evidence":"..."}],
-  "actions_summary": [{"id":"...","status":"done","note":"..."}],
-  "risks": ["..."],
-  "followups": ["..."],
   "assessment_summary": "final verdict against the contract criteria",
   "evidence": "concrete evidence covering the criteria",
   "report_markdown": "## 目标完成报告\\n..."
@@ -202,12 +215,21 @@ func lookupGoalSpecialist(name string) (goalSpecialist, bool) {
 // resolveGoalSpecialist 将 Gateway 管理的 Worker Profiles 合并到内置专家配置。
 // 存在时，提示词、默认最大回合、阶段和显示名称取自 Gateway；工具允许和拒绝策略仍由 Runtime
 // 管理（共享上下文工具与写入隔离），避免设置意外移除安全约束。
+//
+// W4-A: when Gateway sends a catalog, only specialists present and enabled there
+// resolve. With no catalog, only defaultEnabledGoalSpecialists resolve.
 func resolveGoalSpecialist(profiles []methods.WorkerProfileRef, name string) (goalSpecialist, bool) {
 	base, ok := lookupGoalSpecialist(name)
 	if !ok {
 		return goalSpecialist{}, false
 	}
 	key := normalizeGoalSpecialistKey(name)
+	if len(profiles) == 0 {
+		if !defaultEnabledGoalSpecialists[key] {
+			return goalSpecialist{}, false
+		}
+		return base, true
+	}
 	for _, profile := range profiles {
 		if normalizeGoalSpecialistKey(profile.Key) != key {
 			continue
@@ -232,7 +254,8 @@ func resolveGoalSpecialist(profiles []methods.WorkerProfileRef, name string) (go
 		}
 		return base, true
 	}
-	return base, true
+	// Catalog present but this specialist was not attached (disabled / omitted).
+	return goalSpecialist{}, false
 }
 
 func normalizeGoalSpecialistKey(name string) string {

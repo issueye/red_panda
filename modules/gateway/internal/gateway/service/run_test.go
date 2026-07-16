@@ -801,8 +801,9 @@ func TestRunServiceApplyWorkerProfilesUsesWorkerProfileSourceOfTruth(t *testing.
 	if err := service.applyWorkerProfiles(&params); err != nil {
 		t.Fatal(err)
 	}
-	if len(params.Options.WorkerProfiles) < 5 {
-		t.Fatalf("expected builtin worker profiles, got %d", len(params.Options.WorkerProfiles))
+	// W4-A: three default-enabled specialists (planner/evaluator disabled).
+	if len(params.Options.WorkerProfiles) != 3 {
+		t.Fatalf("expected 3 default-enabled builtin worker profiles, got %d", len(params.Options.WorkerProfiles))
 	}
 	var found *methods.WorkerProfileRef
 	for i := range params.Options.WorkerProfiles {

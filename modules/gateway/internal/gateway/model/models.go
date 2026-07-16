@@ -326,7 +326,11 @@ type WorkerProfile struct {
 	Name            string
 	NameZH          string
 	Kind            string `gorm:"index"` // builtin | custom
-	Phase           string `gorm:"index"` // analyze | plan | execute | verify | evaluate | custom | general
+	// Phase is a capability tag for grouping/display only (docs/41 W3-4).
+	// Wire/API field remains "phase" for compatibility; it is NOT a Goal pipeline stage.
+	// Preferred values: research|strategy|build|review|assess|general|custom
+	// (legacy analyze|plan|execute|verify|evaluate still accepted).
+	Phase           string `gorm:"index"`
 	Description     string
 	SystemPrompt    string `gorm:"type:text"`
 	Provider        string

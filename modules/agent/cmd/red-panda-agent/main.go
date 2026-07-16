@@ -30,10 +30,11 @@ func main() {
 	}
 }
 
-// openTransport 在设置 RED_PANDA_IPC_ADDR 时优先使用 IPC（正常 Gateway 启动路径）。
-// 手动或本地调试未启动父监听器时回退为 stdio。诊断日志始终输出到 stderr。
+// openTransport 在设置 RED_PANDA_IPC_ADDR 时优先使用 IPC（正常 Gateway 启动路径，docs/41 W3-2）。
+// 手动或本地调试未启动父监听器时回退为 legacy stdio。诊断日志始终输出到 stderr。
 func openTransport() (in io.Reader, out io.Writer, closer io.Closer, err error) {
 	if strings.TrimSpace(os.Getenv(ipc.EnvAddr)) == "" {
+		fmt.Fprintf(os.Stderr, "red-panda-agent: using legacy stdio transport (no %s); Gateway IPC is the default path\n", ipc.EnvAddr)
 		return os.Stdin, os.Stdout, nil, nil
 	}
 	conn, err := ipc.DialFromEnv(context.Background())

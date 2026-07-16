@@ -1,5 +1,8 @@
 package service
 
+// Goal lifecycle, binding, pause/repair, and tool dispatch entrypoints.
+// Feedback-controller mutations live in goal_controller.go (docs/41 W5-3).
+
 import (
 	"encoding/json"
 	"fmt"

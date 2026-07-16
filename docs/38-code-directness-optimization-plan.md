@@ -45,7 +45,7 @@ Success means:
 
 Primary files:
 
-- `modules/gateway/internal/gateway/service/run.go`
+- `modules/gateway/internal/gateway/service/run.go` (+ `run_start.go` / `run_goal.go` / `run_events.go` after docs/41 W5-4)
 - focused service tests
 
 Implementation:
@@ -54,6 +54,8 @@ Implementation:
 2. Centralize post-admission failure cleanup.
 3. Extract run parameter construction/context preparation where it shortens `Start`.
 4. Keep Goal pause semantics and Runtime dispatch ordering unchanged.
+
+Status: **done** — `Start` is admission → prepare → dispatch; helpers live in `run_start.go`; Goal bind in `run_goal.go`; event projection in `run_events.go` (docs/41 W5-4).
 
 Acceptance:
 

@@ -1,8 +1,20 @@
 /**
  * Managed Worker Profile definitions (Gateway /api/v1/worker-profiles).
+ * Field `phase` on the wire is a capability tag only (docs/41 W3-4) — not a
+ * Goal pipeline stage.
  */
 
-export const AGENT_PHASE_LABELS = {
+import { listFromEnvelope } from './envelope.js';
+
+/** Capability tags for Worker Profiles (API field remains `phase`). */
+export const AGENT_CAPABILITY_LABELS = {
+  // V2 capability tags (builtin seeds).
+  research: '调研',
+  strategy: '策略',
+  build: '实施',
+  review: '验证',
+  assess: '评估',
+  // Legacy pipeline-era labels (still accepted).
   analyze: '分析',
   plan: '规划',
   execute: '执行',
@@ -12,8 +24,16 @@ export const AGENT_PHASE_LABELS = {
   custom: '自定义',
 };
 
+/** @deprecated use AGENT_CAPABILITY_LABELS */
+export const AGENT_PHASE_LABELS = AGENT_CAPABILITY_LABELS;
+
+export function agentCapabilityLabel(capability) {
+  return AGENT_CAPABILITY_LABELS[capability] || capability || '自定义';
+}
+
+/** @deprecated use agentCapabilityLabel */
 export function agentPhaseLabel(phase) {
-  return AGENT_PHASE_LABELS[phase] || phase || '自定义';
+  return agentCapabilityLabel(phase);
 }
 
 export function emptyAgentDraft() {
@@ -22,7 +42,7 @@ export function emptyAgentDraft() {
     key: '',
     name: '',
     name_zh: '',
-    phase: 'custom',
+    phase: 'custom', // capability tag (wire name)
     description: '',
     system_prompt: '',
     default_max_turns: 12,
@@ -59,8 +79,5 @@ export function agentDisplayName(item) {
  * @returns {Array<object>}
  */
 export function normalizeAgentList(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (payload && Array.isArray(payload.items)) return payload.items;
-  if (payload && Array.isArray(payload.data)) return payload.data;
-  return [];
+  return listFromEnvelope(payload, { keys: ['items', 'data'] });
 }

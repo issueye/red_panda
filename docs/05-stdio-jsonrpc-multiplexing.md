@@ -1,32 +1,39 @@
-# stdio JSON-RPC 事件复用协议
+# Gateway ↔ Runtime JSON-RPC 事件复用协议
+
+> **Transport note (docs/41 W3-2, 2026-07):** the **default** wire is **IPC**
+> (named pipes / Unix domain sockets) carrying the same newline-delimited
+> JSON-RPC framing. **stdio** remains a **legacy escape hatch**
+> (`RED_PANDA_RUNTIME_IPC=0` or an agent started without `RED_PANDA_IPC_ADDR`).
+> Framing, methods, and event envelopes are transport-agnostic.
 
 ## 1. 问题定义
 
-`red_panda` 的中间网关和 Agent Runtime 使用 newline-delimited JSON-RPC 2.0 over stdio 通信。Agent Runtime 内部会同时存在：
+`red_panda` 的中间网关和 Agent Runtime 使用 newline-delimited JSON-RPC 2.0
+（默认 IPC，兼容 legacy stdio）通信。Agent Runtime 内部会同时存在：
 
-1. 主代理输出文本、reasoning、工具事件。
-2. 一个或多个子代理输出文本、reasoning、工具事件。
+1. 入口 Run 输出文本、reasoning、工具事件。
+2. 一个或多个 Worker Assignment 输出文本、reasoning、工具事件。
 3. 工具 stdout/stderr 增量输出。
 4. 权限请求、取消、失败、完成等控制事件。
 
-这些事件最终都经过同一个 Agent Runtime stdout 通道发给网关。协议必须保证：
+这些事件最终都经过同一个 Agent Runtime 写出通道发给网关。协议必须保证：
 
-1. stdout 上每一行仍然是合法 JSON-RPC 消息。
-2. 主代理和子代理输出不会混在同一个文本流里。
-3. 网关能把同一个 root run 的主代理和子代理事件转发到同一个 WebSocket 订阅通道。
-4. 桌面端能按代理、子代理、工具和内容流正确展示。
+1. 写出通道上每一行仍然是合法 JSON-RPC 消息。
+2. 入口 Run 与 Worker 输出不会混在同一个文本流里。
+3. 网关能把同一个 run 的入口与 Worker 事件转发到同一个 WebSocket 订阅通道。
+4. 桌面端能按 Run、Worker Assignment、工具和内容流正确展示。
 5. 事件可持久化、可断线续传、可重放。
 
 ## 2. 基本原则
 
-1. Agent Runtime stdout 只能写 JSON-RPC response 或 notification。
-2. 任何 agent、subagent、tool 都不能直接写 stdout。
+1. Agent Runtime 写出通道只能写 JSON-RPC response 或 notification。
+2. 任何 agent、Worker、tool 都不能直接写协议通道。
 3. Runtime 内部必须有 Event Multiplexer，所有执行单元只向它投递事件。
-4. Event Multiplexer 是 stdout 的唯一写入者。
-5. Event Multiplexer 为同一个 `root_run_id` 分配全局递增 `root_seq`。
-6. 每个 agent 维护自己的 `agent_seq`。
+4. Event Multiplexer 是协议写出通道的唯一写入者。
+5. Event Multiplexer 为同一个 `run_id` 分配全局递增 `run_seq`（历史文档中的 `root_seq` 同义）。
+6. 每个 Worker 维护自己的 `worker_seq`（历史 `agent_seq`）。
 7. 每个流式内容维护自己的 `stream_seq`。
-8. 网关存储和 WebSocket 转发时保留完整 envelope，不丢失 agent/subagent 元数据。
+8. 网关存储和 WebSocket 转发时保留完整 EnvelopeV2，不丢失 Worker/Assignment 元数据。
 
 ## 3. JSON-RPC 外层
 

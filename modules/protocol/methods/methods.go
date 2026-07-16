@@ -2,6 +2,8 @@ package methods
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	protocolmcp "redpanda/protocol/mcp"
@@ -22,10 +24,19 @@ const (
 	PermissionResolve = "permission.resolve"
 
 	// Gateway-backed state tools (memory/todo/goal/context) — stable internal RPCs.
+	// Prefer StateToolExecute for new Runtime code; domain methods remain for
+	// compatibility (docs/41 W2-3).
 	MemoryToolExecute  = "memory.tool.execute"
 	TodoToolExecute    = "todo.tool.execute"
 	GoalToolExecute    = "goal.tool.execute"
 	ContextToolExecute = "context.tool.execute"
+	StateToolExecute   = "state.tool.execute"
+
+	// State tool domains for StateToolExecuteParams.Domain.
+	StateToolDomainMemory  = "memory"
+	StateToolDomainTodo    = "todo"
+	StateToolDomainGoal    = "goal"
+	StateToolDomainContext = "context"
 
 	// v0.2 primary execution protocol (no legacy subagent/root model).
 	RunExecute             = "run.execute"
@@ -648,6 +659,104 @@ type ContextToolExecuteResult struct {
 	Status string        `json:"status"`
 	Output string        `json:"output,omitempty"`
 	Notes  []GoalNoteDTO `json:"notes,omitempty"`
+}
+
+// StateToolExecuteParams is the unified Runtime → Gateway envelope for all four
+// Gateway-mediated state domains (docs/41 W2-3). Domain may be omitted when
+// ToolName carries a recognizable prefix (memory.*, todo.*, goal.*, context.*).
+// Domain services still return their existing typed results; JSON fields stay
+// compatible with Memory/Todo/Goal/ContextToolExecuteResult unmarshaling.
+type StateToolExecuteParams struct {
+	Domain        string         `json:"domain,omitempty"`
+	RunID         string         `json:"run_id"`
+	SessionID     string         `json:"session_id"`
+	WorkspaceRoot string         `json:"workspace_root,omitempty"`
+	ToolCallID    string         `json:"tool_call_id"`
+	ToolName      string         `json:"tool_name"`
+	Arguments     map[string]any `json:"arguments,omitempty"`
+}
+
+// ResolveStateToolDomain returns the canonical domain for a state tool call.
+// Prefer explicit domain; otherwise infer from tool_name / legacy aliases.
+func ResolveStateToolDomain(domain, toolName string) (string, error) {
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	switch domain {
+	case StateToolDomainMemory, StateToolDomainTodo, StateToolDomainGoal, StateToolDomainContext:
+		return domain, nil
+	case "":
+		// infer below
+	default:
+		return "", fmt.Errorf("unsupported state tool domain %q", domain)
+	}
+	name := strings.TrimSpace(toolName)
+	switch {
+	case name == "todo_write", strings.HasPrefix(name, "todo."):
+		return StateToolDomainTodo, nil
+	case name == "segment_end", strings.HasPrefix(name, "goal."):
+		return StateToolDomainGoal, nil
+	case strings.HasPrefix(name, "memory."):
+		return StateToolDomainMemory, nil
+	case strings.HasPrefix(name, "context."):
+		return StateToolDomainContext, nil
+	default:
+		return "", fmt.Errorf("cannot resolve state tool domain for tool %q", name)
+	}
+}
+
+// StateToolRequiresSession reports whether the domain requires a live session_id
+// in the Runtime→Gateway envelope (memory keeps workspace-scoped ownership).
+func StateToolRequiresSession(domain string) bool {
+	switch strings.TrimSpace(strings.ToLower(domain)) {
+	case StateToolDomainMemory:
+		return false
+	default:
+		return true
+	}
+}
+
+// AsMemoryParams projects the unified envelope onto the memory domain params.
+func (p StateToolExecuteParams) AsMemoryParams() MemoryToolExecuteParams {
+	return MemoryToolExecuteParams{
+		RunID: p.RunID, SessionID: p.SessionID, WorkspaceRoot: p.WorkspaceRoot,
+		ToolCallID: p.ToolCallID, ToolName: p.ToolName, Arguments: p.Arguments,
+	}
+}
+
+// AsTodoParams projects the unified envelope onto the todo domain params.
+func (p StateToolExecuteParams) AsTodoParams() TodoToolExecuteParams {
+	return TodoToolExecuteParams{
+		RunID: p.RunID, SessionID: p.SessionID, WorkspaceRoot: p.WorkspaceRoot,
+		ToolCallID: p.ToolCallID, ToolName: p.ToolName, Arguments: p.Arguments,
+	}
+}
+
+// AsGoalParams projects the unified envelope onto the goal domain params.
+func (p StateToolExecuteParams) AsGoalParams() GoalToolExecuteParams {
+	return GoalToolExecuteParams{
+		RunID: p.RunID, SessionID: p.SessionID, WorkspaceRoot: p.WorkspaceRoot,
+		ToolCallID: p.ToolCallID, ToolName: p.ToolName, Arguments: p.Arguments,
+	}
+}
+
+// AsContextParams projects the unified envelope onto the context domain params.
+func (p StateToolExecuteParams) AsContextParams() ContextToolExecuteParams {
+	return ContextToolExecuteParams{
+		RunID: p.RunID, SessionID: p.SessionID, WorkspaceRoot: p.WorkspaceRoot,
+		ToolCallID: p.ToolCallID, ToolName: p.ToolName, Arguments: p.Arguments,
+	}
+}
+
+// NewStateToolParams builds a unified envelope from common Runtime tool fields.
+func NewStateToolParams(domain, runID, sessionID, workspaceRoot, toolCallID, toolName string, arguments map[string]any) StateToolExecuteParams {
+	return StateToolExecuteParams{
+		Domain:        domain,
+		RunID:         runID,
+		SessionID:     sessionID,
+		WorkspaceRoot: workspaceRoot,
+		ToolCallID:    toolCallID,
+		ToolName:      toolName,
+		Arguments:     arguments,
+	}
 }
 
 // GoalNoteDTO is the shared shape for a goal scratchpad note.

@@ -81,24 +81,28 @@ func Run(ctx context.Context, cfg Config) error {
 			if err != nil {
 				return nil, err
 			}
-			// Cancel the bound run after the tool RPC returns so we never call
-			// AgentCancel while the Runtime is still blocked on this request.
-			if result.CancelRunID != "" {
-				runToCancel := result.CancelRunID
-				result.CancelRunID = ""
-				go func() {
-					cancelCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-					defer cancel()
-					_ = services.Run.Cancel(cancelCtx, runToCancel, "goal cancelled")
-				}()
-			}
-			return result, nil
+			return scheduleGoalRunCancel(services, result), nil
 		case methods.ContextToolExecute:
 			var req methods.ContextToolExecuteParams
 			if err := json.Unmarshal(params, &req); err != nil {
 				return nil, fmt.Errorf("invalid context tool params")
 			}
 			return services.Context.ExecuteRuntimeTool(req)
+		case methods.StateToolExecute:
+			// Unified state-tool envelope (docs/41 W2-3). Domain services return
+			// their existing typed results for wire compatibility.
+			var req methods.StateToolExecuteParams
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, fmt.Errorf("invalid state tool params")
+			}
+			result, err := services.DispatchStateTool(req)
+			if err != nil {
+				return nil, err
+			}
+			if goalResult, ok := result.(methods.GoalToolExecuteResult); ok {
+				return scheduleGoalRunCancel(services, goalResult), nil
+			}
+			return result, nil
 		default:
 			return nil, fmt.Errorf("method not found: %s", method)
 		}
@@ -129,6 +133,23 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		return err
 	}
+}
+
+// scheduleGoalRunCancel clears CancelRunID on the RPC result and cancels the
+// bound run asynchronously so AgentCancel never runs while Runtime is blocked
+// on the tool request.
+func scheduleGoalRunCancel(services service.Set, result methods.GoalToolExecuteResult) methods.GoalToolExecuteResult {
+	if result.CancelRunID == "" {
+		return result
+	}
+	runToCancel := result.CancelRunID
+	result.CancelRunID = ""
+	go func() {
+		cancelCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = services.Run.Cancel(cancelCtx, runToCancel, "goal cancelled")
+	}()
+	return result
 }
 
 func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {

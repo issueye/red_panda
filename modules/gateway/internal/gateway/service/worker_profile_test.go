@@ -31,6 +31,17 @@ func newWorkerProfileTestService(t *testing.T) (WorkerProfileService, repository
 	return NewWorkerProfileService(repos), repos
 }
 
+func TestNormalizeWorkerProfilePhaseAcceptsCapabilityTags(t *testing.T) {
+	for _, tag := range []string{"research", "strategy", "build", "review", "assess", "analyze", "plan", "custom"} {
+		if got := normalizeWorkerProfilePhase(tag); got != tag {
+			t.Fatalf("normalize(%q) = %q, want same", tag, got)
+		}
+	}
+	if got := normalizeWorkerProfilePhase("pipeline-v1"); got != "custom" {
+		t.Fatalf("unknown tag = %q, want custom", got)
+	}
+}
+
 func TestWorkerProfileEnsureBuiltinsUsesWorkerDelegateDenylist(t *testing.T) {
 	svc, repos := newWorkerProfileTestService(t)
 	if err := svc.EnsureBuiltins(); err != nil {
@@ -43,6 +54,7 @@ func TestWorkerProfileEnsureBuiltinsUsesWorkerDelegateDenylist(t *testing.T) {
 	if len(rows) != 5 {
 		t.Fatalf("builtin count = %d, want 5", len(rows))
 	}
+	enabled := 0
 	for _, row := range rows {
 		if !row.Builtin || row.Kind != "builtin" {
 			t.Fatalf("unexpected builtin row: %#v", row)
@@ -53,6 +65,13 @@ func TestWorkerProfileEnsureBuiltinsUsesWorkerDelegateDenylist(t *testing.T) {
 		if containsWorkerProfileTool(row.ToolDenylist, "subagent.run") {
 			t.Fatalf("%s still references subagent.run: %#v", row.Key, row.ToolDenylist)
 		}
+		if row.Enabled {
+			enabled++
+		}
+	}
+	// W4-A: analyst + implementer + verifier enabled; planner/evaluator off by default.
+	if enabled != 3 {
+		t.Fatalf("enabled builtins = %d, want 3 (W4-A default roster)", enabled)
 	}
 
 	analyst, err := repos.WorkerProfiles.GetByKey("goal-analyst")

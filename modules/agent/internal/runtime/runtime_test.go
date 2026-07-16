@@ -281,3 +281,63 @@ func TestRuntimeCallGatewayRoundTrip(t *testing.T) {
 		t.Fatal("timed out waiting for gateway call result")
 	}
 }
+
+func TestRuntimeCallStateToolRoundTrip(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	ctx := context.Background()
+	type callResult struct {
+		result methods.TodoToolExecuteResult
+		err    error
+	}
+	done := make(chan callResult, 1)
+	go func() {
+		got, err := rt.executeTodoTool(ctx, methods.TodoToolExecuteParams{
+			RunID: "run_state", SessionID: "sess_state", ToolCallID: "tc_state", ToolName: "todo.list",
+		})
+		done <- callResult{result: got, err: err}
+	}()
+
+	var outbound jsonrpc.Request
+	if err := json.NewDecoder(reader).Decode(&outbound); err != nil {
+		t.Fatal(err)
+	}
+	if outbound.Method != methods.StateToolExecute {
+		t.Fatalf("method = %s, want %s", outbound.Method, methods.StateToolExecute)
+	}
+	var params methods.StateToolExecuteParams
+	if err := json.Unmarshal(outbound.Params, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params.Domain != methods.StateToolDomainTodo || params.ToolName != "todo.list" {
+		t.Fatalf("params mismatch: %#v", params)
+	}
+	response, err := jsonrpc.NewResult(outbound.ID, methods.TodoToolExecuteResult{
+		Status: "completed", Output: "[]", OpenCount: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawResponse, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.handleLine(ctx, rawResponse); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.result.Status != "completed" {
+			t.Fatalf("result = %#v", result.result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for state tool result")
+	}
+}

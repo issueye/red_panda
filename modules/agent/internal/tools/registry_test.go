@@ -58,6 +58,7 @@ func TestStableToolRegistryProvidesDefinitionAndTimeout(t *testing.T) {
 	}{
 		"workspace.read_file": {wantRisk: ptools.RiskLow, wantTimeout: int64(defaultLocalToolTimeout)},
 		"memory.create":       {wantRisk: ptools.RiskHigh, wantTimeout: int64(defaultGatewayToolTimeout)},
+		"context.write":       {wantRisk: ptools.RiskHigh, wantTimeout: int64(defaultGatewayToolTimeout)},
 		"shell.exec":          {wantRisk: ptools.RiskHigh, wantTimeout: 0},
 	}
 	byName := make(map[string]ptools.Definition, len(definitions))

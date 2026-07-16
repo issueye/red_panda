@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"redpanda/gateway/internal/gateway/repository"
+	"redpanda/protocol/methods"
 )
 
 // validateRuntimeToolMeta enforces the common Runtime → Gateway tool envelope:
@@ -29,4 +30,16 @@ func validateRuntimeToolMeta(repos repository.Set, runID, sessionID, toolCallID 
 		return fmt.Errorf("session not found")
 	}
 	return nil
+}
+
+// validateStateToolMeta validates the unified envelope using domain session policy.
+func validateStateToolMeta(repos repository.Set, params methods.StateToolExecuteParams) (domain string, err error) {
+	domain, err = methods.ResolveStateToolDomain(params.Domain, params.ToolName)
+	if err != nil {
+		return "", err
+	}
+	if err := validateRuntimeToolMeta(repos, params.RunID, params.SessionID, params.ToolCallID, methods.StateToolRequiresSession(domain)); err != nil {
+		return "", err
+	}
+	return domain, nil
 }

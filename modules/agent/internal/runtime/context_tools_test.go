@@ -78,12 +78,15 @@ func TestFetchGoalNotesPassesSessionIDAndReturnsNotes(t *testing.T) {
 	if err := json.NewDecoder(reader).Decode(&outbound); err != nil {
 		t.Fatal(err)
 	}
-	if outbound.Method != methods.ContextToolExecute {
-		t.Fatalf("method = %s, want %s", outbound.Method, methods.ContextToolExecute)
+	if outbound.Method != methods.StateToolExecute {
+		t.Fatalf("method = %s, want %s", outbound.Method, methods.StateToolExecute)
 	}
-	var params methods.ContextToolExecuteParams
+	var params methods.StateToolExecuteParams
 	if err := json.Unmarshal(outbound.Params, &params); err != nil {
 		t.Fatal(err)
+	}
+	if params.Domain != methods.StateToolDomainContext {
+		t.Fatalf("domain = %q, want %s", params.Domain, methods.StateToolDomainContext)
 	}
 	if params.SessionID != "sess_inject" {
 		t.Fatalf("session_id = %q, want sess_inject (auto-inject must not send empty session)", params.SessionID)

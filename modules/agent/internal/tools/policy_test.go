@@ -104,6 +104,8 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 		{Name: "skill.update"},
 		{Name: "skill.delete"},
 		{Name: "worker.delegate"},
+		{Name: "worker.send"},
+		{Name: "worker.receive"},
 		{Name: "worker.pool_status"},
 		{Name: "worker.pool_resize"},
 		{Name: "worker.pool_reset"},
@@ -118,7 +120,11 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 			t.Fatalf("expected %s in default tools: %#v", keep, names)
 		}
 	}
-	for _, hide := range []string{"skill.create", "skill.update", "skill.delete", "worker.pool_status", "worker.pool_resize", "worker.pool_reset"} {
+	for _, hide := range []string{
+		"skill.create", "skill.update", "skill.delete",
+		"worker.send", "worker.receive",
+		"worker.pool_status", "worker.pool_resize", "worker.pool_reset",
+	} {
 		if names[hide] {
 			t.Fatalf("ops tool %s should be hidden by default: %#v", hide, names)
 		}
@@ -130,6 +136,18 @@ func TestAvailableToolsHidesOpsOnlyToolsByDefault(t *testing.T) {
 	})
 	if len(one) != 2 {
 		t.Fatalf("allowlist opt-in = %#v", one)
+	}
+
+	// 委托 Worker 可经 allowlist 重新打开 mailbox 工具（docs/41 W1-2）。
+	mailbox := AvailableToolsForOptions(definitions, methods.ReplyOptions{
+		ToolAllowlist: []string{"workspace.read_file", "worker.send", "worker.receive"},
+	})
+	mailboxNames := map[string]bool{}
+	for _, d := range mailbox {
+		mailboxNames[d.Name] = true
+	}
+	if !mailboxNames["worker.send"] || !mailboxNames["worker.receive"] {
+		t.Fatalf("allowlist should re-enable mailbox tools: %#v", mailboxNames)
 	}
 
 	// DebugTools 开放全部运维工具。
@@ -160,10 +178,16 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	enabled := true
 	definitions := []ptools.Definition{
 		{Name: "workspace.read_file"},
+		{Name: "workspace.write_file"},
+		{Name: "workspace.edit_file"},
+		{Name: "workspace.apply_patch"},
 		{Name: "shell.exec"},
 		{Name: "goal.create"},
 		{Name: "context.read"},
 		{Name: "worker.delegate"},
+		{Name: "worker.send"},
+		{Name: "todo.write"},
+		{Name: "todo.list"},
 		{Name: "memory.create"},
 		{Name: "skill.run"},
 		{Name: "skill.create"},
@@ -177,16 +201,39 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	for _, d := range filtered {
 		names[d.Name] = true
 	}
-	for _, keep := range []string{"workspace.read_file", "shell.exec", "goal.create", "context.read", "worker.delegate", "skill.run", "web.search"} {
+	for _, keep := range []string{
+		"workspace.read_file", "workspace.write_file", "shell.exec",
+		"goal.create", "context.read", "worker.delegate", "skill.run", "web.search",
+	} {
 		if !names[keep] {
 			t.Fatalf("goal mode should keep %s: %#v", keep, names)
 		}
 	}
-	if names["memory.create"] {
-		t.Fatalf("goal mode should hide memory.create by default: %#v", names)
+	for _, hide := range []string{
+		"memory.create", "skill.create",
+		"todo.write", "todo.list", // docs/41 W0-3
+		"workspace.edit_file", "workspace.apply_patch", // docs/41 W1-1
+		"worker.send", // docs/41 W1-2
+	} {
+		if names[hide] {
+			t.Fatalf("goal mode should hide %s by default: %#v", hide, names)
+		}
 	}
-	if names["skill.create"] {
-		t.Fatalf("goal mode should still hide ops skill.create: %#v", names)
+
+	// 客户端可显式加回 edit_file（与默认列表求交集后仍保留）。
+	withEdit := AvailableToolsForOptions(definitions, methods.ReplyOptions{
+		GoalsEnabled:  &enabled,
+		ToolAllowlist: []string{"workspace.write_file", "workspace.edit_file"},
+	})
+	withEditNames := map[string]bool{}
+	for _, d := range withEdit {
+		withEditNames[d.Name] = true
+	}
+	if withEditNames["workspace.edit_file"] {
+		t.Fatalf("edit_file is outside goal default allowlist so intersect must drop it: %#v", withEditNames)
+	}
+	if !withEditNames["workspace.write_file"] {
+		t.Fatalf("write_file should survive intersect: %#v", withEditNames)
 	}
 
 	// 客户端允许列表与目标默认值求交集，不能超出默认范围。
@@ -198,7 +245,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 		t.Fatalf("intersect should drop memory.create: %#v", narrow)
 	}
 
-	// 非目标聊天保留记忆工具，但排除仅限运维的工具。
+	// 非目标聊天保留记忆与 todo，但排除仅限运维的工具。
 	disabled := false
 	open := AvailableToolsForOptions(definitions, methods.ReplyOptions{GoalsEnabled: &disabled})
 	openNames := map[string]bool{}
@@ -208,7 +255,16 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	if !openNames["memory.create"] {
 		t.Fatalf("non-goal chat should expose memory.create: %#v", openNames)
 	}
+	if !openNames["todo.write"] {
+		t.Fatalf("non-goal chat should expose todo.write: %#v", openNames)
+	}
+	if !openNames["workspace.edit_file"] {
+		t.Fatalf("non-goal chat should expose workspace.edit_file: %#v", openNames)
+	}
 	if openNames["goal.create"] {
 		t.Fatalf("goals disabled should hide goal.create: %#v", openNames)
+	}
+	if openNames["worker.send"] {
+		t.Fatalf("non-goal chat should still hide ops worker.send: %#v", openNames)
 	}
 }

@@ -10,6 +10,15 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
+// requireGatewayToolCompleted maps Gateway status into a tool error while still
+// returning the output body for the model (shared by all state domains).
+func requireGatewayToolCompleted(domain, status, output string) (string, error) {
+	if status != "" && status != "completed" {
+		return output, fmt.Errorf("%s tool returned status %s", domain, status)
+	}
+	return output, nil
+}
+
 func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
 	if runner.MemoryExecutor == nil {
 		return "", fmt.Errorf("memory tool executor is not available")
@@ -25,10 +34,7 @@ func (runner ToolRunner) runMemoryTool(ctx context.Context, runCtx ToolRunContex
 	if err != nil {
 		return "", err
 	}
-	if result.Status != "" && result.Status != "completed" {
-		return result.Output, fmt.Errorf("memory tool returned status %s", result.Status)
-	}
-	return result.Output, nil
+	return requireGatewayToolCompleted("memory", result.Status, result.Output)
 }
 
 func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
@@ -50,10 +56,7 @@ func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext,
 	if err != nil {
 		return "", err
 	}
-	if result.Status != "" && result.Status != "completed" {
-		return result.Output, fmt.Errorf("todo tool returned status %s", result.Status)
-	}
-	return result.Output, nil
+	return requireGatewayToolCompleted("todo", result.Status, result.Output)
 }
 
 func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
@@ -71,10 +74,7 @@ func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext,
 	if err != nil {
 		return "", err
 	}
-	if result.Status != "" && result.Status != "completed" {
-		return result.Output, fmt.Errorf("goal tool returned status %s", result.Status)
-	}
-	return result.Output, nil
+	return requireGatewayToolCompleted("goal", result.Status, result.Output)
 }
 
 // runContextTool 将 context.*（目标暂存区）工具请求转发到 Gateway。
@@ -94,11 +94,11 @@ func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunConte
 	if err != nil {
 		return "", err
 	}
-	if result.Status != "" && result.Status != "completed" {
-		return result.Output, fmt.Errorf("context tool returned status %s", result.Status)
+	output, err := requireGatewayToolCompleted("context", result.Status, result.Output)
+	if err != nil {
+		return output, err
 	}
 	// 将结构化笔记加入输出，确保模型能在当前上下文中看到它们。
-	output := result.Output
 	if len(result.Notes) > 0 {
 		notesJSON, _ := json.Marshal(map[string]any{"notes": result.Notes})
 		if output == "" {

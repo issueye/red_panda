@@ -1,7 +1,7 @@
 # 代码冗余与功能过度实现 — 收敛清单
 
-Updated: 2026-07-13  
-Status: in progress (Wave 0–5 core done; remaining O2b/R5b/O5b optional + Wave 6 runtime split)  
+Updated: 2026-07-16  
+Status: in progress (Wave 0–5 core done; remaining O2b/O5b + Wave 6 absorbed by [docs/41](41-redundancy-overimpl-optimization-plan.md))  
 依据：全项目评估 + Goal 上下文共享后审计（结构冗余 / 语义重叠 / 过度实现）
 
 ## 使用方式
@@ -114,7 +114,7 @@ go test ./modules/agent/internal/runtime/ -run "AvailableTools|Policy|Goal|Speci
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **O2** | process_pool 默认不可见 | 过度产品化 | L | done | 默认 `subAgentBackend=runtime_process`；Settings 将 pool 标为高级 | 默认选项为 runtime_process；API 仍接受 process_pool | — |
 | **O4** | MCP 能力诚实化 | 配置超前 | M | done | Discovery UI 标注「只读发现，对话中尚不可调用 MCP 工具」 | Settings MCP 面板可见只读说明 | — |
-| **O2b** |（可选）in-process planner 收敛 | 历史包袱 | M | todo | `/subagent` 与默认 planner 路径并入 `subagent.run` 或标注 deprecated | 无两套 subagent 叙事；测不回归 cancel | O2 |
+| **O2b** |（可选）in-process planner 收敛 | 历史包袱 | M | done | v0.2 已只用 WorkerPool；docs/41 W3-1 删除死 `PLANNER_*` 延迟变量并统一 README/UI 叙事 | 无用户可见 subagent 双叙事；旧字段被忽略 | O2 |
 
 **建议提交：**
 
@@ -128,7 +128,7 @@ go test ./modules/agent/internal/runtime/ -run "AvailableTools|Policy|Goal|Speci
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **R5** | Goal 状态与 GoalNote 职责文档 + policy 文案 | 语义重叠 | L | done | Goal contract/actions/evidence 记录控制状态；context notes 记录跨行动工作材料 | `TestStateStoreToolDescriptionsClarifyBoundaries` 绿 | R3 |
 | **R5b** | 删除旧流水线扁平投影 | 语义重叠 | M | done | 移除 phase/checkpoint/progress/evaluation 重复字段；V2 只保留 assessment、decision、events | 生产代码无旧字段和双写路径 | R5 |
-| **O5b** | Specialist 阶段简化（产品决策） | 过度 | H | todo | **需产品拍板**：v1 保留 5 专家 vs 收成 3（analyze/execute/verify）。若收成 3：phase 枚举、builtin seed、UI 同步 | 决策记录进 docs；实现与测一致 | R2 |
+| **O5b** | Specialist 阶段简化（产品决策） | 过度 | H | done | docs/41 **W4-A**：默认 3 专家（analyst/implementer/verifier）；planner/evaluator 仍在目录但 `Enabled=false`；Runtime resolve 尊重 catalog | 新库默认 3 启用；设置可重开；测绿 | R2 |
 
 **建议提交：**
 
@@ -163,8 +163,8 @@ npm run test:ui   # 若动 UI 结构
 
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **S1** | Runtime 拆包 | 结构 | M | todo | `internal/runtime/{loop,tools,subagent,state,provider}`；对外 `New/Serve` 不变 | 全量 agent 测绿；无 API 行为变化 | R1, R4 |
-| **S2** | tools.go 拆分 | 结构 | M | todo | schema / workspace / gateway_tools / parse 分文件 | 编译与测绿 | S1 可同波 |
+| **S1** | Runtime 拆包 | 结构 | M | done | docs/41 W5-5：同 package 拆 `runtime_handlers` / `runtime_lifecycle` / `runtime_events`；loop/tools/worker 此前已分文件 | agent runtime 测绿 | R1, R4 |
+| **S2** | tools.go 拆分 | 结构 | M | done | docs/41 W5-1/W5-2：`workspace_*` / `web_*` 分文件；registry 仍为定义源 | 编译与 tools 测绿 | — |
 | **S3** | 统一 `state.tool.execute`（可选 BREAKING） | 协议 | H | todo | 单 RPC 多 domain；旧 4 method 保留适配层 1～2 个版本 | 双栈兼容期有测；再删旧 method | R1 完成且稳定 |
 
 ---

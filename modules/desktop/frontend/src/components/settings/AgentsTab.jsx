@@ -1,14 +1,15 @@
 // Split from SettingsPanel.jsx (checklist R7c)
 import { Plus, RefreshCw, Trash2, Bot } from 'lucide-react';
-import { AGENT_PHASE_OPTIONS, ModuleHeader, ManagerItem } from './shared.jsx';
+import { AGENT_CAPABILITY_OPTIONS, ModuleHeader, ManagerItem } from './shared.jsx';
 import { Button, IconButton } from '../ui/button.jsx';
 import { EmptyState, ErrorMessage } from '../ui/feedback.jsx';
 import { Field } from '../ui/field.jsx';
 import { SelectMenu } from '../ui/select.jsx';
 import { Badge } from '../ui/badge.jsx';
 import {
+  agentCapabilityLabel,
   agentDisplayName,
-  agentPhaseLabel,
+  agentDraftFrom,
   emptyAgentDraft,
 } from '../../lib/agents.js';
 
@@ -66,7 +67,7 @@ export function AgentsTab({
                   enabled={agent.enabled !== false}
                   icon={Bot}
                   key={agent.id}
-                  meta={`${agentPhaseLabel(agent.phase)} · ${agent.key}${agent.builtin ? ' · 内置' : ''}`}
+                  meta={`${agentCapabilityLabel(agent.phase)} · ${agent.key}${agent.builtin ? ' · 内置' : ''}`}
                   name={agentDisplayName(agent)}
                   onDelete={() => deleteAgent(agent)}
                   onSelect={() => {
@@ -109,11 +110,15 @@ export function AgentsTab({
                       value={agentDraft.name_zh}
                     />
                   </Field>
-                  <Field className="settings-row" label="阶段">
+                  <Field
+                    className="settings-row"
+                    label="能力标签"
+                    tooltip="分组与展示用标签，不是 Goal 流水线阶段。API 字段名仍为 phase（兼容）。"
+                  >
                     <SelectMenu
-                      ariaLabel="阶段"
+                      ariaLabel="能力标签"
                       disabled={agentDraft.builtin}
-                      options={AGENT_PHASE_OPTIONS}
+                      options={AGENT_CAPABILITY_OPTIONS}
                       value={agentDraft.phase || 'custom'}
                       onChange={(value) => setAgentDraft((c) => ({ ...c, phase: value }))}
                     />

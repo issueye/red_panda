@@ -3,6 +3,8 @@
  * Gateway remains authority; Desktop only hydrates and displays.
  */
 
+import { mapListFromEnvelope } from './envelope.js';
+
 export const GOAL_NOTE_KIND_LABELS = {
   finding: '发现',
   decision: '决策',
@@ -22,6 +24,7 @@ export function normalizeGoalNote(raw = {}) {
     kind: String(raw.kind || 'note').toLowerCase(),
     title: raw.title || '',
     body: raw.body || '',
+    // Optional freeform tag only — not a Goal pipeline phase (docs/41 W3-4).
     phase: raw.phase || '',
     source: raw.source || '',
     runId: raw.run_id || raw.runId || '',
@@ -37,10 +40,7 @@ export function normalizeGoalNote(raw = {}) {
  * @returns {ReturnType<typeof normalizeGoalNote>[]}
  */
 export function normalizeGoalNoteList(data) {
-  if (Array.isArray(data)) return data.map(normalizeGoalNote);
-  if (Array.isArray(data?.items)) return data.items.map(normalizeGoalNote);
-  if (Array.isArray(data?.notes)) return data.notes.map(normalizeGoalNote);
-  return [];
+  return mapListFromEnvelope(data, normalizeGoalNote, { keys: ['items', 'notes'] });
 }
 
 export function goalNoteKindLabel(kind) {

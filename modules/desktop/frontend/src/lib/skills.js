@@ -1,3 +1,5 @@
+import { mapListFromEnvelope } from './envelope.js';
+
 export function normalizeSkillSummary(item = {}) {
   return {
     name: item.name || '',
@@ -36,6 +38,5 @@ export function skillUpdatePayload(input = {}, workspaceRoot = '') {
 }
 
 export function normalizeSkillsList(data = {}) {
-  const items = Array.isArray(data.items) ? data.items : Array.isArray(data) ? data : [];
-  return items.map(normalizeSkillSummary);
+  return mapListFromEnvelope(data, normalizeSkillSummary);
 }
