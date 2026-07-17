@@ -19,7 +19,6 @@ import { useGatewayResources } from './hooks/useGatewayResources.js';
 import { useGoalSession } from './hooks/useGoalSession.js';
 import { useSessionActions } from './hooks/useSessionActions.js';
 import {
-  INITIAL_BOOTSTRAP_SESSION_ID,
   useSessionBootstrap,
 } from './hooks/useSessionBootstrap.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
@@ -120,12 +119,7 @@ function normalizeAssignment(item = {}) {
 
 export function App() {
   const dialog = useDialog();
-  const [sessionRuntimes, setSessionRuntimes] = useState(() => ({
-    [INITIAL_BOOTSTRAP_SESSION_ID]: createEmptySessionRuntime({
-      messages: initialMessages,
-      hydrated: true,
-    }),
-  }));
+  const [sessionRuntimes, setSessionRuntimes] = useState(() => ({}));
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState('sessions');
   const [rightPanelTab, setRightPanelTab] = useState('activity');
@@ -195,7 +189,8 @@ export function App() {
   sessionRuntimesRef.current = sessionRuntimes;
 
   const runtime = sessionRuntimes[currentSessionId] || createEmptySessionRuntime({
-    messages: currentSessionId === INITIAL_BOOTSTRAP_SESSION_ID ? initialMessages : [],
+    messages: currentSessionId ? [] : initialMessages,
+    hydrated: !currentSessionId,
   });
   const {
     messages,
@@ -392,7 +387,7 @@ export function App() {
     resumeCursors,
     // 网关事件按 session_id 写入对应会话投影，支持多会话并发 run。
     onEvent: (event) => {
-      // Out-of-band session creation (scheduled tasks, other clients).
+      // Out-of-band session mutations (create / schedule / delete).
       if (event?.method === 'session.upserted') {
         const sessionPayload = event.payload?.session || event.payload;
         const runId = event.payload?.run_id || '';
@@ -400,7 +395,7 @@ export function App() {
         const sessionId = upserted?.id || sessionPayload?.id || '';
         if (sessionId) {
           // Auto-open schedule-created sessions so the left tree + chat stay in sync.
-          if (event.payload?.source === 'schedule') {
+          if (event.payload?.source === 'schedule' || event.payload?.reason === 'schedule') {
             void selectSessionRef.current?.(sessionId);
           }
           if (runId) {
@@ -410,6 +405,25 @@ export function App() {
           }
         } else {
           void refreshSessionsRef.current?.();
+        }
+        return;
+      }
+      if (event?.method === 'session.deleted') {
+        const deletedId = event.payload?.id || '';
+        if (!deletedId) return;
+        setSessions((items) => items.filter((item) => item.id !== deletedId));
+        setSessionRuntimes((map) => {
+          if (!map[deletedId]) return map;
+          const next = { ...map };
+          delete next[deletedId];
+          return next;
+        });
+        if (currentSessionIdRef.current === deletedId) {
+          void refreshSessionsRef.current?.().then((list) => {
+            const nextId = Array.isArray(list) && list[0]?.id ? list[0].id : '';
+            if (nextId) void selectSessionRef.current?.(nextId);
+            else setCurrentSessionId('');
+          }).catch(() => setCurrentSessionId(''));
         }
         return;
       }

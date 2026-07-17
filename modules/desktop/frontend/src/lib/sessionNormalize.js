@@ -5,13 +5,17 @@ import { displaySessionKind, displayStatus } from './displayLabels.js';
  * @param {any} session
  */
 export function normalizeSession(session) {
+  if (!session?.id && !session?.name) {
+    return null;
+  }
   const kind = session.kind && session.kind !== 'normal' ? session.kind : '';
-  const workspaceRoot = session.workspace_root || session.working_dir || '';
+  // BREAKING single-path DTO: name + workspace_root only (no title/working_dir aliases).
+  const workspaceRoot = session.workspace_root || '';
   const detail = workspaceRoot || displayStatus(session.status || 'active');
   const kindLabel = displaySessionKind(kind);
   return {
     id: session.id,
-    title: session.title || session.name || session.id,
+    title: session.name || session.id,
     subtitle: kind ? `${kindLabel || kind} - ${detail}` : detail,
     kind,
     parentId: session.parent_id || '',

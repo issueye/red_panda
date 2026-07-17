@@ -29,6 +29,8 @@ const (
 	// EventSessionUpserted notifies all connected desktops that a session was
 	// created/updated out-of-band (e.g. scheduled task fire).
 	EventSessionUpserted = "session.upserted"
+	// EventSessionDeleted notifies desktops to remove a session from the list.
+	EventSessionDeleted = "session.deleted"
 )
 
 type Envelope struct {

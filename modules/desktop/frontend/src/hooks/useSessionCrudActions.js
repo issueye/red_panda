@@ -38,7 +38,7 @@ export function useSessionCrudActions({
   const refreshSessions = useCallback(async () => {
     const items = await apiJson('/api/v1/sessions').catch(() => null);
     if (!Array.isArray(items)) return [];
-    const normalized = items.map(normalizeSession).filter((item) => item?.id);
+    const normalized = items.map(normalizeSession).filter(Boolean);
     setSessions(normalized);
     setSessionRuntimes((map) => {
       const next = { ...map };
@@ -180,25 +180,11 @@ export function useSessionCrudActions({
     return path || '';
   }, []);
 
-  const forkSession = useCallback(async () => {
-    if (!currentSessionId) return;
-    const current = sessions.find((item) => item.id === currentSessionId);
-    const result = await apiJson(`/api/v1/sessions/${encodeURIComponent(currentSessionId)}/fork`, {
-      method: 'POST',
-      body: JSON.stringify({ name: `${current?.title || '会话'} 的分叉` }),
-    });
-    const normalized = normalizeSession(result.session);
-    setSessions((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
-    setCurrentSessionId(normalized.id);
-    await loadSessionState(normalized.id);
-  }, [currentSessionId, loadSessionState, sessions, setCurrentSessionId, setSessions]);
-
   return {
     createSession,
     deleteSession,
     deleteWorkspaceNode,
     browseWorkspaceDirectory,
-    forkSession,
     selectSession,
     upsertSession,
     refreshSessions,

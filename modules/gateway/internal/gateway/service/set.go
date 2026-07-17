@@ -41,7 +41,7 @@ func NewSet(opts Options) Set {
 		App:            AppService{Version: opts.Version},
 		Run:            run,
 		Workspace:      NewWorkspaceService(opts.Repos),
-		Session:        NewSessionService(opts.Repos, opts.RuntimeClient),
+		Session:        NewSessionService(opts.Repos, opts.RuntimeClient, opts.Hub),
 		Memory:         NewMemoryService(opts.Repos),
 		Todo:           NewTodoService(opts.Repos),
 		Tool:           NewToolService(opts.Repos),

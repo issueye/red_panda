@@ -47,7 +47,7 @@ export function useSessionCompactionActions({
 
   const compactSession = useCallback(async ({ silent = false } = {}) => {
     const sessionId = currentSessionIdRef.current;
-    if (!sessionId || sessionId === 'local-design') return null;
+    if (!sessionId) return null;
 
     patchRuntime(sessionId, (previous) => ({ ...previous, compacting: true }));
     let pauseInfo = { paused: false, runId: '', assignments: [] };
@@ -100,7 +100,7 @@ export function useSessionCompactionActions({
 
   useEffect(() => {
     if (!contextTokenBudget?.autoCompact) return;
-    if (!currentSessionId || currentSessionId === 'local-design') return;
+    if (!currentSessionId) return;
     if (autoCompactBusyRef.current || compacting) return;
     if (autoCompactSessionRef.current === currentSessionId) return;
 

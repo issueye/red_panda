@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"redpanda/gateway/internal/gateway/infra/eventhub"
 	"redpanda/gateway/internal/gateway/infra/runtimeclient"
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
@@ -21,6 +22,7 @@ const compactPauseTimeout = 20 * time.Second
 type SessionService struct {
 	repos   repository.Set
 	runtime *runtimeclient.Client
+	hub     *eventhub.Hub
 }
 
 type compactPauseState struct {
@@ -28,12 +30,11 @@ type compactPauseState struct {
 	paused int
 }
 
+// SessionDTO is the single-path session wire shape (BREAKING: no title/working_dir aliases).
 type SessionDTO struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
-	Title           string    `json:"title"`
 	WorkspaceRoot   string    `json:"workspace_root"`
-	WorkingDir      string    `json:"working_dir"`
 	Status          string    `json:"status"`
 	ParentID        string    `json:"parent_id,omitempty"`
 	Kind            string    `json:"kind,omitempty"`
@@ -164,8 +165,8 @@ type CompactionStateResult struct {
 	Summary    CompactSummary `json:"summary"`
 }
 
-func NewSessionService(repos repository.Set, runtime *runtimeclient.Client) SessionService {
-	return SessionService{repos: repos, runtime: runtime}
+func NewSessionService(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub) SessionService {
+	return SessionService{repos: repos, runtime: runtime, hub: hub}
 }
 
 // pauseSessionForCompact suspends delegated Workers while each main Worker and
@@ -234,6 +235,7 @@ func (s SessionService) Create(name string, workspaceRoot string) (SessionDTO, e
 	if err != nil {
 		return SessionDTO{}, err
 	}
+	broadcastSessionUpserted(s.hub, session, map[string]any{"reason": "user_create"})
 	return sessionDTO(session), nil
 }
 
@@ -253,6 +255,10 @@ func (s SessionService) Delete(sessionID string) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("session id is required")
 	}
+	// Cancel active runs before soft-delete so Runtime/process do not outlive the session.
+	s.cancelActiveRuns(sessionID)
+	_, _ = s.repos.Schedules.DisableFixedForSession(sessionID)
+
 	if err := s.repos.Sessions.SoftDelete(sessionID); err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return fmt.Errorf("session not found")
@@ -260,7 +266,23 @@ func (s SessionService) Delete(sessionID string) error {
 		return err
 	}
 	_ = s.repos.Todos.DeleteBySession(sessionID)
+	broadcastSessionDeleted(s.hub, sessionID, "user_delete")
 	return nil
+}
+
+func (s SessionService) cancelActiveRuns(sessionID string) {
+	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
+	if err != nil || len(active) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, run := range active {
+		if s.runtime != nil {
+			_, _ = s.runtime.CancelRun(ctx, methods.RunCancelParams{RunID: run.ID, Reason: "session_deleted"})
+		}
+		_ = s.repos.Runs.Finish(run.ID, "cancelled", "session deleted")
+	}
 }
 
 func (s SessionService) History(sessionID string) ([]MessageDTO, error) {
@@ -333,7 +355,13 @@ func (s SessionService) Fork(sessionID string, req ForkSessionRequest) (ForkSess
 		}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return result, err
+	}
+	if row, e := s.repos.Sessions.Get(result.Session.ID); e == nil {
+		broadcastSessionUpserted(s.hub, row, map[string]any{"reason": "fork"})
+	}
+	return result, nil
 }
 
 func (s SessionService) CompactPreview(sessionID string, req CompactPreviewRequest) (result CompactPreviewResult, err error) {
@@ -480,9 +508,7 @@ func sessionDTO(row model.Session) SessionDTO {
 	return SessionDTO{
 		ID:              row.ID,
 		Name:            row.Name,
-		Title:           row.Name,
 		WorkspaceRoot:   row.WorkspaceRoot,
-		WorkingDir:      row.WorkspaceRoot,
 		Status:          row.Status,
 		ParentID:        row.ParentID,
 		Kind:            row.Kind,

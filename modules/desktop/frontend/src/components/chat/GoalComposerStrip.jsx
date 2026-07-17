@@ -71,7 +71,7 @@ export function GoalComposerStrip({
   const [notesHydrated, setNotesHydrated] = useState(false);
 
   const loadNotes = useCallback(async () => {
-    if (!sessionId || !goal?.id || sessionId === 'local-design') {
+    if (!sessionId || !goal?.id) {
       setNotes([]);
       setNotesError('');
       setNotesHydrated(true);
@@ -384,7 +384,7 @@ export function GoalComposerStrip({
                 <span className="goal-notes-hint">只读 · Goal scratchpad</span>
                 <IconButton
                   data-testid="goal-notes-refresh"
-                  disabled={notesLoading || !sessionId || sessionId === 'local-design'}
+                  disabled={notesLoading || !sessionId}
                   label="刷新笔记"
                   onClick={() => { loadNotes().catch(() => {}); }}
                   variant="ghost"

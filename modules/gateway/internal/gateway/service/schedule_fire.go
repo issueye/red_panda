@@ -246,21 +246,13 @@ func (s ScheduleService) publishSessionUpserted(sessionID, runID, scheduleID str
 	if err != nil {
 		return
 	}
-	dto := sessionDTO(row)
-	raw, err := json.Marshal(map[string]any{
-		"session":     dto,
+	broadcastSessionUpserted(s.hub, row, map[string]any{
+		"reason":      "schedule",
 		"run_id":      runID,
 		"schedule_id": scheduleID,
-		"source":      "schedule",
 		"manual":      manual,
-	})
-	if err != nil {
-		return
-	}
-	s.hub.Broadcast(protows.Envelope{
-		Type:    protows.TypeEvent,
-		Method:  protows.EventSessionUpserted,
-		Payload: raw,
+		// source kept for Desktop auto-select (legacy key used by App.jsx).
+		"source": "schedule",
 	})
 }
 

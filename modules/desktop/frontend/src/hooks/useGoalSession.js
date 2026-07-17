@@ -56,7 +56,7 @@ export async function hydrateSessionTodos(sessionId, patchRuntime, fetchJson = a
  * @param {typeof apiJson} [fetchJson]
  */
 export async function hydrateSessionGoals(sessionId, patchRuntime, fetchJson = apiJson) {
-  if (!sessionId || sessionId === 'local-design') return null;
+  if (!sessionId) return null;
   try {
     const data = await fetchJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`);
     const items = normalizeGoalList(data);
@@ -203,7 +203,7 @@ export function shouldAttemptAutoContinue({
   compacting,
   goalBusy,
 }) {
-  if (!sessionId || sessionId === 'local-design') return false;
+  if (!sessionId) return false;
   if (!goalShouldAutoContinue(goal) || running || compacting || goalBusy) return false;
   return true;
 }

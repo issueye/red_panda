@@ -100,10 +100,9 @@ test('hydrateSessionGoals projects focus goal from Gateway list', async () => {
   assert.equal(state.goal.status, 'active');
 });
 
-test('hydrateSessionGoals skips local-design and missing session', async () => {
+test('hydrateSessionGoals skips missing session', async () => {
   let called = false;
   const patch = () => { called = true; };
-  await hydrateSessionGoals('local-design', patch, async () => ({ items: [] }));
   await hydrateSessionGoals('', patch, async () => ({ items: [] }));
   assert.equal(called, false);
 });
@@ -250,7 +249,7 @@ test('autoContinueDedupeKey and shouldAttemptAutoContinue policy gates', () => {
   );
   assert.equal(
     shouldAttemptAutoContinue({
-      sessionId: 'local-design',
+      sessionId: '',
       goal,
       running: false,
       compacting: false,

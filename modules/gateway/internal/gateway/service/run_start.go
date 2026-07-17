@@ -2,12 +2,9 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 
 	"redpanda/gateway/internal/gateway/model"
 	protocolmcp "redpanda/protocol/mcp"
@@ -78,7 +75,7 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 }
 
 func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartPayload) (params methods.RunExecuteParams, pauseGoalOnFailure bool, err error) {
-	conversation, err := r.buildRunConversation(admission.session.ID)
+	conversation, err := buildModelConversation(r.repos, admission.session.ID)
 	if err != nil {
 		return methods.RunExecuteParams{}, false, err
 	}
@@ -155,57 +152,6 @@ func (r RunService) dispatchRun(ctx context.Context, admission runAdmission, par
 		Subscribed:  subscribe,
 		RuntimeMode: admission.runtimeMode,
 	}, nil
-}
-
-func (r RunService) buildRunConversation(sessionID string) ([]methods.Message, error) {
-	history, err := r.repos.Messages.ListLatestConversation(sessionID, 200)
-	if err != nil {
-		return nil, err
-	}
-	conversation := make([]methods.Message, 0, len(history)+1)
-
-	compaction, compactErr := r.repos.Compactions.LatestAppliedInPlace(sessionID)
-	if compactErr == nil {
-		var summary CompactSummary
-		if err := json.Unmarshal([]byte(compaction.SummaryJSON), &summary); err != nil {
-			return nil, fmt.Errorf("decode active compaction summary: %w", err)
-		}
-		tail, err := r.repos.Messages.ListConversationAfterSeq(sessionID, compaction.SourceEndSeq, 200)
-		if err != nil {
-			return nil, err
-		}
-		history = tail
-		conversation = append(conversation, methods.Message{
-			ID:   compaction.ID,
-			Role: "system",
-			Content: []methods.ContentBlock{{
-				Type: "text",
-				Text: fmt.Sprintf(
-					"Conversation summary covering original messages %d-%d. Use it as prior context; the full original history remains stored in the session.\n\n%s",
-					compaction.SourceStartSeq,
-					compaction.SourceEndSeq,
-					formatCompactSummaryMessage(summary),
-				),
-			}},
-			CreatedAt: compaction.UpdatedAt.Format(time.RFC3339Nano),
-		})
-	} else if compactErr != gorm.ErrRecordNotFound {
-		return nil, compactErr
-	}
-
-	for _, row := range history {
-		message, err := messageDTO(row)
-		if err != nil {
-			return nil, err
-		}
-		conversation = append(conversation, methods.Message{
-			ID:        message.ID,
-			Role:      message.Role,
-			Content:   message.Content,
-			CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
-		})
-	}
-	return conversation, nil
 }
 
 func (r RunService) applyMemoryContext(params *methods.RunExecuteParams) error {

@@ -19,11 +19,8 @@ import {
   normalizeTodo,
 } from '../lib/todos.js';
 
-export const INITIAL_BOOTSTRAP_SESSION_ID = 'local-design';
-
-export const initialSessions = [
-  { id: INITIAL_BOOTSTRAP_SESSION_ID, title: '架构', subtitle: '本地任务与 Worker' },
-];
+/** Empty until Gateway bootstrap; no fake local-design session (docs/45). */
+export const INITIAL_BOOTSTRAP_SESSION_ID = '';
 
 /**
  * Bootstrap + session list + workspace open/hydrate (docs/36 C1).
@@ -47,8 +44,8 @@ export function useSessionBootstrap({
   loadMcpServers,
   loadSkills,
 }) {
-  const [sessions, setSessions] = useState(initialSessions);
-  const [currentSessionId, setCurrentSessionId] = useState(INITIAL_BOOTSTRAP_SESSION_ID);
+  const [sessions, setSessions] = useState([]);
+  const [currentSessionId, setCurrentSessionId] = useState('');
   const [workspace, setWorkspace] = useState(null);
   const [recentWorkspaces, setRecentWorkspaces] = useState([]);
   const [globalPendingPermissions, setGlobalPendingPermissions] = useState([]);
@@ -192,12 +189,15 @@ export function useSessionBootstrap({
           ? data.recent_workspaces.map(normalizeWorkspace).filter(Boolean)
           : [];
         setRecentWorkspaces(recent);
-        const nextSessions = Array.isArray(data.sessions) ? data.sessions.map(normalizeSession) : [];
+        const nextSessions = Array.isArray(data.sessions)
+          ? data.sessions.map(normalizeSession).filter(Boolean)
+          : [];
+        setSessions(nextSessions);
         if (nextSessions.length > 0) {
-          setSessions(nextSessions);
           setCurrentSessionId(nextSessions[0].id);
           loadSessionState(nextSessions[0].id);
         } else {
+          setCurrentSessionId('');
           loadGlobalPendingPermissions();
         }
         loadProviderProfiles?.();

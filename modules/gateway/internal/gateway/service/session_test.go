@@ -54,7 +54,7 @@ func TestPauseSessionForCompactPausesAndResumesDelegatedWorkers(t *testing.T) {
 	}
 	capturePath := filepath.Join(t.TempDir(), "run-compact-params.json")
 	runtime := useStdioRuntimeHelper(t, capturePath)
-	service := NewSessionService(repos, runtime)
+	service := NewSessionService(repos, runtime, nil)
 
 	paused, err := service.pauseSessionForCompact(session.ID)
 	if err != nil {
@@ -265,7 +265,7 @@ func TestRunConversationUsesSummarySnapshotAndPreservesTail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conversation, err := (RunService{repos: repos}).buildRunConversation(source.ID)
+	conversation, err := buildModelConversation(repos, source.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func newSessionServiceTestFixture(t *testing.T) (repository.Set, SessionService)
 	}
 
 	repos := repository.NewSet(db)
-	return repos, NewSessionService(repos, nil)
+	return repos, NewSessionService(repos, nil, nil)
 }
 
 func TestSessionServiceCompactPausesActiveRuns(t *testing.T) {
@@ -367,7 +367,7 @@ func TestSessionServiceCompactPausesActiveRuns(t *testing.T) {
 	}
 
 	capturePath := filepath.Join(t.TempDir(), "compact-active-run.json")
-	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath))
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil)
 	result, err := service.Compact(source.ID, CompactSessionRequest{
 		KeepTailTurns: 1,
 		Mode:          "local",
@@ -412,7 +412,7 @@ func TestSessionServiceCompactResumesWorkersWhenSummaryFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	capturePath := filepath.Join(t.TempDir(), "compact-error.json")
-	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath))
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil)
 
 	if _, err := service.Compact(source.ID, CompactSessionRequest{Mode: "local"}); err == nil {
 		t.Fatal("compact succeeded without any messages")
@@ -455,7 +455,7 @@ func TestSessionServiceCompactResumesRunsWhenPauseReportsZero(t *testing.T) {
 
 	capturePath := filepath.Join(t.TempDir(), "compact-stale-pause.json")
 	t.Setenv("RED_PANDA_RUNTIME_PAUSED_COUNT", "0")
-	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath))
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil)
 	result, err := service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"})
 	if err != nil {
 		t.Fatal(err)
@@ -491,7 +491,7 @@ func TestSessionServiceCompactReportsResumeFailure(t *testing.T) {
 
 	capturePath := filepath.Join(t.TempDir(), "compact-resume-failure.json")
 	t.Setenv("RED_PANDA_RUNTIME_RESUME_ERROR", "1")
-	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath))
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil)
 	_, err = service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"})
 	if err == nil || !strings.Contains(err.Error(), "resume session after compact") {
 		t.Fatalf("compact error = %v, want explicit resume failure", err)
