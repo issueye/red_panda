@@ -41,10 +41,10 @@ function TokenProgressRing({
   const offset = 100 * (1 - fill);
   const percent = Math.round(trueRatio * 100);
   const tone = enabled
-    ? (trueRatio >= 0.9 ? 'danger' : trueRatio >= 0.75 ? 'warn' : 'ok')
+    ? (trueRatio >= 0.8 ? 'danger' : trueRatio >= 0.65 ? 'warn' : 'ok')
     : (used > 0 ? 'soft' : 'idle');
   const title = enabled
-    ? `上下文约 ${formatTokenCount(used)} / ${formatTokenCount(maxTokens)}（${percent}%）${trueRatio >= 0.9 ? ' · 将自动更新摘要' : ''}`
+    ? `上下文约 ${formatTokenCount(used)} / ${formatTokenCount(maxTokens)}（${percent}%）${trueRatio >= 0.8 ? ' · 将自动更新摘要' : ''}`
     : softBudget
       ? `估算上下文约 ${formatTokenCount(used)} Token（未设置上限；在供应商配置中填写「最大 Token 数」以启用预算与自动摘要）`
       : '未设置最大 Token：在供应商配置中填写上下文窗口';

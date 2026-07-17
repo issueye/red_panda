@@ -35,8 +35,8 @@ test('scheduleCreatePayload builds interval request', () => {
   assert.equal(payload.name, 'dig');
   assert.equal(payload.schedule_kind, 'interval');
   assert.equal(payload.interval_sec, 120);
-  assert.equal(payload.permission_mode, 'deny');
-  assert.equal(payload.tool_policy, 'allowlist');
+  assert.equal(payload.permission_mode, 'deny_all');
+  assert.equal(payload.tool_policy, 'risk_based');
   assert.equal(payload.workspace_root, 'E:/ws');
 });
 

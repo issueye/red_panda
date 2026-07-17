@@ -26,6 +26,9 @@ const (
 	MethodAgentStatus       = "agent.status"
 	EventRun                = "run.event"
 	EventRuntimeStatus      = "runtime.status"
+	// EventSessionUpserted notifies all connected desktops that a session was
+	// created/updated out-of-band (e.g. scheduled task fire).
+	EventSessionUpserted = "session.upserted"
 )
 
 type Envelope struct {

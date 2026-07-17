@@ -74,10 +74,10 @@ func TestScheduleCreateIntervalAndDefaults(t *testing.T) {
 	if !dto.Enabled {
 		t.Fatal("expected enabled")
 	}
-	if dto.PermissionMode != "deny" {
+	if dto.PermissionMode != "deny_all" {
 		t.Fatalf("permission_mode=%q", dto.PermissionMode)
 	}
-	if dto.ToolPolicy != "allowlist" {
+	if dto.ToolPolicy != "risk_based" {
 		t.Fatalf("tool_policy=%q", dto.ToolPolicy)
 	}
 	if len(dto.ToolAllowlist) == 0 {
@@ -137,8 +137,11 @@ func TestScheduleTriggerUsesSafeOptions(t *testing.T) {
 	if stub.last.Options["trigger_source"] != "schedule" {
 		t.Fatalf("options=%#v", stub.last.Options)
 	}
-	if stub.last.Options["permission_mode"] != "deny" {
+	if stub.last.Options["permission_mode"] != "deny_all" {
 		t.Fatalf("permission_mode=%v", stub.last.Options["permission_mode"])
+	}
+	if stub.last.Options["tool_policy"] != "risk_based" {
+		t.Fatalf("tool_policy=%v", stub.last.Options["tool_policy"])
 	}
 	if stub.last.Options["working_dir"] != ws {
 		t.Fatalf("working_dir=%v", stub.last.Options["working_dir"])

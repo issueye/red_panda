@@ -43,23 +43,23 @@ test('effective estimate replaces covered history with summary without deleting 
   assert.ok(effective < full);
 });
 
-test('tokenBudgetState marks 90% auto-compact threshold', () => {
-  assert.equal(CONTEXT_AUTO_COMPACT_RATIO, 0.9);
+test('tokenBudgetState marks 80% auto-compact threshold', () => {
+  assert.equal(CONTEXT_AUTO_COMPACT_RATIO, 0.8);
   const disabled = tokenBudgetState(1000, 0);
   assert.equal(disabled.enabled, false);
   assert.equal(disabled.autoCompact, false);
   assert.equal(disabled.softBudget, true);
   assert.ok(disabled.displayRatio > 0);
 
-  const mid = tokenBudgetState(80, 100);
+  const mid = tokenBudgetState(79, 100);
   assert.equal(mid.enabled, true);
   assert.equal(mid.autoCompact, false);
-  assert.ok(Math.abs(mid.ratio - 0.8) < 1e-9);
+  assert.ok(Math.abs(mid.ratio - 0.79) < 1e-9);
   assert.ok(mid.displayRatio >= MIN_VISIBLE_RATIO);
 
-  const hot = tokenBudgetState(90, 100);
+  const hot = tokenBudgetState(80, 100);
   assert.equal(hot.autoCompact, true);
-  assert.equal(hot.ratio, 0.9);
+  assert.equal(hot.ratio, 0.8);
 });
 
 test('ringFillRatio keeps tiny usage visible', () => {

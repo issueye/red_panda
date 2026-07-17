@@ -3,7 +3,8 @@
  * Not a true tokenizer; good enough for progress UX.
  */
 
-export const CONTEXT_AUTO_COMPACT_RATIO = 0.9;
+/** When estimated context usage reaches this fraction of max tokens, auto-compact. */
+export const CONTEXT_AUTO_COMPACT_RATIO = 0.8;
 /** Soft ceiling when provider max_tokens is unset — keeps the ring visually responsive. */
 export const SOFT_CONTEXT_BUDGET = 32_000;
 /** Minimum visible arc when any tokens are used (SVG progress readability). */

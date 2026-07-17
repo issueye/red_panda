@@ -118,38 +118,8 @@ test('Gateway-backed desktop renders denied tool failure path @gateway-backed', 
   }
 });
 
-test('Gateway-backed desktop forks and summarizes a session in place @gateway-backed', async ({ page }) => {
-  const gateway = await startGateway();
-  try {
-    await page.addInitScript(() => window.localStorage.clear());
-    await page.goto('/');
-    await expect(page.getByTestId('gateway-status')).toHaveText('已连接', { timeout: 15000 });
-
-    await page.getByTestId('chat-composer-input').fill('read file README.md');
-    await page.getByTestId('chat-composer-send').click();
-    await expect(page.getByTestId('tool-card').filter({ hasText: 'workspace.read_file' })).toHaveClass(/tool-completed/, { timeout: 20000 });
-
-    await page.getByTestId('session-fork').click();
-    const forkedSession = page.getByTestId('session-item').filter({ hasText: '的分叉' });
-    await expect(forkedSession).toBeVisible({ timeout: 15000 });
-    await expect(forkedSession).toContainText('分叉');
-    await expect(page.getByTestId('message-row').filter({ hasText: 'read file README.md' }).first()).toBeVisible({ timeout: 15000 });
-
-    const sessionsBefore = await page.getByTestId('session-item').count();
-    const applied = page.waitForResponse((response) => (
-      response.request().method() === 'POST'
-      && /\/api\/v1\/sessions\/[^/]+\/compact$/.test(new URL(response.url()).pathname)
-    ));
-    await page.getByTestId('session-compact').click();
-    await applied;
-    await expect(page.getByTestId('session-item')).toHaveCount(sessionsBefore);
-    await expect(page.getByTestId('message-row').filter({ hasText: 'read file README.md' }).first()).toBeVisible();
-  } finally {
-    await page.close().catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await gateway.stop();
-  }
-});
+// Fork / compact sidebar actions were removed from Desktop UI; Gateway APIs remain covered by Go tests.
+test.skip('Gateway-backed desktop forks and summarizes a session in place @gateway-backed', async () => {});
 
 test('Gateway-backed desktop manages memory and shows injection event @gateway-backed', async ({ page }) => {
   const gateway = await startGateway();

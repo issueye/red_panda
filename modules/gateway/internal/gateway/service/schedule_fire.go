@@ -227,12 +227,41 @@ func (s ScheduleService) fire(ctx context.Context, row model.ScheduledTask, now 
 	}
 	_, _ = s.repos.Schedules.Update(row)
 
+	s.publishSessionUpserted(result.SessionID, result.RunID, row.ID, manual)
+
 	return ScheduleTriggerResult{
 		ScheduleRunID: srun.ID,
 		RunID:         result.RunID,
 		SessionID:     result.SessionID,
 		Status:        "running",
 	}, nil
+}
+
+// publishSessionUpserted notifies connected Desktops so the session tree shows schedule-created sessions.
+func (s ScheduleService) publishSessionUpserted(sessionID, runID, scheduleID string, manual bool) {
+	if s.hub == nil || sessionID == "" {
+		return
+	}
+	row, err := s.repos.Sessions.Get(sessionID)
+	if err != nil {
+		return
+	}
+	dto := sessionDTO(row)
+	raw, err := json.Marshal(map[string]any{
+		"session":     dto,
+		"run_id":      runID,
+		"schedule_id": scheduleID,
+		"source":      "schedule",
+		"manual":      manual,
+	})
+	if err != nil {
+		return
+	}
+	s.hub.Broadcast(protows.Envelope{
+		Type:    protows.TypeEvent,
+		Method:  protows.EventSessionUpserted,
+		Payload: raw,
+	})
 }
 
 func (s ScheduleService) advanceAfterFire(row *model.ScheduledTask, now time.Time, countAsFire bool) {
@@ -281,13 +310,17 @@ func (s ScheduleService) resolveSession(row model.ScheduledTask, now time.Time) 
 }
 
 func (s ScheduleService) buildRunPayload(row model.ScheduledTask, sessionID string) protows.RunStartPayload {
+	// Always normalize: legacy rows may store tool_policy="allowlist" / permission_mode="deny"
+	// which Runtime rejects or mis-handles (see tools.EvaluateToolPolicy).
+	toolPolicy := scheduleToolPolicy(row.ToolPolicy)
+	permissionMode := schedulePermissionMode(row.PermissionMode)
 	options := map[string]any{
-		"working_dir":       row.WorkspaceRoot,
-		"trigger_source":    "schedule",
-		"trigger_ref":       row.ID,
-		"permission_mode":   firstNonEmpty(row.PermissionMode, "deny"),
-		"tool_policy":       firstNonEmpty(row.ToolPolicy, "allowlist"),
-		"runtime_mode":      "per_run_process",
+		"working_dir":     row.WorkspaceRoot,
+		"trigger_source":  "schedule",
+		"trigger_ref":     row.ID,
+		"permission_mode": permissionMode,
+		"tool_policy":     toolPolicy,
+		"runtime_mode":    "per_run_process",
 	}
 	if row.ProviderProfileID != "" {
 		options["provider_profile_id"] = row.ProviderProfileID
@@ -311,8 +344,8 @@ func (s ScheduleService) buildRunPayload(row model.ScheduledTask, sessionID stri
 		}
 	}
 	// Safety options from the schedule row win over free-form extras for critical keys.
-	options["permission_mode"] = firstNonEmpty(row.PermissionMode, "deny")
-	options["tool_policy"] = firstNonEmpty(row.ToolPolicy, "allowlist")
+	options["permission_mode"] = permissionMode
+	options["tool_policy"] = toolPolicy
 	options["tool_allowlist"] = allow
 	options["trigger_source"] = "schedule"
 	options["trigger_ref"] = row.ID

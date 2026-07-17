@@ -10,8 +10,10 @@ export const emptyScheduleDraft = {
   sessionMode: 'new_each_run',
   sessionId: '',
   workspaceRoot: '',
-  permissionMode: 'deny',
-  toolPolicy: 'allowlist',
+  // Runtime-valid values (tools.EvaluateToolPolicy): risk_based + deny_all.
+  // Scope is further tightened by tool_allowlist on the Gateway schedule row.
+  permissionMode: 'deny_all',
+  toolPolicy: 'risk_based',
   enabled: true,
 };
 
@@ -32,10 +34,10 @@ export function normalizeSchedule(item = {}) {
     sessionId: item.session_id || '',
     workspaceRoot: item.workspace_root || '',
     providerProfileId: item.provider_profile_id || '',
-    toolPolicy: item.tool_policy || 'allowlist',
+    toolPolicy: item.tool_policy || 'risk_based',
     toolAllowlist: Array.isArray(item.tool_allowlist) ? item.tool_allowlist : [],
     toolDenylist: Array.isArray(item.tool_denylist) ? item.tool_denylist : [],
-    permissionMode: item.permission_mode || 'deny',
+    permissionMode: item.permission_mode || 'deny_all',
     overlapPolicy: item.overlap_policy || 'skip',
     maxRuns: Number(item.max_runs) || 0,
     runCount: Number(item.run_count) || 0,
@@ -76,8 +78,8 @@ export function scheduleCreatePayload(draft, context = {}) {
     prompt: String(draft.prompt || '').trim(),
     session_mode: draft.sessionMode || 'new_each_run',
     workspace_root: draft.workspaceRoot || context.workspaceRoot || '',
-    permission_mode: draft.permissionMode || 'deny',
-    tool_policy: draft.toolPolicy || 'allowlist',
+    permission_mode: draft.permissionMode || 'deny_all',
+    tool_policy: draft.toolPolicy || 'risk_based',
   };
   if (kind === 'interval') {
     payload.interval_sec = Math.max(60, Number(draft.intervalSec) || 3600);

@@ -105,15 +105,19 @@ export function SelectMenu({
     };
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
         setOpen(false);
         buttonRef.current?.focus();
       }
     };
     document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
+    // Capture so Escape closes the list before parent dialogs handle it.
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
     };
   }, [open]);
 
@@ -182,7 +186,7 @@ export function SelectMenu({
         maxHeight: `${coords.maxHeight}px`,
         top: coords.top != null ? `${coords.top}px` : 'auto',
         bottom: coords.bottom != null ? `${coords.bottom}px` : 'auto',
-        zIndex: 80,
+        zIndex: 200,
       }}
     >
       {normalizedOptions.map((option, index) => (

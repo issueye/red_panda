@@ -62,6 +62,19 @@ func (w WebSocketController) Connect(c *gin.Context) {
 	}
 	defer session.close()
 
+	// Fan-in global notices (session.upserted from scheduled tasks, etc.).
+	if w.Hub != nil {
+		broadcastCh, cancelBroadcast := w.Hub.SubscribeBroadcast()
+		session.mu.Lock()
+		session.subscriptions["__broadcast__"] = cancelBroadcast
+		session.mu.Unlock()
+		go func() {
+			for msg := range broadcastCh {
+				session.enqueue(msg)
+			}
+		}()
+	}
+
 	go session.writeLoop(ctx)
 
 	for {

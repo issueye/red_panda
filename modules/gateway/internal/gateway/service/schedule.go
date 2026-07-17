@@ -23,6 +23,8 @@ const (
 )
 
 // defaultScheduleAllowlist is the safe unattended tool surface (docs/43).
+// Filtering is enforced via tool_allowlist; tool_policy must be a Runtime-valid
+// value (risk_based / allow_all / deny_all / ask_all) — not the storage synonym "allowlist".
 var defaultScheduleAllowlist = []string{
 	"workspace.read_file",
 	"workspace.list",
@@ -32,6 +34,32 @@ var defaultScheduleAllowlist = []string{
 	"memory.create",
 	"web.search",
 	"web.fetch",
+}
+
+// scheduleToolPolicy maps API/storage values to Runtime tool_policy.
+// Historical synonym "allowlist" means risk_based + tool_allowlist.
+func scheduleToolPolicy(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "deny_all", "allow_all", "ask_all", "risk_based":
+		return strings.ToLower(strings.TrimSpace(raw))
+	case "allowlist", "default", "":
+		return "risk_based"
+	default:
+		return "risk_based"
+	}
+}
+
+// schedulePermissionMode maps API/storage values to Runtime permission_mode.
+// Historical synonym "deny" means deny_all (unattended: no interactive approval).
+func schedulePermissionMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "deny_all", "allow_all", "strict", "permissive":
+		return strings.ToLower(strings.TrimSpace(raw))
+	case "deny", "":
+		return "deny_all"
+	default:
+		return "deny_all"
+	}
 }
 
 type runStarter interface {
@@ -173,20 +201,14 @@ func (s ScheduleService) Create(req ScheduleCreateRequest) (methods.ScheduleDTO,
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	toolPolicy := strings.TrimSpace(req.ToolPolicy)
-	if toolPolicy == "" {
-		toolPolicy = "allowlist"
-	}
-	permissionMode := strings.TrimSpace(req.PermissionMode)
-	if permissionMode == "" {
-		permissionMode = "deny"
-	}
+	toolPolicy := scheduleToolPolicy(req.ToolPolicy)
+	permissionMode := schedulePermissionMode(req.PermissionMode)
 	overlap := strings.TrimSpace(req.OverlapPolicy)
 	if overlap == "" {
 		overlap = methods.ScheduleOverlapSkip
 	}
 	allowlist := req.ToolAllowlist
-	if len(allowlist) == 0 && toolPolicy == "allowlist" {
+	if len(allowlist) == 0 {
 		allowlist = append([]string(nil), defaultScheduleAllowlist...)
 	}
 	maxRuns := req.MaxRuns
@@ -341,7 +363,7 @@ func (s ScheduleService) Update(id string, req ScheduleUpdateRequest) (methods.S
 		row.ProviderProfileID = strings.TrimSpace(*req.ProviderProfileID)
 	}
 	if req.ToolPolicy != nil {
-		row.ToolPolicy = strings.TrimSpace(*req.ToolPolicy)
+		row.ToolPolicy = scheduleToolPolicy(*req.ToolPolicy)
 	}
 	if req.ToolAllowlist != nil {
 		raw, _ := json.Marshal(req.ToolAllowlist)
@@ -352,7 +374,7 @@ func (s ScheduleService) Update(id string, req ScheduleUpdateRequest) (methods.S
 		row.ToolDenylistJSON = string(raw)
 	}
 	if req.PermissionMode != nil {
-		row.PermissionMode = strings.TrimSpace(*req.PermissionMode)
+		row.PermissionMode = schedulePermissionMode(*req.PermissionMode)
 	}
 	if req.OverlapPolicy != nil {
 		row.OverlapPolicy = strings.TrimSpace(*req.OverlapPolicy)

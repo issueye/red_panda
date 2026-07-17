@@ -15,6 +15,7 @@
 | [42-robotgo-flow-mcp-skill.md](42-robotgo-flow-mcp-skill.md) | robotgo-flow MCP server + native skill integration |
 | [43-scheduled-task-design.md](43-scheduled-task-design.md) | **Scheduled tasks design** (Gateway scheduler → run.start) |
 | [44-v0.2.1-development-plan.md](44-v0.2.1-development-plan.md) | **v0.2.1 plan** — scheduled tasks delivery slices |
+| [45-session-system-abstraction-design.md](45-session-system-abstraction-design.md) | **Session system abstraction & optimization** |
 | [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |
@@ -28,6 +29,7 @@
 | Doc | Domain |
 | --- | --- |
 | [13-session-fork-compact-design.md](13-session-fork-compact-design.md) | Session fork / compact |
+| [45-session-system-abstraction-design.md](45-session-system-abstraction-design.md) | Session aggregate abstraction + lifecycle optimization |
 | [14-memory-history-design.md](14-memory-history-design.md) | Memory |
 | [15-memory-runtime-tools-design.md](15-memory-runtime-tools-design.md) | Memory tools |
 | [19-mcp-stdio-tools-design.md](19-mcp-stdio-tools-design.md) | MCP (config + discovery) |

@@ -23,9 +23,44 @@ export function useSessionCrudActions({
   openWorkspaceRoot,
   loadSkills,
 }) {
-  const selectSession = useCallback((id) => {
+  const upsertSession = useCallback((sessionLike) => {
+    const normalized = normalizeSession(sessionLike);
+    if (!normalized?.id) return null;
+    setSessions((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
+    setSessionRuntimes((map) => (
+      map[normalized.id]
+        ? map
+        : { ...map, [normalized.id]: createEmptySessionRuntime({ hydrated: false }) }
+    ));
+    return normalized;
+  }, [setSessionRuntimes, setSessions]);
+
+  const refreshSessions = useCallback(async () => {
+    const items = await apiJson('/api/v1/sessions').catch(() => null);
+    if (!Array.isArray(items)) return [];
+    const normalized = items.map(normalizeSession).filter((item) => item?.id);
+    setSessions(normalized);
+    setSessionRuntimes((map) => {
+      const next = { ...map };
+      for (const item of normalized) {
+        if (!next[item.id]) {
+          next[item.id] = createEmptySessionRuntime({ hydrated: false });
+        }
+      }
+      return next;
+    });
+    return normalized;
+  }, [setSessionRuntimes, setSessions]);
+
+  const selectSession = useCallback(async (id) => {
+    if (!id) return;
+    let target = sessions.find((item) => item.id === id);
+    if (!target) {
+      // Session may have been created by a scheduled task / other client.
+      const refreshed = await refreshSessions();
+      target = refreshed.find((item) => item.id === id) || null;
+    }
     setCurrentSessionId(id);
-    const target = sessions.find((item) => item.id === id);
     if (target?.workspaceRoot) {
       openWorkspaceRoot(target.workspaceRoot).catch(() => {});
     }
@@ -39,6 +74,7 @@ export function useSessionCrudActions({
     loadGlobalPendingPermissions,
     loadSessionState,
     openWorkspaceRoot,
+    refreshSessions,
     sessionRuntimes,
     sessions,
     setCurrentSessionId,
@@ -164,5 +200,7 @@ export function useSessionCrudActions({
     browseWorkspaceDirectory,
     forkSession,
     selectSession,
+    upsertSession,
+    refreshSessions,
   };
 }

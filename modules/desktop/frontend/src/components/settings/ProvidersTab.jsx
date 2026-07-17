@@ -113,7 +113,7 @@ export function ProvidersTab({
               <Field
                 className="settings-row"
                 label="最大 Token 数"
-                tooltip="上下文窗口预算，用于输入框旁进度环。达到 90% 时自动更新同一会话的上下文摘要。留空表示不限制。"
+                tooltip="上下文窗口预算，用于输入框旁进度环。达到 80% 时自动更新同一会话的上下文摘要。留空表示不限制。"
               >
                 <input
                   data-testid="provider-max-tokens"

@@ -10,22 +10,36 @@ test('main workspace copy avoids protocol labels', async ({ page }) => {
   await expect(body).not.toContainText('Agent Runtime');
 });
 
-test('right panel tabs support keyboard navigation', async ({ page }) => {
+test('left and right panel tabs support keyboard navigation', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
 
-  await page.getByRole('tab', { name: '工作区' }).focus();
+  await page.getByTestId('left-tab-sessions').focus();
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('tab', { name: 'Worker' })).toBeFocused();
-  await expect(page.getByRole('tab', { name: 'Worker' })).toHaveAttribute('aria-selected', 'true');
-
-  await page.keyboard.press('End');
-  await expect(page.getByRole('tab', { name: '记忆' })).toBeFocused();
-  await expect(page.getByRole('tab', { name: '记忆' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('left-tab-workspace')).toBeFocused();
+  await expect(page.getByTestId('left-tab-workspace')).toHaveAttribute('aria-selected', 'true');
 
   await page.keyboard.press('Home');
-  await expect(page.getByRole('tab', { name: '工作区' })).toBeFocused();
-  await expect(page.getByRole('tab', { name: '工作区' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('left-tab-sessions')).toBeFocused();
+  await expect(page.getByTestId('left-tab-sessions')).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('End');
+  await expect(page.getByTestId('left-tab-workspace')).toBeFocused();
+  await expect(page.getByTestId('left-tab-workspace')).toHaveAttribute('aria-selected', 'true');
+
+  await page.getByTestId('right-tab-workers').click();
+  await page.getByTestId('right-tab-workers').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByTestId('right-tab-activity')).toBeFocused();
+  await expect(page.getByTestId('right-tab-activity')).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('End');
+  await expect(page.getByTestId('right-tab-memory')).toBeFocused();
+  await expect(page.getByTestId('right-tab-memory')).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('Home');
+  await expect(page.getByTestId('right-tab-workers')).toBeFocused();
+  await expect(page.getByTestId('right-tab-workers')).toHaveAttribute('aria-selected', 'true');
 });
 
 test('settings dialog manages focus and closes with Escape', async ({ page }) => {

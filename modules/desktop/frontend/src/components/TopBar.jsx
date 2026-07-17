@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Minus, RefreshCw, Settings2, Square, X } from 'lucide-react';
+import { Clock3, Minus, RefreshCw, Settings2, Square, X } from 'lucide-react';
 import mark from '../assets/red-panda-mark.svg';
 import {
   windowClose,
@@ -19,7 +19,7 @@ function RestoreIcon() {
  * Global app header: brand, connection controls, and custom window chrome
  * (replaces the native Wails / OS title bar when the window is frameless).
  */
-export function TopBar({ status, gatewayBase, onReconnect, onSettings, busy = false }) {
+export function TopBar({ status, gatewayBase, onReconnect, onSettings, onSchedules, busy = false }) {
   const [maximised, setMaximised] = useState(false);
 
   const refreshMaximised = useCallback(async () => {
@@ -66,6 +66,11 @@ export function TopBar({ status, gatewayBase, onReconnect, onSettings, busy = fa
         <IconButton label="重新连接" onClick={onReconnect}>
           <RefreshCw size={15} />
         </IconButton>
+        {onSchedules ? (
+          <IconButton data-testid="open-schedules" label="定时任务" onClick={onSchedules}>
+            <Clock3 size={16} />
+          </IconButton>
+        ) : null}
         <IconButton label="设置" onClick={onSettings}>
           <Settings2 size={16} />
         </IconButton>

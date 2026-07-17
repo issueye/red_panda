@@ -4,16 +4,21 @@ test('workspace opens as a dedicated modal without auxiliary tabs', async ({ pag
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
 
+  await page.getByTestId('left-tab-workspace').click();
   const toggle = page.getByTestId('workspace-panel-layout-toggle');
   await expect(toggle).toHaveAccessibleName('独立查看工作区');
-  const sidebarBox = await page.locator('.right-panel').boundingBox();
-  expect(sidebarBox.width).toBe(300);
+  const sidebarBox = await page.locator('.sidebar').boundingBox();
+  expect(sidebarBox.width).toBe(280);
+  await page.getByTestId('left-tab-sessions').click();
+  const sessionsBox = await page.locator('.sidebar').boundingBox();
+  expect(sessionsBox.width).toBe(280);
+  await page.getByTestId('left-tab-workspace').click();
 
   await toggle.click();
   const panel = page.getByRole('dialog', { name: '工作区' });
   await expect(panel).toBeVisible();
   await expect(toggle).toHaveAccessibleName('关闭工作区');
-  await expect(panel.locator('.right-panel-tabs')).toHaveCount(0);
+  await expect(panel.locator('.left-panel-tabs')).toHaveCount(0);
   await expect(panel.getByRole('tab')).toHaveCount(0);
   const expandedBox = await panel.boundingBox();
   expect(expandedBox.x).toBeGreaterThan(0);
@@ -27,11 +32,11 @@ test('workspace opens as a dedicated modal without auxiliary tabs', async ({ pag
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: '工作区' })).toHaveCount(0);
   await expect(toggle).toHaveAccessibleName('独立查看工作区');
-  const collapsedBox = await page.locator('.right-panel').boundingBox();
-  expect(collapsedBox.width).toBe(300);
+  const collapsedBox = await page.locator('.sidebar').boundingBox();
+  expect(collapsedBox.width).toBe(280);
 
   await toggle.click();
-  await page.getByRole('button', { name: '返回右侧栏' }).click({ position: { x: 2, y: 2 } });
+  await page.getByRole('button', { name: '返回侧栏' }).click({ position: { x: 2, y: 2 } });
   await expect(page.getByRole('dialog', { name: '工作区' })).toHaveCount(0);
 });
 

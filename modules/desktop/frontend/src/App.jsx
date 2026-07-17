@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import { ChatPanel } from './components/chat/ChatPanel.jsx';
 import { MemoryPanel } from './components/MemoryPanel.jsx';
 import { RunActivityPanel } from './components/RunActivityPanel.jsx';
-import { SchedulesPanel } from './components/SchedulesPanel.jsx';
+import { SchedulesDialog } from './components/SchedulesDialog.jsx';
 import { SettingsPanel } from './components/SettingsPanel.jsx';
 import { Sidebar } from './components/Sidebar.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
@@ -52,11 +52,9 @@ const initialMessages = [
 ];
 
 const rightPanelTabs = [
-  { id: 'workspace', label: '工作区', testId: '' },
   { id: 'workers', label: 'Worker', testId: 'right-tab-workers' },
   { id: 'activity', label: '活动', testId: 'right-tab-activity' },
   { id: 'memory', label: '记忆', testId: 'right-tab-memory' },
-  { id: 'schedules', label: '定时', testId: 'right-tab-schedules' },
 ];
 
 function loadRunSettings() {
@@ -129,7 +127,8 @@ export function App() {
     }),
   }));
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState('workspace');
+  const [leftPanelTab, setLeftPanelTab] = useState('sessions');
+  const [rightPanelTab, setRightPanelTab] = useState('activity');
   const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
   const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(loadRightPanelWidth);
@@ -138,6 +137,7 @@ export function App() {
     typeof window !== 'undefined' && window.matchMedia('(max-width: 1100px)').matches
   ));
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [runSettings, setRunSettings] = useState(loadRunSettings);
   const workspaceRootRef = useRef('');
   const getWorkspaceRoot = useCallback(() => workspaceRootRef.current, []);
@@ -185,6 +185,10 @@ export function App() {
   const rightPanelReturnFocusRef = useRef(null);
   const rightPanelResizeRef = useRef(null);
   const hydrateGoalsRef = useRef(async () => {});
+  const upsertSessionRef = useRef(null);
+  const selectSessionRef = useRef(null);
+  const refreshSessionsRef = useRef(null);
+  const gatewayRequestRef = useRef(null);
   const currentSessionIdRef = useRef(currentSessionId);
   currentSessionIdRef.current = currentSessionId;
   const sessionRuntimesRef = useRef(sessionRuntimes);
@@ -388,6 +392,28 @@ export function App() {
     resumeCursors,
     // 网关事件按 session_id 写入对应会话投影，支持多会话并发 run。
     onEvent: (event) => {
+      // Out-of-band session creation (scheduled tasks, other clients).
+      if (event?.method === 'session.upserted') {
+        const sessionPayload = event.payload?.session || event.payload;
+        const runId = event.payload?.run_id || '';
+        const upserted = upsertSessionRef.current?.(sessionPayload);
+        const sessionId = upserted?.id || sessionPayload?.id || '';
+        if (sessionId) {
+          // Auto-open schedule-created sessions so the left tree + chat stay in sync.
+          if (event.payload?.source === 'schedule') {
+            void selectSessionRef.current?.(sessionId);
+          }
+          if (runId) {
+            gatewayRequestRef.current?.('run.subscribe', {
+              runs: [{ run_id: runId, after_seq: 0 }],
+            }).catch(() => {});
+          }
+        } else {
+          void refreshSessionsRef.current?.();
+        }
+        return;
+      }
+
       const payload = event.payload || {};
       if (isRunTerminalEvent(payload) && payload.session_id) {
         // A6: Gateway OnRootRunTerminal mutates Goal (pause/fail/budget) before
@@ -419,6 +445,7 @@ export function App() {
       }
     },
   });
+  gatewayRequestRef.current = request;
 
   useEffect(() => {
     if (status !== 'connected') return;
@@ -462,11 +489,11 @@ export function App() {
     deleteSession,
     deleteWorkspaceNode,
     browseWorkspaceDirectory,
-    forkSession,
-    compactSession,
     selectSession,
     sendTask,
     cancelRun,
+    upsertSession,
+    refreshSessions,
   } = useSessionActions({
     dialog,
     sessions,
@@ -496,6 +523,9 @@ export function App() {
     contextTokenBudget,
     compacting,
   });
+  upsertSessionRef.current = upsertSession;
+  selectSessionRef.current = selectSession;
+  refreshSessionsRef.current = refreshSessions;
 
   async function cancelAssignment(assignment) {
     if (!assignment?.id || !assignment.runId || !['queued', 'running', 'waiting_permission'].includes(assignment.status)) {
@@ -567,9 +597,13 @@ export function App() {
     }
   }
 
+  function selectLeftPanelTab(tab) {
+    setLeftPanelTab(tab);
+    if (tab !== 'workspace') setWorkspacePanelExpanded(false);
+  }
+
   function selectRightPanelTab(tab) {
     setRightPanelTab(tab);
-    if (tab !== 'workspace') setWorkspacePanelExpanded(false);
     if (compactLayout) {
       if (!rightPanelDrawerOpen) rightPanelReturnFocusRef.current = document.activeElement;
       setRightPanelDrawerOpen(true);
@@ -610,7 +644,6 @@ export function App() {
     const tabList = event.currentTarget;
     const nextTab = rightPanelTabs[nextIndex];
     setRightPanelTab(nextTab.id);
-    if (nextTab.id !== 'workspace') setWorkspacePanelExpanded(false);
     window.requestAnimationFrame(() => {
       tabList.querySelector(`[data-right-panel-tab="${nextTab.id}"]`)?.focus();
     });
@@ -657,7 +690,7 @@ export function App() {
     }));
   }
 
-  const rightPanelContent = rightPanelTab === 'workspace' ? (
+  const workspacePanel = (
     <WorkspacePanel
       apiJson={apiJson}
       canFloat={!compactLayout}
@@ -665,7 +698,9 @@ export function App() {
       onExpandedChange={setWorkspacePanelExpanded}
       workspace={workspace}
     />
-  ) : rightPanelTab === 'workers' ? (
+  );
+
+  const rightPanelContent = rightPanelTab === 'workers' ? (
     <WorkerPanel
       assignments={assignments}
       onCancelAssignment={cancelAssignment}
@@ -676,13 +711,6 @@ export function App() {
       apiJson={apiJson}
       currentSessionId={currentSessionId}
       workspaceRoot={workspace?.root_path || workspace?.root || ''}
-    />
-  ) : rightPanelTab === 'schedules' ? (
-    <SchedulesPanel
-      apiJson={apiJson}
-      onOpenSession={selectSession}
-      providerProfileId={runSettings?.providerProfileId || ''}
-      workspaceRoot={workspace?.root_path || workspace?.root || currentWorkspaceRoot?.() || ''}
     />
   ) : (
     <RunActivityPanel
@@ -705,6 +733,7 @@ export function App() {
         busy={activeRunCount > 0}
         gatewayBase={gatewayBase}
         onReconnect={reconnect}
+        onSchedules={() => setSchedulesOpen(true)}
         onSettings={() => setSettingsOpen(true)}
         status={status}
       />
@@ -719,6 +748,15 @@ export function App() {
         settings={runSettings}
         workspaceRoot={currentWorkspaceRoot()}
       />
+      <SchedulesDialog
+        apiJson={apiJson}
+        onClose={() => setSchedulesOpen(false)}
+        onOpenSession={selectSession}
+        open={schedulesOpen}
+        providerProfileId={runSettings?.providerProfileId || ''}
+        workspaceRoot={workspace?.root_path || workspace?.root || currentWorkspaceRoot?.() || ''}
+        workspaces={recentWorkspaces}
+      />
       <main
         className={[
           'workspace',
@@ -728,17 +766,26 @@ export function App() {
       >
         <Sidebar
           currentSessionId={currentSessionId}
-          onCompactSession={compactSession}
+          leftTab={leftPanelTab}
           onDeleteSession={deleteSession}
           onDeleteWorkspace={deleteWorkspaceNode}
-          onForkSession={forkSession}
+          onLeftTabChange={selectLeftPanelTab}
           onNewSession={createSession}
           onOpenWorkspace={() => setWorkspacePickerOpen(true)}
           onSelectSession={selectSession}
           onSelectWorkspace={selectWorkspaceNode}
+          onWorkspaceExpandedKeyDown={(event) => {
+            if (!workspacePanelExpanded) return;
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              setWorkspacePanelExpanded(false);
+            }
+          }}
           sessionRunStatus={sessionRunStatus}
           sessions={sessions}
           workspace={workspace}
+          workspaceExpanded={workspacePanelExpanded}
+          workspacePanel={workspacePanel}
           workspaces={recentWorkspaces}
         />
         <WorkspacePickerDialog
@@ -828,9 +875,9 @@ export function App() {
             type="button"
           />
         ) : null}
-        {workspacePanelExpanded && !compactLayout ? (
+        {workspacePanelExpanded && !compactLayout && leftPanelTab === 'workspace' ? (
           <button
-            aria-label="返回右侧栏"
+            aria-label="返回侧栏"
             className="workspace-window-backdrop"
             onClick={() => setWorkspacePanelExpanded(false)}
             tabIndex={-1}
@@ -838,26 +885,18 @@ export function App() {
           />
         ) : null}
         <aside
-          aria-label={workspacePanelExpanded && !compactLayout ? '工作区' : '辅助面板'}
+          aria-label="辅助面板"
           aria-hidden={compactLayout && !rightPanelDrawerOpen ? 'true' : undefined}
-          aria-modal={workspacePanelExpanded && !compactLayout ? 'true' : undefined}
           className={[
             'right-panel',
             rightPanelDrawerOpen ? 'drawer-open' : '',
-            workspacePanelExpanded && !compactLayout ? 'workspace-window' : '',
           ].filter(Boolean).join(' ')}
-          data-testid={workspacePanelExpanded && !compactLayout ? 'workspace-dialog' : undefined}
           inert={compactLayout && !rightPanelDrawerOpen ? '' : undefined}
           onKeyDown={(event) => {
             if (compactLayout && event.key === 'Escape') closeRightPanelDrawer();
-            if (!compactLayout && workspacePanelExpanded && event.key === 'Escape') {
-              event.stopPropagation();
-              setWorkspacePanelExpanded(false);
-            }
           }}
-          role={workspacePanelExpanded && !compactLayout ? 'dialog' : undefined}
         >
-          {!compactLayout && !workspacePanelExpanded ? (
+          {!compactLayout ? (
             <button
               aria-label="拖拽调整右侧面板宽度"
               aria-orientation="vertical"
@@ -893,31 +932,29 @@ export function App() {
               <X size={17} />
             </IconButton>
           </div>
-          {!workspacePanelExpanded || compactLayout ? (
-            <div
-              aria-label="辅助面板"
-              className="right-panel-tabs"
-              onKeyDown={handleRightPanelTabsKeyDown}
-              role="tablist"
-            >
-              {rightPanelTabs.map((tab) => (
-                <TabButton
-                  active={rightPanelTab === tab.id}
-                  data-right-panel-tab={tab.id}
-                  data-testid={tab.testId || undefined}
-                  key={tab.id}
-                  onClick={() => selectRightPanelTab(tab.id)}
-                  panelId="right-panel-content"
-                >
-                  {tab.label}
-                </TabButton>
-              ))}
-            </div>
-          ) : null}
+          <div
+            aria-label="辅助面板"
+            className="right-panel-tabs"
+            onKeyDown={handleRightPanelTabsKeyDown}
+            role="tablist"
+          >
+            {rightPanelTabs.map((tab) => (
+              <TabButton
+                active={rightPanelTab === tab.id}
+                data-right-panel-tab={tab.id}
+                data-testid={tab.testId || undefined}
+                key={tab.id}
+                onClick={() => selectRightPanelTab(tab.id)}
+                panelId="right-panel-content"
+              >
+                {tab.label}
+              </TabButton>
+            ))}
+          </div>
           <div
             className="right-panel-content"
             id="right-panel-content"
-            role={workspacePanelExpanded && !compactLayout ? undefined : 'tabpanel'}
+            role="tabpanel"
           >
             {rightPanelContent}
           </div>
