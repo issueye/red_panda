@@ -1,10 +1,39 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { apiJson } from '../lib/api.js';
 import { appendDiagnosticLog } from '../lib/diagnosticLog.js';
+import { normalizeHistoryMessage } from '../lib/sessionNormalize.js';
 import { createEmptySessionRuntime } from '../lib/sessionRuntime.js';
+import { coveredCountForKeepTailTurns } from '../lib/tokenBudget.js';
 import { appendMessages, createSystemMessage } from './sessionActionHelpers.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = new Set(['queued', 'running', 'waiting_permission', 'cancelling', 'paused']);
+const DEFAULT_KEEP_TAIL_TURNS = 3;
+
+/**
+ * Prefer server history (has messageSeq) after compact; keep live-only rows that
+ * are not yet persisted (optimistic user bubbles / in-flight streaming).
+ * @param {Array<object>} previousMessages
+ * @param {Array<object>} historyMessages
+ * @param {{ running?: boolean, currentRunId?: string }} runtime
+ */
+function mergeHistoryWithLiveMessages(previousMessages = [], historyMessages = [], runtime = {}) {
+  const history = Array.isArray(historyMessages) ? historyMessages : [];
+  const previous = Array.isArray(previousMessages) ? previousMessages : [];
+  if (history.length === 0) return previous;
+
+  const historyIds = new Set(history.map((item) => item?.id).filter(Boolean));
+  const liveExtras = previous.filter((message) => {
+    if (!message) return false;
+    if (message.id && historyIds.has(message.id)) return false;
+    if (message.agent === 'system') return true;
+    const id = String(message.id || '');
+    if (runtime.running && message.runId && message.runId === runtime.currentRunId) return true;
+    if (runtime.running && message.role === 'user' && id.startsWith('user_')) return true;
+    if (id.startsWith('evt_') || id.startsWith('compact_')) return true;
+    return false;
+  });
+  return liveExtras.length > 0 ? [...history, ...liveExtras] : history;
+}
 
 export function useSessionCompactionActions({
   currentSessionId,
@@ -53,8 +82,9 @@ export function useSessionCompactionActions({
     let pauseInfo = { paused: false, runId: '', assignments: [] };
     try {
       pauseInfo = pauseSessionForCompact(sessionId);
+      const keepTailTurns = DEFAULT_KEEP_TAIL_TURNS;
       const compactBody = {
-        keep_tail_turns: 3,
+        keep_tail_turns: keepTailTurns,
         mode: 'auto',
         provider_profile_id: runSettings.providerProfileId || undefined,
       };
@@ -66,18 +96,41 @@ export function useSessionCompactionActions({
         method: 'POST',
         body: JSON.stringify(compactBody),
       });
-      patchRuntime(sessionId, (previous) => ({
-        ...previous,
-        compacting: false,
-        contextSummary: result.summary || null,
-        contextSummaryEndSeq: Number(result.compaction?.source_end_seq) || 0,
-        messages: Number(result.paused_runs) > 0
+
+      // Refresh history so messageSeq is available for the budget ring; fall back to
+      // a covered-count boundary when history cannot be loaded mid-run.
+      let historyMessages = null;
+      try {
+        const history = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/history`);
+        historyMessages = Array.isArray(history) ? history.map(normalizeHistoryMessage) : null;
+      } catch {
+        historyMessages = null;
+      }
+
+      const resolvedKeepTail = Number(result.keep_tail_turns) || keepTailTurns;
+      patchRuntime(sessionId, (previous) => {
+        const coveredCount = historyMessages?.length
+          ? 0
+          : coveredCountForKeepTailTurns(previous.messages, resolvedKeepTail);
+        const merged = historyMessages
+          ? mergeHistoryWithLiveMessages(previous.messages, historyMessages, previous)
+          : previous.messages;
+        const withNotice = Number(result.paused_runs) > 0
           ? appendMessages(
-              previous,
+              { ...previous, messages: merged },
               createSystemMessage('compact_resume', '上下文摘要完成，其他 Worker 已自动恢复。'),
             ).messages
-          : previous.messages,
-      }));
+          : merged;
+        return {
+          ...previous,
+          compacting: false,
+          contextSummary: result.summary || null,
+          contextSummaryEndSeq: Number(result.compaction?.source_end_seq) || 0,
+          contextSummaryCoveredCount: coveredCount,
+          contextSummaryKeepTailTurns: resolvedKeepTail,
+          messages: withNotice,
+        };
+      });
       appendDiagnosticLog('info', `会话上下文摘要已更新（${result.summary_method || 'unknown'}）`, {
         source: 'compact',
         detail: {
@@ -86,6 +139,7 @@ export function useSessionCompactionActions({
           keepTailTurns: result.keep_tail_turns,
           summaryMethod: result.summary_method,
           pausedRuns: result.paused_runs ?? 0,
+          historyReloaded: Boolean(historyMessages),
         },
       });
       if (!silent) {

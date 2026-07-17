@@ -116,7 +116,10 @@ func isRetryableProviderError(ctx context.Context, err error) bool {
 	}
 	var httpErr providerHTTPError
 	if errors.As(err, &httpErr) {
-		return httpErr.StatusCode == http.StatusRequestTimeout ||
+		// 401: credential/token may be briefly unavailable (gateway proxy, plugin
+		// token refresh). Still stop after MaxAttempts like other retryable codes.
+		return httpErr.StatusCode == http.StatusUnauthorized ||
+			httpErr.StatusCode == http.StatusRequestTimeout ||
 			httpErr.StatusCode == http.StatusTooManyRequests ||
 			httpErr.StatusCode >= http.StatusInternalServerError
 	}

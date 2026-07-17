@@ -4,11 +4,13 @@ import {
   CONTEXT_AUTO_COMPACT_RATIO,
   MIN_VISIBLE_RATIO,
   SOFT_CONTEXT_BUDGET,
+  coveredCountForKeepTailTurns,
   estimateEffectiveSessionTokens,
   estimateSessionTokens,
   estimateTextTokens,
   formatTokenCount,
   ringFillRatio,
+  selectEffectiveMessages,
   tokenBudgetState,
 } from './tokenBudget.js';
 
@@ -41,6 +43,56 @@ test('effective estimate replaces covered history with summary without deleting 
   });
   assert.equal(messages.length, 4);
   assert.ok(effective < full);
+});
+
+test('effective estimate keeps unsequenced live messages after compact (no ring freeze at 0)', () => {
+  const messages = [
+    { role: 'user', text: 'old '.repeat(200) },
+    { role: 'assistant', text: 'old answer '.repeat(200) },
+    { role: 'user', text: 'recent question with enough tokens '.repeat(20) },
+    { role: 'assistant', text: 'recent answer with enough tokens '.repeat(20) },
+    { role: 'user', text: 'post compact turn '.repeat(30) },
+    { role: 'assistant', text: 'post compact reply '.repeat(30) },
+  ];
+  // Bug: filtering only by messageSeq drops every live row (seq missing → 0).
+  const broken = messages.filter((message) => (Number(message?.messageSeq) || 0) > 10);
+  assert.equal(broken.length, 0);
+
+  const coveredCount = coveredCountForKeepTailTurns(messages.slice(0, 4), 1);
+  const effective = estimateEffectiveSessionTokens(messages, '', [], {
+    endSeq: 10,
+    coveredCount,
+    summary: { summary: 'short summary of older turns' },
+  });
+  assert.ok(effective > 50, `expected post-compact live tokens to count, got ${effective}`);
+
+  const selected = selectEffectiveMessages(messages, { endSeq: 10, coveredCount });
+  assert.ok(selected.some((item) => String(item.text || '').includes('post compact')));
+});
+
+test('coveredCountForKeepTailTurns keeps the last N user-led rounds', () => {
+  const messages = [
+    { role: 'user', text: 'u1' },
+    { role: 'assistant', text: 'a1' },
+    { role: 'user', text: 'u2' },
+    { role: 'assistant', text: 'a2' },
+    { role: 'user', text: 'u3' },
+    { role: 'assistant', text: 'a3' },
+  ];
+  assert.equal(coveredCountForKeepTailTurns(messages, 2), 2);
+  assert.equal(coveredCountForKeepTailTurns(messages, 3), 0);
+  assert.equal(coveredCountForKeepTailTurns(messages, 1), 4);
+});
+
+test('selectEffectiveMessages uses messageSeq when present and keeps live unsequenced tail', () => {
+  const messages = [
+    { messageSeq: 1, text: 'old' },
+    { messageSeq: 2, text: 'old answer' },
+    { messageSeq: 3, text: 'recent' },
+    { role: 'assistant', text: 'streaming live', id: 'evt_1' },
+  ];
+  const selected = selectEffectiveMessages(messages, { endSeq: 2, coveredCount: 3 });
+  assert.deepEqual(selected.map((item) => item.text), ['recent', 'streaming live']);
 });
 
 test('tokenBudgetState marks 80% auto-compact threshold', () => {

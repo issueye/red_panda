@@ -111,6 +111,9 @@ export function useSessionBootstrap({
             goalHydrated: true,
             contextSummary: compactSummary,
             contextSummaryEndSeq: compactEndSeq,
+            // History messages carry messageSeq; coveredCount is only needed for live rows.
+            contextSummaryCoveredCount: 0,
+            contextSummaryKeepTailTurns: compactEndSeq > 0 ? 3 : 0,
             hydrated: true,
           };
         }
@@ -140,6 +143,8 @@ export function useSessionBootstrap({
           goalBusy: false,
           contextSummary: compactSummary,
           contextSummaryEndSeq: compactEndSeq,
+          contextSummaryCoveredCount: 0,
+          contextSummaryKeepTailTurns: compactEndSeq > 0 ? 3 : 0,
           hydrated: true,
         };
       });

@@ -32,6 +32,10 @@ export function createEmptySessionRuntime(overrides = {}) {
     todosAutoExpandedOnce: false,
     contextSummary: null,
     contextSummaryEndSeq: 0,
+    // UI message index covered by the active in-place summary (for live rows without messageSeq).
+    contextSummaryCoveredCount: 0,
+    // Keep-tail turns used when the summary was applied (fallback boundary without seqs).
+    contextSummaryKeepTailTurns: 0,
     // True while this session is pausing runs and applying a context summary.
     compacting: false,
     // Long-horizon Goal strip (docs/32 M5).

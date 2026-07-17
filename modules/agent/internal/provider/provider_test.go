@@ -90,6 +90,55 @@ func TestHTTPCompatibleProviderRetriesBeforeOutput(t *testing.T) {
 	}
 }
 
+func TestHTTPCompatibleProviderRetriesUnauthorized(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			http.Error(w, `{"error":{"message":"no enabled grok credential"}}`, http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"recovered"}}]}`))
+	}))
+	defer server.Close()
+
+	p := HTTPCompatibleProvider{BaseURL: server.URL, Model: "model", Client: server.Client(), MaxAttempts: 3, RetryBaseDelay: time.Millisecond}
+	if err := p.Complete(context.Background(), ProviderRequest{Messages: []Message{{Role: "user", Content: "go"}}}, func(ProviderChunk) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+}
+
+func TestIsRetryableProviderError(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "401", err: providerHTTPError{StatusCode: http.StatusUnauthorized, Body: "no cred"}, want: true},
+		{name: "408", err: providerHTTPError{StatusCode: http.StatusRequestTimeout}, want: true},
+		{name: "429", err: providerHTTPError{StatusCode: http.StatusTooManyRequests}, want: true},
+		{name: "500", err: providerHTTPError{StatusCode: http.StatusInternalServerError}, want: true},
+		{name: "400", err: providerHTTPError{StatusCode: http.StatusBadRequest, Body: "bad"}, want: false},
+		{name: "403", err: providerHTTPError{StatusCode: http.StatusForbidden}, want: false},
+		{name: "404", err: providerHTTPError{StatusCode: http.StatusNotFound}, want: false},
+	}
+	for _, tc := range cases {
+		if got := isRetryableProviderError(ctx, tc.err); got != tc.want {
+			t.Fatalf("%s: got %v want %v", tc.name, got, tc.want)
+		}
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if isRetryableProviderError(canceled, providerHTTPError{StatusCode: http.StatusUnauthorized}) {
+		t.Fatal("canceled context must not retry")
+	}
+}
+
 func TestHTTPCompatibleProviderDoesNotRetryAfterStreamOutput(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

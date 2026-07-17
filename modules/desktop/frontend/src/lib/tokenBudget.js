@@ -77,17 +77,81 @@ export function estimateSessionTokens(messages = [], draft = '', tools = []) {
 }
 
 /**
+ * Index where the "kept tail" starts when preserving the last N user-led turns.
+ * Matches gateway planCompactionByTurns for live UI transcripts without messageSeq.
+ * @param {Array<{ role?: string }>} messages
+ * @param {number} turns
+ * @returns {number}
+ */
+export function coveredCountForKeepTailTurns(messages = [], turns = 0) {
+  const n = Math.max(0, Math.floor(Number(turns) || 0));
+  if (n <= 0 || !Array.isArray(messages) || messages.length === 0) {
+    return Array.isArray(messages) ? messages.length : 0;
+  }
+  const userIdx = [];
+  for (let i = 0; i < messages.length; i += 1) {
+    if (messages[i]?.role === 'user') userIdx.push(i);
+  }
+  if (userIdx.length === 0) {
+    const keep = Math.min(messages.length, n * 2);
+    return Math.max(0, messages.length - keep);
+  }
+  if (userIdx.length <= n) return 0;
+  return userIdx[userIdx.length - n];
+}
+
+/**
+ * Messages that still count toward model-facing context after an in-place summary.
+ * Live / optimistic messages often lack messageSeq; they must not be dropped when
+ * endSeq > 0 or the budget ring freezes at 0 after the first compact.
+ * @param {Array<{ messageSeq?: number, role?: string }>} messages
+ * @param {{ endSeq?: number, coveredCount?: number, keepTailTurns?: number } | null} compaction
+ */
+export function selectEffectiveMessages(messages = [], compaction = null) {
+  const list = Array.isArray(messages) ? messages : [];
+  const endSeq = Math.max(0, Number(compaction?.endSeq) || 0);
+  if (endSeq <= 0) return list;
+
+  const coveredCount = Math.max(0, Number(compaction?.coveredCount) || 0);
+  const hasSeqs = list.some((message) => (Number(message?.messageSeq) || 0) > 0);
+
+  if (hasSeqs) {
+    return list.filter((message, index) => {
+      const seq = Number(message?.messageSeq) || 0;
+      if (seq > 0) return seq > endSeq;
+      // Unsequenced live rows (streaming / optimistic user bubbles).
+      // When a coveredCount boundary exists, only count messages at/after it.
+      if (coveredCount > 0) return index >= coveredCount;
+      return true;
+    });
+  }
+
+  if (coveredCount > 0) {
+    return list.slice(Math.min(coveredCount, list.length));
+  }
+
+  const keepTailTurns = Math.max(0, Number(compaction?.keepTailTurns) || 0);
+  if (keepTailTurns > 0) {
+    const start = coveredCountForKeepTailTurns(list, keepTailTurns);
+    return list.slice(start);
+  }
+
+  // No boundary available — keep full list rather than reporting 0 forever.
+  return list;
+}
+
+/**
  * Estimate model-facing context while preserving the complete UI history.
  * Messages covered by the active summary are replaced only for this estimate.
  * @param {Array<{ messageSeq?: number, text?: string, content?: string }>} messages
  * @param {string} draft
  * @param {Array<object>} tools
- * @param {{ endSeq?: number, summary?: unknown } | null} compaction
+ * @param {{ endSeq?: number, summary?: unknown, coveredCount?: number, keepTailTurns?: number } | null} compaction
  */
 export function estimateEffectiveSessionTokens(messages = [], draft = '', tools = [], compaction = null) {
   const endSeq = Math.max(0, Number(compaction?.endSeq) || 0);
   if (endSeq <= 0) return estimateSessionTokens(messages, draft, tools);
-  const tail = messages.filter((message) => (Number(message?.messageSeq) || 0) > endSeq);
+  const tail = selectEffectiveMessages(messages, compaction);
   let summaryText = '';
   try {
     summaryText = JSON.stringify(compaction?.summary || '');

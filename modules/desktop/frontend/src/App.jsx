@@ -212,6 +212,8 @@ export function App() {
     todosHydrated = false,
     contextSummary = null,
     contextSummaryEndSeq = 0,
+    contextSummaryCoveredCount = 0,
+    contextSummaryKeepTailTurns = 0,
     compacting = false,
     goal = null,
     goalHydrated = false,
@@ -289,10 +291,21 @@ export function App() {
     const used = estimateEffectiveSessionTokens(messages, draft, tools, {
       endSeq: contextSummaryEndSeq,
       summary: contextSummary,
+      coveredCount: contextSummaryCoveredCount,
+      keepTailTurns: contextSummaryKeepTailTurns,
     });
     const maxTokens = Number(selectedProviderProfile?.maxTokens) || 0;
     return tokenBudgetState(used, maxTokens);
-  }, [messages, draft, tools, selectedProviderProfile, contextSummary, contextSummaryEndSeq]);
+  }, [
+    messages,
+    draft,
+    tools,
+    selectedProviderProfile,
+    contextSummary,
+    contextSummaryEndSeq,
+    contextSummaryCoveredCount,
+    contextSummaryKeepTailTurns,
+  ]);
 
   useEffect(() => {
     try {

@@ -8,16 +8,50 @@ import {
   filterWorkerMessages,
   filterWorkerPermissions,
   filterWorkerTools,
+  isMainConversationItem,
 } from './conversationScope.js';
 
-test('main conversation keeps public Run content only', () => {
+test('main conversation keeps only root-facing content', () => {
   const messages = [
-    { id: 'public', workerId: 'worker-01', text: 'report' },
+    { id: 'user', role: 'user', text: 'go' },
+    { id: 'root', workerId: 'worker-01', assignmentId: 'assignment-000001', profileKey: 'root', text: 'plan' },
+    { id: 'public-worker-leak', workerId: 'worker-02', assignmentId: 'assignment-000002', text: 'worker draft' },
     { id: 'private', workerId: 'worker-02', visibility: 'worker_private', text: 'draft' },
+    { id: 'reviewer', workerId: 'worker-03', profileKey: 'reviewer', text: 'review notes' },
+    { id: 'system', agent: 'system', text: '上下文摘要完成' },
   ];
-  assert.deepEqual(filterMainMessages(messages).map((item) => item.id), ['public']);
-  assert.equal(filterMainTools([{ id: 'tool_1', workerId: 'worker-01' }]).length, 1);
-  assert.equal(filterMainPermissions([{ id: 'perm_1', workerId: 'worker-01' }]).length, 1);
+  assert.deepEqual(
+    filterMainMessages(messages).map((item) => item.id),
+    ['user', 'root', 'system'],
+  );
+
+  const tools = [
+    { id: 'root_tool', workerId: 'worker-01', assignmentId: 'assignment-000001', profileKey: 'root', name: 'workspace.grep' },
+    { id: 'delegate', workerId: 'worker-01', assignmentId: 'assignment-000001', profileKey: 'root', name: 'worker.delegate' },
+    { id: 'worker_tool', workerId: 'worker-02', assignmentId: 'assignment-000002', name: 'shell.exec' },
+    { id: 'worker_tool_profile', workerId: 'worker-03', profileKey: 'archivist', name: 'workspace.read_file' },
+  ];
+  assert.deepEqual(
+    filterMainTools(tools).map((item) => item.id),
+    ['root_tool', 'delegate'],
+  );
+
+  const permissions = [
+    { id: 'root_perm', workerId: 'worker-01', profileKey: 'root' },
+    { id: 'worker_perm', workerId: 'worker-02', assignmentId: 'assignment-000002' },
+  ];
+  assert.deepEqual(
+    filterMainPermissions(permissions).map((item) => item.id),
+    ['root_perm'],
+  );
+});
+
+test('isMainConversationItem classifies root vs collaborative Worker rows', () => {
+  assert.equal(isMainConversationItem({ role: 'user', text: 'hi' }), true);
+  assert.equal(isMainConversationItem({ profileKey: 'root', workerId: 'worker-01' }), true);
+  assert.equal(isMainConversationItem({ workerId: 'worker-02', assignmentId: 'a2' }), false);
+  assert.equal(isMainConversationItem({ profileKey: 'reviewer', workerId: 'worker-03' }), false);
+  assert.equal(isMainConversationItem({ visibility: 'worker_private', profileKey: 'root' }), false);
 });
 
 test('Worker filters prefer Assignment identity and support Worker scope', () => {
