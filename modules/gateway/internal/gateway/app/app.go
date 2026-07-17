@@ -115,6 +115,9 @@ func Run(ctx context.Context, cfg Config) error {
 	})
 	controllers := controller.NewSet(services, hub)
 
+	// Scheduler loop: durable schedule → RunService.Start (docs/43, v0.2.1).
+	go services.Schedule.RunLoop(ctx)
+
 	router := NewRouter(cfg, controllers)
 	server := &http.Server{Addr: cfg.Addr, Handler: router}
 
@@ -216,6 +219,15 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/runs/:id/events", controllers.Run.Events)
 	api.GET("/runs/:id/permissions", controllers.Permission.ListByRun)
 	api.GET("/runs/:id/tools", controllers.Tool.ListByRun)
+	api.GET("/schedules", controllers.Schedule.List)
+	api.POST("/schedules", controllers.Schedule.Create)
+	api.GET("/schedules/:id", controllers.Schedule.Get)
+	api.PUT("/schedules/:id", controllers.Schedule.Update)
+	api.DELETE("/schedules/:id", controllers.Schedule.Delete)
+	api.POST("/schedules/:id/enable", controllers.Schedule.Enable)
+	api.POST("/schedules/:id/disable", controllers.Schedule.Disable)
+	api.POST("/schedules/:id/trigger", controllers.Schedule.Trigger)
+	api.GET("/schedules/:id/runs", controllers.Schedule.ListRuns)
 	api.POST("/workspaces/open", controllers.Workspace.Open)
 	api.GET("/workspaces/current", controllers.Workspace.Current)
 	api.GET("/workspaces/recent", controllers.Workspace.Recent)

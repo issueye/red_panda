@@ -20,6 +20,7 @@ type Set struct {
 	WorkerProfiles WorkerProfileRepository
 	Goals          GoalRepository
 	Contexts       ContextRepository
+	Schedules      ScheduleRepository
 }
 
 func NewSet(db *gorm.DB) Set {
@@ -41,5 +42,6 @@ func NewSet(db *gorm.DB) Set {
 		WorkerProfiles: NewWorkerProfileRepository(db),
 		Goals:          NewGoalRepository(db),
 		Contexts:       NewContextRepository(db),
+		Schedules:      NewScheduleRepository(db),
 	}
 }

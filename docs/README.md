@@ -13,6 +13,8 @@
 | [40-centralization-abstraction-plan.md](40-centralization-abstraction-plan.md) | **Active centralization plan** (provider-neutral requests, RunStateStore, Settings resources) |
 | [41-redundancy-overimpl-optimization-plan.md](41-redundancy-overimpl-optimization-plan.md) | **Active redundancy / over-implementation plan** (default tool surface, state-tool pipeline, narrative) |
 | [42-robotgo-flow-mcp-skill.md](42-robotgo-flow-mcp-skill.md) | robotgo-flow MCP server + native skill integration |
+| [43-scheduled-task-design.md](43-scheduled-task-design.md) | **Scheduled tasks design** (Gateway scheduler → run.start) |
+| [44-v0.2.1-development-plan.md](44-v0.2.1-development-plan.md) | **v0.2.1 plan** — scheduled tasks delivery slices |
 | [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |
@@ -33,6 +35,8 @@
 | [27-desktop-ued-specification.md](27-desktop-ued-specification.md) | UED |
 | [28-desktop-ued-audit.md](28-desktop-ued-audit.md) | UED audit |
 | [30-todo-feature-design.md](30-todo-feature-design.md) | Todo checklist |
+| [43-scheduled-task-design.md](43-scheduled-task-design.md) | Scheduled tasks (cron / interval / one-shot) |
+| [44-v0.2.1-development-plan.md](44-v0.2.1-development-plan.md) | v0.2.1 development plan |
 | [31-goal-loop-design.md](31-goal-loop-design.md) | Goal loop KD |
 | [32-goal-loop-development-design.md](32-goal-loop-development-design.md) | Goal implementation |
 | [33-agent-management.md](33-agent-management.md) | v0.1 Agent definitions (renamed WorkerProfile in v0.2.0) |

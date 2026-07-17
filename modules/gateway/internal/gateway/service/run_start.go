@@ -63,6 +63,8 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 		RuntimeMode:   runtimeMode,
 		Status:        "running",
 		Input:         inputText,
+		TriggerSource: stringOption(payload.Options, "trigger_source"),
+		TriggerRef:    stringOption(payload.Options, "trigger_ref"),
 		StartedAt:     time.Now().UTC(),
 	}); err != nil {
 		return runAdmission{}, err

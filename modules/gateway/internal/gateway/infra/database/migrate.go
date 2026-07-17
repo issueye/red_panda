@@ -31,6 +31,8 @@ func Migrate(db *gorm.DB) error {
 			&model.GoalNote{},
 			&model.GoalAction{},
 			&model.GoalEvent{},
+			&model.ScheduledTask{},
+			&model.ScheduledTaskRun{},
 		); err != nil {
 			return err
 		}

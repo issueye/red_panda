@@ -26,6 +26,10 @@ Desktop and Gateway use WebSocket for realtime interaction (no SSE). Root run an
 - `modules/cli`: placeholder for future debugging tools.
 - `modules/mcp-servers/robotgo-flow`: optional MCP stdio bridge to [robotgo-flow](https://gitee.com/znlgis/robotgo-flow) desktop RPA (see [docs/42](docs/42-robotgo-flow-mcp-skill.md)).
 
+## Scheduled tasks (v0.2.1)
+
+Gateway owns durable schedules (`one_shot` / `interval` / `cron`) and fires them via the existing `RunService.Start` path while the Gateway process is running. Desktop right panel **定时** manages CRUD, enable/disable, manual trigger, and run history. Default unattended policy: `permission_mode=deny` and a read-oriented tool allowlist. Design: [docs/43](docs/43-scheduled-task-design.md), plan: [docs/44](docs/44-v0.2.1-development-plan.md). Env: `RED_PANDA_SCHEDULER_DISABLED=1`, `RED_PANDA_SCHEDULER_TICK_MS`, `RED_PANDA_SCHEDULE_MAX_INFLIGHT`.
+
 ## Design Docs
 
 See [docs/README.md](docs/README.md) for the current index. Highlights:

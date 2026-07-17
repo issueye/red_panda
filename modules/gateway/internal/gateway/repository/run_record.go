@@ -31,13 +31,15 @@ func (r RunRecordRepository) Start(run model.RunRecord) error {
 	return r.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"session_id":     run.SessionID,
-			"workspace_root": run.WorkspaceRoot,
-			"runtime_mode":   run.RuntimeMode,
-			"status":         run.Status,
-			"input":          run.Input,
-			"started_at":     run.StartedAt,
-			"updated_at":     run.UpdatedAt,
+			"session_id":      run.SessionID,
+			"workspace_root":  run.WorkspaceRoot,
+			"runtime_mode":    run.RuntimeMode,
+			"status":          run.Status,
+			"input":           run.Input,
+			"trigger_source":  run.TriggerSource,
+			"trigger_ref":     run.TriggerRef,
+			"started_at":      run.StartedAt,
+			"updated_at":      run.UpdatedAt,
 		}),
 	}).Create(&run).Error
 }

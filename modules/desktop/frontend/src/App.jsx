@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { ChatPanel } from './components/chat/ChatPanel.jsx';
 import { MemoryPanel } from './components/MemoryPanel.jsx';
 import { RunActivityPanel } from './components/RunActivityPanel.jsx';
+import { SchedulesPanel } from './components/SchedulesPanel.jsx';
 import { SettingsPanel } from './components/SettingsPanel.jsx';
 import { Sidebar } from './components/Sidebar.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
@@ -55,6 +56,7 @@ const rightPanelTabs = [
   { id: 'workers', label: 'Worker', testId: 'right-tab-workers' },
   { id: 'activity', label: '活动', testId: 'right-tab-activity' },
   { id: 'memory', label: '记忆', testId: 'right-tab-memory' },
+  { id: 'schedules', label: '定时', testId: 'right-tab-schedules' },
 ];
 
 function loadRunSettings() {
@@ -674,6 +676,13 @@ export function App() {
       apiJson={apiJson}
       currentSessionId={currentSessionId}
       workspaceRoot={workspace?.root_path || workspace?.root || ''}
+    />
+  ) : rightPanelTab === 'schedules' ? (
+    <SchedulesPanel
+      apiJson={apiJson}
+      onOpenSession={selectSession}
+      providerProfileId={runSettings?.providerProfileId || ''}
+      workspaceRoot={workspace?.root_path || workspace?.root || currentWorkspaceRoot?.() || ''}
     />
   ) : (
     <RunActivityPanel

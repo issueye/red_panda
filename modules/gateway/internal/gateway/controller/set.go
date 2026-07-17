@@ -21,6 +21,7 @@ type Set struct {
 	Skills         SkillController
 	WorkerProfiles WorkerProfileController
 	Goal           GoalController
+	Schedule       ScheduleController
 	WebSocket      WebSocketController
 }
 
@@ -41,6 +42,7 @@ func NewSet(services service.Set, hub *eventhub.Hub) Set {
 		Skills:         SkillController{Services: services},
 		WorkerProfiles: WorkerProfileController{Services: services},
 		Goal:           GoalController{Services: services},
+		Schedule:       ScheduleController{Services: services},
 		WebSocket: WebSocketController{
 			Services: services,
 			Hub:      hub,

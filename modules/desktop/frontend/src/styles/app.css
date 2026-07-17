@@ -5403,3 +5403,70 @@ textarea:focus-visible {
     z-index: auto;
   }
 }
+
+/* Scheduled tasks panel (v0.2.1) */
+.schedules-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 12px;
+}
+.schedule-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+.schedule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.schedule-row {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--color-surface);
+  cursor: pointer;
+}
+.schedule-row.is-selected {
+  border-color: var(--color-brand-border);
+  background: var(--color-brand-soft);
+}
+.schedule-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.schedule-row-meta {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.schedule-row-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 6px;
+}
+.schedule-runs {
+  border-top: 1px solid var(--color-border);
+  padding-top: 8px;
+}
+.schedule-run-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.schedule-run-row .linkish {
+  background: none;
+  border: none;
+  color: var(--color-brand-action);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}

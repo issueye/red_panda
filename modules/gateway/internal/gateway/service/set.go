@@ -28,6 +28,7 @@ type Set struct {
 	WorkerProfiles WorkerProfileService
 	Goal           GoalService
 	Context        ContextService
+	Schedule       ScheduleService
 }
 
 type AppService struct {
@@ -35,9 +36,10 @@ type AppService struct {
 }
 
 func NewSet(opts Options) Set {
+	run := NewRunService(opts.Repos, opts.Hub, opts.RuntimeClient)
 	return Set{
 		App:            AppService{Version: opts.Version},
-		Run:            NewRunService(opts.Repos, opts.Hub, opts.RuntimeClient),
+		Run:            run,
 		Workspace:      NewWorkspaceService(opts.Repos),
 		Session:        NewSessionService(opts.Repos, opts.RuntimeClient),
 		Memory:         NewMemoryService(opts.Repos),
@@ -50,5 +52,6 @@ func NewSet(opts Options) Set {
 		WorkerProfiles: NewWorkerProfileService(opts.Repos),
 		Goal:           NewGoalService(opts.Repos),
 		Context:        NewContextService(opts.Repos),
+		Schedule:       NewScheduleService(opts.Repos, opts.Hub, run),
 	}
 }

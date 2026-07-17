@@ -110,6 +110,10 @@ type RunRecord struct {
 	Status        string `gorm:"index"`
 	Input         string
 	GoalID        string `gorm:"index"`
+	// TriggerSource identifies non-user starters (e.g. "schedule"); empty = interactive.
+	TriggerSource string `gorm:"index"`
+	// TriggerRef is the source entity id (e.g. schedule id).
+	TriggerRef    string `gorm:"index"`
 	LastEventType string
 	LastRootSeq   uint64
 	MessageCount  int
@@ -118,6 +122,57 @@ type RunRecord struct {
 	StartedAt     time.Time
 	FinishedAt    *time.Time
 	UpdatedAt     time.Time
+}
+
+// ScheduledTask is a Gateway-owned durable schedule that fires run.start equivalents.
+type ScheduledTask struct {
+	ID                string `gorm:"primaryKey"`
+	Name              string `gorm:"index"`
+	Description       string
+	Enabled           bool   `gorm:"index"`
+	ScheduleKind      string `gorm:"index"` // one_shot|interval|cron
+	CronExpr          string
+	IntervalSec       int
+	RunAt             *time.Time
+	Timezone          string
+	Prompt            string `gorm:"type:text"`
+	RunKind           string // chat|goal
+	SessionMode       string // new_each_run|fixed_session
+	SessionID         string `gorm:"index"`
+	WorkspaceRoot     string `gorm:"index"`
+	ProviderProfileID string
+	RunOptionsJSON    string `gorm:"type:text"`
+	ToolPolicy        string
+	ToolAllowlistJSON string `gorm:"type:text"`
+	ToolDenylistJSON  string `gorm:"type:text"`
+	PermissionMode    string
+	OverlapPolicy     string
+	MissedPolicy      string
+	MaxRuns           int
+	RunCount          int
+	LastRunID         string `gorm:"index"`
+	LastStatus        string `gorm:"index"`
+	LastError         string `gorm:"type:text"`
+	LastFiredAt       *time.Time
+	NextRunAt         *time.Time `gorm:"index"`
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time `gorm:"index"`
+}
+
+// ScheduledTaskRun is one fire attempt audit row linked to an optional run_id.
+type ScheduledTaskRun struct {
+	ID           string `gorm:"primaryKey"`
+	ScheduleID   string `gorm:"index"`
+	RunID        string `gorm:"index"`
+	SessionID    string `gorm:"index"`
+	Status       string `gorm:"index"` // starting|running|succeeded|failed|skipped|cancelled
+	SkipReason   string
+	ScheduledFor time.Time
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
+	Error        string `gorm:"type:text"`
+	CreatedAt    time.Time
 }
 
 // Goal is a session-scoped long-horizon objective with feedback-control state and budgets.

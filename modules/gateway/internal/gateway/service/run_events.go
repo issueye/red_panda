@@ -33,6 +33,11 @@ func (r RunService) HandleRuntimeEvent(event events.EnvelopeV2) {
 			status = "budget_exhausted"
 		}
 		_ = NewGoalService(r.repos).OnRootRunTerminal(event.RunID, event.SessionID, status)
+		errText, _ := event.Payload["message"].(string)
+		if errText == "" {
+			errText, _ = event.Payload["error"].(string)
+		}
+		NewScheduleService(r.repos, r.hub, nil).OnRunTerminal(event.RunID, status, errText)
 	}
 	_ = r.repos.RunEvents.Save(event)
 	if (event.Type == events.EventMessageDelta || event.Type == events.EventReasoningDelta) && payloadString(event.Payload, "visibility") != "worker_private" {

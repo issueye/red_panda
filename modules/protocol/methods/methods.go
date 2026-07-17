@@ -26,17 +26,19 @@ const (
 	// Gateway-backed state tools (memory/todo/goal/context) — stable internal RPCs.
 	// Prefer StateToolExecute for new Runtime code; domain methods remain for
 	// compatibility (docs/41 W2-3).
-	MemoryToolExecute  = "memory.tool.execute"
-	TodoToolExecute    = "todo.tool.execute"
-	GoalToolExecute    = "goal.tool.execute"
-	ContextToolExecute = "context.tool.execute"
-	StateToolExecute   = "state.tool.execute"
+	MemoryToolExecute   = "memory.tool.execute"
+	TodoToolExecute     = "todo.tool.execute"
+	GoalToolExecute     = "goal.tool.execute"
+	ContextToolExecute  = "context.tool.execute"
+	// ScheduleToolExecute is also defined in schedule.go for discoverability.
+	StateToolExecute = "state.tool.execute"
 
 	// State tool domains for StateToolExecuteParams.Domain.
 	StateToolDomainMemory  = "memory"
 	StateToolDomainTodo    = "todo"
 	StateToolDomainGoal    = "goal"
 	StateToolDomainContext = "context"
+	// StateToolDomainSchedule is also defined in schedule.go.
 
 	// v0.2 primary execution protocol (no legacy subagent/root model).
 	RunExecute             = "run.execute"
@@ -681,7 +683,7 @@ type StateToolExecuteParams struct {
 func ResolveStateToolDomain(domain, toolName string) (string, error) {
 	domain = strings.TrimSpace(strings.ToLower(domain))
 	switch domain {
-	case StateToolDomainMemory, StateToolDomainTodo, StateToolDomainGoal, StateToolDomainContext:
+	case StateToolDomainMemory, StateToolDomainTodo, StateToolDomainGoal, StateToolDomainContext, StateToolDomainSchedule:
 		return domain, nil
 	case "":
 		// infer below
@@ -698,6 +700,8 @@ func ResolveStateToolDomain(domain, toolName string) (string, error) {
 		return StateToolDomainMemory, nil
 	case strings.HasPrefix(name, "context."):
 		return StateToolDomainContext, nil
+	case strings.HasPrefix(name, "schedule."):
+		return StateToolDomainSchedule, nil
 	default:
 		return "", fmt.Errorf("cannot resolve state tool domain for tool %q", name)
 	}
