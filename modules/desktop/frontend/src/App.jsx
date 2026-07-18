@@ -23,7 +23,11 @@ import {
 } from './hooks/useSessionBootstrap.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { apiJson, gatewayBase } from './lib/api.js';
-import { filterVisibleMessagesAfterCompaction } from './lib/conversationScope.js';
+import {
+  filterMainMessages,
+  filterMainTools,
+  filterVisibleMessagesAfterCompaction,
+} from './lib/conversationScope.js';
 import { displayRuntimeMode, displayStatus, displayWorkerProfileName } from './lib/displayLabels.js';
 import { defaultRunSettings, normalizeStoredRunSettings } from './lib/runOptions.js';
 import { isRunTerminalEvent } from './lib/runEventLifecycle.js';
@@ -312,6 +316,8 @@ export function App() {
     contextSummaryCoveredCount,
     contextSummaryKeepTailTurns,
   ]);
+  const mainContextMessages = useMemo(() => filterMainMessages(messages), [messages]);
+  const mainContextTools = useMemo(() => filterMainTools(tools), [tools]);
 
   const selectedProviderProfile = useMemo(() => {
     if (!runSettings.providerProfileId) {
@@ -323,7 +329,7 @@ export function App() {
   }, [providerProfiles, runSettings.providerProfileId]);
 
   const contextTokenBudget = useMemo(() => {
-    const used = estimateEffectiveSessionTokens(messages, draft, tools, {
+    const used = estimateEffectiveSessionTokens(mainContextMessages, draft, mainContextTools, {
       endSeq: contextSummaryEndSeq,
       summary: contextSummary,
       coveredCount: contextSummaryCoveredCount,
@@ -332,9 +338,9 @@ export function App() {
     const maxTokens = Number(selectedProviderProfile?.maxTokens) || 0;
     return tokenBudgetState(used, maxTokens);
   }, [
-    messages,
+    mainContextMessages,
     draft,
-    tools,
+    mainContextTools,
     selectedProviderProfile,
     contextSummary,
     contextSummaryEndSeq,

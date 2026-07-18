@@ -11,6 +11,7 @@ import {
   filterWorkerTools,
   isMainConversationItem,
 } from './conversationScope.js';
+import { estimateSessionTokens } from './tokenBudget.js';
 
 test('messages covered by the active summary are hidden from conversation views', () => {
   const messages = [
@@ -62,6 +63,25 @@ test('main conversation keeps only root-facing content', () => {
     filterMainPermissions(permissions).map((item) => item.id),
     ['root_perm'],
   );
+});
+
+test('collaborative Worker output does not contribute to main token usage', () => {
+  const messages = [
+    { id: 'user', role: 'user', text: 'main prompt' },
+    { id: 'root', role: 'assistant', profileKey: 'root', text: 'main reply' },
+    { id: 'worker', role: 'assistant', profileKey: 'reviewer', text: 'worker output '.repeat(200) },
+  ];
+  const tools = [
+    { id: 'root-tool', profileKey: 'root', name: 'workspace.read_file', output: 'main result' },
+    { id: 'worker-tool', profileKey: 'reviewer', name: 'shell.exec', output: 'worker result '.repeat(200) },
+  ];
+
+  const mainUsed = estimateSessionTokens(filterMainMessages(messages), '', filterMainTools(tools));
+  const expected = estimateSessionTokens(messages.slice(0, 2), '', tools.slice(0, 1));
+  const allWorkers = estimateSessionTokens(messages, '', tools);
+
+  assert.equal(mainUsed, expected);
+  assert.ok(mainUsed < allWorkers);
 });
 
 test('isMainConversationItem classifies root vs collaborative Worker rows', () => {
