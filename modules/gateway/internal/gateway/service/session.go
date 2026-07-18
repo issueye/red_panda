@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"gorm.io/gorm"
 
@@ -20,9 +21,11 @@ import (
 const compactPauseTimeout = 20 * time.Second
 
 type SessionService struct {
-	repos   repository.Set
-	runtime *runtimeclient.Client
-	hub     *eventhub.Hub
+	repos     repository.Set
+	store     sessionStore
+	lifecycle sessionLifecycle
+	runtime   *runtimeclient.Client
+	hub       *eventhub.Hub
 }
 
 type compactPauseState struct {
@@ -45,6 +48,12 @@ type SessionDTO struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+type SessionPageDTO struct {
+	Items      []SessionDTO `json:"items"`
+	NextOffset int          `json:"next_offset,omitempty"`
+	HasMore    bool         `json:"has_more"`
+}
+
 type MessageDTO struct {
 	ID           string                 `json:"id"`
 	SessionID    string                 `json:"session_id"`
@@ -57,6 +66,12 @@ type MessageDTO struct {
 	ProfileKey   string                 `json:"profile_key,omitempty"`
 	Visibility   string                 `json:"visibility,omitempty"`
 	CreatedAt    time.Time              `json:"created_at"`
+}
+
+type MessagePageDTO struct {
+	Items        []MessageDTO `json:"items"`
+	NextAfterSeq uint64       `json:"next_after_seq,omitempty"`
+	HasMore      bool         `json:"has_more"`
 }
 
 type ForkPoint struct {
@@ -139,6 +154,9 @@ type CompactionDTO struct {
 	SourceStartSeq   uint64    `json:"source_start_seq"`
 	SourceEndSeq     uint64    `json:"source_end_seq"`
 	SummaryMessageID string    `json:"summary_message_id,omitempty"`
+	SummaryMethod    string    `json:"summary_method,omitempty"`
+	KeepTailMessages int       `json:"keep_tail_messages,omitempty"`
+	KeepTailTurns    int       `json:"keep_tail_turns,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -165,8 +183,32 @@ type CompactionStateResult struct {
 	Summary    CompactSummary `json:"summary"`
 }
 
+type SessionSummaryDTO struct {
+	Compaction CompactionDTO  `json:"compaction"`
+	Summary    CompactSummary `json:"summary"`
+}
+
+type SessionContextState struct {
+	SessionID        string                `json:"session_id"`
+	SummaryActive    bool                  `json:"summary_active"`
+	ActiveSummary    *SessionSummaryDTO    `json:"active_summary,omitempty"`
+	TailMessageCount int64                 `json:"tail_message_count"`
+	GoalID           string                `json:"goal_id,omitempty"`
+	ContextItems     []methods.GoalNoteDTO `json:"context_items"`
+	Usage            ContextUsageDTO       `json:"usage"`
+}
+
+type ContextUsageDTO struct {
+	EstimatedTokens   int    `json:"estimated_tokens"`
+	ModelMessageCount int    `json:"model_message_count"`
+	CoveredEndSeq     uint64 `json:"covered_end_seq"`
+}
+
 func NewSessionService(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub) SessionService {
-	return SessionService{repos: repos, runtime: runtime, hub: hub}
+	return SessionService{
+		repos: repos, store: newSessionStore(repos), lifecycle: newSessionLifecycle(repos, runtime, hub),
+		runtime: runtime, hub: hub,
+	}
 }
 
 // pauseSessionForCompact suspends delegated Workers while each main Worker and
@@ -240,7 +282,7 @@ func (s SessionService) Create(name string, workspaceRoot string) (SessionDTO, e
 }
 
 func (s SessionService) List() ([]SessionDTO, error) {
-	rows, err := s.repos.Sessions.List(100)
+	rows, err := s.repos.Sessions.ListAll()
 	if err != nil {
 		return nil, err
 	}
@@ -251,54 +293,54 @@ func (s SessionService) List() ([]SessionDTO, error) {
 	return items, nil
 }
 
+func (s SessionService) ListPage(offset, limit int) (SessionPageDTO, error) {
+	rows, hasMore, err := s.repos.Sessions.ListPage(offset, limit)
+	if err != nil {
+		return SessionPageDTO{}, err
+	}
+	items := make([]SessionDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, sessionDTO(row))
+	}
+	next := 0
+	if hasMore {
+		next = offset + len(items)
+	}
+	return SessionPageDTO{Items: items, NextOffset: next, HasMore: hasMore}, nil
+}
+
 func (s SessionService) Delete(sessionID string) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("session id is required")
 	}
-	// Cancel active runs before soft-delete so Runtime/process do not outlive the session.
-	s.cancelActiveRuns(sessionID)
-	_, _ = s.repos.Schedules.DisableFixedForSession(sessionID)
-
-	if err := s.repos.Sessions.SoftDelete(sessionID); err != nil {
+	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return fmt.Errorf("session not found")
 		}
 		return err
 	}
-	_ = s.repos.Todos.DeleteBySession(sessionID)
-	broadcastSessionDeleted(s.hub, sessionID, "user_delete")
-	return nil
+	_, err := s.lifecycle.delete([]string{sessionID}, "user_delete")
+	return err
 }
 
-func (s SessionService) cancelActiveRuns(sessionID string) {
-	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
-	if err != nil || len(active) == 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	for _, run := range active {
-		if s.runtime != nil {
-			_, _ = s.runtime.CancelRun(ctx, methods.RunCancelParams{RunID: run.ID, Reason: "session_deleted"})
-		}
-		_ = s.repos.Runs.Finish(run.ID, "cancelled", "session deleted")
-	}
-}
-
-func (s SessionService) History(sessionID string) ([]MessageDTO, error) {
-	rows, err := s.repos.Messages.List(sessionID, 200)
+func (s SessionService) History(sessionID string, afterSeq uint64, limit int) (MessagePageDTO, error) {
+	page, err := s.store.messagePage(sessionID, afterSeq, limit)
 	if err != nil {
-		return nil, err
+		return MessagePageDTO{}, err
 	}
-	items := make([]MessageDTO, 0, len(rows))
-	for _, row := range rows {
+	items := make([]MessageDTO, 0, len(page.Messages))
+	for _, row := range page.Messages {
 		dto, err := messageDTO(row)
 		if err != nil {
-			return nil, err
+			return MessagePageDTO{}, err
 		}
 		items = append(items, dto)
 	}
-	return items, nil
+	next := uint64(0)
+	if page.HasMore && len(items) > 0 {
+		next = items[len(items)-1].Seq
+	}
+	return MessagePageDTO{Items: items, NextAfterSeq: next, HasMore: page.HasMore}, nil
 }
 
 func (s SessionService) Fork(sessionID string, req ForkSessionRequest) (ForkSessionResult, error) {
@@ -450,12 +492,15 @@ func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (re
 			return err
 		}
 		compaction, err := txRepos.Compactions.Create(model.SessionCompaction{
-			SourceSessionID: source.ID,
-			TargetSessionID: source.ID,
-			Status:          "applied",
-			SourceStartSeq:  plan.StartSeq,
-			SourceEndSeq:    plan.EndSeq,
-			SummaryJSON:     string(summaryJSON),
+			SourceSessionID:  source.ID,
+			TargetSessionID:  source.ID,
+			Status:           "applied",
+			SourceStartSeq:   plan.StartSeq,
+			SourceEndSeq:     plan.EndSeq,
+			SummaryJSON:      string(summaryJSON),
+			SummaryMethod:    summaryMethod,
+			KeepTailMessages: plan.KeepTailMessages,
+			KeepTailTurns:    plan.KeepTailTurns,
 		})
 		if err != nil {
 			return err
@@ -504,6 +549,102 @@ func (s SessionService) CompactionState(sessionID string) (CompactionStateResult
 	}, nil
 }
 
+func (s SessionService) Summaries(sessionID string) ([]SessionSummaryDTO, error) {
+	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
+		return nil, err
+	}
+	rows, err := s.repos.Compactions.ListForSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]SessionSummaryDTO, 0, len(rows))
+	for _, row := range rows {
+		var summary CompactSummary
+		if err := json.Unmarshal([]byte(row.SummaryJSON), &summary); err != nil {
+			return nil, fmt.Errorf("decode compaction summary %s: %w", row.ID, err)
+		}
+		items = append(items, SessionSummaryDTO{Compaction: compactionDTO(row), Summary: summary})
+	}
+	return items, nil
+}
+
+func (s SessionService) ContextState(sessionID string) (SessionContextState, error) {
+	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
+		return SessionContextState{}, err
+	}
+	state := SessionContextState{SessionID: sessionID, ContextItems: []methods.GoalNoteDTO{}}
+	summary, err := s.store.activeSummary(sessionID)
+	if err != nil {
+		return SessionContextState{}, err
+	}
+	coveredEnd := uint64(0)
+	if summary != nil {
+		var value CompactSummary
+		if err := json.Unmarshal([]byte(summary.SummaryJSON), &value); err != nil {
+			return SessionContextState{}, fmt.Errorf("decode active compaction summary: %w", err)
+		}
+		state.SummaryActive = true
+		state.ActiveSummary = &SessionSummaryDTO{Compaction: compactionDTO(*summary), Summary: value}
+		coveredEnd = summary.SourceEndSeq
+	}
+	state.TailMessageCount, err = s.repos.Messages.CountConversationAfterSeq(sessionID, coveredEnd)
+	if err != nil {
+		return SessionContextState{}, err
+	}
+	modelContext, err := s.store.modelContext(sessionID, 200)
+	if err != nil {
+		return SessionContextState{}, err
+	}
+	state.Usage = estimateStoredContextUsage(modelContext, coveredEnd)
+	goal, err := s.repos.Goals.GetActiveBySession(sessionID)
+	if err == gorm.ErrRecordNotFound {
+		goal, err = s.repos.Goals.GetLatestPausedBySession(sessionID)
+	}
+	if err == gorm.ErrRecordNotFound {
+		goal, err = s.repos.Goals.GetLatestPendingBySession(sessionID)
+	}
+	if err == gorm.ErrRecordNotFound {
+		return state, nil
+	}
+	if err != nil {
+		return SessionContextState{}, err
+	}
+	state.GoalID = goal.ID
+	notes, err := s.repos.Contexts.List(goal.ID, repository.NoteListOpts{Limit: contextMaxListLimit})
+	if err != nil {
+		return SessionContextState{}, err
+	}
+	for _, note := range notes {
+		state.ContextItems = append(state.ContextItems, noteToDTO(note))
+	}
+	return state, nil
+}
+
+func estimateStoredContextUsage(context storedSessionContext, coveredEnd uint64) ContextUsageDTO {
+	usage := ContextUsageDTO{CoveredEndSeq: coveredEnd, ModelMessageCount: len(context.Messages)}
+	if context.Summary != nil {
+		usage.ModelMessageCount++
+		usage.EstimatedTokens += estimateContextTextTokens(context.Summary.SummaryJSON) + 8
+	}
+	for _, message := range context.Messages {
+		usage.EstimatedTokens += estimateContextTextTokens(messageText(message)) + 4
+	}
+	return usage
+}
+
+func estimateContextTextTokens(text string) int {
+	latinRunes := 0
+	tokens := 0
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
+			tokens++
+		} else {
+			latinRunes++
+		}
+	}
+	return tokens + (latinRunes+3)/4
+}
+
 func sessionDTO(row model.Session) SessionDTO {
 	return SessionDTO{
 		ID:              row.ID,
@@ -543,6 +684,9 @@ func compactionDTO(row model.SessionCompaction) CompactionDTO {
 		SourceStartSeq:   row.SourceStartSeq,
 		SourceEndSeq:     row.SourceEndSeq,
 		SummaryMessageID: row.SummaryMessageID,
+		SummaryMethod:    row.SummaryMethod,
+		KeepTailMessages: row.KeepTailMessages,
+		KeepTailTurns:    row.KeepTailTurns,
 		CreatedAt:        row.CreatedAt,
 		UpdatedAt:        row.UpdatedAt,
 	}

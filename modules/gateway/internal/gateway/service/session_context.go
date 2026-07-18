@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"gorm.io/gorm"
-
 	"redpanda/gateway/internal/gateway/repository"
 	"redpanda/protocol/methods"
 )
@@ -15,23 +13,19 @@ import (
 // optional in-place compaction system message + message tail (or latest window).
 // Visible UI history is unchanged; only this path compresses model context (docs/13, docs/45).
 func buildModelConversation(repos repository.Set, sessionID string) ([]methods.Message, error) {
-	history, err := repos.Messages.ListLatestConversation(sessionID, 200)
+	stored, err := newSessionStore(repos).modelContext(sessionID, 200)
 	if err != nil {
 		return nil, err
 	}
+	history := stored.Messages
 	conversation := make([]methods.Message, 0, len(history)+1)
 
-	compaction, compactErr := repos.Compactions.LatestAppliedInPlace(sessionID)
-	if compactErr == nil {
+	if stored.Summary != nil {
+		compaction := *stored.Summary
 		var summary CompactSummary
 		if err := json.Unmarshal([]byte(compaction.SummaryJSON), &summary); err != nil {
 			return nil, fmt.Errorf("decode active compaction summary: %w", err)
 		}
-		tail, err := repos.Messages.ListConversationAfterSeq(sessionID, compaction.SourceEndSeq, 200)
-		if err != nil {
-			return nil, err
-		}
-		history = tail
 		conversation = append(conversation, methods.Message{
 			ID:   compaction.ID,
 			Role: "system",
@@ -46,8 +40,6 @@ func buildModelConversation(repos repository.Set, sessionID string) ([]methods.M
 			}},
 			CreatedAt: compaction.UpdatedAt.Format(time.RFC3339Nano),
 		})
-	} else if compactErr != gorm.ErrRecordNotFound {
-		return nil, compactErr
 	}
 
 	for _, row := range history {

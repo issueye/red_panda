@@ -23,6 +23,7 @@ import {
 } from './hooks/useSessionBootstrap.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { apiJson, gatewayBase } from './lib/api.js';
+import { filterVisibleMessagesAfterCompaction } from './lib/conversationScope.js';
 import { displayRuntimeMode, displayStatus, displayWorkerProfileName } from './lib/displayLabels.js';
 import { defaultRunSettings, normalizeStoredRunSettings } from './lib/runOptions.js';
 import { isRunTerminalEvent } from './lib/runEventLifecycle.js';
@@ -300,6 +301,17 @@ export function App() {
     () => countActiveRuns(sessionRuntimes),
     [sessionRuntimes],
   );
+
+  const visibleMessages = useMemo(() => filterVisibleMessagesAfterCompaction(messages, {
+    endSeq: contextSummaryEndSeq,
+    coveredCount: contextSummaryCoveredCount,
+    keepTailTurns: contextSummaryKeepTailTurns,
+  }), [
+    messages,
+    contextSummaryEndSeq,
+    contextSummaryCoveredCount,
+    contextSummaryKeepTailTurns,
+  ]);
 
   const selectedProviderProfile = useMemo(() => {
     if (!runSettings.providerProfileId) {
@@ -931,7 +943,7 @@ export function App() {
           activeConversationTab={activeConversationTab}
           conversationTabs={displayedConversationTabs}
           draft={draft}
-          messages={messages}
+          messages={visibleMessages}
           onCancel={cancelRun}
           onCloseConversationTab={closeConversationTab}
           onDraftChange={setDraft}

@@ -13,7 +13,8 @@ import (
 )
 
 type WorkspaceService struct {
-	repos repository.Set
+	repos     repository.Set
+	lifecycle sessionLifecycle
 }
 
 type WorkspaceDTO struct {
@@ -24,8 +25,8 @@ type WorkspaceDTO struct {
 	LastOpenedAt time.Time `json:"last_opened_at"`
 }
 
-func NewWorkspaceService(repos repository.Set) WorkspaceService {
-	return WorkspaceService{repos: repos}
+func NewWorkspaceService(repos repository.Set, lifecycle sessionLifecycle) WorkspaceService {
+	return WorkspaceService{repos: repos, lifecycle: lifecycle}
 }
 
 func (s WorkspaceService) Open(root string) (WorkspaceDTO, error) {
@@ -72,9 +73,15 @@ func (s WorkspaceService) Remove(id string, deleteSessions bool) (WorkspaceDTO, 
 	}
 	var deletedSessions int64
 	if deleteSessions {
-		// Drop todos before soft-deleting sessions so workspace_root lookup still works.
-		_ = s.repos.Todos.DeleteByWorkspaceRoot(workspace.Root)
-		deletedSessions, err = s.repos.Sessions.SoftDeleteByWorkspace(workspace.Root)
+		sessions, listErr := s.repos.Sessions.ListByWorkspace(workspace.Root)
+		if listErr != nil {
+			return WorkspaceDTO{}, 0, listErr
+		}
+		ids := make([]string, 0, len(sessions))
+		for _, session := range sessions {
+			ids = append(ids, session.ID)
+		}
+		deletedSessions, err = s.lifecycle.delete(ids, "workspace_delete")
 		if err != nil {
 			return WorkspaceDTO{}, 0, err
 		}

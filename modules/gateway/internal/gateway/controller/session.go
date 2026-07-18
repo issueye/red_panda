@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -18,7 +19,17 @@ type createSessionRequest struct {
 }
 
 func (s SessionController) List(c *gin.Context) {
-	items, err := s.Services.Session.List()
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil || offset < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_session_offset", "message": "offset must be a non-negative integer"}})
+		return
+	}
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_session_limit", "message": "limit must be an integer"}})
+		return
+	}
+	items, err := s.Services.Session.ListPage(offset, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_list_failed", "message": err.Error()}})
 		return
@@ -41,7 +52,17 @@ func (s SessionController) Create(c *gin.Context) {
 }
 
 func (s SessionController) History(c *gin.Context) {
-	items, err := s.Services.Session.History(c.Param("id"))
+	afterSeq, err := strconv.ParseUint(c.DefaultQuery("after_seq", "0"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_history_cursor", "message": "after_seq must be an unsigned integer"}})
+		return
+	}
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "200"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_history_limit", "message": "limit must be an integer"}})
+		return
+	}
+	items, err := s.Services.Session.History(c.Param("id"), afterSeq, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_history_failed", "message": err.Error()}})
 		return
@@ -93,6 +114,24 @@ func (s SessionController) CompactionState(c *gin.Context) {
 	result, err := s.Services.Session.CompactionState(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "session_compaction_state_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, result))
+}
+
+func (s SessionController) Summaries(c *gin.Context) {
+	result, err := s.Services.Session.Summaries(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "session_summaries_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, result))
+}
+
+func (s SessionController) ContextState(c *gin.Context) {
+	result, err := s.Services.Session.ContextState(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "session_context_failed", "message": err.Error()}})
 		return
 	}
 	c.JSON(http.StatusOK, envelope(c, result))

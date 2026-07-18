@@ -15,12 +15,12 @@ import (
 )
 
 const (
-	defaultKeepTailTurns     = 3
-	maxLocalSummaryRunes     = 2400
-	maxLocalPerMessageRunes  = 280
-	maxLLMTranscriptRunes    = 48_000
-	compactLLMTimeout        = 45 * time.Second
-	compactLLMMaxTokens      = 1200
+	defaultKeepTailTurns    = 3
+	maxLocalSummaryRunes    = 2400
+	maxLocalPerMessageRunes = 280
+	maxLLMTranscriptRunes   = 48_000
+	compactLLMTimeout       = 45 * time.Second
+	compactLLMMaxTokens     = 1200
 )
 
 type compactSummaryOptions struct {
@@ -29,18 +29,18 @@ type compactSummaryOptions struct {
 }
 
 type compactionPlan struct {
-	StartSeq           uint64
-	EndSeq             uint64
-	KeepTailMessages   int
-	KeepTailTurns      int
-	SummarizeMessages  []model.Message
-	TailMessages       []model.Message
+	StartSeq          uint64
+	EndSeq            uint64
+	KeepTailMessages  int
+	KeepTailTurns     int
+	SummarizeMessages []model.Message
+	TailMessages      []model.Message
 }
 
 // planCompaction splits session history into "summarize older" + "keep recent".
 // Prefer keep_tail_turns (conversation rounds) over raw keep_tail_messages.
 func (s SessionService) planCompaction(sessionID string, requested SourceRange, keepTailMessages, keepTailTurns int) (compactionPlan, error) {
-	all, err := s.repos.Messages.List(sessionID, 5000)
+	all, err := s.store.fullHistory(sessionID)
 	if err != nil {
 		return compactionPlan{}, err
 	}

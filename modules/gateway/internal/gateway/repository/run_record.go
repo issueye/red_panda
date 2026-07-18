@@ -31,15 +31,15 @@ func (r RunRecordRepository) Start(run model.RunRecord) error {
 	return r.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"session_id":      run.SessionID,
-			"workspace_root":  run.WorkspaceRoot,
-			"runtime_mode":    run.RuntimeMode,
-			"status":          run.Status,
-			"input":           run.Input,
-			"trigger_source":  run.TriggerSource,
-			"trigger_ref":     run.TriggerRef,
-			"started_at":      run.StartedAt,
-			"updated_at":      run.UpdatedAt,
+			"session_id":     run.SessionID,
+			"workspace_root": run.WorkspaceRoot,
+			"runtime_mode":   run.RuntimeMode,
+			"status":         run.Status,
+			"input":          run.Input,
+			"trigger_source": run.TriggerSource,
+			"trigger_ref":    run.TriggerRef,
+			"started_at":     run.StartedAt,
+			"updated_at":     run.UpdatedAt,
 		}),
 	}).Create(&run).Error
 }
@@ -168,6 +168,29 @@ func (r RunRecordRepository) ListActiveBySession(sessionID string, limit int) ([
 		Limit(limit).
 		Find(&rows).Error
 	return rows, err
+}
+
+func (r RunRecordRepository) ListActiveBySessions(sessionIDs []string) ([]model.RunRecord, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	var rows []model.RunRecord
+	err := r.db.Where("session_id IN ? AND status IN ?", sessionIDs, []string{"running", "waiting_permission"}).
+		Order("started_at asc").Find(&rows).Error
+	return rows, err
+}
+
+func (r RunRecordRepository) CancelActiveBySessions(sessionIDs []string, reason string) (int64, error) {
+	if len(sessionIDs) == 0 {
+		return 0, nil
+	}
+	now := time.Now().UTC()
+	res := r.db.Model(&model.RunRecord{}).
+		Where("session_id IN ? AND status IN ?", sessionIDs, []string{"running", "waiting_permission"}).
+		Updates(map[string]any{
+			"status": "cancelled", "error": reason, "finished_at": now, "updated_at": now,
+		})
+	return res.RowsAffected, res.Error
 }
 
 // RecoverStaleRuns marks any runs that are still in a non-terminal state as failed.

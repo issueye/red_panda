@@ -5,11 +5,29 @@ import {
   filterMainMessages,
   filterMainPermissions,
   filterMainTools,
+  filterVisibleMessagesAfterCompaction,
   filterWorkerMessages,
   filterWorkerPermissions,
   filterWorkerTools,
   isMainConversationItem,
 } from './conversationScope.js';
+
+test('messages covered by the active summary are hidden from conversation views', () => {
+  const messages = [
+    { id: 'old-user', messageSeq: 1, role: 'user', text: 'old prompt' },
+    { id: 'old-reply', messageSeq: 2, role: 'assistant', text: 'old reply' },
+    { id: 'tail-user', messageSeq: 3, role: 'user', text: 'kept prompt' },
+    { id: 'tail-reply', messageSeq: 4, role: 'assistant', text: 'kept reply' },
+    { id: 'live', role: 'assistant', text: 'streaming output' },
+    { id: 'notice', role: 'assistant', agent: 'system', text: 'summary complete' },
+  ];
+
+  assert.deepEqual(
+    filterVisibleMessagesAfterCompaction(messages, { endSeq: 2 }).map((item) => item.id),
+    ['tail-user', 'tail-reply', 'live', 'notice'],
+  );
+  assert.equal(filterVisibleMessagesAfterCompaction(messages, null), messages);
+});
 
 test('main conversation keeps only root-facing content', () => {
   const messages = [

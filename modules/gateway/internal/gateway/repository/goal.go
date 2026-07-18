@@ -253,6 +253,20 @@ func (r GoalRepository) DeleteBySession(sessionID string) error {
 	return r.db.Where("session_id = ?", sessionID).Delete(&model.Goal{}).Error
 }
 
+func (r GoalRepository) CancelActiveBySessions(sessionIDs []string, reason string) (int64, error) {
+	if len(sessionIDs) == 0 {
+		return 0, nil
+	}
+	now := time.Now().UTC()
+	res := r.db.Model(&model.Goal{}).
+		Where("session_id IN ? AND status IN ?", sessionIDs, []string{"pending", "active", "paused"}).
+		Updates(map[string]any{
+			"status": "cancelled", "pause_reason": reason, "active_run_id": "",
+			"finished_at": now, "updated_at": now,
+		})
+	return res.RowsAffected, res.Error
+}
+
 // CalculateUsedWallTime derives usage from finished bound runs, making repeated
 // finish-event handling idempotent.
 func (r GoalRepository) CalculateUsedWallTime(goalID string) (int, error) {

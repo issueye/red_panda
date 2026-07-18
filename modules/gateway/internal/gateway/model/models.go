@@ -19,10 +19,10 @@ type Session struct {
 
 type Message struct {
 	ID              string `gorm:"primaryKey"`
-	SessionID       string `gorm:"index"`
+	SessionID       string `gorm:"index;uniqueIndex:idx_messages_session_seq"`
 	Role            string
 	ContentJSON     string
-	Seq             uint64
+	Seq             uint64 `gorm:"uniqueIndex:idx_messages_session_seq"`
 	RunID           string `gorm:"index"`
 	SourceMessageID string
 	MetadataJSON    string
@@ -44,13 +44,16 @@ type SessionLineage struct {
 
 type SessionCompaction struct {
 	ID               string `gorm:"primaryKey"`
-	SourceSessionID  string `gorm:"index"`
-	TargetSessionID  string `gorm:"index"`
+	SourceSessionID  string `gorm:"index;uniqueIndex:idx_compactions_one_applied,where:status = 'applied'"`
+	TargetSessionID  string `gorm:"index;uniqueIndex:idx_compactions_one_applied,where:status = 'applied'"`
 	Status           string `gorm:"index"`
 	SourceStartSeq   uint64
 	SourceEndSeq     uint64
 	SummaryMessageID string
 	SummaryJSON      string
+	SummaryMethod    string
+	KeepTailMessages int
+	KeepTailTurns    int
 	Error            string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time

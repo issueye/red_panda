@@ -14,6 +14,12 @@ func Migrate(db *gorm.DB) error {
 		if err := migrateProviderProfileStream(tx); err != nil {
 			return err
 		}
+		if err := repairLegacyMessageSequences(tx); err != nil {
+			return err
+		}
+		if err := repairLegacyActiveCompactions(tx); err != nil {
+			return err
+		}
 		if err := tx.AutoMigrate(
 			&model.Session{},
 			&model.SessionLineage{},
@@ -44,6 +50,68 @@ func Migrate(db *gorm.DB) error {
 		}
 		return tx.Migrator().DropTable("agent_definitions")
 	})
+}
+
+func repairLegacyActiveCompactions(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.SessionCompaction{}) ||
+		db.Migrator().HasIndex(&model.SessionCompaction{}, "idx_compactions_one_applied") {
+		return nil
+	}
+	var rows []model.SessionCompaction
+	if err := db.Where("status = ?", "applied").
+		Order("source_session_id asc, target_session_id asc, created_at desc, id desc").Find(&rows).Error; err != nil {
+		return err
+	}
+	seen := map[string]struct{}{}
+	for _, row := range rows {
+		key := row.SourceSessionID + "\x00" + row.TargetSessionID
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			continue
+		}
+		if err := db.Model(&model.SessionCompaction{}).Where("id = ?", row.ID).
+			Updates(map[string]any{"status": "superseded", "updated_at": time.Now().UTC()}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// repairLegacyMessageSequences runs before AutoMigrate adds the unique
+// (session_id, seq) index. Old databases could contain duplicate sequences.
+func repairLegacyMessageSequences(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.Message{}) || db.Migrator().HasIndex(&model.Message{}, "idx_messages_session_seq") {
+		return nil
+	}
+	var duplicateGroups int64
+	if err := db.Raw(`SELECT COUNT(*) FROM (
+		SELECT session_id, seq FROM messages GROUP BY session_id, seq HAVING COUNT(*) > 1
+	)`).Scan(&duplicateGroups).Error; err != nil {
+		return err
+	}
+	if duplicateGroups == 0 {
+		return nil
+	}
+	var rows []model.Message
+	if err := db.Order("session_id asc, seq asc, created_at asc, id asc").Find(&rows).Error; err != nil {
+		return err
+	}
+	currentSession := ""
+	var seq uint64
+	for _, row := range rows {
+		if row.SessionID != currentSession {
+			currentSession = row.SessionID
+			seq = 0
+		}
+		seq++
+		if row.Seq == seq {
+			continue
+		}
+		if err := db.Model(&model.Message{}).Where("id = ?", row.ID).Update("seq", seq).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func migrateProviderProfileStream(db *gorm.DB) error {

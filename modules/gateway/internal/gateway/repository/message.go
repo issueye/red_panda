@@ -3,6 +3,7 @@ package repository
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -23,48 +24,23 @@ func NewMessageRepository(db *gorm.DB) MessageRepository {
 }
 
 func (r MessageRepository) Add(sessionID string, role string, text string, runID string) (model.Message, error) {
-	seq, err := r.nextSeq(sessionID)
-	if err != nil {
-		return model.Message{}, err
-	}
 	content, err := json.Marshal([]methods.ContentBlock{{Type: "text", Text: text}})
 	if err != nil {
 		return model.Message{}, err
 	}
-	now := time.Now().UTC()
-	message := model.Message{
-		ID:          newMessageID(now),
-		SessionID:   sessionID,
-		Role:        role,
-		ContentJSON: string(content),
-		Seq:         seq,
-		RunID:       runID,
-		CreatedAt:   now,
-	}
-	return message, r.db.Create(&message).Error
+	return r.createWithSequence(model.Message{
+		SessionID: sessionID, Role: role, ContentJSON: string(content), RunID: runID,
+	})
 }
 
 func (r MessageRepository) AddWithMetadata(sessionID string, role string, content []methods.ContentBlock, runID string, metadataJSON string) (model.Message, error) {
-	seq, err := r.nextSeq(sessionID)
-	if err != nil {
-		return model.Message{}, err
-	}
 	encoded, err := json.Marshal(content)
 	if err != nil {
 		return model.Message{}, err
 	}
-	now := time.Now().UTC()
-	message := model.Message{
-		ID:           newMessageID(now),
-		SessionID:    sessionID,
-		Role:         role,
-		ContentJSON:  string(encoded),
-		Seq:          seq,
-		RunID:        runID,
-		MetadataJSON: metadataJSON,
-		CreatedAt:    now,
-	}
-	return message, r.db.Create(&message).Error
+	return r.createWithSequence(model.Message{
+		SessionID: sessionID, Role: role, ContentJSON: string(encoded), RunID: runID, MetadataJSON: metadataJSON,
+	})
 }
 
 func (r MessageRepository) AddOrAppend(sessionID string, role string, text string, runID string) (model.Message, error) {
@@ -115,21 +91,13 @@ func (r MessageRepository) addWithMetadata(sessionID string, role string, text s
 	if metadataJSON == "" {
 		return r.Add(sessionID, role, text, runID)
 	}
-	seq, err := r.nextSeq(sessionID)
-	if err != nil {
-		return model.Message{}, err
-	}
 	content, err := json.Marshal([]methods.ContentBlock{{Type: "text", Text: text}})
 	if err != nil {
 		return model.Message{}, err
 	}
-	now := time.Now().UTC()
-	message := model.Message{
-		ID: newMessageID(now), SessionID: sessionID, Role: role,
-		ContentJSON: string(content), Seq: seq, RunID: runID,
-		MetadataJSON: metadataJSON, CreatedAt: now,
-	}
-	return message, r.db.Create(&message).Error
+	return r.createWithSequence(model.Message{
+		SessionID: sessionID, Role: role, ContentJSON: string(content), RunID: runID, MetadataJSON: metadataJSON,
+	})
 }
 
 func isAppendableDeltaRole(role string) bool {
@@ -145,6 +113,34 @@ func (r MessageRepository) List(sessionID string, limit int) ([]model.Message, e
 	return rows, err
 }
 
+// ListAll returns the complete stored history. Callers must use ListPage for
+// user-facing transport and reserve this method for compaction/audit work.
+func (r MessageRepository) ListAll(sessionID string) ([]model.Message, error) {
+	var rows []model.Message
+	err := r.db.Where("session_id = ?", sessionID).Order("seq asc").Find(&rows).Error
+	return rows, err
+}
+
+// ListPage reads visible history after an exclusive sequence cursor.
+func (r MessageRepository) ListPage(sessionID string, afterSeq uint64, limit int) ([]model.Message, bool, error) {
+	if limit <= 0 {
+		limit = 200
+	} else if limit > 500 {
+		limit = 500
+	}
+	var rows []model.Message
+	err := r.db.Where("session_id = ? AND seq > ?", sessionID, afterSeq).
+		Order("seq asc").Limit(limit + 1).Find(&rows).Error
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return rows, hasMore, nil
+}
+
 func (r MessageRepository) ListLatest(sessionID string, limit int) ([]model.Message, error) {
 	return r.listLatestQuery(r.db.Where("session_id = ?", sessionID), limit)
 }
@@ -156,6 +152,14 @@ func (r MessageRepository) ListLatestConversation(sessionID string, limit int) (
 func (r MessageRepository) ListConversationAfterSeq(sessionID string, afterSeq uint64, limit int) ([]model.Message, error) {
 	query := r.db.Where("session_id = ? AND role IN ? AND seq > ?", sessionID, []string{"user", "assistant"}, afterSeq)
 	return r.listLatestQuery(query, limit)
+}
+
+func (r MessageRepository) CountConversationAfterSeq(sessionID string, afterSeq uint64) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.Message{}).
+		Where("session_id = ? AND role IN ? AND seq > ?", sessionID, []string{"user", "assistant"}, afterSeq).
+		Count(&count).Error
+	return count, err
 }
 
 func (r MessageRepository) listLatestQuery(query *gorm.DB, limit int) ([]model.Message, error) {
@@ -237,4 +241,40 @@ func (r MessageRepository) nextSeq(sessionID string) (uint64, error) {
 		return 0, err
 	}
 	return last.Seq + 1, nil
+}
+
+func (r MessageRepository) createWithSequence(message model.Message) (model.Message, error) {
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		candidate := message
+		err := r.db.Transaction(func(tx *gorm.DB) error {
+			seq, err := NewMessageRepository(tx).nextSeq(candidate.SessionID)
+			if err != nil {
+				return err
+			}
+			now := time.Now().UTC()
+			candidate.ID = newMessageID(now)
+			candidate.Seq = seq
+			candidate.CreatedAt = now
+			return tx.Create(&candidate).Error
+		})
+		if err == nil {
+			return candidate, nil
+		}
+		lastErr = err
+		if !isRetryableMessageSequenceError(err) {
+			break
+		}
+		time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+	}
+	return model.Message{}, lastErr
+}
+
+func isRetryableMessageSequenceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	sequenceConflict := strings.Contains(text, "unique") && strings.Contains(text, "session") && strings.Contains(text, "seq")
+	return sequenceConflict || strings.Contains(text, "database is locked") || strings.Contains(text, "database is busy")
 }

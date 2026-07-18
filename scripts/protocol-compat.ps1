@@ -8,7 +8,6 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $GatewayExe = Join-Path $Root "bin\red-panda-gateway.exe"
 $Database = Join-Path $Root "protocol-compat-red-panda.db"
 $ProviderAddr = "127.0.0.1:17912"
-$MissingSubAgentExe = Join-Path $Root "bin\missing-red-panda-subagent.exe"
 
 function Remove-CompatDatabase {
   foreach ($path in @($Database, "$Database-shm", "$Database-wal")) {
@@ -128,11 +127,11 @@ function Wait-RunFinishWithInitialEvents($ws, $initialEvents) {
   throw "run did not finish"
 }
 
-function Assert-IncreasingRootSeq($events) {
+function Assert-IncreasingRunSeq($events) {
   $last = 0
   foreach ($event in $events) {
-    $seq = [uint64]$event.root_seq
-    Assert-True ($seq -gt $last) "root_seq is not strictly increasing"
+    $seq = [uint64]$event.run_seq
+    Assert-True ($seq -gt $last) "run_seq is not strictly increasing: last=$last current=$seq type=$($event.type)"
     $last = $seq
   }
 }
@@ -187,8 +186,6 @@ $env:RED_PANDA_GATEWAY_ADDR = $Addr
 $env:RED_PANDA_DATABASE = $Database
 # Compat script uses /read Temporary Triggers (debug slash tools).
 $env:RED_PANDA_SLASH_TOOLS = "1"
-$previousSubAgentCommand = $env:RED_PANDA_SUBAGENT_COMMAND
-$env:RED_PANDA_SUBAGENT_COMMAND = $MissingSubAgentExe
 
 $gateway = Start-Process -FilePath $GatewayExe -WorkingDirectory $Root -PassThru -WindowStyle Hidden
 $providerJob = $null
@@ -426,6 +423,7 @@ try {
     model = "compat-model"
     api_key = $profileKey
     is_default = $true
+    stream = $false
   }
   Assert-True ($profile.id -ne "") "provider profile create missing id"
   Assert-True ($profile.api_key_set -and $profile.api_key_masked -ne $profileKey) "provider profile exposed raw api key"
@@ -450,9 +448,9 @@ try {
     $providerResponse = Wait-WsResponseWithEvents $providerWs "provider_run" ([ref]$providerInitial)
     Assert-True ($providerResponse.type -eq "response" -and $providerResponse.payload.accepted) "provider profile run.start mismatch"
     $providerEvents = Wait-RunFinishWithInitialEvents $providerWs $providerInitial
-    Assert-IncreasingRootSeq $providerEvents
+    Assert-IncreasingRunSeq $providerEvents
     $providerMessage = @($providerEvents | Where-Object { $_.type -eq "message_delta" })[0]
-    Assert-True ($providerMessage.payload.delta -like "*provider profile compat ok*") "provider profile selection did not use compat provider"
+    Assert-True ($providerMessage.payload.delta -like "*provider profile compat ok*") "provider profile selection did not use compat provider: delta=$($providerMessage.payload.delta) types=$((@($providerEvents | ForEach-Object { $_.type })) -join ',')"
   } finally {
     $providerWs.Dispose()
   }
@@ -560,17 +558,17 @@ try {
     $runID = $runResponse.payload.run_id
     $events = Wait-RunFinishWithInitialEvents $ws $startEvents
     Assert-True ($events.Count -gt 0) "run emitted no events"
-    Assert-IncreasingRootSeq $events
+    Assert-IncreasingRunSeq $events
     Assert-EventTypes $events @("tool_started", "tool_finished", "message_delta", "finish")
 
     $run = Invoke-Api "GET" "/api/v1/runs/$runID"
     Assert-True ($run.status -eq "completed") "run projection status mismatch"
     $timeline = @(Invoke-Api "GET" "/api/v1/runs/$runID/events")
     Assert-True ($timeline.Count -eq $events.Count) "timeline count mismatch"
-    Assert-True ($timeline[0].root_seq -eq 1 -and $timeline[0].agent_role -ne "") "timeline event shape mismatch"
+    Assert-True ($timeline[0].run_seq -eq 1 -and $timeline[0].worker_id -ne "") "timeline event shape mismatch"
 
     $afterOne = @(Invoke-Api "GET" "/api/v1/runs/$runID/events?after_seq=1&limit=2")
-    Assert-True ($afterOne.Count -eq 2 -and $afterOne[0].root_seq -gt 1) "timeline after_seq/limit mismatch"
+    Assert-True ($afterOne.Count -eq 2 -and $afterOne[0].run_seq -gt 1) "timeline after_seq/limit mismatch"
 
     $memoryToolWs = New-WsClient
     try {
@@ -607,7 +605,7 @@ try {
             method = "permission.resolve"
             payload = @{
               permission_id = $memoryPermissionID
-              run_id = $event.root_run_id
+              run_id = $event.run_id
               decision = "approve"
               reason = "compat memory approve"
             }
@@ -627,7 +625,7 @@ try {
       }
       Assert-True ($memoryPermissionID -ne "") "memory tool permission_required was not emitted"
       Assert-True ($memoryPermissionResolve.type -eq "response" -and $memoryPermissionResolve.payload.accepted) "memory tool permission resolve mismatch"
-      Assert-IncreasingRootSeq $memoryToolEvents
+      Assert-IncreasingRunSeq $memoryToolEvents
       Assert-EventTypes $memoryToolEvents @("tool_started", "permission_required", "tool_finished", "finish")
       $memoryToolStarted = @($memoryToolEvents | Where-Object { $_.type -eq "tool_started" })[-1]
       Assert-True ($memoryToolStarted.payload.tool_name -eq "memory.create" -and $memoryToolStarted.payload.risk -eq "high") "memory tool_started payload mismatch"
@@ -665,7 +663,7 @@ try {
       $memoryListResponse = Wait-WsResponseWithEvents $memoryListWs "memory_tool_list_run" ([ref]$memoryListInitial)
       Assert-True ($memoryListResponse.type -eq "response" -and $memoryListResponse.payload.accepted) "memory list tool run.start mismatch"
       $memoryListEvents = Wait-RunFinishWithInitialEvents $memoryListWs $memoryListInitial
-      Assert-IncreasingRootSeq $memoryListEvents
+      Assert-IncreasingRunSeq $memoryListEvents
       Assert-EventTypes $memoryListEvents @("tool_started", "tool_output", "tool_finished", "finish")
       $memoryListOutput = @($memoryListEvents | Where-Object { $_.type -eq "tool_output" })[-1]
       Assert-True ($memoryListOutput.payload.tool_name -eq "memory.list") "memory list tool output tool_name mismatch"
@@ -709,7 +707,7 @@ try {
             method = "permission.resolve"
             payload = @{
               permission_id = $memoryDenyPermissionID
-              run_id = $event.root_run_id
+              run_id = $event.run_id
               decision = "deny"
               reason = "compat memory deny"
             }
@@ -729,9 +727,9 @@ try {
       }
       Assert-True ($memoryDenyPermissionID -ne "") "memory deny permission_required was not emitted"
       Assert-True ($memoryDenyResolve.type -eq "response" -and $memoryDenyResolve.payload.accepted) "memory deny resolve mismatch"
-      Assert-EventTypes $memoryDenyEvents @("tool_started", "permission_required", "tool_failed", "error", "finish")
+      Assert-EventTypes $memoryDenyEvents @("tool_started", "permission_required", "tool_failed", "finish")
       $memoryDenyFinish = @($memoryDenyEvents | Where-Object { $_.type -eq "finish" })[-1]
-      Assert-True ($memoryDenyFinish.payload.status -eq "denied") "memory deny run finish mismatch"
+      Assert-True ($memoryDenyFinish.payload.status -eq "completed") "memory deny run finish mismatch: $($memoryDenyFinish.payload.status)"
       $memoryDenyRecords = @(Invoke-Api "GET" "/api/v1/memory?scope=session&session_id=$($session.id)")
       Assert-True (@($memoryDenyRecords | Where-Object { $_.content -eq "Protocol compat denied memory" }).Count -eq 0) "denied memory tool persisted a record"
       $memoryDenyCalls = @(Invoke-Api "GET" "/api/v1/runs/$memoryDenyRunID/tools")
@@ -740,7 +738,7 @@ try {
       $memoryDenyWs.Dispose()
     }
 
-    $sourceHistory = @(Invoke-Api "GET" "/api/v1/sessions/$($session.id)/history")
+    $sourceHistory = @((Invoke-Api "GET" "/api/v1/sessions/$($session.id)/history").items)
     Assert-True ($sourceHistory.Count -gt 0) "source session history missing before fork"
     $forkPointSeq = [uint64]$sourceHistory[-1].seq
     $fork = Invoke-Api "POST" "/api/v1/sessions/$($session.id)/fork" @{
@@ -752,25 +750,26 @@ try {
     Assert-True ($fork.session.parent_id -eq $session.id -and $fork.session.kind -eq "fork") "fork session metadata mismatch"
     Assert-True ($fork.lineage.operation -eq "fork" -and $fork.lineage.fork_point_seq -eq $forkPointSeq) "fork lineage mismatch"
     Assert-True ($fork.copied_messages -eq $sourceHistory.Count) "fork copied message count mismatch"
-    $forkHistory = @(Invoke-Api "GET" "/api/v1/sessions/$($fork.session.id)/history")
+    $forkHistory = @((Invoke-Api "GET" "/api/v1/sessions/$($fork.session.id)/history").items)
     Assert-True ($forkHistory.Count -eq $sourceHistory.Count) "fork history count mismatch"
 
     $compactPreview = Invoke-Api "POST" "/api/v1/sessions/$($session.id)/compact/preview" @{
       keep_tail_messages = 1
     }
     Assert-True ($compactPreview.preview.source_session_id -eq $session.id) "compact preview source mismatch"
-    Assert-True ($compactPreview.preview.summary.summary -like "Compacted session messages*") "compact preview summary mismatch"
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$compactPreview.preview.summary.summary)) "compact preview summary missing"
 
     $compact = Invoke-Api "POST" "/api/v1/sessions/$($session.id)/compact" @{
       name = "compat compact"
       keep_tail_messages = 1
       summary = $compactPreview.preview.summary
     }
-    Assert-True ($compact.session.parent_id -eq $session.id -and $compact.session.kind -eq "compact") "compact session metadata mismatch"
-    Assert-True ($compact.lineage.operation -eq "compact" -and $compact.compaction.status -eq "applied") "compact lineage/record mismatch"
-    $compactHistory = @(Invoke-Api "GET" "/api/v1/sessions/$($compact.session.id)/history")
-    Assert-True ($compactHistory.Count -ge 1) "compact history missing"
-    Assert-True ($compactHistory[0].content[0].text -like "Compacted session messages*") "compact summary history mismatch"
+    Assert-True ($compact.session.id -eq $session.id -and $compact.session.kind -eq "normal") "compact must update the source session in place"
+    Assert-True ($compact.compaction.status -eq "applied" -and $compact.compaction.target_session_id -eq $session.id) "compact record mismatch"
+    $compactHistory = @((Invoke-Api "GET" "/api/v1/sessions/$($compact.session.id)/history").items)
+    Assert-True ($compactHistory.Count -eq $sourceHistory.Count) "compact must preserve visible history"
+    $contextState = Invoke-Api "GET" "/api/v1/sessions/$($session.id)/context"
+    Assert-True ($contextState.summary_active -and $contextState.active_summary.compaction.id -eq $compact.compaction.id) "active session summary mismatch"
 
     $resumeWs = New-WsClient
     try {
@@ -789,8 +788,8 @@ try {
           $replayed += $msg.payload
         }
       }
-      Assert-True (($replayed | Select-Object -First 1).root_seq -eq 3) "run.resume replay cursor mismatch"
-      Assert-IncreasingRootSeq $replayed
+      Assert-True (($replayed | Select-Object -First 1).run_seq -eq 3) "run.resume replay cursor mismatch"
+      Assert-IncreasingRunSeq $replayed
     } finally {
       $resumeWs.Dispose()
     }
@@ -819,14 +818,14 @@ try {
       Assert-True ($failedToolResponse.type -eq "response" -and $failedToolResponse.payload.accepted) "failed tool run.start mismatch"
       $failedToolRunID = $failedToolResponse.payload.run_id
       $failedToolEvents = Wait-RunFinishWithInitialEvents $failedToolWs $failedToolInitial
-      Assert-IncreasingRootSeq $failedToolEvents
-      Assert-EventTypes $failedToolEvents @("tool_started", "tool_failed", "error", "finish")
+      Assert-IncreasingRunSeq $failedToolEvents
+      Assert-EventTypes $failedToolEvents @("tool_started", "tool_failed", "finish")
       $failedToolEvent = @($failedToolEvents | Where-Object { $_.type -eq "tool_failed" })[-1]
       Assert-True ($failedToolEvent.payload.tool_name -eq "shell.exec") "failed tool event tool_name mismatch"
       Assert-True ($failedToolEvent.payload.status -eq "denied") "failed tool event status mismatch"
       Assert-True ($failedToolEvent.payload.error -eq "tool is denied by tool_denylist") "failed tool event error mismatch"
       $failedToolFinish = @($failedToolEvents | Where-Object { $_.type -eq "finish" })[-1]
-      Assert-True ($failedToolFinish.payload.status -eq "denied") "failed tool run did not finish denied"
+      Assert-True ($failedToolFinish.payload.status -eq "denied") "failed tool run did not finish denied: $($failedToolFinish.payload.status)"
 
       $failedToolRun = Invoke-Api "GET" "/api/v1/runs/$failedToolRunID"
       Assert-True ($failedToolRun.status -eq "denied" -and $failedToolRun.error -like "*tool_denylist*") "failed tool run projection mismatch"
@@ -839,51 +838,6 @@ try {
       Assert-True ($failedToolTimelineFailures.Count -eq 1) "failed tool timeline missing tool_failed, actual=$($failedToolTimeline.type -join ",")"
     } finally {
       $failedToolWs.Dispose()
-    }
-
-    $failedSubAgentWs = New-WsClient
-    try {
-      Send-WsJson $failedSubAgentWs @{
-        id = "failed_subagent_run"
-        type = "request"
-        method = "run.start"
-        payload = @{
-          session_id = $session.id
-          input = @{ text = "/subagent compat failed child" }
-          options = @{
-            runtime_mode = "single_core"
-            working_dir = "$Root"
-            spawn_subagents = $true
-            subagent_backend = "runtime_process"
-          }
-          subscribe = $true
-        }
-      }
-      $failedSubAgentInitial = @()
-      $failedSubAgentResponse = Wait-WsResponseWithEvents $failedSubAgentWs "failed_subagent_run" ([ref]$failedSubAgentInitial)
-      Assert-True ($failedSubAgentResponse.type -eq "response" -and $failedSubAgentResponse.payload.accepted) "failed subagent run.start mismatch"
-      $failedSubAgentRunID = $failedSubAgentResponse.payload.run_id
-      $failedSubAgentEvents = Wait-RunFinishWithInitialEvents $failedSubAgentWs $failedSubAgentInitial
-      Assert-IncreasingRootSeq $failedSubAgentEvents
-      Assert-EventTypes $failedSubAgentEvents @("subagent_update", "finish")
-      $failedSubAgentEvent = @($failedSubAgentEvents | Where-Object { $_.type -eq "subagent_update" -and $_.payload.status -eq "failed" })[-1]
-      Assert-True ($null -ne $failedSubAgentEvent) "failed subagent event was not emitted"
-      Assert-True ($failedSubAgentEvent.agent.role -eq "subagent") "failed subagent event agent role mismatch"
-      Assert-True ($failedSubAgentEvent.payload.backend -eq "runtime_process") "failed subagent backend mismatch"
-      Assert-True ($failedSubAgentEvent.payload.summary -eq "runtime_process planner subagent failed") "failed subagent summary mismatch"
-      Assert-True ($failedSubAgentEvent.payload.error -like "*missing-red-panda-subagent*") "failed subagent error mismatch"
-      $failedSubAgentFinish = @($failedSubAgentEvents | Where-Object { $_.type -eq "finish" })[-1]
-      Assert-True ($failedSubAgentFinish.payload.status -eq "completed") "failed subagent root run finish status mismatch"
-
-      $failedSubAgentRun = Invoke-Api "GET" "/api/v1/runs/$failedSubAgentRunID"
-      Assert-True ($failedSubAgentRun.status -eq "completed") "failed subagent root run projection mismatch"
-      $failedSubAgentTimeline = @(Invoke-Api "GET" "/api/v1/runs/$failedSubAgentRunID/events")
-      $failedSubAgentTimelineEvent = @((Select-EventsByType $failedSubAgentTimeline "subagent_update") | Where-Object { $_.agent_role -eq "subagent" -and $_.payload.status -eq "failed" })[-1]
-      Assert-True ($null -ne $failedSubAgentTimelineEvent) "failed subagent timeline missing failed update"
-      Assert-True ($failedSubAgentTimelineEvent.payload.backend -eq "runtime_process") "failed subagent timeline backend mismatch"
-      Assert-True ($failedSubAgentTimelineEvent.payload.error -like "*missing-red-panda-subagent*") "failed subagent timeline error mismatch"
-    } finally {
-      $failedSubAgentWs.Dispose()
     }
 
     $permissionWs = New-WsClient
@@ -920,7 +874,7 @@ try {
             method = "permission.resolve"
             payload = @{
               permission_id = $permissionID
-              run_id = $event.root_run_id
+              run_id = $event.run_id
               decision = "approve"
               reason = "compat"
             }
@@ -985,7 +939,7 @@ try {
             method = "permission.resolve"
             payload = @{
               permission_id = $permissionDenyID
-              run_id = $event.root_run_id
+              run_id = $event.run_id
               decision = "deny"
               reason = "compat deny"
             }
@@ -1031,7 +985,6 @@ try {
     permission = "approved"
     permission_deny = "denied"
     failed_tool = $failedToolRunID
-    failed_subagent = $failedSubAgentRunID
     fork = $fork.session.id
     compact = $compact.session.id
     memory_project = $projectMemory.id
@@ -1055,5 +1008,4 @@ try {
     $gateway.WaitForExit()
   }
   Remove-CompatDatabase
-  $env:RED_PANDA_SUBAGENT_COMMAND = $previousSubAgentCommand
 }

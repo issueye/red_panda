@@ -731,12 +731,12 @@ func TestRunServiceAggregatesConversationMessagesAndHidesWorkerPrivateDeltas(t *
 	assertServiceMessage(t, rows[1], "assistant", "run_1", "hello world")
 	assertServiceMessage(t, rows[2], "assistant", "run_2", "new run")
 
-	history, err := NewSessionService(repos, nil, nil).History("session_1")
+	history, err := NewSessionService(repos, nil, nil).History("session_1", 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if history[1].WorkerID != "worker-01" || history[1].AssignmentID != "assignment_run_1" || history[1].ProfileKey != "general" {
-		t.Fatalf("history lost Worker attribution: %#v", history[1])
+	if history.Items[1].WorkerID != "worker-01" || history.Items[1].AssignmentID != "assignment_run_1" || history.Items[1].ProfileKey != "general" {
+		t.Fatalf("history lost Worker attribution: %#v", history.Items[1])
 	}
 }
 

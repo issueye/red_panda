@@ -1,4 +1,14 @@
+import { selectEffectiveMessages } from './tokenBudget.js';
+
 /** Helpers for selecting public Run content or one Worker's Assignment content. */
+
+/**
+ * Keep complete history in session storage, but do not keep rendering messages
+ * that the active context summary has already replaced.
+ */
+export function filterVisibleMessagesAfterCompaction(messages = [], compaction = null) {
+  return selectEffectiveMessages(messages, compaction);
+}
 
 /**
  * Root-facing rows for the main conversation tab.

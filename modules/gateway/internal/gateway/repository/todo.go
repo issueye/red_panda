@@ -86,15 +86,6 @@ func (r TodoRepository) DeleteBySessions(sessionIDs []string) error {
 	return r.db.Where("session_id IN ?", sessionIDs).Delete(&model.TodoItem{}).Error
 }
 
-func (r TodoRepository) DeleteByWorkspaceRoot(workspaceRoot string) error {
-	if workspaceRoot == "" {
-		return nil
-	}
-	return r.db.Where("session_id IN (?)",
-		r.db.Model(&model.Session{}).Select("id").Where("workspace_root = ?", workspaceRoot),
-	).Delete(&model.TodoItem{}).Error
-}
-
 // CopySessionTodos copies todos from source to target with new IDs.
 // openOnly keeps pending/in_progress only (compact); false copies all (fork).
 func (r TodoRepository) CopySessionTodos(sourceSessionID, targetSessionID string, openOnly bool) (int, error) {

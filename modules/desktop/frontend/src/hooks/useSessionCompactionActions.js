@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { apiJson } from '../lib/api.js';
 import { appendDiagnosticLog } from '../lib/diagnosticLog.js';
+import { loadAllSessionHistory } from '../lib/sessionHistory.js';
+import { mergeSessionHistoryMessages } from '../lib/sessionMessageMerge.js';
 import { normalizeHistoryMessage } from '../lib/sessionNormalize.js';
 import { createEmptySessionRuntime } from '../lib/sessionRuntime.js';
 import { coveredCountForKeepTailTurns } from '../lib/tokenBudget.js';
@@ -8,32 +10,6 @@ import { appendMessages, createSystemMessage } from './sessionActionHelpers.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = new Set(['queued', 'running', 'waiting_permission', 'cancelling', 'paused']);
 const DEFAULT_KEEP_TAIL_TURNS = 3;
-
-/**
- * Prefer server history (has messageSeq) after compact; keep live-only rows that
- * are not yet persisted (optimistic user bubbles / in-flight streaming).
- * @param {Array<object>} previousMessages
- * @param {Array<object>} historyMessages
- * @param {{ running?: boolean, currentRunId?: string }} runtime
- */
-function mergeHistoryWithLiveMessages(previousMessages = [], historyMessages = [], runtime = {}) {
-  const history = Array.isArray(historyMessages) ? historyMessages : [];
-  const previous = Array.isArray(previousMessages) ? previousMessages : [];
-  if (history.length === 0) return previous;
-
-  const historyIds = new Set(history.map((item) => item?.id).filter(Boolean));
-  const liveExtras = previous.filter((message) => {
-    if (!message) return false;
-    if (message.id && historyIds.has(message.id)) return false;
-    if (message.agent === 'system') return true;
-    const id = String(message.id || '');
-    if (runtime.running && message.runId && message.runId === runtime.currentRunId) return true;
-    if (runtime.running && message.role === 'user' && id.startsWith('user_')) return true;
-    if (id.startsWith('evt_') || id.startsWith('compact_')) return true;
-    return false;
-  });
-  return liveExtras.length > 0 ? [...history, ...liveExtras] : history;
-}
 
 export function useSessionCompactionActions({
   currentSessionId,
@@ -101,7 +77,7 @@ export function useSessionCompactionActions({
       // a covered-count boundary when history cannot be loaded mid-run.
       let historyMessages = null;
       try {
-        const history = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/history`);
+        const history = await loadAllSessionHistory(sessionId);
         historyMessages = Array.isArray(history) ? history.map(normalizeHistoryMessage) : null;
       } catch {
         historyMessages = null;
@@ -113,7 +89,7 @@ export function useSessionCompactionActions({
           ? 0
           : coveredCountForKeepTailTurns(previous.messages, resolvedKeepTail);
         const merged = historyMessages
-          ? mergeHistoryWithLiveMessages(previous.messages, historyMessages, previous)
+          ? mergeSessionHistoryMessages(previous.messages, historyMessages)
           : previous.messages;
         const withNotice = Number(result.paused_runs) > 0
           ? appendMessages(

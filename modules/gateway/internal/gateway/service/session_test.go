@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,6 +319,93 @@ func TestSessionServiceCompactSupersedesPreviousSnapshot(t *testing.T) {
 	}
 	if len(rows) != 2 || rows[0].Status != "superseded" || rows[1].Status != "applied" {
 		t.Fatalf("snapshot statuses = %#v", rows)
+	}
+}
+
+func TestSessionHistoryPaginationAndLongCompactionUseCompleteHistory(t *testing.T) {
+	repos, service := newSessionServiceTestFixture(t)
+	session, err := repos.Sessions.Create("long", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index <= 450; index++ {
+		if _, err := repos.Messages.Add(session.ID, "user", fmt.Sprintf("message-%03d", index), "run"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := service.History(session.ID, 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.History(session.ID, first.NextAfterSeq, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := service.History(session.ID, second.NextAfterSeq, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 200 || len(second.Items) != 200 || len(third.Items) != 50 || !first.HasMore || !second.HasMore || third.HasMore {
+		t.Fatalf("history pages = %d/%t %d/%t %d/%t", len(first.Items), first.HasMore, len(second.Items), second.HasMore, len(third.Items), third.HasMore)
+	}
+	result, err := service.Compact(session.ID, CompactSessionRequest{KeepTailTurns: 2, Mode: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Compaction.SourceEndSeq != 448 {
+		t.Fatalf("compact end seq = %d, want 448", result.Compaction.SourceEndSeq)
+	}
+	goal, err := repos.Goals.Create(model.Goal{ID: "goal-long", SessionID: session.ID, Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repos.Contexts.Append(model.GoalNote{
+		ID: "note-long", GoalID: goal.ID, SessionID: session.ID, Kind: "decision", Title: "Keep context", Body: "Use the session context projection.", Pinned: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := service.ContextState(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.SummaryActive || state.TailMessageCount != 2 || state.ActiveSummary.Compaction.KeepTailTurns != 2 ||
+		state.GoalID != goal.ID || len(state.ContextItems) != 1 || state.ContextItems[0].ID != "note-long" ||
+		state.Usage.EstimatedTokens <= 0 || state.Usage.ModelMessageCount != 3 || state.Usage.CoveredEndSeq != 448 {
+		t.Fatalf("context state = %#v", state)
+	}
+}
+
+func TestSessionListPaginationDoesNotHideSessionsAfterFirstHundred(t *testing.T) {
+	repos, service := newSessionServiceTestFixture(t)
+	now := time.Now().UTC()
+	rows := make([]model.Session, 0, 205)
+	for index := 0; index < 205; index++ {
+		rows = append(rows, model.Session{
+			ID: fmt.Sprintf("session-page-%03d", index), Name: "page", Status: "active", Kind: "normal",
+			CreatedAt: now.Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(time.Duration(index) * time.Second),
+		})
+	}
+	if err := repos.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.ListPage(0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.ListPage(first.NextOffset, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := service.ListPage(second.NextOffset, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 100 || len(second.Items) != 100 || len(third.Items) != 5 || !first.HasMore || !second.HasMore || third.HasMore {
+		t.Fatalf("session pages = %d/%t %d/%t %d/%t", len(first.Items), first.HasMore, len(second.Items), second.HasMore, len(third.Items), third.HasMore)
+	}
+	all, err := service.List()
+	if err != nil || len(all) != 205 {
+		t.Fatalf("all sessions = %d, %v", len(all), err)
 	}
 }
 

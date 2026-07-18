@@ -37,10 +37,11 @@ type AppService struct {
 
 func NewSet(opts Options) Set {
 	run := NewRunService(opts.Repos, opts.Hub, opts.RuntimeClient)
+	lifecycle := newSessionLifecycle(opts.Repos, opts.RuntimeClient, opts.Hub)
 	return Set{
 		App:            AppService{Version: opts.Version},
 		Run:            run,
-		Workspace:      NewWorkspaceService(opts.Repos),
+		Workspace:      NewWorkspaceService(opts.Repos, lifecycle),
 		Session:        NewSessionService(opts.Repos, opts.RuntimeClient, opts.Hub),
 		Memory:         NewMemoryService(opts.Repos),
 		Todo:           NewTodoService(opts.Repos),

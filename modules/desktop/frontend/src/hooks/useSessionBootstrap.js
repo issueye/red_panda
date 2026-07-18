@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiJson } from '../lib/api.js';
 import { normalizeGoalList, pickFocusGoal } from '../lib/goals.js';
+import { loadAllSessionHistory } from '../lib/sessionHistory.js';
 import {
   createEmptySessionRuntime,
 } from '../lib/sessionRuntime.js';
@@ -62,13 +63,13 @@ export function useSessionBootstrap({
 
   const loadSessionState = useCallback(async (sessionId, { preserveLive = true } = {}) => {
     try {
-      const [history, serverRuns, toolCalls, permissionItems, todoData, compactionData, goalData] = await Promise.all([
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/history`),
+      const [history, serverRuns, toolCalls, permissionItems, todoData, contextData, goalData] = await Promise.all([
+        loadAllSessionHistory(sessionId),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/runs`).catch(() => []),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/tools`).catch(() => []),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/permissions`).catch(() => []),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/todos`).catch(() => null),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/compact`).catch(() => null),
+        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/context`).catch(() => null),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`).catch(() => null),
       ]);
       const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
@@ -79,9 +80,14 @@ export function useSessionBootstrap({
         ? todoData.items.map(normalizeTodo)
         : [];
       const todoOpen = Number(todoData?.open_count ?? countOpenTodos(todoItems));
-      const compactSummary = compactionData?.active ? (compactionData.summary || null) : null;
-      const compactEndSeq = compactionData?.active
-        ? Number(compactionData.compaction?.source_end_seq) || 0
+      const compactSummary = contextData?.summary_active
+        ? (contextData.active_summary?.summary || null)
+        : null;
+      const compactEndSeq = contextData?.summary_active
+        ? Number(contextData.active_summary?.compaction?.source_end_seq) || 0
+        : 0;
+      const compactKeepTailTurns = contextData?.summary_active
+        ? Number(contextData.active_summary?.compaction?.keep_tail_turns) || 0
         : 0;
       const goalItems = goalData ? normalizeGoalList(goalData) : [];
       const focusGoal = goalData ? pickFocusGoal(goalItems) : null;
@@ -113,7 +119,7 @@ export function useSessionBootstrap({
             contextSummaryEndSeq: compactEndSeq,
             // History messages carry messageSeq; coveredCount is only needed for live rows.
             contextSummaryCoveredCount: 0,
-            contextSummaryKeepTailTurns: compactEndSeq > 0 ? 3 : 0,
+            contextSummaryKeepTailTurns: compactKeepTailTurns,
             hydrated: true,
           };
         }
@@ -144,7 +150,7 @@ export function useSessionBootstrap({
           contextSummary: compactSummary,
           contextSummaryEndSeq: compactEndSeq,
           contextSummaryCoveredCount: 0,
-          contextSummaryKeepTailTurns: compactEndSeq > 0 ? 3 : 0,
+          contextSummaryKeepTailTurns: compactKeepTailTurns,
           hydrated: true,
         };
       });

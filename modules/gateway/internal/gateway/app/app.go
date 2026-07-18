@@ -173,6 +173,8 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/sessions/:id/history", controllers.Session.History)
 	api.POST("/sessions/:id/fork", controllers.Session.Fork)
 	api.GET("/sessions/:id/compact", controllers.Session.CompactionState)
+	api.GET("/sessions/:id/summaries", controllers.Session.Summaries)
+	api.GET("/sessions/:id/context", controllers.Session.ContextState)
 	api.POST("/sessions/:id/compact/preview", controllers.Session.CompactPreview)
 	api.POST("/sessions/:id/compact", controllers.Session.Compact)
 	api.GET("/sessions/:id/permissions", controllers.Permission.ListBySession)

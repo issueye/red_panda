@@ -61,6 +61,8 @@ function messageBodyText(value) {
 export function estimateSessionTokens(messages = [], draft = '', tools = []) {
   let total = 0;
   for (const message of messages) {
+    // Desktop-only notices are visible transcript rows, not model messages.
+    if (message?.agent === 'system' || message?.countsTowardContext === false) continue;
     const body = messageBodyText(message?.text ?? message?.content ?? '');
     total += estimateTextTokens(body);
     // Role / framing overhead.

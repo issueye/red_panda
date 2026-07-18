@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { apiJson } from '../lib/api.js';
 import { selectDirectory } from '../lib/desktopShell.js';
 import { createEmptySessionRuntime } from '../lib/sessionRuntime.js';
+import { loadAllSessions } from '../lib/sessionHistory.js';
 import { normalizeSession } from '../lib/sessionNormalize.js';
 import { normalizeWorkspaceRoot } from './sessionActionHelpers.js';
 
@@ -36,7 +37,7 @@ export function useSessionCrudActions({
   }, [setSessionRuntimes, setSessions]);
 
   const refreshSessions = useCallback(async () => {
-    const items = await apiJson('/api/v1/sessions').catch(() => null);
+    const items = await loadAllSessions().catch(() => null);
     if (!Array.isArray(items)) return [];
     const normalized = items.map(normalizeSession).filter(Boolean);
     setSessions(normalized);

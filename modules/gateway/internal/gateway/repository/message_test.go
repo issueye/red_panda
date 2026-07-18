@@ -173,6 +173,17 @@ func TestMessageRepositoryListLatestConversationFiltersSubagentsBeforeLimit(t *t
 	assertMessageText(t, rows[1], "root question two")
 }
 
+func TestMessageRepositoryEnforcesUniqueSessionSequence(t *testing.T) {
+	repo := newMessageTestRepository(t)
+	if _, err := repo.Add("session_1", "user", "one", "run_1"); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := model.Message{ID: "duplicate", SessionID: "session_1", Role: "user", ContentJSON: `[]`, Seq: 1}
+	if err := repo.db.Create(&duplicate).Error; err == nil {
+		t.Fatal("duplicate (session_id, seq) was accepted")
+	}
+}
+
 func newMessageTestRepository(t *testing.T) MessageRepository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "messages.db")), &gorm.Config{})

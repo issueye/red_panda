@@ -107,6 +107,41 @@ func (r SessionRepository) List(limit int) ([]model.Session, error) {
 	return rows, err
 }
 
+func (r SessionRepository) ListAll() ([]model.Session, error) {
+	var rows []model.Session
+	err := r.db.Where("deleted_at IS NULL").Order("updated_at desc, id desc").Find(&rows).Error
+	return rows, err
+}
+
+func (r SessionRepository) ListPage(offset int, limit int) ([]model.Session, bool, error) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		limit = 100
+	} else if limit > 200 {
+		limit = 200
+	}
+	var rows []model.Session
+	err := r.db.Where("deleted_at IS NULL").Order("updated_at desc, id desc").
+		Offset(offset).Limit(limit + 1).Find(&rows).Error
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return rows, hasMore, nil
+}
+
+func (r SessionRepository) ListByWorkspace(workspaceRoot string) ([]model.Session, error) {
+	var rows []model.Session
+	err := r.db.Where("workspace_root = ? AND deleted_at IS NULL", workspaceRoot).
+		Order("updated_at desc").Find(&rows).Error
+	return rows, err
+}
+
 func (r SessionRepository) Touch(id string) error {
 	return r.db.Model(&model.Session{}).Where("id = ?", id).Updates(map[string]any{
 		"updated_at": time.Now().UTC(),
@@ -132,19 +167,14 @@ func (r SessionRepository) SoftDelete(id string) error {
 	return nil
 }
 
-// SoftDeleteByWorkspace soft-deletes all active sessions under a workspace root.
-func (r SessionRepository) SoftDeleteByWorkspace(workspaceRoot string) (int64, error) {
-	if workspaceRoot == "" {
+func (r SessionRepository) SoftDeleteMany(sessionIDs []string) (int64, error) {
+	if len(sessionIDs) == 0 {
 		return 0, nil
 	}
 	now := time.Now().UTC()
 	result := r.db.Model(&model.Session{}).
-		Where("workspace_root = ? AND deleted_at IS NULL", workspaceRoot).
-		Updates(map[string]any{
-			"status":     "deleted",
-			"deleted_at": now,
-			"updated_at": now,
-		})
+		Where("id IN ? AND deleted_at IS NULL", sessionIDs).
+		Updates(map[string]any{"status": "deleted", "deleted_at": now, "updated_at": now})
 	return result.RowsAffected, result.Error
 }
 

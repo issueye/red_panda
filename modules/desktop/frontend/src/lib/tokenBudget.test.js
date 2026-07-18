@@ -121,6 +121,14 @@ test('ringFillRatio keeps tiny usage visible', () => {
   assert.equal(ringFillRatio(128000, 128000), 1);
 });
 
+test('estimateSessionTokens ignores visible UI-only system notices', () => {
+  const messages = [
+    { role: 'user', text: 'hello' },
+    { role: 'assistant', agent: 'system', text: 'context summary completed' },
+  ];
+  assert.equal(estimateSessionTokens(messages), estimateSessionTokens(messages.slice(0, 1)));
+});
+
 test('soft budget uses soft ceiling when max unset', () => {
   const state = tokenBudgetState(SOFT_CONTEXT_BUDGET / 2, 0);
   assert.equal(state.enabled, false);

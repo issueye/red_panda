@@ -2,7 +2,6 @@ package repository
 
 import (
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -66,18 +65,14 @@ func (r ScheduleRepository) List(enabledOnly bool, limit int) ([]model.Scheduled
 	return rows, err
 }
 
-// DisableFixedForSession disables enabled fixed_session schedules bound to sessionID.
-func (r ScheduleRepository) DisableFixedForSession(sessionID string) (int64, error) {
-	if strings.TrimSpace(sessionID) == "" {
+func (r ScheduleRepository) DisableFixedForSessions(sessionIDs []string) (int64, error) {
+	if len(sessionIDs) == 0 {
 		return 0, nil
 	}
 	res := r.db.Model(&model.ScheduledTask{}).
-		Where("session_id = ? AND session_mode = ? AND enabled = ? AND deleted_at IS NULL",
-			sessionID, "fixed_session", true).
-		Updates(map[string]any{
-			"enabled":     false,
-			"next_run_at": nil,
-		})
+		Where("session_id IN ? AND session_mode = ? AND enabled = ? AND deleted_at IS NULL",
+			sessionIDs, "fixed_session", true).
+		Updates(map[string]any{"enabled": false, "next_run_at": nil, "updated_at": time.Now().UTC()})
 	return res.RowsAffected, res.Error
 }
 
