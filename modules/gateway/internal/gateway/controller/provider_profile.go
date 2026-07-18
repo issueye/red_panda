@@ -20,6 +20,7 @@ type providerProfileCreateRequest struct {
 	MaxTokens int    `json:"max_tokens"`
 	APIKey    string `json:"api_key"`
 	IsDefault bool   `json:"is_default"`
+	Stream    *bool  `json:"stream"`
 }
 
 type providerProfileUpdateRequest struct {
@@ -30,6 +31,7 @@ type providerProfileUpdateRequest struct {
 	MaxTokens *int    `json:"max_tokens"`
 	APIKey    *string `json:"api_key"`
 	IsDefault *bool   `json:"is_default"`
+	Stream    *bool   `json:"stream"`
 	Active    *bool   `json:"active"`
 }
 
@@ -56,6 +58,7 @@ func (p ProviderProfileController) Create(c *gin.Context) {
 		MaxTokens: req.MaxTokens,
 		APIKey:    req.APIKey,
 		IsDefault: req.IsDefault,
+		Stream:    req.Stream,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_create_failed", "message": err.Error()}})
@@ -87,6 +90,7 @@ func (p ProviderProfileController) Update(c *gin.Context) {
 		MaxTokens: req.MaxTokens,
 		APIKey:    req.APIKey,
 		IsDefault: req.IsDefault,
+		Stream:    req.Stream,
 		Active:    req.Active,
 	})
 	if err != nil {

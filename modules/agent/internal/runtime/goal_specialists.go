@@ -28,8 +28,14 @@ var workspaceReadTools = []string{
 	"workspace.read_file",
 	"workspace.list",
 	"workspace.grep",
+	"workspace.find_files",
+	"workspace.read_files",
 	"workspace.diff_file",
 	"workspace.stats",
+	"git.status",
+	"git.diff",
+	"git.log",
+	"git.show",
 }
 
 var workspaceWriteTools = []string{

@@ -41,6 +41,9 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 	if hasToolNamed(definitions, "todo.write") && !goalController {
 		appendSystem(rootAgentTodoPolicy)
 	}
+	if options := params.Options; options.SpecialistContext == nil && hasToolNamed(definitions, "git.status") {
+		appendSystem(rootAgentFileChangeReportPolicy)
+	}
 
 	options := params.Options
 	if options.SpecialistContext != nil {
@@ -82,6 +85,7 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 			ProviderName:    options.ProviderName,
 			ProviderBaseURL: options.ProviderBaseURL,
 			ProviderAPIKey:  options.ProviderAPIKey,
+			Stream:          options.ProviderStream,
 			Model:           options.Model,
 			LogLLMRequests:  options.LogLLMRequests,
 		},

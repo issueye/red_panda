@@ -230,6 +230,36 @@ func TestBoundGoalSuppressesProviderStreamFinal(t *testing.T) {
 	}
 }
 
+func TestConsumeProviderChunkPreservesStandaloneMarkdownNewlines(t *testing.T) {
+	var output bytes.Buffer
+	rt := New(strings.NewReader(""), &output, io.Discard, "test")
+	seq := uint64(1)
+	var calls []tools.Call
+	emitted := false
+	err := rt.consumeProviderChunk(context.Background(), methods.ReplyParams{
+		RunID: "run_markdown", Session: methods.ReplySession{ID: "session_markdown"},
+	}, ProviderChunk{Delta: "\n\n"}, "msg", "stream", &seq, &calls, &emitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emitted {
+		t.Fatal("standalone newlines must not count as meaningful answer text")
+	}
+	var note struct {
+		Params json.RawMessage `json:"params"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &note); err != nil {
+		t.Fatal(err)
+	}
+	var event events.EnvelopeV2
+	if err := json.Unmarshal(note.Params, &event); err != nil {
+		t.Fatal(err)
+	}
+	if delta, _ := event.Payload["delta"].(string); delta != "\n\n" {
+		t.Fatalf("delta = %q, want preserved Markdown newlines", delta)
+	}
+}
+
 // TestBoundGoalMultiSegmentSingleRootFinalAndFinish 固化 A5 流语义：中间分段不得关闭根消息流；
 // 必须恰好由一个 final=true 的根 message_delta 和一个根 finish 结束运行。
 func TestBoundGoalMultiSegmentSingleRootFinalAndFinish(t *testing.T) {

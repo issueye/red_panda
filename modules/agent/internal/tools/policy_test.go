@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"redpanda/protocol/methods"
@@ -203,11 +204,24 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	}
 	for _, keep := range []string{
 		"workspace.read_file", "workspace.write_file", "shell.exec",
-		"goal.create", "context.read", "worker.delegate", "skill.run", "web.search",
+		"goal.create", "worker.delegate", "skill.run", "web.search",
 	} {
 		if !names[keep] {
 			t.Fatalf("goal mode should keep %s: %#v", keep, names)
 		}
+	}
+	if names["context.read"] {
+		t.Fatalf("goal mode without a concrete goal must hide context.read: %#v", names)
+	}
+	bound := AvailableToolsForOptions(definitions, methods.ReplyOptions{
+		GoalContext: &methods.GoalContext{GoalID: "goal_real"},
+	})
+	boundNames := map[string]bool{}
+	for _, d := range bound {
+		boundNames[d.Name] = true
+	}
+	if !boundNames["context.read"] {
+		t.Fatalf("bound goal should expose context.read: %#v", boundNames)
 	}
 	for _, hide := range []string{
 		"memory.create", "skill.create",
@@ -266,5 +280,39 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	}
 	if openNames["worker.send"] {
 		t.Fatalf("non-goal chat should still hide ops worker.send: %#v", openNames)
+	}
+	if openNames["context.read"] {
+		t.Fatalf("non-goal chat must hide context.read: %#v", openNames)
+	}
+}
+
+func TestContextToolsRequireBoundGoalOrGoalSpecialist(t *testing.T) {
+	definitions := []ptools.Definition{{Name: "workspace.read_file"}, {Name: "context.read"}, {Name: "context.write"}}
+
+	genericWorker := AvailableToolsForOptions(definitions, methods.ReplyOptions{
+		ToolAllowlist: []string{"workspace.read_file", "context.read"},
+		SpecialistContext: &methods.SpecialistContext{
+			Kind: "delegated_worker_proxy", Context: "ordinary worker",
+		},
+	})
+	if len(genericWorker) != 1 || genericWorker[0].Name != "workspace.read_file" {
+		t.Fatalf("generic worker context tools = %#v, want hidden", genericWorker)
+	}
+
+	goalSpecialist := AvailableToolsForOptions(definitions, methods.ReplyOptions{
+		ToolAllowlist: []string{"workspace.read_file", "context.read", "context.write"},
+		SpecialistContext: &methods.SpecialistContext{
+			Kind: "specialist", Context: "trusted goal specialist",
+		},
+	})
+	if len(goalSpecialist) != 3 {
+		t.Fatalf("goal specialist context tools = %#v, want exposed", goalSpecialist)
+	}
+
+	decision := EvaluateToolPolicy(methods.ReplyOptions{ToolPolicy: "allow_all"}, ptools.Call{
+		Name: "context.read", Risk: ptools.RiskLow,
+	})
+	if decision.Action != ToolDecisionDeny || !strings.Contains(decision.Reason, "bound goal") {
+		t.Fatalf("unbound context.read decision = %#v, want deny", decision)
 	}
 }

@@ -154,6 +154,14 @@ export function ProvidersTab({
                 </label>
                 <label className="settings-check">
                   <input
+                    checked={profileDraft.stream !== false}
+                    onChange={(event) => updateProfileDraft('stream', event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>使用流式</span>
+                </label>
+                <label className="settings-check">
+                  <input
                     checked={profileDraft.active !== false}
                     onChange={(event) => updateProfileDraft('active', event.target.checked)}
                     type="checkbox"

@@ -13,6 +13,7 @@ import (
 
 func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 	fixed := time.Date(2026, time.July, 15, 9, 8, 7, 0, time.FixedZone("CST", 8*60*60))
+	stream := false
 	composer := promptComposer{now: func() time.Time { return fixed }}
 	params := methods.ReplyParams{
 		RunID: "run_1",
@@ -22,7 +23,7 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 			{Role: "worker", Content: []methods.ContentBlock{{Type: "text", Text: "ignored"}}},
 		}},
 		Options: methods.ReplyOptions{
-			ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1", ProviderAPIKey: "secret", Model: "model-a", LogLLMRequests: true,
+			ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1", ProviderAPIKey: "secret", ProviderStream: &stream, Model: "model-a", LogLLMRequests: true,
 			SpecialistContext: &methods.SpecialistContext{Context: " specialist "},
 			MemoryContext:     &methods.MemoryContext{Context: " memory "},
 			TodoContext:       &methods.TodoContext{Context: " todo context "},
@@ -39,7 +40,7 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 	if request.RunID != "run_1" || request.SessionID != "session_1" || request.Input != "current" {
 		t.Fatalf("identity/input changed: %#v", request)
 	}
-	wantOptions := provider.RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1", ProviderAPIKey: "secret", Model: "model-a", LogLLMRequests: true}
+	wantOptions := provider.RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1", ProviderAPIKey: "secret", Stream: &stream, Model: "model-a", LogLLMRequests: true}
 	if !reflect.DeepEqual(request.Options, wantOptions) {
 		t.Fatalf("options = %#v, want %#v", request.Options, wantOptions)
 	}
@@ -82,6 +83,24 @@ func TestPromptComposerGoalControllerSuppressesWorkerAndTodoPolicies(t *testing.
 	}
 	if strings.Contains(all, "spawn multiple worker.delegate calls IN ONE TURN") || strings.Contains(all, "Session task list") {
 		t.Fatalf("goal controller received worker/todo policy: %s", all)
+	}
+}
+
+func TestPromptComposerAddsFileChangeReportPolicyOnlyToRoot(t *testing.T) {
+	composer := promptComposer{now: time.Now}
+	definitions := []tools.Definition{{Name: "git.status"}, {Name: "workspace.write_file"}}
+	root := composer.compose(methods.ReplyParams{}, "edit", definitions, nil)
+	if !strings.Contains(root.Messages[1].Content, "变更文件") || !strings.Contains(root.Messages[1].Content, "Markdown link") {
+		t.Fatalf("root file report policy missing: %#v", root.Messages)
+	}
+
+	specialist := composer.compose(methods.ReplyParams{Options: methods.ReplyOptions{
+		SpecialistContext: &methods.SpecialistContext{Context: "specialist"},
+	}}, "edit", definitions, nil)
+	for _, message := range specialist.Messages {
+		if strings.Contains(message.Content, "变更文件") {
+			t.Fatalf("specialist received root report policy: %#v", specialist.Messages)
+		}
 	}
 }
 

@@ -52,16 +52,20 @@ func StandardizeToolOutput(toolName string, raw string, runErr error, durationMS
 
 	if runErr != nil {
 		errText := strings.TrimSpace(runErr.Error())
+		raw = strings.TrimSpace(raw)
+		text := raw
+		if text == "" {
+			text = errText
+		}
 		return mustMarshalToolResult(StandardToolResult{
 			Schema: toolResultSchemaV1,
 			Tool:   toolName,
 			Status: string(ptools.CallStatusFailed),
 			OK:     false,
-			Text:   errText,
-			Error:  errText,
-			Data: map[string]any{
-				"raw": strings.TrimSpace(raw),
-			},
+			// Preserve compiler/test diagnostics as the readable result. Error keeps
+			// the process-level failure (for example "exit status 1") separate.
+			Text:  text,
+			Error: errText,
 			Meta: ToolResultMeta{
 				DurationMS: durationMS,
 				Note:       "standardized failure envelope",

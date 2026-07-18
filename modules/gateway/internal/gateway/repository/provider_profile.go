@@ -68,6 +68,7 @@ func (r ProviderProfileRepository) Update(profile model.ProviderProfile) (model.
 		current.APIKeySecret = profile.APIKeySecret
 	}
 	current.IsDefault = profile.IsDefault
+	current.Stream = profile.Stream
 	current.Active = profile.Active
 	current.UpdatedAt = time.Now().UTC()
 

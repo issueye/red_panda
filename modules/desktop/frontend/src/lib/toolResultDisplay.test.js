@@ -29,6 +29,17 @@ test('displayToolOutput does not repeat a standardized failure error', () => {
   assert.equal(displayToolOutput(output, 'file not found'), '');
 });
 
+test('displayToolOutput recovers diagnostics from historical failure envelopes', () => {
+  const output = envelope({
+    status: 'failed',
+    ok: false,
+    text: 'exit status 1',
+    error: 'exit status 1',
+    data: { raw: 'compile.go:12: undefined: value' },
+  });
+  assert.equal(displayToolOutput(output, 'exit status 1'), 'compile.go:12: undefined: value');
+});
+
 test('isWorkerToolFallback only compacts public Assignment recovery messages', () => {
   const text = '根据工具执行结果整理如下：\n\n### Read file\nlarge output';
   assert.equal(isWorkerToolFallback({ role: 'assistant', assignmentId: 'assignment_1', workerId: 'worker-01', text }), true);

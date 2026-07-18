@@ -23,6 +23,7 @@ type ProviderProfileDTO struct {
 	APIKeySet    bool      `json:"api_key_set"`
 	APIKeyMasked string    `json:"api_key_masked,omitempty"`
 	IsDefault    bool      `json:"is_default"`
+	Stream       bool      `json:"stream"`
 	Active       bool      `json:"active"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -36,6 +37,7 @@ type ProviderProfileCreate struct {
 	MaxTokens int
 	APIKey    string
 	IsDefault bool
+	Stream    *bool
 }
 
 type ProviderProfileUpdate struct {
@@ -46,6 +48,7 @@ type ProviderProfileUpdate struct {
 	MaxTokens *int
 	APIKey    *string
 	IsDefault *bool
+	Stream    *bool
 	Active    *bool
 }
 
@@ -66,6 +69,10 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 	if err != nil {
 		return ProviderProfileDTO{}, err
 	}
+	stream := true
+	if input.Stream != nil {
+		stream = *input.Stream
+	}
 	row, err := s.repos.Providers.Create(model.ProviderProfile{
 		Name:         strings.TrimSpace(input.Name),
 		Provider:     profile,
@@ -74,6 +81,7 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 		MaxTokens:    maxTokens,
 		APIKeySecret: input.APIKey,
 		IsDefault:    input.IsDefault,
+		Stream:       stream,
 	})
 	if err != nil {
 		return ProviderProfileDTO{}, err
@@ -95,6 +103,7 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 		MaxTokens:    current.MaxTokens,
 		APIKeySecret: current.APIKeySecret,
 		IsDefault:    current.IsDefault,
+		Stream:       current.Stream,
 		Active:       current.Active,
 	}
 	if input.Name != nil {
@@ -128,6 +137,9 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 	}
 	if input.IsDefault != nil {
 		next.IsDefault = *input.IsDefault
+	}
+	if input.Stream != nil {
+		next.Stream = *input.Stream
 	}
 	if input.Active != nil {
 		next.Active = *input.Active
@@ -189,6 +201,7 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		APIKeySet:    row.APIKeySecret != "",
 		APIKeyMasked: maskSecret(row.APIKeySecret),
 		IsDefault:    row.IsDefault,
+		Stream:       row.Stream,
 		Active:       row.Active,
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,

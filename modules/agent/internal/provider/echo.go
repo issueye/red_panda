@@ -14,14 +14,28 @@ const (
 	defaultGrepMatches = 50
 )
 
-type EchoProvider struct{}
+type EchoProvider struct {
+	providerStream   bool
+	streamConfigured bool
+}
+
+func newEchoProvider(stream bool) EchoProvider {
+	return EchoProvider{providerStream: stream, streamConfigured: true}
+}
+
+func (p EchoProvider) streamByDefault() bool {
+	if p.streamConfigured {
+		return p.providerStream
+	}
+	return true
+}
 
 func (EchoProvider) Name() string {
 	return "echo"
 }
 
-func (EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
-	if override, ok := providerFromOptions(req.Options, false); ok {
+func (p EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	if override, ok := providerFromOptions(req.Options, p.streamByDefault()); ok {
 		return completeResolvedProvider(ctx, override, req, emit)
 	}
 	if len(req.ToolHistory) > 0 {

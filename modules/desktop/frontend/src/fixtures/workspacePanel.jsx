@@ -5,7 +5,8 @@ import '../styles/app.css';
 
 const markdown = `# Workspace report
 
-This preview renders **formatted Markdown** with an [external link](https://example.com).
+This preview renders **formatted Markdown** with an [external link](https://example.com)
+and a [workspace file](docs/guide.md).
 
 - [x] Render headings and lists
 - [ ] Verify the final layout

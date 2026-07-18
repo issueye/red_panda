@@ -12,6 +12,9 @@ test('workspace renders Markdown files and keeps other content as source text', 
   await expect(preview.locator('input[type="checkbox"]')).toHaveCount(2);
   await expect(preview.locator('script')).toHaveCount(0);
   await expect(preview).toContainText('<script>window.fixtureUnsafeHtml = true</script>');
+  const workspaceLink = preview.getByRole('link', { name: 'workspace file' });
+  await expect(workspaceLink).toHaveAttribute('data-workspace-file-link', 'true');
+  await expect(workspaceLink).toHaveAttribute('title', '在资源管理器中定位文件');
 
   await page.getByRole('button', { name: '差异' }).click();
   await expect(page.locator('.workspace-markdown-preview')).toHaveCount(0);

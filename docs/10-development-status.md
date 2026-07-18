@@ -10,7 +10,7 @@ Updated: 2026-07-13
 - Gateway: Go + Gin + SQLite(no cgo) + GORM + MVC.
 - Agent Runtime: Go subprocess using newline-delimited stdio JSON-RPC.
 - Desktop <-> Gateway: HTTP JSON + WebSocket, no SSE.
-- Agent Runtime supports provider-side OpenAI-compatible HTTP streaming when `RED_PANDA_PROVIDER_STREAM=true`; Desktop and Gateway still use WebSocket for realtime events.
+- Agent Runtime defaults OpenAI-compatible, OpenAI Responses, and Anthropic calls to provider-side streaming. Provider Profiles expose a checked-by-default `使用流式` setting; `RED_PANDA_PROVIDER_STREAM` remains the fallback for environment-backed providers. Desktop and Gateway still use WebSocket for realtime events.
 - Root agent and subagents share one root run WebSocket channel using `root_seq`, `agent_seq`, and stream metadata.
 - `subagent_backend=runtime_process` runs a subagent through an independent child `red-panda-agent` process and bridges child `agent.event` output back to the parent root run channel.
 - `subagent_backend=process_pool` runs a subagent through a reusable child `red-panda-agent` process from the parent Runtime pool.
@@ -112,7 +112,7 @@ Updated: 2026-07-13
 41. Implemented Gateway root-run `runtime_mode=per_run_process` with a dedicated `red-panda-agent` process per root run, shared WebSocket/projection event flow, and automatic per-run Runtime client shutdown/removal after run finish.
 42. Implemented high-risk precise replacement `workspace.edit_file` with `path`, `old_text`, `new_text`, and `replace_all`; by default `old_text` must appear exactly once, while `replace_all=true` permits multi-location replacement. It uses the existing permission and tool policy flow.
 43. Cleaned known Desktop UI mojibake.
-44. Implemented OpenAI-compatible provider streaming behind `RED_PANDA_PROVIDER_STREAM=true`: Runtime sends `stream=true` to `/v1/chat/completions`, parses provider `text/event-stream` data chunks, forwards content deltas through existing `message_delta`/WebSocket events, and accumulates streaming `tool_calls` before the existing tool-call loop.
+44. Provider-side streaming is the default for OpenAI-compatible, OpenAI Responses, and Anthropic calls. Provider Profiles persist a `使用流式` toggle and pass it through Gateway and Runtime to the adapter. Runtime parses provider chunks, forwards content deltas through existing `message_delta`/WebSocket events, and accumulates streaming tool calls before the existing tool loop. `RED_PANDA_PROVIDER_STREAM=false` is the compatibility opt-out for environment-backed providers.
 45. Implemented Desktop SettingsPanel for runtime and policy controls, including `runtime_mode`, `tool_policy`, `permission_mode`, `spawn_subagents`, `subagent_backend`, `model`, `tool_allowlist`, and `tool_denylist`; these values are sent to Gateway as WebSocket `run.start` options.
 46. Implemented low-risk read-only `workspace.diff_file` for one-file unified diff previews. It accepts `path` plus either full proposed `content`, or `old_text`/`new_text` with optional `replace_all` for exact replacement preview.
 47. Implemented high-risk `workspace.apply_patch` for applying workspace-scoped unified patches from `patch`; it uses the existing permission and tool policy flow and emits the existing WebSocket tool events.
@@ -330,13 +330,13 @@ $env:RED_PANDA_PROVIDER_MODEL='your-model'
 
 The base URL may be the provider host root, a base already ending in `/v1`, or the full `/chat/completions` endpoint. Runtime avoids duplicating the version segment.
 
-Streaming output is supported for OpenAI-compatible providers:
+Provider streaming is enabled by default. Provider Profiles use the `使用流式` setting. To disable the environment-backed fallback for an incompatible endpoint:
 
 ```powershell
-$env:RED_PANDA_PROVIDER_STREAM='true'
+$env:RED_PANDA_PROVIDER_STREAM='false'
 ```
 
-This enables provider-side `text/event-stream` parsing in Agent Runtime. Desktop and Gateway continue to use WebSocket, not SSE.
+Runtime otherwise requests provider-side streaming automatically. Desktop and Gateway continue to use WebSocket, not SSE.
 
 Gateway provider profiles are also supported through `/api/v1/provider-profiles`:
 

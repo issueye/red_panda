@@ -11,6 +11,9 @@ import (
 
 func Migrate(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
+		if err := migrateProviderProfileStream(tx); err != nil {
+			return err
+		}
 		if err := tx.AutoMigrate(
 			&model.Session{},
 			&model.SessionLineage{},
@@ -41,6 +44,16 @@ func Migrate(db *gorm.DB) error {
 		}
 		return tx.Migrator().DropTable("agent_definitions")
 	})
+}
+
+func migrateProviderProfileStream(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.ProviderProfile{}) ||
+		db.Migrator().HasColumn(&model.ProviderProfile{}, "stream") {
+		return nil
+	}
+	// Profiles created before the setting existed used the application's
+	// streaming default, so preserve that behavior when adding the column.
+	return db.Exec("ALTER TABLE provider_profiles ADD COLUMN stream numeric NOT NULL DEFAULT 1").Error
 }
 
 type legacyAgentDefinition struct {

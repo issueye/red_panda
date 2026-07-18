@@ -117,6 +117,7 @@ test('tokenBudgetState marks 80% auto-compact threshold', () => {
 test('ringFillRatio keeps tiny usage visible', () => {
   assert.equal(ringFillRatio(0, 128000), 0);
   assert.ok(ringFillRatio(200, 128000) >= MIN_VISIBLE_RATIO);
+  assert.ok(ringFillRatio(400, 128000) > ringFillRatio(200, 128000));
   assert.equal(ringFillRatio(128000, 128000), 1);
 });
 

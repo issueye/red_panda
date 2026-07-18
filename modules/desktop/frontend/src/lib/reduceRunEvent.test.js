@@ -161,7 +161,8 @@ test('new Run events are not suppressed by a completed Goal Run high sequence', 
 
 test('appendWorkerText merges consecutive deltas for one assignment', () => {
   const first = appendWorkerText([], event('message_delta', 1, { delta: 'Hello' }), 'Hello');
-  const second = appendWorkerText(first, event('message_delta', 2, { delta: ' world' }), ' world');
+  const newline = appendWorkerText(first, event('message_delta', 2, { delta: '\n\n' }), '\n\n');
+  const second = appendWorkerText(newline, event('message_delta', 3, { delta: '## Report' }), '## Report');
   assert.equal(second.length, 1);
-  assert.equal(second[0].text, 'Hello world');
+  assert.equal(second[0].text, 'Hello\n\n## Report');
 });

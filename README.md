@@ -65,7 +65,7 @@ See [docs/README.md](docs/README.md) for the current index. Highlights:
 - WebSocket methods: `run.start`, `run.subscribe`, `run.resume`, `run.cancel`, `permission.resolve`, `agent.status`, `subagents.list`, `subagent.cancel`.
 - Runtime JSON-RPC methods: `core.initialize`, `core.ping`, `agent.reply`, `agent.cancel`, `agent.subagents`, `agent.subagent.cancel`, `permission.resolve`.
 - Providers: default `echo`; optional OpenAI-compatible HTTP provider. Base URLs may be a host root, an existing `/v1` base, or a full `/chat/completions` endpoint.
-- ToolRunner MVP: `workspace.read_file`, `workspace.list`, `workspace.grep`, `workspace.diff_file`, `workspace.write_file`, `workspace.edit_file`, `workspace.apply_patch`, `shell.exec`, `skill.create`, `skill.update`, and isolated `skill.run`.
+- Coding tools: `workspace.read_file`, `workspace.read_files`, `workspace.list`, `workspace.find_files`, `workspace.grep`, `workspace.stats`, `workspace.diff_file`, `workspace.write_file`, `workspace.edit_file`, `workspace.apply_patch`, read-only `git.status` / `git.diff` / `git.log` / `git.show`, and `shell.exec`. Failed shell commands preserve compiler and test diagnostics separately from the process exit status.
 - `workspace.edit_file`: high-risk precise string replacement with `path`, `old_text`, `new_text`, and `replace_all`. By default `old_text` must match exactly once; `replace_all=true` allows multi-location replacement. It uses the existing permission and tool policy flow.
 - `workspace.diff_file`: low-risk read-only unified diff preview for one workspace file. It accepts `path` plus either full proposed `content`, or `old_text`/`new_text` with optional `replace_all` for exact replacement preview. It does not write files.
 - `workspace.apply_patch`: high-risk workspace-scoped unified patch application with `patch`. It uses the existing permission and tool policy flow before writing.
@@ -99,7 +99,7 @@ See [docs/README.md](docs/README.md) for the current index. Highlights:
 - Desktop clarity pass: main panels use concise titles, explanatory subtitles are reduced, visible status/risk/memory/event labels are normalized to Chinese, and Gateway-backed timeline assertions tolerate valid event projection count variance.
 - Runtime per-run provider override: Agent Runtime can use the provider, model, base URL, and key supplied by Gateway for a single OpenAI-compatible chat completion run while retaining environment-variable provider fallback.
 - Desktop SubAgentPanel: shows subagent `root_run_id`, backend, and status, and exposes cancel for running subagents through WebSocket `subagent.cancel`.
-- OpenAI-compatible provider streaming: when `RED_PANDA_PROVIDER_STREAM=true`, provider requests to `/v1/chat/completions` use `stream=true`, parse `text/event-stream` data chunks, forward content deltas through the existing `message_delta` WebSocket flow, and accumulate streaming `tool_calls` before entering the existing tool-call loop. Desktop and Gateway still use WebSocket and do not use SSE.
+- Provider streaming is enabled by default for OpenAI-compatible, OpenAI Responses, and Anthropic requests. Each Provider Profile has a checked-by-default `使用流式` setting that controls its requests. `RED_PANDA_PROVIDER_STREAM` remains the fallback for environment-backed providers.
 
 ## Temporary Triggers
 
@@ -205,13 +205,13 @@ $env:RED_PANDA_PROVIDER_API_KEY='...'
 $env:RED_PANDA_PROVIDER_MODEL='your-model'
 ```
 
-Streaming is supported for OpenAI-compatible providers:
+Provider streaming is enabled by default. Provider Profiles can enable or disable it with `使用流式`. For an environment-backed incompatible endpoint, disable the fallback with:
 
 ```powershell
-$env:RED_PANDA_PROVIDER_STREAM='true'
+$env:RED_PANDA_PROVIDER_STREAM='false'
 ```
 
-With streaming enabled, Runtime sends `stream=true` to `/v1/chat/completions`, parses provider `text/event-stream` chunks, and keeps Desktop/Gateway realtime delivery on the existing WebSocket channel.
+By default Runtime sends `stream=true`, parses provider chunks, and keeps Desktop/Gateway realtime delivery on the existing WebSocket channel.
 
 Provider profiles are managed by Gateway through `/api/v1/provider-profiles`. A profile contains:
 

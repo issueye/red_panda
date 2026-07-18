@@ -35,6 +35,7 @@ test('normalizeProviderProfile maps masked key state and defaults', () => {
   assert.equal(profile.apiKeySet, true);
   assert.equal(profile.apiKeyMasked, '****1234');
   assert.equal(profile.isDefault, true);
+  assert.equal(profile.stream, true);
   assert.equal(profile.active, true);
 });
 
@@ -54,6 +55,7 @@ test('profileDraftFrom never copies saved API key state into editable draft', ()
   assert.equal(draft.apiKey, '');
   assert.equal(draft.maxTokens, '64000');
   assert.equal(draft.isDefault, true);
+  assert.equal(draft.stream, true);
 });
 
 test('provider profile payloads use Gateway field names and omit blank update key', () => {
@@ -65,6 +67,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     maxTokens: '128000',
     apiKey: 'sk-live',
     isDefault: true,
+    stream: false,
   }), {
     name: 'Work',
     provider: 'openai_compatible',
@@ -73,6 +76,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     max_tokens: 128000,
     api_key: 'sk-live',
     is_default: true,
+    stream: false,
   });
 
   const update = providerProfileUpdatePayload({
@@ -83,12 +87,14 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     maxTokens: '',
     apiKey: '',
     isDefault: false,
+    stream: true,
     active: true,
   });
   assert.equal(Object.hasOwn(update, 'api_key'), false);
   assert.equal(update.model, 'model-b');
   assert.equal(update.max_tokens, 0);
   assert.equal(update.active, true);
+  assert.equal(update.stream, true);
 
   const anthropic = providerProfileCreatePayload({
     name: 'Claude',

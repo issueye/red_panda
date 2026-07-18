@@ -45,6 +45,7 @@ export function ConversationView({
   tokenDisplayRatio = 0,
   tokenBudgetEnabled = false,
   tokenSoftBudget = false,
+  workspaceRoot = '',
 }) {
   return (
     <section className={classNames('conversation-view', className)}>
@@ -55,6 +56,7 @@ export function ConversationView({
         permissions={permissions}
         running={running}
         tools={tools}
+        workspaceRoot={workspaceRoot}
       />
       {showComposer ? (
         <div className="conversation-footer">

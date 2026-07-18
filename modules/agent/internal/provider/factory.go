@@ -10,6 +10,7 @@ import (
 )
 
 func NewFromEnv(log io.Writer) Provider {
+	stream := providerStreamFromEnv()
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER")))
 	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_BASE_URL")), "/")
 	if provider != "" || baseURL != "" {
@@ -20,18 +21,18 @@ func NewFromEnv(log io.Writer) Provider {
 		}
 		if baseURL == "" {
 			fmt.Fprintln(log, "provider base url is empty; falling back to echo provider")
-			return EchoProvider{}
+			return newEchoProvider(stream)
 		}
 		resolved, ok := providerFromOptions(RequestOptions{
 			ProviderName: provider, ProviderBaseURL: baseURL,
 			ProviderAPIKey: apiKey, Model: model,
-		}, boolEnv("RED_PANDA_PROVIDER_STREAM"))
+		}, stream)
 		if ok {
 			return resolved
 		}
 		fmt.Fprintf(log, "unsupported provider %q; falling back to echo provider\n", provider)
 	}
-	return EchoProvider{}
+	return newEchoProvider(stream)
 }
 
 func providerFromOptions(options RequestOptions, fallbackStream bool) (Provider, bool) {
@@ -47,9 +48,13 @@ func providerFromOptions(options RequestOptions, fallbackStream bool) (Provider,
 	if model == "" {
 		model = "default"
 	}
+	stream := fallbackStream
+	if options.Stream != nil {
+		stream = *options.Stream
+	}
 	config := providerConfig{
 		BaseURL: baseURL, APIKey: strings.TrimSpace(options.ProviderAPIKey), Model: model,
-		Stream: fallbackStream, Client: &http.Client{Timeout: 90 * time.Second},
+		Stream: stream, Client: &http.Client{Timeout: 90 * time.Second},
 	}
 	switch provider {
 	case "openai_compatible", "http_compatible":
@@ -63,11 +68,13 @@ func providerFromOptions(options RequestOptions, fallbackStream bool) (Provider,
 	}
 }
 
-func boolEnv(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+func providerStreamFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_STREAM"))) {
+	case "0", "false", "no", "off":
+		return false
 	case "1", "true", "yes", "on":
 		return true
 	default:
-		return false
+		return true
 	}
 }

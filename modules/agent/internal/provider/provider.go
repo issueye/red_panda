@@ -20,6 +20,7 @@ type RequestOptions struct {
 	ProviderName    string
 	ProviderBaseURL string
 	ProviderAPIKey  string
+	Stream          *bool
 	Model           string
 	LogLLMRequests  bool
 }

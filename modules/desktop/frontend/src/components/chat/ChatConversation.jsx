@@ -29,7 +29,7 @@ function displayMessageAgent(message) {
 }
 
 /** Render assistant message body and convert embedded tool markup into cards. */
-function AssistantMessageBody({ message }) {
+function AssistantMessageBody({ message, workspaceRoot = '' }) {
   const text = message.text || '';
   if (isWorkerToolFallback(message)) {
     return (
@@ -47,7 +47,7 @@ function AssistantMessageBody({ message }) {
 
   const hasTool = segments.some((segment) => segment.type === 'tool_call');
   if (!hasTool) {
-    return <Markdown className="message-markdown">{text}</Markdown>;
+    return <Markdown className="message-markdown" workspaceRoot={workspaceRoot}>{text}</Markdown>;
   }
 
   let toolIndex = 0;
@@ -67,7 +67,7 @@ function AssistantMessageBody({ message }) {
           return null;
         }
         return (
-          <Markdown className="message-markdown" key={`text:${index}`}>
+          <Markdown className="message-markdown" key={`text:${index}`} workspaceRoot={workspaceRoot}>
             {segment.text}
           </Markdown>
         );
@@ -81,6 +81,7 @@ export function ChatConversation({
   permissions,
   tools,
   running = false,
+  workspaceRoot = '',
   onResolvePermission,
   emptyTitle = '准备开始',
 }) {
@@ -149,7 +150,7 @@ export function ChatConversation({
               {isUser ? (
                 <p className="message-plain">{message.text}</p>
               ) : (
-                <AssistantMessageBody message={message} />
+                <AssistantMessageBody message={message} workspaceRoot={workspaceRoot} />
               )}
             </div>
           );

@@ -652,6 +652,7 @@ textarea:focus-visible {
 }
 
 .workspace {
+  --left-panel-width: 280px;
   --right-panel-width: 300px;
   /* display: grid; */
   /* grid-template-columns: 240px minmax(280px, 1fr) var(--right-panel-width); */
@@ -670,12 +671,12 @@ textarea:focus-visible {
 }
 
 .sidebar {
-  flex: 0 0 280px;
+  flex: 0 0 var(--left-panel-width);
   gap: 0;
   overflow: hidden;
   padding: 10px 10px 12px;
   position: relative;
-  width: 280px;
+  width: var(--left-panel-width);
   z-index: 2;
 }
 
@@ -766,21 +767,34 @@ textarea:focus-visible {
   padding: 0 14px;
 }
 
+.left-panel-resizer,
 .right-panel-resizer {
   background: transparent;
   border: 0;
-  bottom: 0;
   cursor: col-resize;
-  left: -3px;
   padding: 0;
-  position: absolute;
-  top: 0;
   touch-action: none;
   user-select: none;
   width: 8px;
   z-index: 6;
 }
 
+.left-panel-resizer {
+  align-self: stretch;
+  flex: 0 0 8px;
+  margin-left: -4px;
+  margin-right: -4px;
+  position: relative;
+}
+
+.right-panel-resizer {
+  bottom: 0;
+  left: -3px;
+  position: absolute;
+  top: 0;
+}
+
+.left-panel-resizer::after,
 .right-panel-resizer::after {
   background: transparent;
   border-radius: 999px;
@@ -794,17 +808,22 @@ textarea:focus-visible {
   width: 2px;
 }
 
+.left-panel-resizer:hover::after,
+.left-panel-resizer:focus-visible::after,
+.workspace.is-resizing-left .left-panel-resizer::after,
 .right-panel-resizer:hover::after,
 .right-panel-resizer:focus-visible::after,
 .workspace.is-resizing-right .right-panel-resizer::after {
   background: var(--color-brand-action, #2563eb);
 }
 
+.workspace.is-resizing-left,
 .workspace.is-resizing-right {
   cursor: col-resize;
   user-select: none;
 }
 
+.workspace.is-resizing-left *,
 .workspace.is-resizing-right * {
   cursor: col-resize !important;
 }
@@ -2376,7 +2395,14 @@ textarea:focus-visible {
 }
 
 .todo-composer-strip {
+  transition: transform 140ms ease;
+  will-change: transform;
   width: 100%;
+}
+
+.todo-composer-strip.is-dragging {
+  transition: none;
+  user-select: none;
 }
 
 .todo-composer-panel {
@@ -2419,6 +2445,36 @@ textarea:focus-visible {
   min-width: 0;
   padding: 2px 2px;
   text-align: left;
+}
+
+.todo-composer-drag-handle {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: grab;
+  display: inline-flex;
+  flex: 0 0 20px;
+  justify-content: center;
+  margin-left: -4px;
+  padding: 0;
+  touch-action: none;
+  width: 20px;
+}
+
+.todo-composer-drag-handle:hover,
+.todo-composer-drag-handle:focus-visible {
+  color: var(--color-text);
+}
+
+.todo-composer-drag-handle:focus-visible {
+  outline: 2px solid var(--color-accent, #2563eb);
+  outline-offset: 1px;
+}
+
+.todo-composer-strip.is-dragging .todo-composer-drag-handle {
+  cursor: grabbing;
 }
 
 .todo-composer-chevron {
@@ -5190,6 +5246,10 @@ textarea:focus-visible {
   }
 
   .right-panel-resizer {
+    display: none;
+  }
+
+  .left-panel-resizer {
     display: none;
   }
 

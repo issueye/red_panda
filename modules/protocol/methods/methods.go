@@ -26,10 +26,10 @@ const (
 	// Gateway-backed state tools (memory/todo/goal/context) — stable internal RPCs.
 	// Prefer StateToolExecute for new Runtime code; domain methods remain for
 	// compatibility (docs/41 W2-3).
-	MemoryToolExecute   = "memory.tool.execute"
-	TodoToolExecute     = "todo.tool.execute"
-	GoalToolExecute     = "goal.tool.execute"
-	ContextToolExecute  = "context.tool.execute"
+	MemoryToolExecute  = "memory.tool.execute"
+	TodoToolExecute    = "todo.tool.execute"
+	GoalToolExecute    = "goal.tool.execute"
+	ContextToolExecute = "context.tool.execute"
 	// ScheduleToolExecute is also defined in schedule.go for discoverability.
 	StateToolExecute = "state.tool.execute"
 
@@ -154,6 +154,7 @@ type RunExecuteOptions struct {
 	ProviderName        string                        `json:"provider_name,omitempty"`
 	ProviderBaseURL     string                        `json:"provider_base_url,omitempty"`
 	ProviderAPIKey      string                        `json:"provider_api_key,omitempty"`
+	ProviderStream      *bool                         `json:"provider_stream,omitempty"`
 	Model               string                        `json:"model,omitempty"`
 	PermissionMode      string                        `json:"permission_mode,omitempty"`
 	ToolPolicy          string                        `json:"tool_policy,omitempty"`
@@ -370,6 +371,7 @@ type ReplyOptions struct {
 	ProviderName      string         `json:"provider_name,omitempty"`
 	ProviderBaseURL   string         `json:"provider_base_url,omitempty"`
 	ProviderAPIKey    string         `json:"provider_api_key,omitempty"`
+	ProviderStream    *bool          `json:"provider_stream,omitempty"`
 	Model             string         `json:"model,omitempty"`
 	PermissionMode    string         `json:"permission_mode,omitempty"`
 	ToolPolicy        string         `json:"tool_policy,omitempty"`

@@ -19,7 +19,8 @@ export function displayToolOutput(output, error = '') {
   const text = String(parsed.text || '').trim();
   const parsedError = String(parsed.error || '').trim();
   if (parsed.ok === false && (text === parsedError || text === String(error || '').trim())) {
-    return '';
+    const raw = String(parsed.data?.raw || '').trim();
+    return raw && raw !== parsedError ? raw : '';
   }
   if (text) return text;
   if (parsed.data != null && Object.keys(parsed.data || {}).length > 0) {

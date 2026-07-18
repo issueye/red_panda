@@ -6,6 +6,7 @@ export const emptyProfileDraft = {
   maxTokens: '',
   apiKey: '',
   isDefault: false,
+  stream: true,
   active: true,
 };
 
@@ -41,6 +42,7 @@ export function normalizeProviderProfile(item) {
     apiKeySet: Boolean(item.api_key_set),
     apiKeyMasked: item.api_key_masked || item.masked_api_key || item.api_key_preview || '',
     isDefault: Boolean(item.is_default),
+    stream: item.stream !== false,
     active: item.active !== false,
     createdAt: item.created_at,
     updatedAt: item.updated_at,
@@ -59,6 +61,7 @@ export function profileDraftFrom(profile) {
     maxTokens: profile.maxTokens > 0 ? String(profile.maxTokens) : '',
     apiKey: '',
     isDefault: Boolean(profile.isDefault),
+    stream: profile.stream !== false,
     active: profile.active !== false,
   };
 }
@@ -79,6 +82,7 @@ export function providerProfileCreatePayload(input) {
     max_tokens: parseMaxTokensInput(input.maxTokens),
     api_key: input.apiKey,
     is_default: Boolean(input.isDefault),
+    stream: input.stream !== false,
   };
 }
 
@@ -91,6 +95,7 @@ export function providerProfileUpdatePayload(input) {
     max_tokens: parseMaxTokensInput(input.maxTokens),
     api_key: input.apiKey || undefined,
     is_default: Boolean(input.isDefault),
+    stream: input.stream !== false,
     active: input.active !== false,
   });
 }

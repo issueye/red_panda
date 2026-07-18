@@ -42,6 +42,7 @@ func TestOpenAICompatibleMessagesGolden(t *testing.T) {
 func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 	var auth string
 	var model string
+	var stream bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
 		var body map[string]any
@@ -49,7 +50,9 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 			t.Fatal(err)
 		}
 		model, _ = body["model"].(string)
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"profile ok"}}]}`))
+		stream, _ = body["stream"].(bool)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"profile ok\"}}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 
@@ -61,8 +64,8 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if auth != "Bearer sk-profile" || model != "profile-model" {
-		t.Fatalf("override mismatch auth=%q model=%q", auth, model)
+	if auth != "Bearer sk-profile" || model != "profile-model" || !stream {
+		t.Fatalf("override mismatch auth=%q model=%q stream=%v", auth, model, stream)
 	}
 	if len(chunks) != 2 || chunks[0].Delta != "profile ok" || !chunks[1].Final {
 		t.Fatalf("chunks = %#v", chunks)

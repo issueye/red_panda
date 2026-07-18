@@ -18,6 +18,7 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await expect(failedTool).toContainText('Shell command');
   await expect(failedTool).toHaveClass(/tool-failed/);
   await expect(failedTool.getByTestId('tool-error')).toHaveText('exit status 1');
+  await expect(failedTool.getByTestId('tool-output')).toHaveText('go: cannot find main module; see go help modules');
 
   await expect(page.getByTestId('permission-card')).toHaveCount(2);
   expect(await page.locator('.conversation > [data-timeline-type]').evaluateAll((items) => (
@@ -182,6 +183,43 @@ test('Goal information can be dragged, restored, and reset', async ({ page }) =>
 
   await page.reload();
   await page.getByTestId('fixture-goal-mode').click();
+  const restored = await strip.boundingBox();
+  expect(restored.x).toBeGreaterThan(initial.x + 20);
+  expect(restored.y).toBeLessThan(initial.y - 20);
+
+  await handle.dblclick();
+  await expect.poll(async () => (await strip.boundingBox()).x).toBeLessThan(initial.x + 8);
+  await expect.poll(async () => (await strip.boundingBox()).y).toBeGreaterThan(initial.y - 8);
+});
+
+test('Collapsed task strip can be dragged, restored, and reset', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+
+  const strip = page.getByTestId('todo-composer-strip');
+  const handle = page.getByTestId('todo-drag-handle');
+  await expect(strip).toBeVisible();
+  await expect(handle).toHaveAttribute('aria-label', '拖动任务信息');
+
+  const initial = await strip.boundingBox();
+  const grip = await handle.boundingBox();
+  expect(initial).not.toBeNull();
+  expect(grip).not.toBeNull();
+
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 + 72, grip.y + grip.height / 2 - 56, { steps: 8 });
+  await page.mouse.up();
+
+  const moved = await strip.boundingBox();
+  expect(moved.x).toBeGreaterThan(initial.x + 20);
+  expect(moved.y).toBeLessThan(initial.y - 20);
+  expect(moved.x).toBeGreaterThanOrEqual(8);
+  expect(moved.x + moved.width).toBeLessThanOrEqual(1280 - 8);
+  await expect.poll(() => page.evaluate(() => (
+    window.localStorage.getItem('red_panda_todo_strip_position_v1')
+  ))).not.toBeNull();
+
+  await page.reload();
   const restored = await strip.boundingBox();
   expect(restored.x).toBeGreaterThan(initial.x + 20);
   expect(restored.y).toBeLessThan(initial.y - 20);

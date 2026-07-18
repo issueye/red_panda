@@ -220,7 +220,7 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
           </div>
           <ErrorMessage as="div" className="workspace-error">{error}</ErrorMessage>
           {showMarkdown ? (
-            <Markdown className="workspace-markdown-preview">{previewContent}</Markdown>
+            <Markdown className="workspace-markdown-preview" workspaceRoot={workspaceRoot}>{previewContent}</Markdown>
           ) : (
             <pre className="workspace-preview-source">{previewContent}</pre>
           )}

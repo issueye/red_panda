@@ -64,6 +64,33 @@ test('narrow app layout keeps right panel tools reachable without horizontal ove
   expect(hasHorizontalOverflow).toBe(false);
 });
 
+test('desktop side panels resize by dragging their separators', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+
+  const sidebar = page.locator('.sidebar');
+  const leftHandle = page.getByTestId('left-panel-resizer');
+  const leftBefore = await sidebar.boundingBox();
+  const leftHandleBox = await leftHandle.boundingBox();
+  await page.mouse.move(leftHandleBox.x + leftHandleBox.width / 2, leftHandleBox.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(leftHandleBox.x + leftHandleBox.width / 2 + 48, leftHandleBox.y + 120);
+  await page.mouse.up();
+  const leftAfter = await sidebar.boundingBox();
+  expect(leftAfter.width).toBeGreaterThan(leftBefore.width + 40);
+
+  const rightPanel = page.locator('.right-panel');
+  const rightHandle = page.getByTestId('right-panel-resizer');
+  const rightBefore = await rightPanel.boundingBox();
+  const rightHandleBox = await rightHandle.boundingBox();
+  await page.mouse.move(rightHandleBox.x + rightHandleBox.width / 2, rightHandleBox.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(rightHandleBox.x + rightHandleBox.width / 2 - 48, rightHandleBox.y + 120);
+  await page.mouse.up();
+  const rightAfter = await rightPanel.boundingBox();
+  expect(rightAfter.width).toBeGreaterThan(rightBefore.width + 40);
+});
+
 test('settings uses the full viewport at the compact breakpoint', async ({ page }) => {
   await page.setViewportSize({ width: 520, height: 760 });
   await page.goto('/');

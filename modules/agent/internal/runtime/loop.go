@@ -247,7 +247,10 @@ func (r *Runtime) consumeProviderChunk(
 		*requestedCalls = append(*requestedCalls, chunk.ToolCalls...)
 		return nil
 	}
-	if strings.TrimSpace(chunk.Delta) == "" && !chunk.Final {
+	// Streaming providers commonly emit Markdown line breaks as standalone
+	// "\n" / "\n\n" deltas. Only discard a truly empty chunk; trimming here
+	// flattens headings, lists, and tables into one paragraph.
+	if chunk.Delta == "" && !chunk.Final {
 		return nil
 	}
 	if strings.TrimSpace(chunk.Delta) != "" {
@@ -255,7 +258,7 @@ func (r *Runtime) consumeProviderChunk(
 	}
 	// 空 Final 标记会关闭根消息流。绑定 Goal 时，外层运行器负责唯一的终止 Final（A5），
 	// 因此延后处理中间空 Final；未绑定的运行仍必须在此关闭消息流。
-	if strings.TrimSpace(chunk.Delta) == "" && chunk.Final {
+	if chunk.Delta == "" && chunk.Final {
 		if r.deferGoalStreamFinal(params.RunID) {
 			return nil
 		}

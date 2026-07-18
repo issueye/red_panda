@@ -60,6 +60,16 @@ const tools = [
     arguments: { command: 'exit 1' },
     status: 'failed',
     error: 'exit status 1',
+    output: JSON.stringify({
+      schema: 'red_panda.tool_result.v1',
+      tool: 'shell.exec',
+      status: 'failed',
+      ok: false,
+      text: 'exit status 1',
+      error: 'exit status 1',
+      data: { raw: 'go: cannot find main module; see go help modules' },
+      meta: {},
+    }),
     runSeq: 3,
   },
 ];

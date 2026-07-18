@@ -83,6 +83,7 @@ func TestProviderNamesRemainStable(t *testing.T) {
 }
 
 func TestProviderFromOptionsCompatibility(t *testing.T) {
+	disableStream := false
 	tests := []struct {
 		name           string
 		options        RequestOptions
@@ -92,6 +93,17 @@ func TestProviderFromOptionsCompatibility(t *testing.T) {
 		wantAPIKey     string
 		wantModel      string
 	}{
+		{
+			name: "profile stream setting overrides fallback",
+			options: RequestOptions{
+				ProviderBaseURL: "https://provider.example/v1",
+				Stream:          &disableStream,
+			},
+			fallbackStream: true,
+			wantOK:         true,
+			wantBaseURL:    "https://provider.example/v1",
+			wantModel:      "default",
+		},
 		{
 			name: "empty provider defaults to OpenAI compatible",
 			options: RequestOptions{
@@ -158,8 +170,12 @@ func TestProviderFromOptionsCompatibility(t *testing.T) {
 			if config.BaseURL != test.wantBaseURL || config.APIKey != test.wantAPIKey || config.Model != test.wantModel {
 				t.Fatalf("provider override = %#v, want base=%q key=%q model=%q", got, test.wantBaseURL, test.wantAPIKey, test.wantModel)
 			}
-			if config.Stream != test.fallbackStream {
-				t.Fatalf("Stream = %v, want fallback value %v", config.Stream, test.fallbackStream)
+			wantStream := test.fallbackStream
+			if test.options.Stream != nil {
+				wantStream = *test.options.Stream
+			}
+			if config.Stream != wantStream {
+				t.Fatalf("Stream = %v, want %v", config.Stream, wantStream)
 			}
 			if config.Client == nil || config.Client.Timeout != 90*time.Second {
 				t.Fatalf("override client = %#v, want 90s timeout", config.Client)

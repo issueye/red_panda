@@ -93,6 +93,37 @@ func stableToolDefinitions() []ptools.Definition {
 			},
 		},
 		{
+			Name:        "workspace.find_files",
+			DisplayName: "Find files",
+			Description: "Find files by filename, substring, or glob pattern inside the active workspace. Skips generated and dependency directories.",
+			Risk:        ptools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"pattern":     map[string]any{"type": "string", "description": "Filename substring or glob such as *.go or modules/**/*.jsx."},
+					"path":        map[string]any{"type": "string", "description": "Workspace-relative directory to search. Defaults to workspace root."},
+					"max_results": map[string]any{"type": "integer", "description": "Maximum matching paths to return (default 200, max 1000)."},
+				},
+				"required": []string{"pattern"},
+			},
+		},
+		{
+			Name:        "workspace.read_files",
+			DisplayName: "Read files",
+			Description: "Read up to 12 text files from the active workspace in one call, with clear per-file headings.",
+			Risk:        ptools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"paths": map[string]any{
+						"type": "array", "description": "Workspace-relative text file paths.",
+						"items": map[string]any{"type": "string"}, "maxItems": defaultReadFiles,
+					},
+				},
+				"required": []string{"paths"},
+			},
+		},
+		{
 			Name:        "workspace.write_file",
 			DisplayName: "Write file",
 			Description: "Write text content to a file inside the active workspace.",
@@ -150,6 +181,53 @@ func stableToolDefinitions() []ptools.Definition {
 					"patch": map[string]any{"type": "string", "description": "Unified diff patch to apply inside the workspace."},
 				},
 				"required": []string{"patch"},
+			},
+		},
+		{
+			Name:        "git.status",
+			DisplayName: "Git status",
+			Description: "Show the current branch and concise working tree status without modifying the repository.",
+			Risk:        ptools.RiskLow,
+			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			Name:        "git.diff",
+			DisplayName: "Git diff",
+			Description: "Show an unstaged, staged, or revision-based Git diff, optionally limited to one workspace path.",
+			Risk:        ptools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"staged":   map[string]any{"type": "boolean", "description": "Show staged changes."},
+					"revision": map[string]any{"type": "string", "description": "Optional revision or range such as HEAD~1 or main...HEAD."},
+					"path":     map[string]any{"type": "string", "description": "Optional workspace-relative path."},
+				},
+			},
+		},
+		{
+			Name:        "git.log",
+			DisplayName: "Git log",
+			Description: "Show recent commits in a concise format, optionally limited to one workspace path.",
+			Risk:        ptools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"max_count": map[string]any{"type": "integer", "description": "Maximum commits to return (default 10, max 50)."},
+					"path":      map[string]any{"type": "string", "description": "Optional workspace-relative path."},
+				},
+			},
+		},
+		{
+			Name:        "git.show",
+			DisplayName: "Git show",
+			Description: "Show commit metadata and patch for a revision, optionally limited to one workspace path.",
+			Risk:        ptools.RiskLow,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"revision": map[string]any{"type": "string", "description": "Revision to show. Defaults to HEAD."},
+					"path":     map[string]any{"type": "string", "description": "Optional workspace-relative path."},
+				},
 			},
 		},
 		{

@@ -239,6 +239,10 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 		return runWorkspaceStats(runCtx.WorkingDir, StringArgDefault(call.Arguments, "path", "."), IntArg(call.Arguments, "max_depth", 4))
 	case "workspace.grep":
 		return runGrepWorkspace(runCtx.WorkingDir, StringArg(call.Arguments, "pattern"), StringArgDefault(call.Arguments, "path", "."), IntArg(call.Arguments, "max_matches", defaultGrepMatches))
+	case "workspace.find_files":
+		return runFindFiles(runCtx.WorkingDir, StringArgDefault(call.Arguments, "path", "."), StringArg(call.Arguments, "pattern"), IntArg(call.Arguments, "max_results", defaultFindFiles))
+	case "workspace.read_files":
+		return runReadFiles(runCtx.WorkingDir, stringListArg(call.Arguments, "paths"))
 	case "workspace.write_file":
 		return runWriteFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"), StringArg(call.Arguments, "content"))
 	case "workspace.edit_file":
@@ -248,6 +252,14 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 		return runDiffFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"), content, hasContent, StringArg(call.Arguments, "old_text"), StringArg(call.Arguments, "new_text"), BoolArg(call.Arguments, "replace_all", false))
 	case "workspace.apply_patch":
 		return runApplyPatch(runCtx.WorkingDir, StringArg(call.Arguments, "patch"))
+	case "git.status":
+		return runGitStatus(ctx, runCtx.WorkingDir)
+	case "git.diff":
+		return runGitDiff(ctx, runCtx.WorkingDir, BoolArg(call.Arguments, "staged", false), StringArg(call.Arguments, "revision"), StringArg(call.Arguments, "path"))
+	case "git.log":
+		return runGitLog(ctx, runCtx.WorkingDir, IntArg(call.Arguments, "max_count", 10), StringArg(call.Arguments, "path"))
+	case "git.show":
+		return runGitShow(ctx, runCtx.WorkingDir, StringArg(call.Arguments, "revision"), StringArg(call.Arguments, "path"))
 	case "shell.exec":
 		return runShell(ctx, runCtx.WorkingDir, StringArg(call.Arguments, "command"))
 	case "skill.list":

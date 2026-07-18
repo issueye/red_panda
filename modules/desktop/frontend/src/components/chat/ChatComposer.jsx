@@ -48,9 +48,9 @@ function TokenProgressRing({
     : softBudget
       ? `估算上下文约 ${formatTokenCount(used)} Token（未设置上限；在供应商配置中填写「最大 Token 数」以启用预算与自动摘要）`
       : '未设置最大 Token：在供应商配置中填写上下文窗口';
-  const label = enabled
-    ? `${percent}`
-    : (used > 0 ? formatTokenCount(used) : '—');
+  // Show the changing token estimate in the centre; percentage remains in the
+  // accessible label/tooltip. This avoids a static "1%" across long sessions.
+  const label = used > 0 ? formatTokenCount(used) : '—';
 
   return (
     <div
@@ -77,10 +77,8 @@ function TokenProgressRing({
           cy="12"
           pathLength="100"
           r={RING_RADIUS}
-          style={{
-            strokeDasharray: 100,
-            strokeDashoffset: offset,
-          }}
+          strokeDasharray="100 100"
+          strokeDashoffset={offset}
         />
       </svg>
       <span className="composer-token-ring-label">

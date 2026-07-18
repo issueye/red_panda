@@ -175,7 +175,9 @@ export function ringFillRatio(used, maxTokens) {
   if (max <= 0) return 0;
   if (safeUsed <= 0) return 0;
   const raw = Math.min(1, safeUsed / max);
-  return Math.max(MIN_VISIBLE_RATIO, raw);
+  // Reserve a small visible starting arc, then map the complete real range
+  // continuously. The previous hard floor made low usage look frozen.
+  return Math.min(1, MIN_VISIBLE_RATIO + raw * (1 - MIN_VISIBLE_RATIO));
 }
 
 /**

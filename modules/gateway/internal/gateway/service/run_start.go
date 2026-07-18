@@ -270,6 +270,7 @@ func (r RunService) applyProviderProfile(params *methods.RunExecuteParams) error
 	params.Options.ProviderName = profile.Provider
 	params.Options.ProviderBaseURL = profile.BaseURL
 	params.Options.ProviderAPIKey = profile.APIKeySecret
+	params.Options.ProviderStream = &profile.Stream
 	if params.Options.Model == "" {
 		params.Options.Model = profile.Model
 	}

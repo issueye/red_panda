@@ -749,6 +749,7 @@ func TestRunServiceApplyProviderProfile(t *testing.T) {
 		Model:        "profile-model",
 		APIKeySecret: "sk-profile",
 		IsDefault:    true,
+		Stream:       false,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -765,6 +766,7 @@ func TestRunServiceApplyProviderProfile(t *testing.T) {
 	if params.Options.ProviderName != "openai_compatible" ||
 		params.Options.ProviderBaseURL != "https://provider.invalid/v1" ||
 		params.Options.ProviderAPIKey != "sk-profile" ||
+		params.Options.ProviderStream == nil || *params.Options.ProviderStream ||
 		params.Options.Model != "profile-model" {
 		t.Fatalf("provider profile options mismatch: %#v", params.Options)
 	}

@@ -75,6 +75,26 @@ const RIGHT_PANEL_WIDTH_KEY = 'red_panda_right_panel_width';
 const RIGHT_PANEL_WIDTH_DEFAULT = 300;
 const RIGHT_PANEL_WIDTH_MIN = 220;
 const RIGHT_PANEL_WIDTH_MAX = 560;
+const LEFT_PANEL_WIDTH_KEY = 'red_panda_left_panel_width';
+const LEFT_PANEL_WIDTH_DEFAULT = 280;
+const LEFT_PANEL_WIDTH_MIN = 220;
+const LEFT_PANEL_WIDTH_MAX = 480;
+
+function clampLeftPanelWidth(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return LEFT_PANEL_WIDTH_DEFAULT;
+  return Math.min(LEFT_PANEL_WIDTH_MAX, Math.max(LEFT_PANEL_WIDTH_MIN, Math.round(n)));
+}
+
+function loadLeftPanelWidth() {
+  if (typeof window === 'undefined') return LEFT_PANEL_WIDTH_DEFAULT;
+  try {
+    const saved = window.localStorage.getItem(LEFT_PANEL_WIDTH_KEY);
+    return saved == null ? LEFT_PANEL_WIDTH_DEFAULT : clampLeftPanelWidth(saved);
+  } catch {
+    return LEFT_PANEL_WIDTH_DEFAULT;
+  }
+}
 
 function clampRightPanelWidth(value) {
   const n = Number(value);
@@ -125,6 +145,8 @@ export function App() {
   const [rightPanelTab, setRightPanelTab] = useState('activity');
   const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
   const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(false);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(loadLeftPanelWidth);
+  const [leftPanelResizing, setLeftPanelResizing] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(loadRightPanelWidth);
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [compactLayout, setCompactLayout] = useState(() => (
@@ -178,6 +200,7 @@ export function App() {
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
   const rightPanelResizeRef = useRef(null);
+  const leftPanelResizeRef = useRef(null);
   const hydrateGoalsRef = useRef(async () => {});
   const upsertSessionRef = useRef(null);
   const selectSessionRef = useRef(null);
@@ -309,6 +332,14 @@ export function App() {
 
   useEffect(() => {
     try {
+      window.localStorage.setItem(LEFT_PANEL_WIDTH_KEY, String(leftPanelWidth));
+    } catch {
+      // Local storage is optional in embedded desktop previews.
+    }
+  }, [leftPanelWidth]);
+
+  useEffect(() => {
+    try {
       window.localStorage.setItem('red_panda_run_settings', JSON.stringify(runSettings));
     } catch {
       // Local storage is optional in embedded desktop previews.
@@ -322,6 +353,30 @@ export function App() {
       // Local storage is optional in embedded desktop previews.
     }
   }, [rightPanelWidth]);
+
+  useEffect(() => {
+    if (!leftPanelResizing) return undefined;
+
+    function onPointerMove(event) {
+      const start = leftPanelResizeRef.current;
+      if (!start) return;
+      setLeftPanelWidth(clampLeftPanelWidth(start.startWidth + (event.clientX - start.startX)));
+    }
+
+    function onPointerUp() {
+      setLeftPanelResizing(false);
+      leftPanelResizeRef.current = null;
+    }
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+  }, [leftPanelResizing]);
 
   useEffect(() => {
     if (!rightPanelResizing) return undefined;
@@ -357,6 +412,21 @@ export function App() {
       startWidth: rightPanelWidth,
     };
     setRightPanelResizing(true);
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture is optional.
+    }
+  }
+
+  function startLeftPanelResize(event) {
+    if (compactLayout) return;
+    event.preventDefault();
+    leftPanelResizeRef.current = {
+      startX: event.clientX,
+      startWidth: leftPanelWidth,
+    };
+    setLeftPanelResizing(true);
     try {
       event.currentTarget.setPointerCapture?.(event.pointerId);
     } catch {
@@ -787,9 +857,13 @@ export function App() {
       <main
         className={[
           'workspace',
+          leftPanelResizing ? 'is-resizing-left' : '',
           rightPanelResizing ? 'is-resizing-right' : '',
         ].filter(Boolean).join(' ')}
-        style={compactLayout ? undefined : { '--right-panel-width': `${rightPanelWidth}px` }}
+        style={compactLayout ? undefined : {
+          '--left-panel-width': `${leftPanelWidth}px`,
+          '--right-panel-width': `${rightPanelWidth}px`,
+        }}
       >
         <Sidebar
           currentSessionId={currentSessionId}
@@ -815,6 +889,36 @@ export function App() {
           workspacePanel={workspacePanel}
           workspaces={recentWorkspaces}
         />
+        {!compactLayout ? (
+          <button
+            aria-label="拖拽调整左侧面板宽度"
+            aria-orientation="vertical"
+            aria-valuemax={LEFT_PANEL_WIDTH_MAX}
+            aria-valuemin={LEFT_PANEL_WIDTH_MIN}
+            aria-valuenow={leftPanelWidth}
+            className="left-panel-resizer"
+            data-testid="left-panel-resizer"
+            onDoubleClick={() => setLeftPanelWidth(LEFT_PANEL_WIDTH_DEFAULT)}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                setLeftPanelWidth((width) => clampLeftPanelWidth(width - 16));
+              } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                setLeftPanelWidth((width) => clampLeftPanelWidth(width + 16));
+              } else if (event.key === 'Home') {
+                event.preventDefault();
+                setLeftPanelWidth(LEFT_PANEL_WIDTH_MIN);
+              } else if (event.key === 'End') {
+                event.preventDefault();
+                setLeftPanelWidth(LEFT_PANEL_WIDTH_MAX);
+              }
+            }}
+            onPointerDown={startLeftPanelResize}
+            role="separator"
+            type="button"
+          />
+        ) : null}
         <WorkspacePickerDialog
           currentRoot={workspace?.root_path || workspace?.root || ''}
           onBrowse={browseWorkspaceDirectory}
@@ -872,6 +976,7 @@ export function App() {
           tokenSoftBudget={contextTokenBudget.softBudget}
           tokenUsed={contextTokenBudget.used}
           tools={tools}
+          workspaceRoot={currentWorkspaceRoot()}
         />
         <div
           aria-label="辅助面板"

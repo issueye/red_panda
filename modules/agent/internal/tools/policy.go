@@ -53,6 +53,27 @@ func opsToolExposed(options methods.ReplyOptions, name string) bool {
 	return ContainsString(options.ToolAllowlist, name)
 }
 
+func isContextTool(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), "context.")
+}
+
+// Context tools address a Goal-scoped scratchpad. Expose them only when the
+// run carries a concrete Goal ID, or when trusted Runtime code marks a child as
+// a Goal specialist. Generic chats/workers must not invent placeholder IDs.
+func contextToolExposed(options methods.ReplyOptions, name string) bool {
+	if !isContextTool(name) {
+		return true
+	}
+	if strings.TrimSpace(options.GoalID) != "" {
+		return true
+	}
+	if options.GoalContext != nil && strings.TrimSpace(options.GoalContext.GoalID) != "" {
+		return true
+	}
+	return options.SpecialistContext != nil &&
+		strings.EqualFold(strings.TrimSpace(options.SpecialistContext.Kind), "specialist")
+}
+
 type ToolDecisionAction string
 
 const (
@@ -72,6 +93,9 @@ func EvaluateToolPolicy(options methods.ReplyOptions, call ptools.Call) ToolDeci
 	}
 	if ContainsString(options.ToolDenylist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is denied by tool_denylist"}
+	}
+	if !contextToolExposed(options, call.Name) {
+		return ToolDecision{Action: ToolDecisionDeny, Reason: "context tool requires a bound goal"}
 	}
 	allowlist := effectiveToolAllowlist(options)
 	if len(allowlist) > 0 && !ContainsString(allowlist, call.Name) {
@@ -138,8 +162,14 @@ var goalModeDefaultAllowlist = []string{
 	"workspace.list",
 	"workspace.stats",
 	"workspace.grep",
+	"workspace.find_files",
+	"workspace.read_files",
 	"workspace.write_file",
 	"workspace.diff_file",
+	"git.status",
+	"git.diff",
+	"git.log",
+	"git.show",
 	// workspace.edit_file / workspace.apply_patch: opt-in via client allowlist or non-goal chat.
 	"shell.exec",
 	// todo.* intentionally omitted: Goal uses goal.plan actions (docs/41 W0-3).
@@ -239,6 +269,9 @@ func AvailableToolsForOptions(definitions []ptools.Definition, options methods.R
 			continue
 		}
 		if ContainsString(options.ToolDenylist, definition.Name) {
+			continue
+		}
+		if !contextToolExposed(options, definition.Name) {
 			continue
 		}
 		if len(allowlist) > 0 && !ContainsString(allowlist, definition.Name) {

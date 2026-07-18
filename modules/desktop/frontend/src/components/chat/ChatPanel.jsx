@@ -49,6 +49,7 @@ export function ChatPanel({
   tokenDisplayRatio = 0,
   tokenBudgetEnabled = false,
   tokenSoftBudget = false,
+  workspaceRoot = '',
 }) {
   const activeTab = conversationTabs.find((tab) => tab.id === activeConversationTab)
     || conversationTabs[0]
@@ -163,6 +164,7 @@ export function ChatPanel({
         tokenSoftBudget={tokenSoftBudget}
         tokenUsed={tokenUsed}
         tools={scoped.tools}
+        workspaceRoot={workspaceRoot}
       />
     </section>
   );

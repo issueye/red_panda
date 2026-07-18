@@ -343,6 +343,7 @@ type ProviderProfile struct {
 	MaxTokens    int
 	APIKeySecret string
 	IsDefault    bool `gorm:"index"`
+	Stream       bool `gorm:"not null"`
 	Active       bool `gorm:"index"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -376,11 +377,11 @@ type MCPServerConfig struct {
 // WorkerProfile configures how a Worker executes an Assignment. It is not a
 // runtime Worker instance and therefore carries no Worker or Assignment state.
 type WorkerProfile struct {
-	ID              string `gorm:"primaryKey"`
-	Key             string `gorm:"uniqueIndex:idx_worker_profiles_key,where:deleted_at IS NULL"`
-	Name            string
-	NameZH          string
-	Kind            string `gorm:"index"` // builtin | custom
+	ID     string `gorm:"primaryKey"`
+	Key    string `gorm:"uniqueIndex:idx_worker_profiles_key,where:deleted_at IS NULL"`
+	Name   string
+	NameZH string
+	Kind   string `gorm:"index"` // builtin | custom
 	// Phase is a capability tag for grouping/display only (docs/41 W3-4).
 	// Wire/API field remains "phase" for compatibility; it is NOT a Goal pipeline stage.
 	// Preferred values: research|strategy|build|review|assess|general|custom

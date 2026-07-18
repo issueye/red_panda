@@ -1,5 +1,13 @@
 package runtime
 
+// rootAgentFileChangeReportPolicy keeps code handoffs auditable and makes the
+// reported paths clickable in Desktop Markdown.
+const rootAgentFileChangeReportPolicy = `File change reporting:
+- If this run changes workspace files, call git.status before the final response when available.
+- The final response MUST contain a concise "变更文件" section listing every changed, added, deleted, or renamed file.
+- Render each workspace-relative path as a Markdown link whose href is that same relative path, so Desktop can reveal it in the file manager.
+- Do not claim a file changed unless tool results or git.status provide evidence. If no files changed, omit the section.`
+
 // rootAgentOrchestrationPolicy 仅注入可调用子代理工具的根运行。
 // 专业子代理不会接收该策略，因为它们不能嵌套创建子代理。
 const rootAgentOrchestrationPolicy = `You are the red_panda root orchestrator.

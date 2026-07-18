@@ -9,8 +9,9 @@ import (
 
 func TestStableToolRegistryPreservesPublicOrder(t *testing.T) {
 	want := []string{
-		"workspace.read_file", "workspace.list", "workspace.stats", "workspace.grep",
+		"workspace.read_file", "workspace.list", "workspace.stats", "workspace.grep", "workspace.find_files", "workspace.read_files",
 		"workspace.write_file", "workspace.edit_file", "workspace.diff_file", "workspace.apply_patch",
+		"git.status", "git.diff", "git.log", "git.show",
 		"shell.exec",
 		"skill.list", "skill.create", "skill.update", "skill.delete", "skill.run",
 		"worker.delegate", "worker.list", "worker.cancel", "worker.pool_status", "worker.send", "worker.receive",
@@ -57,6 +58,7 @@ func TestStableToolRegistryProvidesDefinitionAndTimeout(t *testing.T) {
 		wantTimeout int64
 	}{
 		"workspace.read_file": {wantRisk: ptools.RiskLow, wantTimeout: int64(defaultLocalToolTimeout)},
+		"git.diff":            {wantRisk: ptools.RiskLow, wantTimeout: int64(defaultLocalToolTimeout)},
 		"memory.create":       {wantRisk: ptools.RiskHigh, wantTimeout: int64(defaultGatewayToolTimeout)},
 		"context.write":       {wantRisk: ptools.RiskHigh, wantTimeout: int64(defaultGatewayToolTimeout)},
 		"shell.exec":          {wantRisk: ptools.RiskHigh, wantTimeout: 0},

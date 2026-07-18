@@ -59,6 +59,17 @@ func TestStandardizeToolOutputFailure(t *testing.T) {
 	}
 }
 
+func TestStandardizeToolOutputFailurePreservesCommandDiagnostics(t *testing.T) {
+	out := StandardizeToolOutput("shell.exec", "compile.go:12: undefined: value", fmtError("exit status 1"), 8)
+	env, ok := ParseStandardToolResult(out)
+	if !ok || env.OK {
+		t.Fatalf("expected failed envelope: %#v ok=%v", env, ok)
+	}
+	if env.Text != "compile.go:12: undefined: value" || env.Error != "exit status 1" {
+		t.Fatalf("failure diagnostics were lost: %#v", env)
+	}
+}
+
 func TestModelFacingToolContentKeepsSchemaAndMarksTruncation(t *testing.T) {
 	big := strings.Repeat("a", maxToolResultForModel+100)
 	result := ptools.Result{
