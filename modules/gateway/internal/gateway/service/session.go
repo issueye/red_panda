@@ -1,12 +1,9 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -19,34 +16,19 @@ import (
 	"redpanda/protocol/methods"
 )
 
-const compactPauseTimeout = 20 * time.Second
-
-// Compact concurrency contract (docs/48 Wave A):
-//  1. At most one Compact or CompactPreview critical section per session_id.
-//  2. Root run may stay active; pause is DelegatedOnly (Worker assignments).
-//  3. Apply always re-plans from fullHistory after pause (server truth).
-//  4. This wave does not cancel root runs (auto-compact product path).
-var errSessionCompactInProgress = errors.New("session compact already in progress")
-
-// sessionCompactGate is heap-allocated so SessionService value copies share one lock.
-type sessionCompactGate struct {
-	mu         sync.Mutex
-	compacting map[string]struct{}
-}
-
 type SessionService struct {
 	repos     repository.Set
 	store     sessionStore
-	lifecycle sessionLifecycle
+	purge     PurgeService
 	runtime   *runtimeclient.Client
 	hub       *eventhub.Hub
-	// compactGate must be a pointer: Set/controllers copy SessionService by value.
-	compactGate *sessionCompactGate
-}
-
-type compactPauseState struct {
-	runIDs []string
-	paused int
+	// packer is the shared model-context packer (docs/plans/2026-07-19-convergence-wave.md
+	// Wave B Task B1). Injected by Set so SessionService and RunService share one instance.
+	packer *SessionContextPacker
+	// compactor owns the compact critical section + plan/summary logic
+	// (docs/plans/2026-07-19-convergence-wave.md Wave B Task B2). Injected by Set
+	// as a pointer so all SessionService value copies share the same compact gate.
+	compactor *SessionCompactor
 }
 
 // SessionDTO is the single-path session wire shape (BREAKING: no title/working_dir aliases).
@@ -221,101 +203,33 @@ type ContextUsageDTO struct {
 }
 
 func NewSessionService(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub, archiveDir string) SessionService {
+	return NewSessionServiceWithPacker(repos, runtime, hub, archiveDir, NewSessionContextPacker(repos))
+}
+
+// NewSessionServiceWithPacker constructs a SessionService with an explicit
+// shared context packer. The compactor and store are built internally and
+// shared between SessionService and the compactor (single source of truth for
+// fullHistory / activeSummary reads). Used by Set
+// (docs/plans/2026-07-19-convergence-wave.md Wave B Task B1/B2).
+func NewSessionServiceWithPacker(
+	repos repository.Set,
+	runtime *runtimeclient.Client,
+	hub *eventhub.Hub,
+	archiveDir string,
+	packer *SessionContextPacker,
+) SessionService {
+	store := newSessionStore(repos, archiveDir)
+	compactor := NewSessionCompactor(repos, store, runtime, hub)
 	return SessionService{
-		repos: repos, store: newSessionStore(repos, archiveDir), lifecycle: newSessionLifecycle(repos, runtime, hub, archiveDir),
-		runtime: runtime, hub: hub,
-		compactGate: &sessionCompactGate{compacting: make(map[string]struct{})},
+		repos: repos, store: store, purge: newPurgeService(repos, runtime, hub, archiveDir),
+		runtime: runtime, hub: hub, packer: packer, compactor: compactor,
 	}
 }
 
-// beginSessionCompact acquires the per-session compact critical section.
-// Caller must invoke the returned unlock (typically via defer).
-func (s SessionService) beginSessionCompact(sessionID string) (unlock func(), err error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return func() {}, fmt.Errorf("session id is required")
-	}
-	gate := s.compactGate
-	if gate == nil {
-		return func() {}, fmt.Errorf("session compact gate is not initialized")
-	}
-	gate.mu.Lock()
-	if _, busy := gate.compacting[sessionID]; busy {
-		gate.mu.Unlock()
-		return func() {}, errSessionCompactInProgress
-	}
-	gate.compacting[sessionID] = struct{}{}
-	gate.mu.Unlock()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			gate.mu.Lock()
-			delete(gate.compacting, sessionID)
-			gate.mu.Unlock()
-		})
-	}, nil
-}
-
-// pauseSessionForCompact suspends delegated Workers while each main Worker and
-// root Run remain alive. Paused Assignments retain their process and context.
-func (s SessionService) pauseSessionForCompact(sessionID string) (compactPauseState, error) {
-	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
-	if err != nil {
-		return compactPauseState{}, err
-	}
-	if len(active) == 0 {
-		return compactPauseState{}, nil
-	}
-
-	if s.runtime == nil {
-		return compactPauseState{}, fmt.Errorf("runtime is required to pause active workers")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), compactPauseTimeout)
-	defer cancel()
-
-	state := compactPauseState{runIDs: make([]string, 0, len(active))}
-	for _, run := range active {
-		state.runIDs = append(state.runIDs, run.ID)
-		result, pauseErr := s.runtime.PauseRun(ctx, methods.RunPauseParams{
-			RunID: run.ID, Reason: "session compact", DelegatedOnly: true,
-		})
-		if pauseErr != nil {
-			resumeErr := s.resumeRunsAfterCompact(state.runIDs)
-			return state, errors.Join(pauseErr, resumeErr)
-		}
-		state.paused += result.Paused
-	}
-	return state, nil
-}
-
-func (s SessionService) resumeRunsAfterCompact(runIDs []string) error {
-	if s.runtime == nil || len(runIDs) == 0 {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), compactPauseTimeout)
-	defer cancel()
-	var resumeErr error
-	for _, runID := range runIDs {
-		_, err := s.runtime.ResumeRun(ctx, methods.RunResumeParams{RunID: runID, DelegatedOnly: true})
-		if err != nil {
-			resumeErr = errors.Join(resumeErr, fmt.Errorf("resume run %s: %w", runID, err))
-		}
-	}
-	return resumeErr
-}
-
-func (s SessionService) resumeSessionAfterCompact(sessionID string) error {
-	active, err := s.repos.Runs.ListActiveBySession(sessionID, 50)
-	if err != nil {
-		return err
-	}
-	runIDs := make([]string, 0, len(active))
-	for _, run := range active {
-		runIDs = append(runIDs, run.ID)
-	}
-	return s.resumeRunsAfterCompact(runIDs)
-}
+// beginSessionCompact / pauseSessionForCompact / resumeRunsAfterCompact /
+// resumeSessionAfterCompact / ensureOpenTasks were extracted into
+// SessionCompactor (session_compactor.go, docs/plans/2026-07-19-convergence-wave.md
+// Wave B Task B2). Tests should call them on s.compactor directly.
 
 func (s SessionService) Create(name string, workspaceRoot string) (SessionDTO, error) {
 	session, err := s.repos.Sessions.Create(name, workspaceRoot)
@@ -364,7 +278,7 @@ func (s SessionService) Delete(sessionID string) error {
 		}
 		return err
 	}
-	_, err := s.lifecycle.delete([]string{sessionID}, "user_delete")
+	_, err := s.purge.PurgeSessions([]string{sessionID}, "user_delete")
 	return err
 }
 
@@ -451,177 +365,24 @@ func (s SessionService) Fork(sessionID string, req ForkSessionRequest) (ForkSess
 	return result, nil
 }
 
-func (s SessionService) CompactPreview(sessionID string, req CompactPreviewRequest) (result CompactPreviewResult, err error) {
-	unlock, err := s.beginSessionCompact(sessionID)
-	if err != nil {
-		return CompactPreviewResult{}, err
-	}
-	defer unlock()
-	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
-		return CompactPreviewResult{}, err
-	}
-	// Pause only once per compact flow: preview may run alone; apply pauses again if needed.
-	// Prefer pausing before reading history so mid-run writes do not race the transcript.
-	paused, err := s.pauseSessionForCompact(sessionID)
-	if err != nil {
-		return CompactPreviewResult{}, fmt.Errorf("pause session for compact: %w", err)
-	}
-	defer func() {
-		if resumeErr := s.resumeRunsAfterCompact(paused.runIDs); resumeErr != nil {
-			err = errors.Join(err, fmt.Errorf("resume session after compact: %w", resumeErr))
-		}
-	}()
-	plan, err := s.planCompaction(sessionID, req.SourceRange, req.KeepTailMessages, req.KeepTailTurns)
-	if err != nil {
-		return CompactPreviewResult{}, err
-	}
-	summary, method, err := s.buildCompactSummary(sessionID, plan.SummarizeMessages, plan.StartSeq, plan.EndSeq, compactSummaryOptions{
-		Mode:              req.Mode,
-		ProviderProfileID: req.ProviderProfileID,
-	})
-	if err != nil {
-		return CompactPreviewResult{}, err
-	}
-	return CompactPreviewResult{
-		Preview: CompactPreview{
-			SourceSessionID:  sessionID,
-			SourceStartSeq:   plan.StartSeq,
-			SourceEndSeq:     plan.EndSeq,
-			KeepTailMessages: plan.KeepTailMessages,
-			KeepTailTurns:    plan.KeepTailTurns,
-			SummaryMethod:    method,
-			Summary:          summary,
-		},
-		PausedRuns: paused.paused,
-	}, nil
+// Compact-related entry points delegate to SessionCompactor
+// (docs/plans/2026-07-19-convergence-wave.md Wave B Task B2). Each method
+// preserves its prior signature so callers (controllers, tests) are unchanged.
+
+func (s SessionService) CompactPreview(sessionID string, req CompactPreviewRequest) (CompactPreviewResult, error) {
+	return s.compactor.Preview(sessionID, req)
 }
 
-func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (result CompactSessionResult, err error) {
-	unlock, err := s.beginSessionCompact(sessionID)
-	if err != nil {
-		return CompactSessionResult{}, err
-	}
-	defer unlock()
-	source, err := s.repos.Sessions.Get(sessionID)
-	if err != nil {
-		return CompactSessionResult{}, err
-	}
-	// Always pause again before apply: preview may have been skipped, or a new
-	// run may have started between preview and apply. Re-plan after pause uses
-	// server fullHistory (docs/48).
-	paused, err := s.pauseSessionForCompact(sessionID)
-	if err != nil {
-		return CompactSessionResult{}, fmt.Errorf("pause session for compact: %w", err)
-	}
-	defer func() {
-		if resumeErr := s.resumeRunsAfterCompact(paused.runIDs); resumeErr != nil {
-			err = errors.Join(err, fmt.Errorf("resume session after compact: %w", resumeErr))
-		}
-	}()
-	plan, err := s.planCompaction(sessionID, req.SourceRange, req.KeepTailMessages, req.KeepTailTurns)
-	if err != nil {
-		return CompactSessionResult{}, err
-	}
-	summary := req.Summary
-	summaryMethod := "provided"
-	if strings.TrimSpace(summary.Summary) == "" {
-		built, method, buildErr := s.buildCompactSummary(sessionID, plan.SummarizeMessages, plan.StartSeq, plan.EndSeq, compactSummaryOptions{
-			Mode:              req.Mode,
-			ProviderProfileID: req.ProviderProfileID,
-		})
-		if buildErr != nil {
-			return CompactSessionResult{}, buildErr
-		}
-		summary = built
-		summaryMethod = method
-	} else {
-		summary = s.ensureOpenTasks(sessionID, summary)
-	}
-	summaryJSON, err := json.Marshal(summary)
-	if err != nil {
-		return CompactSessionResult{}, err
-	}
-
-	err = s.repos.DB.Transaction(func(tx *gorm.DB) error {
-		txRepos := repository.NewSet(tx)
-		if err := txRepos.Compactions.SupersedeAppliedInPlace(source.ID); err != nil {
-			return err
-		}
-		compaction, err := txRepos.Compactions.Create(model.SessionCompaction{
-			SourceSessionID:  source.ID,
-			TargetSessionID:  source.ID,
-			Status:           "applied",
-			SourceStartSeq:   plan.StartSeq,
-			SourceEndSeq:     plan.EndSeq,
-			SummaryJSON:      string(summaryJSON),
-			SummaryMethod:    summaryMethod,
-			KeepTailMessages: plan.KeepTailMessages,
-			KeepTailTurns:    plan.KeepTailTurns,
-		})
-		if err != nil {
-			return err
-		}
-		if err := txRepos.Sessions.Touch(source.ID); err != nil {
-			return err
-		}
-		updated, err := txRepos.Sessions.Get(source.ID)
-		if err != nil {
-			return err
-		}
-		result = CompactSessionResult{
-			Session:          sessionDTO(updated),
-			Compaction:       compactionDTO(compaction),
-			Summary:          summary,
-			KeepTailMessages: plan.KeepTailMessages,
-			KeepTailTurns:    plan.KeepTailTurns,
-			PausedRuns:       paused.paused,
-			SummaryMethod:    summaryMethod,
-		}
-		return nil
-	})
-	return result, err
+func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (CompactSessionResult, error) {
+	return s.compactor.Apply(sessionID, req)
 }
 
 func (s SessionService) CompactionState(sessionID string) (CompactionStateResult, error) {
-	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
-		return CompactionStateResult{}, err
-	}
-	row, err := s.repos.Compactions.LatestAppliedInPlace(sessionID)
-	if err == gorm.ErrRecordNotFound {
-		return CompactionStateResult{Active: false}, nil
-	}
-	if err != nil {
-		return CompactionStateResult{}, err
-	}
-	var summary CompactSummary
-	if err := json.Unmarshal([]byte(row.SummaryJSON), &summary); err != nil {
-		return CompactionStateResult{}, fmt.Errorf("decode compaction summary: %w", err)
-	}
-	dto := compactionDTO(row)
-	return CompactionStateResult{
-		Active:     true,
-		Compaction: &dto,
-		Summary:    summary,
-	}, nil
+	return s.compactor.State(sessionID)
 }
 
 func (s SessionService) Summaries(sessionID string) ([]SessionSummaryDTO, error) {
-	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
-		return nil, err
-	}
-	rows, err := s.repos.Compactions.ListForSession(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]SessionSummaryDTO, 0, len(rows))
-	for _, row := range rows {
-		var summary CompactSummary
-		if err := json.Unmarshal([]byte(row.SummaryJSON), &summary); err != nil {
-			return nil, fmt.Errorf("decode compaction summary %s: %w", row.ID, err)
-		}
-		items = append(items, SessionSummaryDTO{Compaction: compactionDTO(row), Summary: summary})
-	}
-	return items, nil
+	return s.compactor.Summaries(sessionID)
 }
 
 func (s SessionService) ContextState(sessionID string) (SessionContextState, error) {
@@ -647,8 +408,8 @@ func (s SessionService) ContextState(sessionID string) (SessionContextState, err
 	if err != nil {
 		return SessionContextState{}, err
 	}
-	// Same packing as buildModelConversation so Desktop ring matches model input (docs/48 C).
-	modelContext, err := loadModelContextForAssembly(s.repos, sessionID)
+	// Same packing as BuildModelConversation so Desktop ring matches model input (docs/48 C).
+	modelContext, err := s.packer.LoadForAssembly(sessionID)
 	if err != nil {
 		return SessionContextState{}, err
 	}
@@ -773,22 +534,6 @@ func messageDTO(row model.Message) (MessageDTO, error) {
 		WorkerID: metadata.WorkerID, ProfileKey: metadata.ProfileKey,
 		Visibility: metadata.Visibility, CreatedAt: row.CreatedAt,
 	}, nil
-}
-
-func (s SessionService) ensureOpenTasks(sessionID string, summary CompactSummary) CompactSummary {
-	if len(summary.OpenTasks) > 0 {
-		return summary
-	}
-	rows, err := s.repos.Todos.ListOpenBySession(sessionID)
-	if err != nil || len(rows) == 0 {
-		return summary
-	}
-	tasks := make([]string, 0, len(rows))
-	for _, row := range rows {
-		tasks = append(tasks, row.Content)
-	}
-	summary.OpenTasks = tasks
-	return summary
 }
 
 func formatCompactSummaryMessage(summary CompactSummary) string {

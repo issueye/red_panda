@@ -39,8 +39,8 @@ type compactionPlan struct {
 
 // planCompaction splits session history into "summarize older" + "keep recent".
 // Prefer keep_tail_turns (conversation rounds) over raw keep_tail_messages.
-func (s SessionService) planCompaction(sessionID string, requested SourceRange, keepTailMessages, keepTailTurns int) (compactionPlan, error) {
-	all, err := s.store.fullHistory(sessionID)
+func (c *SessionCompactor) planCompaction(sessionID string, requested SourceRange, keepTailMessages, keepTailTurns int) (compactionPlan, error) {
+	all, err := c.store.fullHistory(sessionID)
 	if err != nil {
 		return compactionPlan{}, err
 	}
@@ -50,7 +50,7 @@ func (s SessionService) planCompaction(sessionID string, requested SourceRange, 
 
 	// Explicit source_range end still supported for advanced callers.
 	if requested.EndSeq > 0 || (keepTailTurns <= 0 && keepTailMessages > 0) {
-		return s.planCompactionByMessageCount(all, requested, keepTailMessages)
+		return c.planCompactionByMessageCount(all, requested, keepTailMessages)
 	}
 
 	turns := keepTailTurns
@@ -60,7 +60,7 @@ func (s SessionService) planCompaction(sessionID string, requested SourceRange, 
 	return planCompactionByTurns(all, requested.StartSeq, turns), nil
 }
 
-func (s SessionService) planCompactionByMessageCount(all []model.Message, requested SourceRange, keepTailMessages int) (compactionPlan, error) {
+func (c *SessionCompactor) planCompactionByMessageCount(all []model.Message, requested SourceRange, keepTailMessages int) (compactionPlan, error) {
 	latestSeq := all[len(all)-1].Seq
 	startSeq := requested.StartSeq
 	if startSeq == 0 {
@@ -192,7 +192,7 @@ func planCompactionByTurns(all []model.Message, startSeq uint64, turns int) comp
 	}
 }
 
-func (s SessionService) buildCompactSummary(
+func (c *SessionCompactor) buildCompactSummary(
 	sessionID string,
 	messages []model.Message,
 	startSeq uint64,
@@ -208,9 +208,9 @@ func (s SessionService) buildCompactSummary(
 	forceLocal := mode == "local"
 
 	if tryLLM && !forceLocal {
-		summary, err := s.summarizeMessagesWithLLM(messages, startSeq, endSeq, opts.ProviderProfileID)
+		summary, err := c.summarizeMessagesWithLLM(messages, startSeq, endSeq, opts.ProviderProfileID)
 		if err == nil && strings.TrimSpace(summary.Summary) != "" {
-			return s.ensureOpenTasks(sessionID, summary), "llm", nil
+			return c.ensureOpenTasks(sessionID, summary), "llm", nil
 		}
 		if mode == "llm" {
 			// Explicit LLM mode: surface the error instead of silently truncating.
@@ -219,7 +219,7 @@ func (s SessionService) buildCompactSummary(
 	}
 
 	summary := summarizeMessagesLocal(messages, startSeq, endSeq)
-	return s.ensureOpenTasks(sessionID, summary), "local", nil
+	return c.ensureOpenTasks(sessionID, summary), "local", nil
 }
 
 // summarizeMessagesLocal is a structured heuristic fallback (not a hard one-shot cut).
@@ -312,13 +312,13 @@ func looksLikePath(value string) bool {
 	return false
 }
 
-func (s SessionService) summarizeMessagesWithLLM(
+func (c *SessionCompactor) summarizeMessagesWithLLM(
 	messages []model.Message,
 	startSeq uint64,
 	endSeq uint64,
 	providerProfileID string,
 ) (CompactSummary, error) {
-	profile, err := s.resolveCompactProvider(providerProfileID)
+	profile, err := c.resolveCompactProvider(providerProfileID)
 	if err != nil {
 		return CompactSummary{}, err
 	}
@@ -411,10 +411,10 @@ type compactProvider struct {
 	APIKeySecret string
 }
 
-func (s SessionService) resolveCompactProvider(providerProfileID string) (compactProvider, error) {
+func (c *SessionCompactor) resolveCompactProvider(providerProfileID string) (compactProvider, error) {
 	id := strings.TrimSpace(providerProfileID)
 	if id != "" {
-		row, err := s.repos.Providers.Get(id)
+		row, err := c.repos.Providers.Get(id)
 		if err != nil {
 			return compactProvider{}, fmt.Errorf("provider profile %s: %w", id, err)
 		}
@@ -429,7 +429,7 @@ func (s SessionService) resolveCompactProvider(providerProfileID string) (compac
 	}
 
 	// Prefer default active profile, then any active profile.
-	rows, err := s.repos.Providers.List(100)
+	rows, err := c.repos.Providers.List(100)
 	if err != nil {
 		return compactProvider{}, err
 	}

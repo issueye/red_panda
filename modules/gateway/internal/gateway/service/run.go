@@ -33,6 +33,10 @@ type RunService struct {
 	repos   repository.Set
 	hub     *eventhub.Hub
 	runtime *runtimeclient.Client
+	// packer assembles the model-facing conversation for a run (docs/48 Wave C,
+	// docs/plans/2026-07-19-convergence-wave.md Wave B Task B1). Shared instance
+	// supplied by Set so Run and Session stay decoupled from packing internals.
+	packer *SessionContextPacker
 	// startMu serializes admission so concurrent budget checks and slot reservation are atomic.
 	startMu *sync.Mutex
 }
@@ -86,7 +90,14 @@ type RunEventDTO struct {
 }
 
 func NewRunService(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclient.Client) RunService {
-	service := RunService{repos: repos, hub: hub, runtime: runtime, startMu: &sync.Mutex{}}
+	return NewRunServiceWithPacker(repos, hub, runtime, NewSessionContextPacker(repos))
+}
+
+// NewRunServiceWithPacker constructs a RunService with an explicit context
+// packer. Used by Set to share a single Packer instance across services
+// (docs/plans/2026-07-19-convergence-wave.md Wave B Task B1).
+func NewRunServiceWithPacker(repos repository.Set, hub *eventhub.Hub, runtime *runtimeclient.Client, packer *SessionContextPacker) RunService {
+	service := RunService{repos: repos, hub: hub, runtime: runtime, packer: packer, startMu: &sync.Mutex{}}
 	if runtime != nil {
 		runtime.SetRunExitHandler(service.HandleRuntimeExit)
 	}

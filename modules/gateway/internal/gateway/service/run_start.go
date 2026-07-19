@@ -75,7 +75,7 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 }
 
 func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartPayload) (params methods.RunExecuteParams, pauseGoalOnFailure bool, err error) {
-	conversation, err := buildModelConversation(r.repos, admission.session.ID)
+	conversation, err := r.packer.BuildModelConversation(admission.session.ID)
 	if err != nil {
 		return methods.RunExecuteParams{}, false, err
 	}

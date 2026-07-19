@@ -13,8 +13,8 @@ import (
 )
 
 type WorkspaceService struct {
-	repos     repository.Set
-	lifecycle sessionLifecycle
+	repos repository.Set
+	purge PurgeService
 }
 
 type WorkspaceDTO struct {
@@ -25,8 +25,8 @@ type WorkspaceDTO struct {
 	LastOpenedAt time.Time `json:"last_opened_at"`
 }
 
-func NewWorkspaceService(repos repository.Set, lifecycle sessionLifecycle) WorkspaceService {
-	return WorkspaceService{repos: repos, lifecycle: lifecycle}
+func NewWorkspaceService(repos repository.Set, purge PurgeService) WorkspaceService {
+	return WorkspaceService{repos: repos, purge: purge}
 }
 
 func (s WorkspaceService) Open(root string) (WorkspaceDTO, error) {
@@ -81,7 +81,7 @@ func (s WorkspaceService) Remove(id string, deleteSessions bool) (WorkspaceDTO, 
 		for _, session := range sessions {
 			ids = append(ids, session.ID)
 		}
-		deletedSessions, err = s.lifecycle.delete(ids, "workspace_delete")
+		deletedSessions, err = s.purge.PurgeSessions(ids, "workspace_delete")
 		if err != nil {
 			return WorkspaceDTO{}, 0, err
 		}

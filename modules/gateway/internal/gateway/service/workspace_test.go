@@ -44,7 +44,7 @@ func TestWorkspaceRemoveUsesSessionLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	lifecycle := newSessionLifecycle(repos, nil, hub, t.TempDir())
+	lifecycle := newPurgeService(repos, nil, hub, t.TempDir())
 	service := NewWorkspaceService(repos, lifecycle)
 	_, deleted, err := service.Remove(workspace.ID, true)
 	if err != nil {

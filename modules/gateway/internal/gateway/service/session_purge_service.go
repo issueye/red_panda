@@ -11,20 +11,28 @@ import (
 	"redpanda/protocol/methods"
 )
 
-type sessionLifecycle struct {
+// PurgeService owns cascade deletion of sessions (and, by extension, workspace
+// cleanup). It was previously the unexported sessionLifecycle helper; it is now
+// a first-class service because two consumers (SessionService.Delete and
+// WorkspaceService.Remove) depend on it
+// (docs/plans/2026-07-19-convergence-wave.md Wave B Task B3).
+type PurgeService struct {
 	repos   repository.Set
 	store   sessionStore
 	runtime *runtimeclient.Client
 	hub     *eventhub.Hub
 }
 
-func newSessionLifecycle(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub, archiveDir string) sessionLifecycle {
-	return sessionLifecycle{
+func newPurgeService(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub, archiveDir string) PurgeService {
+	return PurgeService{
 		repos: repos, store: newSessionStore(repos, archiveDir), runtime: runtime, hub: hub,
 	}
 }
 
-func (l sessionLifecycle) delete(sessionIDs []string, reason string) (int64, error) {
+// PurgeSessions cancels active runs, archives each session to JSONL, hard-deletes
+// the session and all cascade-linked rows, and broadcasts session_deleted for
+// each id (docs/49). Returns the number of sessions actually deleted.
+func (l PurgeService) PurgeSessions(sessionIDs []string, reason string) (int64, error) {
 	if len(sessionIDs) == 0 {
 		return 0, nil
 	}

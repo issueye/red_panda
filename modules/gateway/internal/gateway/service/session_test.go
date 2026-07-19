@@ -58,7 +58,7 @@ func TestPauseSessionForCompactPausesAndResumesDelegatedWorkers(t *testing.T) {
 	runtime := useStdioRuntimeHelper(t, capturePath)
 	service := NewSessionService(repos, runtime, nil, "")
 
-	paused, err := service.pauseSessionForCompact(session.ID)
+	paused, err := service.compactor.pauseSessionForCompact(session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestPauseSessionForCompactPausesAndResumesDelegatedWorkers(t *testing.T) {
 	if params.RunID != "run_compact_v2" || params.Reason != "session compact" || !params.DelegatedOnly {
 		t.Fatalf("run.pause params = %#v", params)
 	}
-	if err := service.resumeSessionAfterCompact(session.ID); err != nil {
+	if err := service.compactor.resumeSessionAfterCompact(session.ID); err != nil {
 		t.Fatal(err)
 	}
 	resumeRaw, err := os.ReadFile(capturePath + ".resume")
@@ -267,7 +267,7 @@ func TestRunConversationUsesSummarySnapshotAndPreservesTail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conversation, err := buildModelConversation(repos, source.ID)
+	conversation, err := NewSessionContextPacker(repos).BuildModelConversation(source.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -705,7 +705,7 @@ func TestSessionServiceRejectsConcurrentCompact(t *testing.T) {
 		}
 	}
 
-	unlock, err := service.beginSessionCompact(source.ID)
+	unlock, err := service.compactor.beginSessionCompact(source.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

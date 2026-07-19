@@ -106,7 +106,7 @@ func TestSummarizeMessagesWithLLMUsesProvider(t *testing.T) {
 		{Seq: 1, Role: "user", ContentJSON: encodeMessageText(t, "implement compact")},
 		{Seq: 2, Role: "assistant", ContentJSON: encodeMessageText(t, "done compact")},
 	}
-	summary, err := service.summarizeMessagesWithLLM(messages, 1, 2, profile.ID)
+	summary, err := service.compactor.summarizeMessagesWithLLM(messages, 1, 2, profile.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestBuildCompactSummaryFallsBackToLocalWhenNoProvider(t *testing.T) {
 		{Seq: 1, Role: "user", ContentJSON: encodeMessageText(t, "hello")},
 		{Seq: 2, Role: "assistant", ContentJSON: encodeMessageText(t, "world")},
 	}
-	summary, method, err := service.buildCompactSummary("sess", messages, 1, 2, compactSummaryOptions{Mode: "auto"})
+	summary, method, err := service.compactor.buildCompactSummary("sess", messages, 1, 2, compactSummaryOptions{Mode: "auto"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,8 +10,7 @@ import (
 	"redpanda/protocol/methods"
 )
 
-// Model-context packing (docs/48 Wave C). Aligned with Desktop SOFT_CONTEXT_BUDGET
-// (tokenBudget.js): rough CJK/latin estimator, not a true tokenizer.
+// Model-context packing constants (docs/48 Wave C).
 const (
 	// modelContextFetchLimit is the max rows pulled from SQLite before token trim.
 	// Higher than the old hard 200 so token budget can keep more short turns.
@@ -23,16 +22,13 @@ const (
 	minModelContextTokenBudget = 256
 )
 
-// buildModelConversation assembles the model-facing transcript for a session:
-// optional in-place compaction system message + message tail trimmed by token budget.
-// Visible UI history is unchanged; only this path compresses model context (docs/13, docs/45, docs/48).
-func buildModelConversation(repos repository.Set, sessionID string) ([]methods.Message, error) {
-	stored, err := loadModelContextForAssembly(repos, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return assembleModelConversation(stored)
-}
+// Model-context packing internals (docs/48 Wave C). The public entry points
+// live on SessionContextPacker (session_context_packer.go); these helpers stay
+// package-private so the Packer owns the surface while keeping the token-budget
+// trim logic (selectModelContextMessages) reusable as a pure function.
+//
+// Aligned with Desktop SOFT_CONTEXT_BUDGET (tokenBudget.js): rough CJK/latin
+// estimator, not a true tokenizer.
 
 func loadModelContextForAssembly(repos repository.Set, sessionID string) (storedSessionContext, error) {
 	stored, err := newSessionStore(repos, "").modelContext(sessionID, modelContextFetchLimit)
