@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"redpanda/agent/internal/skill"
 	"strings"
 	"time"
 
@@ -231,116 +230,26 @@ func runBounded(ctx context.Context, timeout time.Duration, fn func(context.Cont
 	}
 }
 
+// dispatchTool routes a call to the domain group that owns it (docs/47 Wave C).
+// Groups keep exact tool-name switches so unknown names still fail closed.
 func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
-	switch call.Name {
-	case "workspace.read_file":
-		return runReadFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"))
-	case "workspace.list":
-		return runListWorkspace(runCtx.WorkingDir, StringArgDefault(call.Arguments, "path", "."), IntArg(call.Arguments, "max_depth", defaultListDepth))
-	case "workspace.stats":
-		return runWorkspaceStats(runCtx.WorkingDir, StringArgDefault(call.Arguments, "path", "."), IntArg(call.Arguments, "max_depth", 4))
-	case "workspace.grep":
-		return runGrepWorkspace(runCtx.WorkingDir, StringArg(call.Arguments, "pattern"), StringArgDefault(call.Arguments, "path", "."), IntArg(call.Arguments, "max_matches", defaultGrepMatches))
-	case "workspace.find_files":
-		return runFindFiles(runCtx.WorkingDir, StringArgDefault(call.Arguments, "path", "."), StringArg(call.Arguments, "pattern"), IntArg(call.Arguments, "max_results", defaultFindFiles))
-	case "workspace.read_files":
-		return runReadFiles(runCtx.WorkingDir, stringListArg(call.Arguments, "paths"))
-	case "workspace.write_file":
-		return runWriteFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"), StringArg(call.Arguments, "content"))
-	case "workspace.edit_file":
-		return runEditFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"), StringArg(call.Arguments, "old_text"), StringArg(call.Arguments, "new_text"), BoolArg(call.Arguments, "replace_all", false))
-	case "workspace.diff_file":
-		content, hasContent := stringArgPresent(call.Arguments, "content")
-		return runDiffFile(runCtx.WorkingDir, StringArg(call.Arguments, "path"), content, hasContent, StringArg(call.Arguments, "old_text"), StringArg(call.Arguments, "new_text"), BoolArg(call.Arguments, "replace_all", false))
-	case "workspace.apply_patch":
-		return runApplyPatch(runCtx.WorkingDir, StringArg(call.Arguments, "patch"))
-	case "git.status":
-		return runGitStatus(ctx, runCtx.WorkingDir)
-	case "git.diff":
-		return runGitDiff(ctx, runCtx.WorkingDir, BoolArg(call.Arguments, "staged", false), StringArg(call.Arguments, "revision"), StringArg(call.Arguments, "path"))
-	case "git.log":
-		return runGitLog(ctx, runCtx.WorkingDir, IntArg(call.Arguments, "max_count", 10), StringArg(call.Arguments, "path"))
-	case "git.show":
-		return runGitShow(ctx, runCtx.WorkingDir, StringArg(call.Arguments, "revision"), StringArg(call.Arguments, "path"))
-	case "shell.exec":
-		return runShell(ctx, runCtx.WorkingDir, StringArg(call.Arguments, "command"))
-	case "skill.list":
-		return skill.RunList(runCtx.WorkingDir)
-	case "skill.create":
-		return skill.RunCreate(runCtx.WorkingDir, StringArg(call.Arguments, "name"), StringArg(call.Arguments, "description"), StringArg(call.Arguments, "instructions"))
-	case "skill.update":
-		return skill.RunUpdate(runCtx.WorkingDir, StringArg(call.Arguments, "name"), StringArg(call.Arguments, "description"), StringArg(call.Arguments, "instructions"))
-	case "skill.delete":
-		return skill.RunDelete(runCtx.WorkingDir, StringArg(call.Arguments, "name"))
-	case "skill.run":
-		if runner.SkillExecutor == nil {
-			return "", fmt.Errorf("skill Worker executor is not available")
-		}
-		return runner.SkillExecutor(ctx, runCtx, call)
-	case "worker.delegate":
-		if runner.WorkerDelegate == nil {
-			return "", fmt.Errorf("worker delegate executor is not available")
-		}
-		return runner.WorkerDelegate(ctx, runCtx, call)
-	case "worker.list":
-		if runner.WorkerList == nil {
-			return "", fmt.Errorf("worker list executor is not available")
-		}
-		return runner.WorkerList(ctx, runCtx, call)
-	case "worker.cancel":
-		if runner.WorkerCancel == nil {
-			return "", fmt.Errorf("worker cancel executor is not available")
-		}
-		return runner.WorkerCancel(ctx, runCtx, call)
-	case "worker.pool_status":
-		if runner.WorkerPoolStatus == nil {
-			return "", fmt.Errorf("worker pool status executor is not available")
-		}
-		return runner.WorkerPoolStatus(ctx, runCtx, call)
-	case "worker.send":
-		if runner.WorkerSend == nil {
-			return "", fmt.Errorf("worker send executor is not available")
-		}
-		return runner.WorkerSend(ctx, runCtx, call)
-	case "worker.receive":
-		if runner.WorkerReceive == nil {
-			return "", fmt.Errorf("worker receive executor is not available")
-		}
-		return runner.WorkerReceive(ctx, runCtx, call)
-	case "todo.write", "todo.list":
-		return runner.runTodoTool(ctx, runCtx, call)
-	case "goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish", "goal.list":
-		return runner.runGoalTool(ctx, runCtx, call)
-	case "context.read", "context.search", "context.write", "context.replace", "context.delete":
-		return runner.runContextTool(ctx, runCtx, call)
-	case "memory.list", "memory.create", "memory.update", "memory.delete":
-		return runner.runMemoryTool(ctx, runCtx, call)
-	case "web.search":
-		searchOpts := effectiveWebSearchOptions(runCtx)
-		return runWebOp(ctx, func(opCtx context.Context) (string, error) {
-			return runWebSearch(
-				opCtx,
-				StringArg(call.Arguments, "query"),
-				effectiveWebResultCount(runCtx, IntArg(call.Arguments, "max_results", 0)),
-				searchOpts,
-			)
-		})
-	case "web.fetch":
-		return runWebOp(ctx, func(opCtx context.Context) (string, error) {
-			return runWebFetch(
-				opCtx,
-				StringArg(call.Arguments, "url"),
-				effectiveWebFetchBytes(runCtx, IntArg(call.Arguments, "max_bytes", 0)),
-				effectiveWebHTTPProxy(runCtx),
-			)
-		})
-	default:
-		if IsMCPToolName(call.Name) {
-			if runner.MCPExecutor == nil {
-				return "", fmt.Errorf("MCP executor is not available")
-			}
-			return runner.MCPExecutor(ctx, runCtx, call)
-		}
-		return "", fmt.Errorf("unknown tool %s", call.Name)
+	if out, handled, err := dispatchLocalTool(ctx, runCtx, call); handled {
+		return out, err
 	}
+	if out, handled, err := runner.dispatchOrchestrationTool(ctx, runCtx, call); handled {
+		return out, err
+	}
+	if out, handled, err := runner.dispatchStateTool(ctx, runCtx, call); handled {
+		return out, err
+	}
+	if out, handled, err := dispatchWebTool(ctx, runCtx, call); handled {
+		return out, err
+	}
+	if IsMCPToolName(call.Name) {
+		if runner.MCPExecutor == nil {
+			return "", fmt.Errorf("MCP executor is not available")
+		}
+		return runner.MCPExecutor(ctx, runCtx, call)
+	}
+	return "", fmt.Errorf("unknown tool %s", call.Name)
 }

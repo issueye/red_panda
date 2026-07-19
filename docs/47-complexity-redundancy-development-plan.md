@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | **Date** | 2026-07-19 |
-| **Status** | active (Wave A + B done; C–E planned) |
+| **Status** | active (Wave A–C done; D–E planned) |
 | **Branch** | `feat/goal-context-scratchpad` |
 | **Related** | [35](35-redundancy-convergence-checklist.md)、[38](38-code-directness-optimization-plan.md)、[41](41-redundancy-overimpl-optimization-plan.md) |
 | **Basis** | 2026-07-19 代码冗余度 / 功能实现复杂度审计 |
@@ -176,7 +176,8 @@ go test ./modules/agent/internal/tools/ -count=1
 | A | A3 纯函数单测 + 既有 Goal 测 | `done` |
 | B | B1 marshal 共享 | `done` |
 | B | B2 tool name 归一化 | `done` |
-| C–E | 见上文 | `todo` |
+| C | C1 `dispatchTool` 分组文件 | `done` |
+| D–E | 见上文 | `todo` |
 
 ---
 
@@ -204,3 +205,4 @@ go test ./modules/agent/... ./modules/gateway/... ./modules/protocol/...
 | 2026-07-19 | plan | 创建本文档 + plans 任务切片；启动 Wave A |
 | 2026-07-19 | A1–A3 | `goal_loop_decisions.go` + `runWithGoalLoop` 接线 + 表驱动测 |
 | 2026-07-19 | B1–B2 | `runtime_tool_output.go`；`CanonicalToolName` 于 runner 入口 |
+| 2026-07-19 | C1 | `dispatch_{local,orchestration,state,web}.go`；`runner.dispatchTool` 仅路由 |
