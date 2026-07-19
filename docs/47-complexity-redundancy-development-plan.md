@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | **Date** | 2026-07-19 |
-| **Status** | active (Wave A–C done; D partial; E planned) |
+| **Status** | active (Wave A–D done; E planned / needs product sign-off) |
 | **Branch** | `feat/goal-context-scratchpad` |
 | **Related** | [35](35-redundancy-convergence-checklist.md)、[38](38-code-directness-optimization-plan.md)、[41](41-redundancy-overimpl-optimization-plan.md) |
 | **Basis** | 2026-07-19 代码冗余度 / 功能实现复杂度审计 |
@@ -178,7 +178,7 @@ go test ./modules/agent/internal/tools/ -count=1
 | B | B2 tool name 归一化 | `done` |
 | C | C1 `dispatchTool` 分组文件 | `done` |
 | D | D1 面板布局 / runSettings / assignment 抽出 | `done` |
-| D | D2 permission / activity 再拆 hook | `todo` |
+| D | D2 permission / activity / conversation / right-panel chrome | `done` |
 | E | 兼容退役 | `todo` |
 
 ---
@@ -209,3 +209,4 @@ go test ./modules/agent/... ./modules/gateway/... ./modules/protocol/...
 | 2026-07-19 | B1–B2 | `runtime_tool_output.go`；`CanonicalToolName` 于 runner 入口 |
 | 2026-07-19 | C1 | `dispatch_{local,orchestration,state,web}.go`；`runner.dispatchTool` 仅路由 |
 | 2026-07-19 | D1 | `panelLayout` + `useResizablePanels` + `runSettingsStorage` + `assignments` |
+| 2026-07-19 | D2 | permission/activity/conversation/right-panel hooks + pure helpers + unit tests |

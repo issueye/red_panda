@@ -14,15 +14,18 @@ import { useDialog } from './components/ui/dialog.jsx';
 import { TabButton } from './components/ui/tabs.jsx';
 import { WorkspacePanel } from './components/WorkspacePanel.jsx';
 import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
+import { useConversationTabs } from './hooks/useConversationTabs.js';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
 import { useGatewayResources } from './hooks/useGatewayResources.js';
 import { useGoalSession } from './hooks/useGoalSession.js';
+import { usePermissionActions } from './hooks/usePermissionActions.js';
 import { useResizablePanels } from './hooks/useResizablePanels.js';
+import { useRightPanelChrome } from './hooks/useRightPanelChrome.js';
+import { useRunActivityActions } from './hooks/useRunActivityActions.js';
 import { useSessionActions } from './hooks/useSessionActions.js';
 import {
   useSessionBootstrap,
 } from './hooks/useSessionBootstrap.js';
-import { normalizeRunEvent } from './lib/activityEvents.js';
 import { apiJson, gatewayBase } from './lib/api.js';
 import { normalizeAssignment } from './lib/assignments.js';
 import {
@@ -74,8 +77,6 @@ export function App() {
   const [sessionRuntimes, setSessionRuntimes] = useState(() => ({}));
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState('sessions');
-  const [rightPanelTab, setRightPanelTab] = useState('activity');
-  const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
   const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(false);
   const [compactLayout, setCompactLayout] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 1100px)').matches
@@ -90,6 +91,16 @@ export function App() {
     startLeftPanelResize,
     startRightPanelResize,
   } = useResizablePanels({ compactLayout });
+  const {
+    rightPanelTab,
+    setRightPanelTab,
+    rightPanelDrawerOpen,
+    setRightPanelDrawerOpen,
+    rightPanelCloseRef,
+    selectRightPanelTab,
+    closeRightPanelDrawer,
+    handleRightPanelTabsKeyDown,
+  } = useRightPanelChrome({ compactLayout });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [runSettings, setRunSettings] = useState(loadRunSettings);
@@ -135,8 +146,6 @@ export function App() {
     loadSkills,
   });
 
-  const rightPanelCloseRef = useRef(null);
-  const rightPanelReturnFocusRef = useRef(null);
   const hydrateGoalsRef = useRef(async () => {});
   const upsertSessionRef = useRef(null);
   const selectSessionRef = useRef(null);
@@ -296,12 +305,6 @@ export function App() {
     media.addEventListener('change', handleChange);
     return () => media.removeEventListener('change', handleChange);
   }, []);
-
-  useEffect(() => {
-    if (!compactLayout || !rightPanelDrawerOpen) return undefined;
-    const frame = window.requestAnimationFrame(() => rightPanelCloseRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [compactLayout, rightPanelDrawerOpen]);
 
   function currentWorkspaceRoot() {
     return workspaceRootRef.current;
@@ -475,167 +478,30 @@ export function App() {
   selectSessionRef.current = selectSession;
   refreshSessionsRef.current = refreshSessions;
 
-  async function cancelAssignment(assignment) {
-    if (!assignment?.id || !assignment.runId || !['queued', 'running', 'waiting_permission'].includes(assignment.status)) {
-      return;
-    }
-    patchCurrentRuntime((rt) => ({ ...rt, assignmentsById: {
-      ...rt.assignmentsById,
-      [assignment.id]: { ...assignment, status: 'cancelling', summary: '已请求取消' },
-    } }));
-    try {
-      await request('worker.assignment.cancel', {
-        run_id: assignment.runId,
-        assignment_id: assignment.id,
-      });
-    } catch (error) {
-      patchCurrentRuntime((rt) => ({ ...rt, assignmentsById: {
-        ...rt.assignmentsById,
-        [assignment.id]: { ...assignment, summary: error.message },
-      } }));
-      setMessages((items) => [
-        ...items,
-        {
-          id: `assignment_cancel_error_${Date.now()}`,
-          role: 'assistant',
-          agent: 'system',
-          text: `取消 Worker 任务失败：${error.message}`,
-        },
-      ]);
-    }
-  }
-
-  async function resolvePermission(id, decision) {
-    const item = permissions.find((permission) => permission.id === id) ||
-      globalPendingPermissions.find((permission) => permission.id === id);
-    setPermissions((items) => items.map((permission) => (
-      permission.id === id
-        ? { ...permission, status: 'resolved', decision }
-        : permission
-    )));
-    setGlobalPendingPermissions((items) => items.filter((permission) => permission.id !== id));
-    setRuns((items) => items.map((run) => (
-      run.id === (item?.runId || currentRunId) && run.status === 'waiting_permission'
-        ? { ...run, status: 'running', updatedAt: new Date().toISOString() }
-        : run
-    )));
-    await request('permission.resolve', {
-      permission_id: id,
-      run_id: item?.runId || currentRunId,
-      decision,
-    }).catch(() => {});
-  }
-
-  async function loadRunEvents(runId) {
-    if (!runId) {
-      return [];
-    }
-    setRunEventsLoading((items) => ({ ...items, [runId]: true }));
-    setRunEventsError((items) => ({ ...items, [runId]: '' }));
-    try {
-      const items = await apiJson(`/api/v1/runs/${encodeURIComponent(runId)}/events`);
-      const normalized = Array.isArray(items) ? items.map(normalizeRunEvent) : [];
-      setRunEventsByRun((current) => ({ ...current, [runId]: normalized }));
-      return normalized;
-    } catch (error) {
-      setRunEventsError((items) => ({ ...items, [runId]: error.message }));
-      return [];
-    } finally {
-      setRunEventsLoading((items) => ({ ...items, [runId]: false }));
-    }
-  }
+  const { resolvePermission } = usePermissionActions({
+    permissions,
+    globalPendingPermissions,
+    currentRunId,
+    setPermissions,
+    setGlobalPendingPermissions,
+    setRuns,
+    request,
+  });
+  const { cancelAssignment, loadRunEvents } = useRunActivityActions({
+    patchCurrentRuntime,
+    setMessages,
+    setRunEventsByRun,
+    setRunEventsLoading,
+    setRunEventsError,
+    request,
+  });
+  const { openWorkerConversation, closeConversationTab } = useConversationTabs({
+    patchCurrentRuntime,
+  });
 
   function selectLeftPanelTab(tab) {
     setLeftPanelTab(tab);
     if (tab !== 'workspace') setWorkspacePanelExpanded(false);
-  }
-
-  function selectRightPanelTab(tab) {
-    setRightPanelTab(tab);
-    if (compactLayout) {
-      if (!rightPanelDrawerOpen) rightPanelReturnFocusRef.current = document.activeElement;
-      setRightPanelDrawerOpen(true);
-    }
-  }
-
-  function closeRightPanelDrawer() {
-    setRightPanelDrawerOpen(false);
-    const returnTarget = rightPanelReturnFocusRef.current;
-    window.requestAnimationFrame(() => {
-      if (returnTarget && typeof returnTarget.focus === 'function' && document.contains(returnTarget)) {
-        returnTarget.focus();
-      }
-    });
-  }
-
-  function handleRightPanelTabsKeyDown(event) {
-    const currentIndex = rightPanelTabs.findIndex((tab) => tab.id === rightPanelTab);
-    if (currentIndex < 0) {
-      return;
-    }
-
-    const lastIndex = rightPanelTabs.length - 1;
-    let nextIndex = currentIndex;
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-      nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
-    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-      nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
-    } else if (event.key === 'Home') {
-      nextIndex = 0;
-    } else if (event.key === 'End') {
-      nextIndex = lastIndex;
-    } else {
-      return;
-    }
-
-    event.preventDefault();
-    const tabList = event.currentTarget;
-    const nextTab = rightPanelTabs[nextIndex];
-    setRightPanelTab(nextTab.id);
-    window.requestAnimationFrame(() => {
-      tabList.querySelector(`[data-right-panel-tab="${nextTab.id}"]`)?.focus();
-    });
-  }
-
-  function openWorkerConversation(assignment) {
-    if (!assignment?.id) return;
-    const tabId = `worker:${assignment.id}`;
-    const title = displayWorkerProfileName(
-      assignment.profileKey || assignment.workerId || assignment.id,
-    );
-    patchCurrentRuntime((rt) => {
-      const tabs = rt.conversationTabs || [{
-        id: 'main', kind: 'main', title: '主对话', closable: false,
-      }];
-      const nextTab = {
-        id: tabId,
-        kind: 'worker',
-        assignmentId: assignment.id,
-        workerId: assignment.workerId || '',
-        runId: assignment.runId || '',
-        task: assignment.task || '',
-        title,
-        status: assignment.status,
-        statusLabel: displayStatus(assignment.status),
-        closable: true,
-      };
-      return {
-        ...rt,
-        conversationTabs: tabs.some((tab) => tab.id === tabId)
-          ? tabs.map((tab) => (tab.id === tabId ? { ...tab, ...nextTab } : tab))
-          : [...tabs, nextTab],
-        activeConversationTab: tabId,
-      };
-    });
-  }
-
-  function closeConversationTab(tabId) {
-    if (!tabId || tabId === 'main') return;
-    patchCurrentRuntime((rt) => ({
-      ...rt,
-      conversationTabs: (rt.conversationTabs || []).filter((tab) => tab.id !== tabId),
-      activeConversationTab: rt.activeConversationTab === tabId ? 'main' : rt.activeConversationTab,
-    }));
   }
 
   const workspacePanel = (
