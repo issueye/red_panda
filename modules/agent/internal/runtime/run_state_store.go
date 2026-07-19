@@ -22,6 +22,14 @@ type RunState struct {
 
 // RunStateStore is the single lifecycle owner for Runtime's per-run state.
 // Its zero value is ready for use.
+//
+// Known limitation: state is in-memory and process-local by design. A Runtime
+// crash loses in-flight tool-call intermediates and per-run cursors; Gateway's
+// run_events table is the source of truth for event-sourced recovery, and
+// RecoverStaleRuns marks orphaned runs as failed on Gateway startup. Do NOT
+// add persistence here without solving the dual-write consistency problem
+// (Runtime emit vs Gateway ack). See docs/plans/2026-07-19-convergence-wave.md
+// Wave A.
 type RunStateStore struct {
 	mu   sync.RWMutex
 	runs map[string]*RunState

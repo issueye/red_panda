@@ -20,6 +20,8 @@
 | [47-complexity-redundancy-development-plan.md](47-complexity-redundancy-development-plan.md) | **Complexity & redundancy wave** (Goal loop pure decisions, state-tool boilerplate, alias cleanup) |
 | [48-session-correctness-optimization-plan.md](48-session-correctness-optimization-plan.md) | **Session correctness P0** (compact mutex, preserveLive merge, hydrate generation) |
 | [49-session-hard-delete-jsonl-archive.md](49-session-hard-delete-jsonl-archive.md) | **Session hard-delete + JSONL archive** (replace soft-delete) |
+| [50-session-service-decomposition.md](50-session-service-decomposition.md) | **SessionService decomposition** (extract ContextPacker/Compactor/PurgeService) |
+| [plans/2026-07-19-convergence-wave.md](plans/2026-07-19-convergence-wave.md) | **Convergence wave** (doc/UI sync, Session service decomposition, large-file splits) |
 | [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |
@@ -37,7 +39,7 @@
 | [46-session-store-development-plan.md](46-session-store-development-plan.md) | Session persistence projection, context state, summary history, and deletion lifecycle |
 | [14-memory-history-design.md](14-memory-history-design.md) | Memory |
 | [15-memory-runtime-tools-design.md](15-memory-runtime-tools-design.md) | Memory tools |
-| [19-mcp-stdio-tools-design.md](19-mcp-stdio-tools-design.md) | MCP (config + discovery) |
+| [19-mcp-stdio-tools-design.md](19-mcp-stdio-tools-design.md) | MCP (config + discovery + tools/call MVP) |
 | [21-ui-normalization.md](21-ui-normalization.md) | UI primitives |
 | [27-desktop-ued-specification.md](27-desktop-ued-specification.md) | UED |
 | [28-desktop-ued-audit.md](28-desktop-ued-audit.md) | UED audit |

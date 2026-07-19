@@ -2,7 +2,7 @@
 
 Updated: 2026-07-09
 
-Status: design only. MCP stdio tools are not implemented in v0.1.1.
+Status: partially implemented (v0.2.0). config CRUD + discovery + `tools/call` MVP are done; see §2.1 for the current truth and remaining gaps.
 
 This document defines the MCP stdio tool boundary for a later implementation slice. It preserves the v0.1.0 architecture:
 
@@ -36,6 +36,27 @@ v0.1.1 scope:
 4. Define how MCP tools reuse existing permission policy and events.
 5. Define stdout/stderr isolation rules and fake server test coverage.
 6. Define implementation order for later slices.
+
+## 2.1 Implementation status (2026-07-19)
+
+The design below is now partially realized in code. See [docs/10-development-status.md](10-development-status.md) §MCP for the authoritative truth.
+
+**Implemented (v0.2.0):**
+
+- Gateway config CRUD + validation + masked env + `/api/v1/mcp/servers/:id/discover` endpoint.
+- `run.start` injects enabled server configs into `RunExecuteOptions.MCPServers` with plaintext secrets (Gateway-side only).
+- Runtime lazily spawns the stdio child process per call, performs `initialize` + notifications/initialized, paginates `tools/list`, and registers discovered tools under canonical names (`mcp__server__tool`) into the provider-facing tool table for the run.
+- `tools/call` executes one-shot stdio sessions with start/initialize/list/call/shutdown timeouts; multi-content text concatenation; 64KB max output truncation; bounded (8KB) stderr drain; secret redaction in diagnostics.
+- MCP tools default to `RiskHigh` and flow through the existing ToolRunner policy / permission / event pipeline (`tool_started` / `tool_output` / `tool_finished` / `tool_failed`). Per-server allowlists and risk overrides apply.
+- `core.shutdown` and Runtime `Close` close all MCP child processes; end-to-end integration tests (`mcp_tools_integration_test.go`) cover success / timeout / `isError` paths.
+
+**Not yet implemented (tracked as backlog, see [docs/plans/2026-07-19-convergence-wave.md](plans/2026-07-19-convergence-wave.md) Wave D):**
+
+- MCP process reuse across calls (each call currently spawns a fresh child).
+- Crash/restart budget (e.g. auto-disable a server after 3 failures within 60s).
+- Cross-run discovery cache (every run re-discovers tool lists for enabled servers).
+- MCP protocol-level cancellation notifications (run-level cancel currently relies on context cancellation).
+- Desktop "try-call" UI for manually invoking a discovered tool.
 
 ## 3. Non-goals
 

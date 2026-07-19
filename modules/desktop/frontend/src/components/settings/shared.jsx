@@ -200,7 +200,7 @@ export function ManagerItem({ active, children, disabled = false, enabled, icon:
 export function McpDiscoveryReadOnlyNotice() {
   return (
     <small className="mcp-discovery-notice" data-testid="mcp-discovery-readonly-notice">
-      只读发现：当前仅可查看服务器信息与工具清单，对话中尚不可调用 MCP 工具（tools/call 未接入）。
+      发现：已列出服务器信息与可用工具清单。这些工具在对话中可被调用（默认高风险，受工具策略与权限模式约束）。性能加固（进程复用、crash 预算等）尚未完成。
     </small>
   );
 }
@@ -209,7 +209,7 @@ export function McpDiscoveryPanel({ state }) {
   if (!state) {
     return (
       <section className="mcp-discovery" data-testid="mcp-discovery-empty">
-        <span className="mcp-discovery-heading">可用工具（只读）</span>
+        <span className="mcp-discovery-heading">可用工具</span>
         <McpDiscoveryReadOnlyNotice />
         <small>使用列表中的发现按钮读取服务器信息和工具清单。</small>
       </section>
@@ -219,7 +219,7 @@ export function McpDiscoveryPanel({ state }) {
     return (
       <section className="mcp-discovery" data-testid="mcp-discovery-loading">
         <span className="mcp-discovery-heading">正在发现</span>
-        <small>正在连接服务器并读取工具清单（只读，不会调用工具）。</small>
+        <small>正在连接服务器并读取工具清单（不会调用工具）。</small>
       </section>
     );
   }
@@ -235,7 +235,7 @@ export function McpDiscoveryPanel({ state }) {
   const servers = state.result?.servers || [];
   return (
     <section className="mcp-discovery" data-testid="mcp-discovery-result">
-      <span className="mcp-discovery-heading">可用工具（只读）</span>
+      <span className="mcp-discovery-heading">可用工具</span>
       <McpDiscoveryReadOnlyNotice />
       {servers.length === 0 ? <small>服务器未返回发现结果。</small> : servers.map((server, index) => {
         const healthy = ['connected', 'healthy', 'ready', 'ok', 'success'].includes(server.status);
