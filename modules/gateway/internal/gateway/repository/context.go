@@ -11,7 +11,7 @@ import (
 )
 
 // ContextRepository persists GoalNote scratchpad entries that are shared across
-// segments, runs, and specialist subagents for a goal.
+// segments, runs, and specialist workers for a goal.
 type ContextRepository struct {
 	db *gorm.DB
 }

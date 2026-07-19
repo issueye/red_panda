@@ -47,8 +47,7 @@ func (r *Runtime) todoExecutor(ctx context.Context, req methods.TodoToolExecuteP
 	if err != nil {
 		return result, err
 	}
-	name := strings.TrimSpace(req.ToolName)
-	if name == "todo.write" || name == "todo_write" {
+	if methods.IsTodoWriteTool(req.ToolName) {
 		r.setRunTodos(req.RunID, result.Items)
 	}
 	return result, nil
@@ -86,7 +85,7 @@ func (r *Runtime) executeGoalTool(ctx context.Context, req methods.GoalToolExecu
 }
 
 // executeContextTool 将 context.*（目标暂存区）工具调用转发至 Gateway。
-// 根运行和专业子代理均可使用它，因为 context.* 被有意排除在 Worker.RunDenylist 之外。
+// 根运行和 specialist Worker 均可使用它，因为 context.* 被有意排除在 Worker.RunDenylist 之外。
 func (r *Runtime) executeContextTool(ctx context.Context, req methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error) {
 	var result methods.ContextToolExecuteResult
 	if err := r.callStateTool(ctx, methods.StateToolDomainContext, req.RunID, req.SessionID, req.WorkspaceRoot, req.ToolCallID, req.ToolName, req.Arguments, &result); err != nil {

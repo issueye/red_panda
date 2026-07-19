@@ -69,11 +69,13 @@ func (s TodoService) ExecuteRuntimeTool(params methods.TodoToolExecuteParams) (m
 	if err := validateRuntimeToolMeta(s.repos, params.RunID, params.SessionID, params.ToolCallID, true); err != nil {
 		return methods.TodoToolExecuteResult{}, err
 	}
-	name := strings.TrimSpace(params.ToolName)
+	// Accept legacy todo_write then canonicalize (docs/47 Wave E).
+	name := methods.CanonicalToolName(params.ToolName)
+	params.ToolName = name
 	switch name {
-	case "todo.write", "todo_write":
+	case methods.ToolTodoWrite:
 		return s.executeWrite(params)
-	case "todo.list":
+	case methods.ToolTodoList:
 		return s.executeList(params)
 	default:
 		return methods.TodoToolExecuteResult{}, fmt.Errorf("unsupported todo tool %q", name)

@@ -14,6 +14,9 @@ import (
 
 func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, invocation agenttools.ToolInvocation) (tools.Result, string, bool) {
 	call := invocation.Call
+	// Normalize legacy aliases before policy, events, and dispatch (docs/47 Wave E).
+	call.Name = agenttools.CanonicalToolName(call.Name)
+	invocation.Call = call
 	decision := agenttools.EvaluateToolPolicy(params.Options, call)
 	_ = r.emitEvent(ctx, params, events.EventToolStarted, nil, map[string]any{
 		"tool_call_id":  call.ID,
@@ -96,7 +99,7 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		return result, output, false
 	}
 	_ = r.emitEvent(eventCtx, params, events.EventToolFinished, nil, toolResultPayload(result))
-	if call.Name == "todo.write" || call.Name == "todo_write" {
+	if methods.IsTodoWriteTool(call.Name) {
 		items := r.getRunTodos(params.RunID)
 		open, completed, cancelled := todoStatusCounts(items)
 		_ = r.emitEvent(eventCtx, params, events.EventTodoUpdated, nil, map[string]any{

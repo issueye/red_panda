@@ -120,7 +120,8 @@ func (s GoalService) ExecuteRuntimeTool(params methods.GoalToolExecuteParams) (m
 		return s.executeFinishV2(params)
 	case "goal.list":
 		return s.executeList(params)
-	case "segment_end":
+	case methods.InternalGoalSegmentEnd:
+		// Internal budget accounting path (not model-facing; docs/47 Wave E).
 		return s.executeSegmentEnd(params)
 	default:
 		return methods.GoalToolExecuteResult{}, fmt.Errorf("unsupported goal tool %q", name)

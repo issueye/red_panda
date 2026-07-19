@@ -52,6 +52,9 @@ test('todosFromToolFinishedPayload parses standard envelope', () => {
     },
   });
   const result = todosFromToolFinishedPayload({ tool_name: 'todo.write', output });
+  const legacy = todosFromToolFinishedPayload({ tool_name: 'todo_write', output });
+  assert.ok(legacy);
+  assert.equal(legacy.items.length, result.items.length);
   assert.ok(result);
   assert.equal(result.items[0].clientKey, '1');
   assert.equal(result.openCount, 1);

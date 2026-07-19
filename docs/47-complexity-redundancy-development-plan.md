@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | **Date** | 2026-07-19 |
-| **Status** | active (Wave A–D done; E planned / needs product sign-off) |
+| **Status** | active (Wave A–D done; Wave E-prep done; E cutover needs product sign-off) |
 | **Branch** | `feat/goal-context-scratchpad` |
 | **Related** | [35](35-redundancy-convergence-checklist.md)、[38](38-code-directness-optimization-plan.md)、[41](41-redundancy-overimpl-optimization-plan.md) |
 | **Basis** | 2026-07-19 代码冗余度 / 功能实现复杂度审计 |
@@ -156,14 +156,29 @@ go test ./modules/agent/internal/tools/ -count=1
 
 ---
 
-## 7. Wave E — 兼容退役（需拍板）
+## 7. Wave E — 兼容退役
 
-| 项 | 说明 |
+### 7.1 E-prep（本波已完成，行为兼容）
+
+| 项 | 动作 |
 | --- | --- |
-| `todo_write` | 单协议边界 deprecate → 删除 |
-| `segment_end` | 改为私有 Gateway method 或内部字段 |
-| 旧 4 method | 仅保留 `state.tool.execute` |
-| `subagent` 文案 | 代码/测试统一 Worker |
+| **E1 协议真相源** | `methods/legacy.go`：`CanonicalToolName` / `IsTodoWriteTool` / `InternalGoalSegmentEnd` |
+| **E2 入口归一化** | Runtime `executeTool` 在 policy 前 canonical；Gateway Todo service 同理 |
+| **E3 旧 RPC 标注** | 4 个 `*.tool.execute` 常量与 Gateway 适配器标注 Deprecated；新路径只用 `state.tool.execute` |
+| **E4 内部预算名** | `segment_end` → `methods.InternalGoalSegmentEnd` 常量（wire 值暂不变） |
+| **E5 叙事** | 注释/doc 中 specialist subagent → worker；Worker denylist 去掉冗余 `todo_write` |
+| **E6 前端** | `todos.js` `canonicalToolName` / `isTodoToolName` 接受遗留别名 |
+
+### 7.2 E-cutover（需产品拍板 + 版本说明，**未做**）
+
+| 项 | 说明 | 风险 |
+| --- | --- | --- |
+| 删除 `todo_write` wire 接受 | 模型/旧客户端若仍 emit 会失败 | H |
+| 删除 4 个 domain RPC method | 仅保留 `state.tool.execute` | H |
+| `segment_end` 改私有 method 名 | 需 Runtime+Gateway 同步发版 | H |
+| DB/API 中 `role=subagent` 历史值 | 只读兼容，勿贸然改写 | M |
+
+建议 cutover：单独 minor/breaking 版本 + protocol-compat 脚本绿灯。
 
 ---
 
@@ -179,7 +194,8 @@ go test ./modules/agent/internal/tools/ -count=1
 | C | C1 `dispatchTool` 分组文件 | `done` |
 | D | D1 面板布局 / runSettings / assignment 抽出 | `done` |
 | D | D2 permission / activity / conversation / right-panel chrome | `done` |
-| E | 兼容退役 | `todo` |
+| E | E-prep 别名/常量/入口收敛 | `done` |
+| E | E-cutover 删除兼容层 | `todo`（需拍板） |
 
 ---
 
@@ -210,3 +226,4 @@ go test ./modules/agent/... ./modules/gateway/... ./modules/protocol/...
 | 2026-07-19 | C1 | `dispatch_{local,orchestration,state,web}.go`；`runner.dispatchTool` 仅路由 |
 | 2026-07-19 | D1 | `panelLayout` + `useResizablePanels` + `runSettingsStorage` + `assignments` |
 | 2026-07-19 | D2 | permission/activity/conversation/right-panel hooks + pure helpers + unit tests |
+| 2026-07-19 | E-prep | methods/legacy.go；executeTool 入口归一；InternalGoalSegmentEnd；deprecated 旧 RPC |

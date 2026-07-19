@@ -23,14 +23,18 @@ const (
 	MCPDiscover       = "mcp.discover"
 	PermissionResolve = "permission.resolve"
 
-	// Gateway-backed state tools (memory/todo/goal/context) — stable internal RPCs.
-	// Prefer StateToolExecute for new Runtime code; domain methods remain for
-	// compatibility (docs/41 W2-3).
-	MemoryToolExecute  = "memory.tool.execute"
-	TodoToolExecute    = "todo.tool.execute"
-	GoalToolExecute    = "goal.tool.execute"
-	ContextToolExecute = "context.tool.execute"
+	// Gateway-backed state tools (memory/todo/goal/context).
+	//
+	// Deprecated RPC methods (docs/47 Wave E): MemoryToolExecute, TodoToolExecute,
+	// GoalToolExecute, ContextToolExecute remain for compatibility adapters and
+	// older Runtime clients. New Runtime code MUST use StateToolExecute only
+	// (docs/41 W2-3). Planned removal requires an explicit version/cutover note.
+	MemoryToolExecute  = "memory.tool.execute"  // Deprecated: use StateToolExecute + domain=memory
+	TodoToolExecute    = "todo.tool.execute"    // Deprecated: use StateToolExecute + domain=todo
+	GoalToolExecute    = "goal.tool.execute"    // Deprecated: use StateToolExecute + domain=goal
+	ContextToolExecute = "context.tool.execute" // Deprecated: use StateToolExecute + domain=context
 	// ScheduleToolExecute is also defined in schedule.go for discoverability.
+	// StateToolExecute is the unified Runtime→Gateway state-tool envelope.
 	StateToolExecute = "state.tool.execute"
 
 	// State tool domains for StateToolExecuteParams.Domain.
@@ -694,11 +698,11 @@ func ResolveStateToolDomain(domain, toolName string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported state tool domain %q", domain)
 	}
-	name := strings.TrimSpace(toolName)
+	name := CanonicalToolName(toolName)
 	switch {
-	case name == "todo_write", strings.HasPrefix(name, "todo."):
+	case name == ToolTodoWrite, name == ToolTodoList, strings.HasPrefix(name, "todo."):
 		return StateToolDomainTodo, nil
-	case name == "segment_end", strings.HasPrefix(name, "goal."):
+	case IsInternalGoalBudgetTool(name), strings.HasPrefix(name, "goal."):
 		return StateToolDomainGoal, nil
 	case strings.HasPrefix(name, "memory."):
 		return StateToolDomainMemory, nil

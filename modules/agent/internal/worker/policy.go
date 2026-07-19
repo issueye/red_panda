@@ -12,6 +12,9 @@ const (
 	DefaultToolTurns = 16
 )
 
+// DelegatedDenylist is applied to Worker tool allowlists. Prefer canonical names
+// only: Runtime normalizes legacy aliases (todo_write→todo.write) before policy
+// when using the main tool path (docs/47 Wave E).
 var DelegatedDenylist = []string{
 	"worker.delegate",
 	"worker.assignment.cancel",
@@ -19,7 +22,6 @@ var DelegatedDenylist = []string{
 	"skill.run",
 	"todo.write",
 	"todo.list",
-	"todo_write",
 	"goal.create",
 	"goal.plan",
 	"goal.observe",

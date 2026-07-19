@@ -332,14 +332,15 @@ func (r *Runtime) reportGoalBudgetExhausted(params methods.ReplyParams, goalID s
 	result, err := r.executeGoalTool(callCtx, methods.GoalToolExecuteParams{
 		RunID: params.RunID, SessionID: params.Session.ID,
 		ToolCallID: fmt.Sprintf("goal_budget_%s_%d", params.RunID, segmentIndex),
-		ToolName:   "segment_end",
+		// InternalGoalSegmentEnd is not model-facing (docs/47 Wave E).
+		ToolName: methods.InternalGoalSegmentEnd,
 		Arguments: map[string]any{
 			"goal_id": goalID, "segment_index": segmentIndex,
 			"delta_tool_turns": deltaTurns, "budget_exhausted": true,
 		},
 	})
 	if err == nil {
-		r.applyGoalToolResult(params.RunID, "segment_end", result)
+		r.applyGoalToolResult(params.RunID, methods.InternalGoalSegmentEnd, result)
 	}
 }
 
@@ -355,7 +356,7 @@ func (r *Runtime) reportSegmentEnd(ctx context.Context, params methods.ReplyPara
 		RunID:      params.RunID,
 		SessionID:  params.Session.ID,
 		ToolCallID: fmt.Sprintf("segment_end_%s_%d", params.RunID, segmentIndex),
-		ToolName:   "segment_end",
+		ToolName:   methods.InternalGoalSegmentEnd,
 		Arguments: map[string]any{
 			"goal_id":          goalID,
 			"segment_index":    segmentIndex,
@@ -363,7 +364,7 @@ func (r *Runtime) reportSegmentEnd(ctx context.Context, params methods.ReplyPara
 		},
 	})
 	if err != nil {
-		fmt.Fprintf(r.log, "segment_end: %v\n", err)
+		fmt.Fprintf(r.log, "%s: %v\n", methods.InternalGoalSegmentEnd, err)
 		// 仍推进本地计数器，使离线和测试场景下外层循环仍可进行预算决策。
 		if state := r.getRunGoal(params.RunID); state != nil {
 			state.Goal.UsedToolTurns += deltaTurns
@@ -378,7 +379,7 @@ func (r *Runtime) reportSegmentEnd(ctx context.Context, params methods.ReplyPara
 		}
 		return
 	}
-	r.applyGoalToolResult(params.RunID, "segment_end", result)
+	r.applyGoalToolResult(params.RunID, methods.InternalGoalSegmentEnd, result)
 }
 
 func goalContinuationPrompt(original string, state *runGoalState, nextSeg int, reason loopEndReason) string {

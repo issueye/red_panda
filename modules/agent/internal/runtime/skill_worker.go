@@ -30,7 +30,6 @@ var skillWorkerDenylist = []string{
 	"goal.finish",
 	"goal.list",
 	"todo.list",
-	"todo_write",
 	"skill.create",
 	"skill.update",
 	"skill.delete",

@@ -5,6 +5,26 @@
 const OPEN_STATUSES = new Set(['pending', 'in_progress']);
 
 /**
+ * Canonicalize legacy tool aliases (docs/47 Wave E).
+ * @param {string} name
+ * @returns {string}
+ */
+export function canonicalToolName(name) {
+  const n = String(name || '').trim();
+  if (n === 'todo_write') return 'todo.write';
+  return n;
+}
+
+/**
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isTodoToolName(name) {
+  const n = canonicalToolName(name);
+  return n === 'todo.write' || n === 'todo.list';
+}
+
+/**
  * @param {any} raw
  */
 export function normalizeTodo(raw = {}) {
@@ -35,7 +55,7 @@ export function countOpenTodos(items = []) {
  */
 export function todosFromToolFinishedPayload(payload) {
   const name = payload?.tool_name || payload?.name || '';
-  if (name !== 'todo.write' && name !== 'todo.list' && name !== 'todo_write') {
+  if (!isTodoToolName(name)) {
     return null;
   }
   const envelope = parseToolResultV1(payload?.output);

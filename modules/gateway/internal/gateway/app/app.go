@@ -60,6 +60,8 @@ func Run(ctx context.Context, cfg Config) error {
 		services.Run.HandleRuntimeEvent(event)
 	}, func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		switch method {
+		// Deprecated domain RPCs (docs/47 Wave E): prefer methods.StateToolExecute.
+		// Kept as thin adapters so older Runtime clients keep working.
 		case methods.MemoryToolExecute:
 			var req methods.MemoryToolExecuteParams
 			if err := json.Unmarshal(params, &req); err != nil {
@@ -89,8 +91,7 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			return services.Context.ExecuteRuntimeTool(req)
 		case methods.StateToolExecute:
-			// Unified state-tool envelope (docs/41 W2-3). Domain services return
-			// their existing typed results for wire compatibility.
+			// Preferred unified state-tool envelope (docs/41 W2-3 / docs/47 Wave E).
 			var req methods.StateToolExecuteParams
 			if err := json.Unmarshal(params, &req); err != nil {
 				return nil, fmt.Errorf("invalid state tool params")

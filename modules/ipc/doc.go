@@ -1,6 +1,6 @@
 // Package ipc provides a cross-platform local IPC transport used by default
 // for newline-delimited JSON-RPC between processes
-// (for example gateway ↔ agent, or parent agent ↔ subagent).
+// (for example gateway ↔ agent, or parent agent ↔ worker process).
 //
 // Transport backends:
 //
