@@ -587,6 +587,29 @@ func TestSessionServiceCompactReportsResumeFailure(t *testing.T) {
 	}
 }
 
+func TestSessionServiceHistoryAllAndBootstrapShape(t *testing.T) {
+	repos, service := newSessionServiceTestFixture(t)
+	session, err := repos.Sessions.Create("boot", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"one", "two", "three"} {
+		if _, err := repos.Messages.Add(session.ID, "user", text, "run"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := service.HistoryAll(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.HasMore || len(page.Items) != 3 {
+		t.Fatalf("HistoryAll = %#v", page)
+	}
+	if page.Items[0].Seq != 1 || page.Items[2].Seq != 3 {
+		t.Fatalf("seq order = %#v", page.Items)
+	}
+}
+
 func TestSessionServiceRejectsConcurrentCompact(t *testing.T) {
 	repos, service := newSessionServiceTestFixture(t)
 	source, err := repos.Sessions.Create("compact-lock", t.TempDir())

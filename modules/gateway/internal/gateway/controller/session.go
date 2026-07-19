@@ -137,6 +137,59 @@ func (s SessionController) ContextState(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, result))
 }
 
+// Bootstrap returns history + satellites in one response (docs/48 Wave D).
+func (s SessionController) Bootstrap(c *gin.Context) {
+	id := c.Param("id")
+	history, err := s.Services.Session.HistoryAll(id)
+	if err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "session not found" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
+		return
+	}
+	runs, err := s.Services.Run.ListBySession(id, 200)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
+		return
+	}
+	tools, err := s.Services.Tool.ListBySession(id, 200)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
+		return
+	}
+	permissions, err := s.Services.Permission.ListBySession(id, 200)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
+		return
+	}
+	todos, err := s.Services.Todo.ListBySession(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
+		return
+	}
+	contextState, err := s.Services.Session.ContextState(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
+		return
+	}
+	goals, err := s.Services.Goal.ListBySession(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, service.SessionBootstrapResult{
+		History:     history,
+		Runs:        runs,
+		Tools:       tools,
+		Permissions: permissions,
+		Todos:       todos,
+		Context:     contextState,
+		Goals:       goals,
+	}))
+}
+
 func (s SessionController) Compact(c *gin.Context) {
 	var req service.CompactSessionRequest
 	if err := c.BindJSON(&req); err != nil {

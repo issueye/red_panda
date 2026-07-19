@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiJson } from '../lib/api.js';
 import { normalizeGoalList, pickFocusGoal } from '../lib/goals.js';
-import { loadAllSessionHistory } from '../lib/sessionHistory.js';
+import { loadSessionBootstrap } from '../lib/sessionHistory.js';
 import { mergeSessionHistoryMessages } from '../lib/sessionMessageMerge.js';
 import {
   createEmptySessionRuntime,
@@ -70,16 +70,15 @@ export function useSessionBootstrap({
     hydrateGenBySessionRef.current[sessionId] = nextGen;
     const isStale = () => hydrateGenBySessionRef.current[sessionId] !== nextGen;
     try {
-      const [history, serverRuns, toolCalls, permissionItems, todoData, contextData, goalData] = await Promise.all([
-        loadAllSessionHistory(sessionId),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/runs`).catch(() => []),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/tools`).catch(() => []),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/permissions`).catch(() => []),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/todos`).catch(() => null),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/context`).catch(() => null),
-        apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`).catch(() => null),
-      ]);
+      const boot = await loadSessionBootstrap(sessionId);
       if (isStale()) return;
+      const history = boot.history;
+      const serverRuns = boot.runs;
+      const toolCalls = boot.tools;
+      const permissionItems = boot.permissions;
+      const todoData = boot.todos;
+      const contextData = boot.context;
+      const goalData = boot.goals;
       const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
       const normalizedRuns = Array.isArray(serverRuns) ? serverRuns.map(normalizeRun) : [];
       const activeRun = latestActiveRun(serverRuns);
@@ -103,6 +102,7 @@ export function useSessionBootstrap({
       const normalizedPermissions = Array.isArray(permissionItems)
         ? permissionItems.map(normalizePermission)
         : [];
+      const touchedAt = Date.now();
       patchRuntime(sessionId, (prev) => {
         if (isStale()) return prev;
         // Live session: merge authoritative history (keep streaming suffix) instead of
@@ -137,6 +137,7 @@ export function useSessionBootstrap({
             // History messages carry messageSeq; coveredCount is only needed for live rows.
             contextSummaryCoveredCount: 0,
             contextSummaryKeepTailTurns: compactKeepTailTurns,
+            lastTouchedAt: touchedAt,
             hydrated: true,
           };
         }
@@ -166,6 +167,7 @@ export function useSessionBootstrap({
           contextSummaryEndSeq: compactEndSeq,
           contextSummaryCoveredCount: 0,
           contextSummaryKeepTailTurns: compactKeepTailTurns,
+          lastTouchedAt: touchedAt,
           hydrated: true,
         };
       });
@@ -174,7 +176,7 @@ export function useSessionBootstrap({
       }
     } catch {
       if (isStale()) return;
-      patchRuntime(sessionId, () => createEmptySessionRuntime({ hydrated: true }));
+      patchRuntime(sessionId, () => createEmptySessionRuntime({ hydrated: true, lastTouchedAt: Date.now() }));
       setGlobalPendingPermissions([]);
     }
   }, [loadGlobalPendingPermissions, patchRuntime]);

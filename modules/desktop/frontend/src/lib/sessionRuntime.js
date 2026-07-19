@@ -143,3 +143,44 @@ export function countActiveRuns(map) {
   }
   return count;
 }
+
+/** Max idle (non-running, non-focused) session runtimes retained in memory (docs/48 D). */
+export const MAX_IDLE_SESSION_RUNTIMES = 12;
+
+function sessionRuntimeIsActive(runtime) {
+  if (!runtime) return false;
+  if (runtime.running) return true;
+  if ((runtime.permissions || []).some((item) => item.status === 'pending')) return true;
+  return (runtime.runs || []).some((run) => run.status === 'running' || run.status === 'waiting_permission');
+}
+
+/**
+ * Drop least-recently-touched idle session projections to bound Desktop memory.
+ * Always keeps keepSessionId and any actively running sessions.
+ *
+ * @param {Record<string, object>} map
+ * @param {{ keepSessionId?: string, maxIdle?: number }} [options]
+ */
+export function pruneIdleSessionRuntimes(map, { keepSessionId = '', maxIdle = MAX_IDLE_SESSION_RUNTIMES } = {}) {
+  const entries = Object.entries(map || {});
+  if (entries.length === 0) return map || {};
+
+  const protectedIds = new Set();
+  if (keepSessionId) protectedIds.add(keepSessionId);
+  for (const [id, runtime] of entries) {
+    if (sessionRuntimeIsActive(runtime)) protectedIds.add(id);
+  }
+
+  const idle = entries
+    .filter(([id]) => !protectedIds.has(id))
+    .sort((a, b) => (Number(b[1]?.lastTouchedAt) || 0) - (Number(a[1]?.lastTouchedAt) || 0));
+
+  if (idle.length <= maxIdle) return map;
+
+  const drop = new Set(idle.slice(maxIdle).map(([id]) => id));
+  const next = { ...map };
+  for (const id of drop) {
+    delete next[id];
+  }
+  return next;
+}

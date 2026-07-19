@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | **Date** | 2026-07-19 |
-| **Status** | active (Wave A–C done; D planned) |
+| **Status** | complete (Wave A–D done) |
 | **Related** | [45](45-session-system-abstraction-design.md)、[46](46-session-store-development-plan.md)、会话系统问题审计 |
 | **Task plan** | [plans/2026-07-19-session-correctness-p0.md](plans/2026-07-19-session-correctness-p0.md) |
 
@@ -142,12 +142,25 @@ cd modules/desktop/frontend && node --test src/lib/sessionMessageMerge.test.js
 
 ---
 
-## 6. Wave D — 后续
+## 6. Wave D — bootstrap + runtime 内存界
 
-- `GET /sessions/:id/bootstrap` 聚合 hydrate。  
-- 非当前会话 runtime LRU。  
-- 软删 GC。  
-- Fork 产品决策。
+### 6.1 Bootstrap API
+
+`GET /api/v1/sessions/:id/bootstrap` 一次返回：
+
+`history`（全量 visible，`HistoryAll`）· `runs` · `tools` · `permissions` · `todos` · `context` · `goals`
+
+Desktop `loadSessionBootstrap` 优先该接口；失败时回退多 endpoint（兼容旧 Gateway）。
+
+### 6.2 Idle runtime prune
+
+- hydrate 成功写 `lastTouchedAt`  
+- `patchRuntime` 后 `pruneIdleSessionRuntimes`：保留当前 session + 进行中的 run，idle 最多 12 个  
+
+### 6.3 仍后置
+
+- 软删 GC  
+- Fork 产品决策
 
 ---
 
@@ -161,7 +174,8 @@ cd modules/desktop/frontend && node --test src/lib/sessionMessageMerge.test.js
 | B | B2 hydrate generation | `done` |
 | B | B3 单测 | `done`（复用 merge 既有测 + compact 并发测） |
 | C | C1 token 裁剪 model context | `done` |
-| D | bootstrap / LRU | `todo` |
+| D | D1 bootstrap API + Desktop 客户端 | `done` |
+| D | D2 idle runtime prune | `done` |
 
 ---
 
@@ -173,3 +187,4 @@ cd modules/desktop/frontend && node --test src/lib/sessionMessageMerge.test.js
 | 2026-07-19 | A1–A2 | `sessionCompactGate` + Compact/Preview 互斥；`TestSessionServiceRejectsConcurrentCompact` |
 | 2026-07-19 | B1–B2 | preserveLive 用 `mergeSessionHistoryMessages`；per-session hydrate gen |
 | 2026-07-19 | C1 | `selectModelContextMessages` + fetch 800 / budget 32k；ContextState 同源 |
+| 2026-07-19 | D1–D2 | `GET .../bootstrap`；`loadSessionBootstrap`；`pruneIdleSessionRuntimes` |

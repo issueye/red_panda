@@ -55,6 +55,7 @@ import {
   countActiveRuns,
   createEmptySessionRuntime,
   patchSessionRuntimeMap,
+  pruneIdleSessionRuntimes,
   resolveEventSessionId,
 } from './lib/sessionRuntime.js';
 import {
@@ -116,10 +117,17 @@ export function App() {
   const loadWorkerProfiles = workers.load;
   const loadMcpServers = mcp.load;
   const loadSkills = skills.load;
+  const currentSessionIdRef = useRef('');
 
   const patchRuntime = useCallback((sessionId, updater) => {
     if (!sessionId) return;
-    setSessionRuntimes((map) => patchSessionRuntimeMap(map, sessionId, updater));
+    setSessionRuntimes((map) => {
+      const next = patchSessionRuntimeMap(map, sessionId, updater);
+      // Bound idle session projections in memory (docs/48 Wave D).
+      return pruneIdleSessionRuntimes(next, {
+        keepSessionId: currentSessionIdRef.current || sessionId,
+      });
+    });
   }, []);
 
   const {
@@ -151,7 +159,6 @@ export function App() {
   const selectSessionRef = useRef(null);
   const refreshSessionsRef = useRef(null);
   const gatewayRequestRef = useRef(null);
-  const currentSessionIdRef = useRef(currentSessionId);
   currentSessionIdRef.current = currentSessionId;
   const sessionRuntimesRef = useRef(sessionRuntimes);
   sessionRuntimesRef.current = sessionRuntimes;
