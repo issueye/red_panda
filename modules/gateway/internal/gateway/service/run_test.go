@@ -731,7 +731,7 @@ func TestRunServiceAggregatesConversationMessagesAndHidesWorkerPrivateDeltas(t *
 	assertServiceMessage(t, rows[1], "assistant", "run_1", "hello world")
 	assertServiceMessage(t, rows[2], "assistant", "run_2", "new run")
 
-	history, err := NewSessionService(repos, nil, nil).History("session_1", 0, 200)
+	history, err := NewSessionService(repos, nil, nil, "").History("session_1", 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}

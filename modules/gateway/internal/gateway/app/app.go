@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,10 @@ type Config struct {
 
 	AgentCommand string
 	AgentArgs    []string
+
+	// SessionArchiveDir holds JSONL snapshots of hard-deleted sessions (docs/49).
+	// Empty → DefaultSessionArchiveDir(DatabaseDSN).
+	SessionArchiveDir string
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -79,11 +84,16 @@ func Run(ctx context.Context, cfg Config) error {
 			return nil, fmt.Errorf("method not found: %s", method)
 		}
 	})
+	archiveDir := cfg.SessionArchiveDir
+	if strings.TrimSpace(archiveDir) == "" {
+		archiveDir = service.DefaultSessionArchiveDir(cfg.DatabaseDSN)
+	}
 	services = service.NewSet(service.Options{
-		Version:       cfg.Version,
-		Repos:         repos,
-		Hub:           hub,
-		RuntimeClient: runtime,
+		Version:           cfg.Version,
+		Repos:             repos,
+		Hub:               hub,
+		RuntimeClient:     runtime,
+		SessionArchiveDir: archiveDir,
 	})
 	controllers := controller.NewSet(services, hub)
 

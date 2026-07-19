@@ -56,7 +56,7 @@ func TestPauseSessionForCompactPausesAndResumesDelegatedWorkers(t *testing.T) {
 	}
 	capturePath := filepath.Join(t.TempDir(), "run-compact-params.json")
 	runtime := useStdioRuntimeHelper(t, capturePath)
-	service := NewSessionService(repos, runtime, nil)
+	service := NewSessionService(repos, runtime, nil, "")
 
 	paused, err := service.pauseSessionForCompact(session.ID)
 	if err != nil {
@@ -428,7 +428,7 @@ func newSessionServiceTestFixture(t *testing.T) (repository.Set, SessionService)
 	}
 
 	repos := repository.NewSet(db)
-	return repos, NewSessionService(repos, nil, nil)
+	return repos, NewSessionService(repos, nil, nil, t.TempDir())
 }
 
 func TestSessionServiceCompactPausesActiveRuns(t *testing.T) {
@@ -456,7 +456,7 @@ func TestSessionServiceCompactPausesActiveRuns(t *testing.T) {
 	}
 
 	capturePath := filepath.Join(t.TempDir(), "compact-active-run.json")
-	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil)
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil, t.TempDir())
 	result, err := service.Compact(source.ID, CompactSessionRequest{
 		KeepTailTurns: 1,
 		Mode:          "local",
@@ -501,7 +501,7 @@ func TestSessionServiceCompactResumesWorkersWhenSummaryFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	capturePath := filepath.Join(t.TempDir(), "compact-error.json")
-	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil)
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil, t.TempDir())
 
 	if _, err := service.Compact(source.ID, CompactSessionRequest{Mode: "local"}); err == nil {
 		t.Fatal("compact succeeded without any messages")
@@ -544,7 +544,7 @@ func TestSessionServiceCompactResumesRunsWhenPauseReportsZero(t *testing.T) {
 
 	capturePath := filepath.Join(t.TempDir(), "compact-stale-pause.json")
 	t.Setenv("RED_PANDA_RUNTIME_PAUSED_COUNT", "0")
-	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil)
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil, t.TempDir())
 	result, err := service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"})
 	if err != nil {
 		t.Fatal(err)
@@ -580,10 +580,89 @@ func TestSessionServiceCompactReportsResumeFailure(t *testing.T) {
 
 	capturePath := filepath.Join(t.TempDir(), "compact-resume-failure.json")
 	t.Setenv("RED_PANDA_RUNTIME_RESUME_ERROR", "1")
-	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil)
+	service := NewSessionService(repos, useStdioRuntimeHelper(t, capturePath), nil, t.TempDir())
 	_, err = service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"})
 	if err == nil || !strings.Contains(err.Error(), "resume session after compact") {
 		t.Fatalf("compact error = %v, want explicit resume failure", err)
+	}
+}
+
+func TestSessionServiceDeleteArchivesJSONLAndHardDeletes(t *testing.T) {
+	archiveDir := t.TempDir()
+	repos, _ := newSessionServiceTestFixture(t)
+	service := NewSessionService(repos, nil, nil, archiveDir)
+
+	session, err := repos.Sessions.Create("to-delete", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.Messages.Add(session.ID, "user", "hello archive", "run_del"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Runs.Start(model.RunRecord{
+		ID: "run_del", SessionID: session.ID, Status: "completed", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.Delete(session.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := repos.Sessions.Get(session.ID); err == nil {
+		t.Fatal("expected session hard-deleted from active query")
+	}
+	if _, err := repos.Sessions.GetAny(session.ID); err == nil {
+		t.Fatal("expected session row fully removed")
+	}
+	msgs, err := repos.Messages.ListAll(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("messages remain after hard delete: %d", len(msgs))
+	}
+
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), ".jsonl") {
+		t.Fatalf("archive files = %#v", entries)
+	}
+	raw, err := os.ReadFile(filepath.Join(archiveDir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"type":"archive_header"`) || !strings.Contains(text, `"type":"session"`) {
+		t.Fatalf("archive missing header/session: %s", text[:min(200, len(text))])
+	}
+	if !strings.Contains(text, "hello archive") {
+		t.Fatalf("archive missing message body: %s", text)
+	}
+}
+
+func TestSessionServiceDeleteFailsWhenArchiveDirInvalid(t *testing.T) {
+	repos, _ := newSessionServiceTestFixture(t)
+	// Point archive at a file path so MkdirAll / create fails.
+	bad := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := NewSessionService(repos, nil, nil, filepath.Join(bad, "nested"))
+	session, err := repos.Sessions.Create("keep-me", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.Messages.Add(session.ID, "user", "stay", "run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Delete(session.ID); err == nil {
+		t.Fatal("expected delete to fail when archive cannot be written")
+	}
+	if _, err := repos.Sessions.Get(session.ID); err != nil {
+		t.Fatalf("session should remain after failed archive: %v", err)
 	}
 }
 

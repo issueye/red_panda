@@ -220,9 +220,9 @@ type ContextUsageDTO struct {
 	CoveredEndSeq     uint64 `json:"covered_end_seq"`
 }
 
-func NewSessionService(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub) SessionService {
+func NewSessionService(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub, archiveDir string) SessionService {
 	return SessionService{
-		repos: repos, store: newSessionStore(repos), lifecycle: newSessionLifecycle(repos, runtime, hub),
+		repos: repos, store: newSessionStore(repos, archiveDir), lifecycle: newSessionLifecycle(repos, runtime, hub, archiveDir),
 		runtime: runtime, hub: hub,
 		compactGate: &sessionCompactGate{compacting: make(map[string]struct{})},
 	}

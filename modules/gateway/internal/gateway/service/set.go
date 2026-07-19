@@ -7,10 +7,11 @@ import (
 )
 
 type Options struct {
-	Version       string
-	Repos         repository.Set
-	Hub           *eventhub.Hub
-	RuntimeClient *runtimeclient.Client
+	Version           string
+	Repos             repository.Set
+	Hub               *eventhub.Hub
+	RuntimeClient     *runtimeclient.Client
+	SessionArchiveDir string // JSONL archives for hard-deleted sessions (docs/49)
 }
 
 type Set struct {
@@ -37,12 +38,13 @@ type AppService struct {
 
 func NewSet(opts Options) Set {
 	run := NewRunService(opts.Repos, opts.Hub, opts.RuntimeClient)
-	lifecycle := newSessionLifecycle(opts.Repos, opts.RuntimeClient, opts.Hub)
+	archiveDir := opts.SessionArchiveDir
+	lifecycle := newSessionLifecycle(opts.Repos, opts.RuntimeClient, opts.Hub, archiveDir)
 	return Set{
 		App:            AppService{Version: opts.Version},
 		Run:            run,
 		Workspace:      NewWorkspaceService(opts.Repos, lifecycle),
-		Session:        NewSessionService(opts.Repos, opts.RuntimeClient, opts.Hub),
+		Session:        NewSessionService(opts.Repos, opts.RuntimeClient, opts.Hub, archiveDir),
 		Memory:         NewMemoryService(opts.Repos),
 		Todo:           NewTodoService(opts.Repos),
 		Tool:           NewToolService(opts.Repos),

@@ -19,6 +19,7 @@
 | [46-session-store-development-plan.md](46-session-store-development-plan.md) | **Session store, context, summary, and lifecycle implementation plan** |
 | [47-complexity-redundancy-development-plan.md](47-complexity-redundancy-development-plan.md) | **Complexity & redundancy wave** (Goal loop pure decisions, state-tool boilerplate, alias cleanup) |
 | [48-session-correctness-optimization-plan.md](48-session-correctness-optimization-plan.md) | **Session correctness P0** (compact mutex, preserveLive merge, hydrate generation) |
+| [49-session-hard-delete-jsonl-archive.md](49-session-hard-delete-jsonl-archive.md) | **Session hard-delete + JSONL archive** (replace soft-delete) |
 | [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |

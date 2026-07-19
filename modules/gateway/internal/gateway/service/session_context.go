@@ -35,7 +35,7 @@ func buildModelConversation(repos repository.Set, sessionID string) ([]methods.M
 }
 
 func loadModelContextForAssembly(repos repository.Set, sessionID string) (storedSessionContext, error) {
-	stored, err := newSessionStore(repos).modelContext(sessionID, modelContextFetchLimit)
+	stored, err := newSessionStore(repos, "").modelContext(sessionID, modelContextFetchLimit)
 	if err != nil {
 		return storedSessionContext{}, err
 	}

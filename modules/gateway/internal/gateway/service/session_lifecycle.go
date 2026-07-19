@@ -18,8 +18,10 @@ type sessionLifecycle struct {
 	hub     *eventhub.Hub
 }
 
-func newSessionLifecycle(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub) sessionLifecycle {
-	return sessionLifecycle{repos: repos, store: newSessionStore(repos), runtime: runtime, hub: hub}
+func newSessionLifecycle(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub, archiveDir string) sessionLifecycle {
+	return sessionLifecycle{
+		repos: repos, store: newSessionStore(repos, archiveDir), runtime: runtime, hub: hub,
+	}
 }
 
 func (l sessionLifecycle) delete(sessionIDs []string, reason string) (int64, error) {
@@ -39,7 +41,8 @@ func (l sessionLifecycle) delete(sessionIDs []string, reason string) (int64, err
 			}
 		}
 	}
-	deleted, err := l.store.deleteSessions(sessionIDs)
+	// Archive to JSONL then hard-delete (docs/49).
+	deleted, err := l.store.deleteSessions(sessionIDs, reason)
 	if err != nil {
 		return 0, err
 	}
