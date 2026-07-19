@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | **Date** | 2026-07-19 |
-| **Status** | active (Wave A–B done; C–D planned) |
+| **Status** | active (Wave A–C done; D planned) |
 | **Related** | [45](45-session-system-abstraction-design.md)、[46](46-session-store-development-plan.md)、会话系统问题审计 |
 | **Task plan** | [plans/2026-07-19-session-correctness-p0.md](plans/2026-07-19-session-correctness-p0.md) |
 
@@ -160,7 +160,8 @@ cd modules/desktop/frontend && node --test src/lib/sessionMessageMerge.test.js
 | B | B1 preserveLive merge | `done` |
 | B | B2 hydrate generation | `done` |
 | B | B3 单测 | `done`（复用 merge 既有测 + compact 并发测） |
-| C–D | 见上文 | `todo` |
+| C | C1 token 裁剪 model context | `done` |
+| D | bootstrap / LRU | `todo` |
 
 ---
 
@@ -171,3 +172,4 @@ cd modules/desktop/frontend && node --test src/lib/sessionMessageMerge.test.js
 | 2026-07-19 | plan | 创建本文档；启动 Wave A/B |
 | 2026-07-19 | A1–A2 | `sessionCompactGate` + Compact/Preview 互斥；`TestSessionServiceRejectsConcurrentCompact` |
 | 2026-07-19 | B1–B2 | preserveLive 用 `mergeSessionHistoryMessages`；per-session hydrate gen |
+| 2026-07-19 | C1 | `selectModelContextMessages` + fetch 800 / budget 32k；ContextState 同源 |

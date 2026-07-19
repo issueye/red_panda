@@ -647,7 +647,8 @@ func (s SessionService) ContextState(sessionID string) (SessionContextState, err
 	if err != nil {
 		return SessionContextState{}, err
 	}
-	modelContext, err := s.store.modelContext(sessionID, 200)
+	// Same packing as buildModelConversation so Desktop ring matches model input (docs/48 C).
+	modelContext, err := loadModelContextForAssembly(s.repos, sessionID)
 	if err != nil {
 		return SessionContextState{}, err
 	}
