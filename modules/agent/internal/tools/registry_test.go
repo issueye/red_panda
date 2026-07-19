@@ -78,8 +78,12 @@ func TestStableToolRegistryProvidesDefinitionAndTimeout(t *testing.T) {
 }
 
 func TestToolTimeoutCompatibilityFallbacks(t *testing.T) {
-	if got := toolTimeoutFor("todo_write"); got != defaultGatewayToolTimeout {
-		t.Fatalf("todo_write timeout = %s, want %s", got, defaultGatewayToolTimeout)
+	// Removed alias is no longer mapped to gateway timeout (docs/47 E-cutover).
+	if got := toolTimeoutFor("todo_write"); got != defaultLocalToolTimeout {
+		t.Fatalf("todo_write timeout = %s, want %s (alias removed)", got, defaultLocalToolTimeout)
+	}
+	if got := toolTimeoutFor("todo.write"); got != defaultGatewayToolTimeout {
+		t.Fatalf("todo.write timeout = %s, want %s", got, defaultGatewayToolTimeout)
 	}
 	if got := toolTimeoutFor("mcp__server__dynamic"); got != 0 {
 		t.Fatalf("dynamic MCP timeout = %s, want self-managed", got)

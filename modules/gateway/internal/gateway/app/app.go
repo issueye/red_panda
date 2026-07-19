@@ -60,38 +60,9 @@ func Run(ctx context.Context, cfg Config) error {
 		services.Run.HandleRuntimeEvent(event)
 	}, func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		switch method {
-		// Deprecated domain RPCs (docs/47 Wave E): prefer methods.StateToolExecute.
-		// Kept as thin adapters so older Runtime clients keep working.
-		case methods.MemoryToolExecute:
-			var req methods.MemoryToolExecuteParams
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, fmt.Errorf("invalid memory tool params")
-			}
-			return services.Memory.ExecuteRuntimeTool(req)
-		case methods.TodoToolExecute:
-			var req methods.TodoToolExecuteParams
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, fmt.Errorf("invalid todo tool params")
-			}
-			return services.Todo.ExecuteRuntimeTool(req)
-		case methods.GoalToolExecute:
-			var req methods.GoalToolExecuteParams
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, fmt.Errorf("invalid goal tool params")
-			}
-			result, err := services.Goal.ExecuteRuntimeTool(req)
-			if err != nil {
-				return nil, err
-			}
-			return scheduleGoalRunCancel(services, result), nil
-		case methods.ContextToolExecute:
-			var req methods.ContextToolExecuteParams
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, fmt.Errorf("invalid context tool params")
-			}
-			return services.Context.ExecuteRuntimeTool(req)
 		case methods.StateToolExecute:
-			// Preferred unified state-tool envelope (docs/41 W2-3 / docs/47 Wave E).
+			// Sole Runtime→Gateway state-tool RPC (docs/47 E-cutover).
+			// Removed: memory/todo/goal/context.tool.execute.
 			var req methods.StateToolExecuteParams
 			if err := json.Unmarshal(params, &req); err != nil {
 				return nil, fmt.Errorf("invalid state tool params")

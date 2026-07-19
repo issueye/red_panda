@@ -2,57 +2,57 @@ package methods
 
 import "strings"
 
-// Legacy / internal tool names (docs/47 Wave E prep).
+// Compatibility cutover (docs/47 Wave E-cutover, BREAKING).
 //
-// Compatibility window:
-//   - Prefer CanonicalToolName at every Runtime tool entry before policy/dispatch.
-//   - Prefer StateToolExecute over per-domain *.tool.execute RPCs for new code.
-//   - segment_end is an internal Goal budget RPC name, not a model-visible tool.
-// Removal of wire aliases requires an explicit product/version decision (Wave E cutover).
+// Removed wire acceptance:
+//   - tool alias "todo_write" (use "todo.write")
+//   - domain RPCs memory/todo/goal/context.tool.execute (use StateToolExecute)
+//   - internal budget tool name "segment_end" (use InternalGoalSegmentEnd)
+//
+// Domain Params/Result types remain — they are the typed service envelopes
+// projected from StateToolExecuteParams, not separate wire methods.
 
 const (
-	// LegacyToolAliasTodoWrite is the pre-todo.write alias still accepted on wire.
-	// Deprecated: models and new code should emit "todo.write" only.
-	LegacyToolAliasTodoWrite = "todo_write"
-
-	// ToolTodoWrite is the canonical todo write tool name.
+	// ToolTodoWrite is the only accepted todo write tool name.
 	ToolTodoWrite = "todo.write"
-	// ToolTodoList is the canonical todo list tool name.
+	// ToolTodoList is the only accepted todo list tool name.
 	ToolTodoList = "todo.list"
 
 	// InternalGoalSegmentEnd is the Runtime→Gateway budget accounting tool name.
-	// It is not registered in the provider tool schema. Prefer this constant over
-	// string literals so a future private method rename is a single-file change.
-	InternalGoalSegmentEnd = "segment_end"
+	// Not registered in the provider tool schema. Wire value is goal-namespaced
+	// so domain inference stays on the goal.* prefix without a special case.
+	InternalGoalSegmentEnd = "goal.segment_budget"
+
+	// RemovedLegacyTodoWriteAlias documents the retired alias (no longer accepted).
+	RemovedLegacyTodoWriteAlias = "todo_write"
+	// RemovedLegacySegmentEnd documents the retired internal budget name.
+	RemovedLegacySegmentEnd = "segment_end"
 )
 
-// CanonicalToolName maps legacy tool aliases to stable schema names.
-// Unknown names are returned trimmed unchanged.
+// CanonicalToolName returns the stable tool name. Post-cutover there are no
+// alias rewrites — names are only trimmed. Kept as a single call site so future
+// renames stay centralized.
 func CanonicalToolName(name string) string {
-	switch strings.TrimSpace(name) {
-	case LegacyToolAliasTodoWrite:
-		return ToolTodoWrite
-	default:
-		return strings.TrimSpace(name)
-	}
+	return strings.TrimSpace(name)
 }
 
-// IsLegacyToolAlias reports whether name is a deprecated alias that still works.
-func IsLegacyToolAlias(name string) bool {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return false
-	}
-	return CanonicalToolName(trimmed) != trimmed
-}
-
-// IsInternalGoalBudgetTool reports whether name is the Goal segment budget path
-// (not exposed to the model tool surface).
-func IsInternalGoalBudgetTool(name string) bool {
-	return strings.TrimSpace(name) == InternalGoalSegmentEnd
-}
-
-// IsTodoWriteTool reports whether name is the todo write tool (canonical or legacy).
+// IsTodoWriteTool reports whether name is the canonical todo write tool.
 func IsTodoWriteTool(name string) bool {
 	return CanonicalToolName(name) == ToolTodoWrite
+}
+
+// IsInternalGoalBudgetTool reports whether name is the Goal segment budget path.
+func IsInternalGoalBudgetTool(name string) bool {
+	return CanonicalToolName(name) == InternalGoalSegmentEnd
+}
+
+// IsRemovedToolAlias reports whether name was a previously accepted alias that
+// is now rejected (useful for clear error messages and tests).
+func IsRemovedToolAlias(name string) bool {
+	switch CanonicalToolName(name) {
+	case RemovedLegacyTodoWriteAlias, RemovedLegacySegmentEnd:
+		return true
+	default:
+		return false
+	}
 }

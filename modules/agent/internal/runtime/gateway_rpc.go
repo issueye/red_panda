@@ -67,7 +67,7 @@ func (r *Runtime) goalExecutor(ctx context.Context, req methods.GoalToolExecuteP
 		return result, err
 	}
 	// goal.list is read-only and often returns multiple goals without a single
-	// snapshot to bind; every mutating tool (including internal segment_end)
+	// snapshot to bind; every mutating tool (including internal goal.segment_budget)
 	// refreshes the per-run Goal projection when result.Goal is set.
 	name := strings.TrimSpace(req.ToolName)
 	if name != "goal.list" {

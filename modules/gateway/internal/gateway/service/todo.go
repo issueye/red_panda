@@ -69,8 +69,10 @@ func (s TodoService) ExecuteRuntimeTool(params methods.TodoToolExecuteParams) (m
 	if err := validateRuntimeToolMeta(s.repos, params.RunID, params.SessionID, params.ToolCallID, true); err != nil {
 		return methods.TodoToolExecuteResult{}, err
 	}
-	// Accept legacy todo_write then canonicalize (docs/47 Wave E).
 	name := methods.CanonicalToolName(params.ToolName)
+	if methods.IsRemovedToolAlias(name) {
+		return methods.TodoToolExecuteResult{}, fmt.Errorf("tool alias %q was removed; use todo.write / todo.list", name)
+	}
 	params.ToolName = name
 	switch name {
 	case methods.ToolTodoWrite:

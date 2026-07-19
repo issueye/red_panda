@@ -23,18 +23,9 @@ const (
 	MCPDiscover       = "mcp.discover"
 	PermissionResolve = "permission.resolve"
 
-	// Gateway-backed state tools (memory/todo/goal/context).
-	//
-	// Deprecated RPC methods (docs/47 Wave E): MemoryToolExecute, TodoToolExecute,
-	// GoalToolExecute, ContextToolExecute remain for compatibility adapters and
-	// older Runtime clients. New Runtime code MUST use StateToolExecute only
-	// (docs/41 W2-3). Planned removal requires an explicit version/cutover note.
-	MemoryToolExecute  = "memory.tool.execute"  // Deprecated: use StateToolExecute + domain=memory
-	TodoToolExecute    = "todo.tool.execute"    // Deprecated: use StateToolExecute + domain=todo
-	GoalToolExecute    = "goal.tool.execute"    // Deprecated: use StateToolExecute + domain=goal
-	ContextToolExecute = "context.tool.execute" // Deprecated: use StateToolExecute + domain=context
 	// ScheduleToolExecute is also defined in schedule.go for discoverability.
-	// StateToolExecute is the unified Runtime→Gateway state-tool envelope.
+	// StateToolExecute is the sole Runtime→Gateway state-tool RPC (docs/47 E-cutover).
+	// Removed methods: memory/todo/goal/context.tool.execute.
 	StateToolExecute = "state.tool.execute"
 
 	// State tool domains for StateToolExecuteParams.Domain.
@@ -699,10 +690,14 @@ func ResolveStateToolDomain(domain, toolName string) (string, error) {
 		return "", fmt.Errorf("unsupported state tool domain %q", domain)
 	}
 	name := CanonicalToolName(toolName)
+	if IsRemovedToolAlias(name) {
+		return "", fmt.Errorf("tool alias %q was removed; use the canonical tool name (docs/47 E-cutover)", name)
+	}
 	switch {
 	case name == ToolTodoWrite, name == ToolTodoList, strings.HasPrefix(name, "todo."):
 		return StateToolDomainTodo, nil
-	case IsInternalGoalBudgetTool(name), strings.HasPrefix(name, "goal."):
+	case strings.HasPrefix(name, "goal."):
+		// Includes InternalGoalSegmentEnd ("goal.segment_budget").
 		return StateToolDomainGoal, nil
 	case strings.HasPrefix(name, "memory."):
 		return StateToolDomainMemory, nil

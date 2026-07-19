@@ -291,7 +291,7 @@ func TestGoalV2SegmentLedgerRemainsIdempotent(t *testing.T) {
 	svc, sessionID := newGoalTestService(t)
 	goal := createGoalV2(t, svc, sessionID, "run_root", nil)
 	params := methods.GoalToolExecuteParams{
-		RunID: "run_root", SessionID: sessionID, ToolCallID: "segment", ToolName: "segment_end",
+		RunID: "run_root", SessionID: sessionID, ToolCallID: "segment", ToolName: methods.InternalGoalSegmentEnd,
 		Arguments: map[string]any{"goal_id": goal.ID, "segment_index": 0, "delta_tool_turns": 7},
 	}
 	if _, err := svc.ExecuteRuntimeTool(params); err != nil {

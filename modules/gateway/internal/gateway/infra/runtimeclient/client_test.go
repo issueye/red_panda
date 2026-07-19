@@ -75,10 +75,10 @@ func TestClientHandlesRuntimeOriginatedRequest(t *testing.T) {
 	defer writer.Close()
 
 	client := New("", nil, "test", nil, func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		if method != methods.MemoryToolExecute {
-			t.Fatalf("method = %s, want %s", method, methods.MemoryToolExecute)
+		if method != methods.StateToolExecute {
+			t.Fatalf("method = %s, want %s", method, methods.StateToolExecute)
 		}
-		var req methods.MemoryToolExecuteParams
+		var req methods.StateToolExecuteParams
 		if err := json.Unmarshal(params, &req); err != nil {
 			t.Fatal(err)
 		}
@@ -90,11 +90,9 @@ func TestClientHandlesRuntimeOriginatedRequest(t *testing.T) {
 	client.running = true
 	client.stdin = writer
 
-	request, err := jsonrpc.NewRequest("rt_1", methods.MemoryToolExecute, methods.MemoryToolExecuteParams{
-		RunID:      "run_1",
-		ToolCallID: "tool_1",
-		ToolName:   "memory.list",
-	})
+	request, err := jsonrpc.NewRequest("rt_1", methods.StateToolExecute, methods.NewStateToolParams(
+		methods.StateToolDomainMemory, "run_1", "", "", "tool_1", "memory.list", nil,
+	))
 	if err != nil {
 		t.Fatal(err)
 	}

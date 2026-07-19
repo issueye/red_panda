@@ -235,11 +235,9 @@ func TestRuntimeCallGatewayRoundTrip(t *testing.T) {
 	}
 	done := make(chan callResult, 1)
 	go func() {
-		raw, err := rt.callGateway(ctx, methods.MemoryToolExecute, methods.MemoryToolExecuteParams{
-			RunID:      "run_gateway_call",
-			ToolCallID: "tool_gateway_call",
-			ToolName:   "memory.list",
-		})
+		raw, err := rt.callGateway(ctx, methods.StateToolExecute, methods.NewStateToolParams(
+			methods.StateToolDomainMemory, "run_gateway_call", "", "", "tool_gateway_call", "memory.list", nil,
+		))
 		done <- callResult{raw: raw, err: err}
 	}()
 
@@ -247,7 +245,7 @@ func TestRuntimeCallGatewayRoundTrip(t *testing.T) {
 	if err := json.NewDecoder(reader).Decode(&outbound); err != nil {
 		t.Fatal(err)
 	}
-	if outbound.Method != methods.MemoryToolExecute || outbound.ID == "" {
+	if outbound.Method != methods.StateToolExecute || outbound.ID == "" {
 		t.Fatalf("unexpected outbound request: %#v", outbound)
 	}
 	response, err := jsonrpc.NewResult(outbound.ID, methods.MemoryToolExecuteResult{

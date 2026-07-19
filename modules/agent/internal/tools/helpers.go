@@ -8,9 +8,7 @@ import (
 
 const maxToolOutputBytes = 64 * 1024
 
-// CanonicalToolName maps legacy aliases to the stable tool name used in
-// schemas and dispatch (docs/47 Wave B/E). Prefer methods.CanonicalToolName
-// as the single protocol-level source of truth.
+// CanonicalToolName trims tool names (docs/47 E-cutover: no alias rewrites).
 func CanonicalToolName(name string) string {
 	return methods.CanonicalToolName(name)
 }

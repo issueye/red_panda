@@ -121,7 +121,7 @@ func (s GoalService) ExecuteRuntimeTool(params methods.GoalToolExecuteParams) (m
 	case "goal.list":
 		return s.executeList(params)
 	case methods.InternalGoalSegmentEnd:
-		// Internal budget accounting path (not model-facing; docs/47 Wave E).
+		// Internal budget accounting path (not model-facing; docs/47 E-cutover).
 		return s.executeSegmentEnd(params)
 	default:
 		return methods.GoalToolExecuteResult{}, fmt.Errorf("unsupported goal tool %q", name)
@@ -563,7 +563,7 @@ func (s GoalService) executeSegmentEnd(params methods.GoalToolExecuteParams) (me
 	dto := s.goalDTO(row)
 	return methods.GoalToolExecuteResult{
 		Status: "completed",
-		Output: runtimeGoalOutput("segment_end", &dto, nil, map[string]any{"action": "segment_end", "delta": delta, "recorded": recorded}),
+		Output: runtimeGoalOutput(methods.InternalGoalSegmentEnd, &dto, nil, map[string]any{"action": "segment_budget", "delta": delta, "recorded": recorded}),
 		Goal:   &dto,
 	}, nil
 }

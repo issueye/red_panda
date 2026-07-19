@@ -12,9 +12,10 @@ func TestResolveStateToolDomain(t *testing.T) {
 		{domain: "TODO", tool: "anything", want: StateToolDomainTodo},
 		{domain: "", tool: "memory.list", want: StateToolDomainMemory},
 		{domain: "", tool: "todo.write", want: StateToolDomainTodo},
-		{domain: "", tool: "todo_write", want: StateToolDomainTodo},
+		{domain: "", tool: "todo_write", wantErr: true}, // removed alias
 		{domain: "", tool: "goal.assess", want: StateToolDomainGoal},
-		{domain: "", tool: "segment_end", want: StateToolDomainGoal},
+		{domain: "", tool: "goal.segment_budget", want: StateToolDomainGoal},
+		{domain: "", tool: "segment_end", wantErr: true}, // removed internal name
 		{domain: "", tool: "context.read", want: StateToolDomainContext},
 		{domain: "unknown", tool: "memory.list", wantErr: true},
 		{domain: "", tool: "shell.exec", wantErr: true},

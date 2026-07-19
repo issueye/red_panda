@@ -5,22 +5,12 @@
 const OPEN_STATUSES = new Set(['pending', 'in_progress']);
 
 /**
- * Canonicalize legacy tool aliases (docs/47 Wave E).
- * @param {string} name
- * @returns {string}
- */
-export function canonicalToolName(name) {
-  const n = String(name || '').trim();
-  if (n === 'todo_write') return 'todo.write';
-  return n;
-}
-
-/**
  * @param {string} name
  * @returns {boolean}
  */
 export function isTodoToolName(name) {
-  const n = canonicalToolName(name);
+  const n = String(name || '').trim();
+  // docs/47 E-cutover: todo_write alias removed
   return n === 'todo.write' || n === 'todo.list';
 }
 
