@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiJson } from '../lib/api.js';
 import { normalizeGoalList, pickFocusGoal } from '../lib/goals.js';
 import { loadAllSessionHistory } from '../lib/sessionHistory.js';
+import { mergeSessionHistoryMessages } from '../lib/sessionMessageMerge.js';
 import {
   createEmptySessionRuntime,
 } from '../lib/sessionRuntime.js';
@@ -50,6 +51,8 @@ export function useSessionBootstrap({
   const [workspace, setWorkspace] = useState(null);
   const [recentWorkspaces, setRecentWorkspaces] = useState([]);
   const [globalPendingPermissions, setGlobalPendingPermissions] = useState([]);
+  // Per-session hydrate generation: discard stale responses after rapid switches (docs/48 B2).
+  const hydrateGenBySessionRef = useRef({});
 
   // Keep Gateway resource loaders in sync with the active workspace root.
   if (workspaceRootRef) {
@@ -62,6 +65,10 @@ export function useSessionBootstrap({
   }, []);
 
   const loadSessionState = useCallback(async (sessionId, { preserveLive = true } = {}) => {
+    if (!sessionId) return;
+    const nextGen = (Number(hydrateGenBySessionRef.current[sessionId]) || 0) + 1;
+    hydrateGenBySessionRef.current[sessionId] = nextGen;
+    const isStale = () => hydrateGenBySessionRef.current[sessionId] !== nextGen;
     try {
       const [history, serverRuns, toolCalls, permissionItems, todoData, contextData, goalData] = await Promise.all([
         loadAllSessionHistory(sessionId),
@@ -72,6 +79,7 @@ export function useSessionBootstrap({
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/context`).catch(() => null),
         apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goals`).catch(() => null),
       ]);
+      if (isStale()) return;
       const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
       const normalizedRuns = Array.isArray(serverRuns) ? serverRuns.map(normalizeRun) : [];
       const activeRun = latestActiveRun(serverRuns);
@@ -91,8 +99,14 @@ export function useSessionBootstrap({
         : 0;
       const goalItems = goalData ? normalizeGoalList(goalData) : [];
       const focusGoal = goalData ? pickFocusGoal(goalItems) : null;
+      const normalizedTools = Array.isArray(toolCalls) ? toolCalls.map(normalizeToolCall) : [];
+      const normalizedPermissions = Array.isArray(permissionItems)
+        ? permissionItems.map(normalizePermission)
+        : [];
       patchRuntime(sessionId, (prev) => {
-        // Keep in-memory live projection when switching back to a still-running session.
+        if (isStale()) return prev;
+        // Live session: merge authoritative history (keep streaming suffix) instead of
+        // dropping history refresh (docs/48 Wave B1).
         if (preserveLive && prev.hydrated && prev.running) {
           const activeRunId = activeRun?.id || prev.currentRunId || '';
           const activeRunSeq = Math.max(
@@ -101,6 +115,9 @@ export function useSessionBootstrap({
           );
           return {
             ...prev,
+            messages: mergeSessionHistoryMessages(prev.messages, normalized),
+            tools: normalizedTools.length > 0 ? normalizedTools : prev.tools,
+            permissions: normalizedPermissions.length > 0 ? normalizedPermissions : prev.permissions,
             runs: normalizedRuns.length > 0 ? normalizedRuns : prev.runs,
             currentRunId: activeRunId,
             runSeq: activeRunSeq,
@@ -126,10 +143,8 @@ export function useSessionBootstrap({
         return {
           ...prev,
           messages: normalized,
-          tools: Array.isArray(toolCalls) ? toolCalls.map(normalizeToolCall) : [],
-          permissions: Array.isArray(permissionItems)
-            ? permissionItems.map(normalizePermission)
-            : [],
+          tools: normalizedTools,
+          permissions: normalizedPermissions,
           runs: normalizedRuns,
           running: Boolean(activeRun) || prev.running,
           currentRunId: activeRun?.id || prev.currentRunId || '',
@@ -154,8 +169,11 @@ export function useSessionBootstrap({
           hydrated: true,
         };
       });
-      loadGlobalPendingPermissions();
+      if (!isStale()) {
+        loadGlobalPendingPermissions();
+      }
     } catch {
+      if (isStale()) return;
       patchRuntime(sessionId, () => createEmptySessionRuntime({ hydrated: true }));
       setGlobalPendingPermissions([]);
     }

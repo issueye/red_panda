@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -20,12 +21,27 @@ import (
 
 const compactPauseTimeout = 20 * time.Second
 
+// Compact concurrency contract (docs/48 Wave A):
+//  1. At most one Compact or CompactPreview critical section per session_id.
+//  2. Root run may stay active; pause is DelegatedOnly (Worker assignments).
+//  3. Apply always re-plans from fullHistory after pause (server truth).
+//  4. This wave does not cancel root runs (auto-compact product path).
+var errSessionCompactInProgress = errors.New("session compact already in progress")
+
+// sessionCompactGate is heap-allocated so SessionService value copies share one lock.
+type sessionCompactGate struct {
+	mu         sync.Mutex
+	compacting map[string]struct{}
+}
+
 type SessionService struct {
 	repos     repository.Set
 	store     sessionStore
 	lifecycle sessionLifecycle
 	runtime   *runtimeclient.Client
 	hub       *eventhub.Hub
+	// compactGate must be a pointer: Set/controllers copy SessionService by value.
+	compactGate *sessionCompactGate
 }
 
 type compactPauseState struct {
@@ -208,7 +224,36 @@ func NewSessionService(repos repository.Set, runtime *runtimeclient.Client, hub 
 	return SessionService{
 		repos: repos, store: newSessionStore(repos), lifecycle: newSessionLifecycle(repos, runtime, hub),
 		runtime: runtime, hub: hub,
+		compactGate: &sessionCompactGate{compacting: make(map[string]struct{})},
 	}
+}
+
+// beginSessionCompact acquires the per-session compact critical section.
+// Caller must invoke the returned unlock (typically via defer).
+func (s SessionService) beginSessionCompact(sessionID string) (unlock func(), err error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return func() {}, fmt.Errorf("session id is required")
+	}
+	gate := s.compactGate
+	if gate == nil {
+		return func() {}, fmt.Errorf("session compact gate is not initialized")
+	}
+	gate.mu.Lock()
+	if _, busy := gate.compacting[sessionID]; busy {
+		gate.mu.Unlock()
+		return func() {}, errSessionCompactInProgress
+	}
+	gate.compacting[sessionID] = struct{}{}
+	gate.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			gate.mu.Lock()
+			delete(gate.compacting, sessionID)
+			gate.mu.Unlock()
+		})
+	}, nil
 }
 
 // pauseSessionForCompact suspends delegated Workers while each main Worker and
@@ -407,6 +452,11 @@ func (s SessionService) Fork(sessionID string, req ForkSessionRequest) (ForkSess
 }
 
 func (s SessionService) CompactPreview(sessionID string, req CompactPreviewRequest) (result CompactPreviewResult, err error) {
+	unlock, err := s.beginSessionCompact(sessionID)
+	if err != nil {
+		return CompactPreviewResult{}, err
+	}
+	defer unlock()
 	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
 		return CompactPreviewResult{}, err
 	}
@@ -447,12 +497,18 @@ func (s SessionService) CompactPreview(sessionID string, req CompactPreviewReque
 }
 
 func (s SessionService) Compact(sessionID string, req CompactSessionRequest) (result CompactSessionResult, err error) {
+	unlock, err := s.beginSessionCompact(sessionID)
+	if err != nil {
+		return CompactSessionResult{}, err
+	}
+	defer unlock()
 	source, err := s.repos.Sessions.Get(sessionID)
 	if err != nil {
 		return CompactSessionResult{}, err
 	}
 	// Always pause again before apply: preview may have been skipped, or a new
-	// run may have started between preview and apply.
+	// run may have started between preview and apply. Re-plan after pause uses
+	// server fullHistory (docs/48).
 	paused, err := s.pauseSessionForCompact(sessionID)
 	if err != nil {
 		return CompactSessionResult{}, fmt.Errorf("pause session for compact: %w", err)

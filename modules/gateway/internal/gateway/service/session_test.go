@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -583,6 +584,43 @@ func TestSessionServiceCompactReportsResumeFailure(t *testing.T) {
 	_, err = service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"})
 	if err == nil || !strings.Contains(err.Error(), "resume session after compact") {
 		t.Fatalf("compact error = %v, want explicit resume failure", err)
+	}
+}
+
+func TestSessionServiceRejectsConcurrentCompact(t *testing.T) {
+	repos, service := newSessionServiceTestFixture(t)
+	source, err := repos.Sessions.Create("compact-lock", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"user one", "assistant one", "user two", "assistant two"} {
+		role := "user"
+		if strings.HasPrefix(text, "assistant") {
+			role = "assistant"
+		}
+		if _, err := repos.Messages.Add(source.ID, role, text, "run_lock"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	unlock, err := service.beginSessionCompact(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"})
+	if !errors.Is(err, errSessionCompactInProgress) {
+		unlock()
+		t.Fatalf("concurrent compact error = %v, want %v", err, errSessionCompactInProgress)
+	}
+	_, err = service.CompactPreview(source.ID, CompactPreviewRequest{KeepTailTurns: 1, Mode: "local"})
+	if !errors.Is(err, errSessionCompactInProgress) {
+		unlock()
+		t.Fatalf("concurrent preview error = %v, want %v", err, errSessionCompactInProgress)
+	}
+	unlock()
+
+	if _, err := service.Compact(source.ID, CompactSessionRequest{KeepTailTurns: 1, Mode: "local"}); err != nil {
+		t.Fatalf("compact after unlock: %v", err)
 	}
 }
 
