@@ -270,6 +270,61 @@ func TestDelegatedAssignmentRetriesWithoutStoppingSiblingWorker(t *testing.T) {
 	}
 }
 
+func TestDelegatedAssignmentCancellationSettlesAndEmitsTerminalState(t *testing.T) {
+	executor := &blockingRuntimeWorkerExecutor{started: make(chan worker.ExecuteRequest, 2)}
+	pool, err := worker.NewPool(worker.Config{Size: 2}, func(worker.WorkerID) (worker.Executor, error) {
+		return executor, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), time.Second)
+		defer closeCancel()
+		_ = pool.Close(closeCtx)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	entry, err := pool.SubmitEntry(context.Background(), worker.SubmitRequest{RunID: "run-cancel", Task: "entry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRuntimeWorkerStart(t, executor.started, entry.AssignmentID)
+
+	var output strings.Builder
+	rt := &Runtime{out: &output, workerPool: pool}
+	reply := methods.ReplyParams{RunID: "run-cancel", Session: methods.ReplySession{ID: "session-cancel"}}
+	resultCh := make(chan error, 1)
+	go func() {
+		_, result, runErr := rt.executeDelegatedAssignment(ctx, agenttools.ToolRunContext{
+			RunID: "run-cancel", SessionID: "session-cancel", AssignmentID: string(entry.AssignmentID), Reply: &reply,
+		}, workerExecutionSpec{Kind: workerExecutionDelegated, Parent: reply, ProfileKey: "reviewer", Task: "cancel me", MaxTurns: 1})
+		if !result.Status.Terminal() {
+			resultCh <- fmt.Errorf("result status = %s, want terminal cancellation", result.Status)
+			return
+		}
+		resultCh <- runErr
+	}()
+	waitForRuntimeWorkerStart(t, executor.started, "assignment-000002")
+	cancel()
+
+	select {
+	case runErr := <-resultCh:
+		if runErr == nil || !strings.Contains(runErr.Error(), "context canceled") {
+			t.Fatalf("executeDelegatedAssignment error = %v, want context canceled", runErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("executeDelegatedAssignment did not settle after cancellation")
+	}
+	if !strings.Contains(output.String(), `"status":"cancelled"`) && !strings.Contains(output.String(), `"status":"failed"`) {
+		t.Fatalf("terminal cancellation event missing: %s", output.String())
+	}
+	assignment := findRuntimeAssignment(t, pool.Snapshot(), worker.AssignmentID("assignment-000002"))
+	if !assignment.Status.Terminal() {
+		t.Fatalf("cancelled delegate remained active: %+v", assignment)
+	}
+}
+
 func TestParallelAssignmentsExchangeMessagesAndRejectForgedContext(t *testing.T) {
 	executor := &blockingRuntimeWorkerExecutor{started: make(chan worker.ExecuteRequest, 3)}
 	pool, err := worker.NewPool(worker.Config{Size: 3}, func(worker.WorkerID) (worker.Executor, error) {

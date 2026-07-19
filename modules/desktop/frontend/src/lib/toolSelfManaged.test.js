@@ -5,6 +5,7 @@ import { isSelfManagedTool, shouldMarkToolStale } from './toolSelfManaged.js';
 describe('toolSelfManaged', () => {
   it('recognizes worker.* tools as self-managed', () => {
     assert.equal(isSelfManagedTool('worker.delegate'), true);
+    assert.equal(isSelfManagedTool('worker.cancel'), true);
     assert.equal(isSelfManagedTool('worker.send'), true);
     assert.equal(isSelfManagedTool('worker.receive'), true);
   });
@@ -32,6 +33,7 @@ describe('toolSelfManaged', () => {
 
   it('shouldMarkToolStale returns false for self-managed tools even after long time', () => {
     assert.equal(shouldMarkToolStale('worker.delegate', 30000), false);
+    assert.equal(shouldMarkToolStale('worker.cancel', 30000), false);
     assert.equal(shouldMarkToolStale('worker.send', 120000), false);
     assert.equal(shouldMarkToolStale('shell.exec', 45000), false);
   });

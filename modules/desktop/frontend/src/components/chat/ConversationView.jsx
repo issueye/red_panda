@@ -23,7 +23,10 @@ export function ConversationView({
   onResolvePermission,
   providerProfiles = [],
   providerProfileId = '',
+  model = '',
+  reasoningEffort = '',
   onProviderProfileChange,
+  onReasoningEffortChange,
   readOnlyHint = '',
   goal = null,
   goalSessionId = '',
@@ -87,8 +90,11 @@ export function ConversationView({
             onCancel={onCancel}
             onChange={onDraftChange}
             onProviderProfileChange={onProviderProfileChange}
+            onReasoningEffortChange={onReasoningEffortChange}
             onSend={onSend}
             providerProfileId={providerProfileId}
+            model={model}
+            reasoningEffort={reasoningEffort}
             providerProfiles={providerProfiles}
             running={running}
             tokenBudgetEnabled={tokenBudgetEnabled}

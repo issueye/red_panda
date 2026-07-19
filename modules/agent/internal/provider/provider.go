@@ -22,6 +22,7 @@ type RequestOptions struct {
 	ProviderAPIKey  string
 	Stream          *bool
 	Model           string
+	ReasoningEffort string
 	LogLLMRequests  bool
 }
 

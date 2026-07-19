@@ -50,6 +50,24 @@ test('settings opens as a centered modal with navigation on the left', async ({ 
   expect(navigationBox.x).toBeLessThan(contentBox.x);
 });
 
+test('provider profiles can configure multiple models and reasoning defaults', async ({ page }) => {
+  const editor = page.getByTestId('provider-model-editor');
+  await expect(editor.getByTestId('provider-model-row')).toHaveCount(1);
+  await editor.getByLabel('模型 1 ID').fill('gpt-fast');
+  await editor.getByLabel('模型 1 显示名').fill('快速');
+  await editor.getByLabel('模型 1 最大 Token 数').fill('128000');
+
+  await editor.getByRole('button', { name: '添加模型' }).click();
+  await expect(editor.getByTestId('provider-model-row')).toHaveCount(2);
+  await editor.getByLabel('模型 2 ID').fill('gpt-deep');
+  await editor.getByLabel('模型 2 显示名').fill('深度');
+  await editor.getByLabel('模型 2 最大 Token 数').fill('200000');
+  await editor.getByRole('button', { name: '模型 2 默认思考等级' }).click();
+  await page.getByRole('option', { name: '高', exact: true }).click();
+  await editor.getByRole('button', { name: '设为默认模型' }).click();
+  await expect(editor.getByRole('button', { name: '默认模型', exact: true })).toBeVisible();
+});
+
 test('settings modal closes when clicking the backdrop', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: '设置' });
   await expect(dialog).toBeVisible();

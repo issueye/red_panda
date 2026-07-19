@@ -344,6 +344,7 @@ type ProviderProfile struct {
 	// MaxTokens is the context window budget used for Desktop usage ring and auto-compact.
 	// Zero means unset (no budget tracking / no auto-compact).
 	MaxTokens    int
+	Models       []ProviderModel `gorm:"column:models_json;serializer:json;type:text"`
 	APIKeySecret string
 	IsDefault    bool `gorm:"index"`
 	Stream       bool `gorm:"not null"`
@@ -351,6 +352,13 @@ type ProviderProfile struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
+}
+
+type ProviderModel struct {
+	Model           string `json:"model"`
+	Label           string `json:"label,omitempty"`
+	MaxTokens       int    `json:"max_tokens,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type MCPTimeouts struct {

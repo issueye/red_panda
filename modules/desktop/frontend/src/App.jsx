@@ -30,6 +30,7 @@ import {
 } from './lib/conversationScope.js';
 import { displayRuntimeMode, displayStatus, displayWorkerProfileName } from './lib/displayLabels.js';
 import { defaultRunSettings, normalizeStoredRunSettings } from './lib/runOptions.js';
+import { providerModelFor } from './lib/providerProfiles.js';
 import { isRunTerminalEvent } from './lib/runEventLifecycle.js';
 import { reconcileAssignmentsWithRuns, reduceRunEvent, upsertByID } from './lib/reduceRunEvent.js';
 import {
@@ -335,13 +336,15 @@ export function App() {
       coveredCount: contextSummaryCoveredCount,
       keepTailTurns: contextSummaryKeepTailTurns,
     });
-    const maxTokens = Number(selectedProviderProfile?.maxTokens) || 0;
+    const selectedModel = providerModelFor(selectedProviderProfile, runSettings.model);
+    const maxTokens = Number(selectedModel?.maxTokens || selectedProviderProfile?.maxTokens) || 0;
     return tokenBudgetState(used, maxTokens);
   }, [
     mainContextMessages,
     draft,
     mainContextTools,
     selectedProviderProfile,
+    runSettings.model,
     contextSummary,
     contextSummaryEndSeq,
     contextSummaryCoveredCount,
@@ -953,10 +956,15 @@ export function App() {
           onCancel={cancelRun}
           onCloseConversationTab={closeConversationTab}
           onDraftChange={setDraft}
-          onProviderProfileChange={(id) => setRunSettings((current) => ({
+          onProviderProfileChange={(id, model) => setRunSettings((current) => ({
             ...current,
             providerProfileId: id,
-            model: '',
+            model,
+            reasoningEffort: '',
+          }))}
+          onReasoningEffortChange={(reasoningEffort) => setRunSettings((current) => ({
+            ...current,
+            reasoningEffort,
           }))}
           onResolvePermission={resolvePermission}
           onSend={sendTask}
@@ -981,6 +989,8 @@ export function App() {
           }))}
           permissions={pendingPermissions}
           providerProfileId={runSettings.providerProfileId}
+          model={runSettings.model}
+          reasoningEffort={runSettings.reasoningEffort}
           providerProfiles={providerProfiles}
           running={running}
           todoOpenCount={todoOpenCount}

@@ -75,6 +75,41 @@ func TestProviderProfileRepositoryDeleteHidesProfile(t *testing.T) {
 	}
 }
 
+func TestProviderProfileRepositoryPersistsMultipleModels(t *testing.T) {
+	repo := newProviderProfileTestRepository(t)
+	profile, err := repo.Create(model.ProviderProfile{
+		Name: "multi", Provider: "openai_responses", BaseURL: "https://example.invalid/v1",
+		Model: "gpt-fast", MaxTokens: 128000,
+		Models: []model.ProviderModel{
+			{Model: "gpt-fast", Label: "Fast", MaxTokens: 128000, ReasoningEffort: "low"},
+			{Model: "gpt-deep", Label: "Deep", MaxTokens: 200000, ReasoningEffort: "high"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.Get(profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Models) != 2 || stored.Models[1].Model != "gpt-deep" || stored.Models[1].ReasoningEffort != "high" {
+		t.Fatalf("created models = %#v", stored.Models)
+	}
+	stored.Model = "gpt-deep"
+	stored.MaxTokens = 200000
+	stored.Models[0].Label = "Quick"
+	if _, err := repo.Update(stored); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repo.Get(profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Models) != 2 || updated.Models[0].Label != "Quick" || updated.Model != "gpt-deep" {
+		t.Fatalf("updated profile = %#v", updated)
+	}
+}
+
 func newProviderProfileTestRepository(t *testing.T) ProviderProfileRepository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "providers.db")), &gorm.Config{})

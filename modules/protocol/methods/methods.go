@@ -156,6 +156,7 @@ type RunExecuteOptions struct {
 	ProviderAPIKey      string                        `json:"provider_api_key,omitempty"`
 	ProviderStream      *bool                         `json:"provider_stream,omitempty"`
 	Model               string                        `json:"model,omitempty"`
+	ReasoningEffort     string                        `json:"reasoning_effort,omitempty"`
 	PermissionMode      string                        `json:"permission_mode,omitempty"`
 	ToolPolicy          string                        `json:"tool_policy,omitempty"`
 	ToolAllowlist       []string                      `json:"tool_allowlist,omitempty"`
@@ -373,6 +374,7 @@ type ReplyOptions struct {
 	ProviderAPIKey    string         `json:"provider_api_key,omitempty"`
 	ProviderStream    *bool          `json:"provider_stream,omitempty"`
 	Model             string         `json:"model,omitempty"`
+	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
 	PermissionMode    string         `json:"permission_mode,omitempty"`
 	ToolPolicy        string         `json:"tool_policy,omitempty"`
 	ToolAllowlist     []string       `json:"tool_allowlist,omitempty"`

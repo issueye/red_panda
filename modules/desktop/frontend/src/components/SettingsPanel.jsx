@@ -110,7 +110,7 @@ export function SettingsPanel({
     onChange({
       ...settings,
       [key]: value,
-      ...(key === 'providerProfileId' ? { model: '' } : {}),
+      ...(key === 'providerProfileId' ? { model: '', reasoningEffort: '' } : {}),
     });
   };
   const updateProfileDraft = (key, value) => {

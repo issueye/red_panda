@@ -106,11 +106,18 @@ func (r *Runtime) executeDelegatedAssignment(ctx context.Context, runCtx agentto
 		lastAssignment = assignment
 		delegatedCtx := withAssignment(executionCtx, assignment.AssignmentID, assignment.WorkerID)
 		emitAssignment := func(status worker.AssignmentStatus, result worker.AssignmentResult, errText string, retrying bool) {
+			eventCtx := delegatedCtx
+			// A cancelled run still needs a terminal assignment event. Keep the
+			// assignment values carried by the context, but do not inherit its
+			// cancelled Done channel.
+			if ctx.Err() != nil {
+				eventCtx = context.WithoutCancel(delegatedCtx)
+			}
 			workerState, currentID := "ready", ""
 			if status == worker.AssignmentQueued || status == worker.AssignmentRunning {
 				workerState, currentID = "busy", string(assignment.AssignmentID)
 			}
-			_ = r.emitAgentEvent(delegatedCtx, *runCtx.Reply, events.AgentRef{Name: spec.ProfileKey}, events.EventWorkerAssignmentUpdated, nil, map[string]any{
+			_ = r.emitAgentEvent(eventCtx, *runCtx.Reply, events.AgentRef{Name: spec.ProfileKey}, events.EventWorkerAssignmentUpdated, nil, map[string]any{
 				"status": string(status), "task": spec.Task, "profile_key": spec.ProfileKey,
 				"attempt": assignment.Attempt, "retry_of": string(assignment.RetryOf),
 				"retrying": retrying, "retry_in_ms": retryDelay(attempt).Milliseconds(),
@@ -123,6 +130,16 @@ func (r *Runtime) executeDelegatedAssignment(ctx context.Context, runCtx agentto
 		emitAssignment(worker.AssignmentRunning, worker.AssignmentResult{}, "", false)
 
 		result, waitErr := r.workerPool.Wait(ctx, assignment.AssignmentID)
+		if waitErr != nil && ctx.Err() != nil {
+			// Wait returns as soon as the parent run is cancelled. Explicitly
+			// cancel the assignment as well, otherwise its executor keeps running
+			// and the UI continues to show an orphaned "in progress" delegate.
+			reason := ctx.Err().Error()
+			_ = r.workerPool.Cancel(context.Background(), assignment.AssignmentID, reason)
+			settledCtx, settledCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			result, _ = r.workerPool.WaitSettled(settledCtx, assignment.AssignmentID)
+			settledCancel()
+		}
 		lastResult = result
 		finalStatus := result.Status
 		if finalStatus == "" {
@@ -272,7 +289,9 @@ func (r *Runtime) executeWorkerCancel(ctx context.Context, runCtx agenttools.Too
 	if reason == "" {
 		reason = "cancelled by Worker"
 	}
-	cancelled := r.workerPool.Cancel(ctx, id, reason)
+	// Cancellation is a control-plane action. It must survive the caller's
+	// run context being cancelled at the same time as the assignment.
+	cancelled := r.workerPool.Cancel(context.Background(), id, reason)
 	return marshalToolJSON(map[string]any{
 		"assignment_id": id,
 		"run_id":        runCtx.RunID,

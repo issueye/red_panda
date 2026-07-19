@@ -130,13 +130,20 @@ export function useSessionRunActions({
           },
         },
       );
-      patchRuntime(sessionId, (runtime) => applyStartedRunProjection(runtime, {
+      let cancelAfterStart = false;
+      patchRuntime(sessionId, (runtime) => {
+        cancelAfterStart = Boolean(runtime.cancelRequested);
+        return applyStartedRunProjection(runtime, {
         displayText,
         result,
         runSettings,
         sessionId,
         workspace,
-      }));
+        });
+      });
+      if (cancelAfterStart && nextRunId) {
+        await request('run.cancel', { run_id: nextRunId, reason: 'cancelled before run start completed' }).catch(() => {});
+      }
       if (command.action === 'start_goal') {
         await hydrateGoals?.(sessionId);
       }
@@ -188,14 +195,18 @@ export function useSessionRunActions({
 
   const cancelRun = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
-    const runId = sessionRuntimesRef.current[sessionId]?.currentRunId || '';
+    const runtime = sessionRuntimesRef.current[sessionId];
+    const runId = runtime?.currentRunId
+      || runtime?.runs?.find((item) => item.status === 'running' || item.status === 'waiting_permission')?.id
+      || '';
     patchRuntime(sessionId, (runtime) => ({
       ...runtime,
       running: false,
+      cancelRequested: true,
       currentRunId: '',
     }));
     if (runId) {
-      await request('run.cancel', { run_id: runId }).catch(() => {});
+      await request('run.cancel', { run_id: runId, reason: 'cancelled by user' }).catch(() => {});
     }
   }, [currentSessionIdRef, patchRuntime, request, sessionRuntimesRef]);
 

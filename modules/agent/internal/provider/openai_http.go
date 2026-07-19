@@ -59,6 +59,9 @@ func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req Provide
 		"messages": openAICompatibleMessages(req),
 		"stream":   config.Stream,
 	}
+	if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
+		body["reasoning_effort"] = effort
+	}
 	if len(req.Tools) > 0 {
 		body["tools"] = openAICompatibleTools(req.Tools)
 		body["tool_choice"] = "auto"

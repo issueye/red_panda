@@ -743,10 +743,14 @@ func TestRunServiceAggregatesConversationMessagesAndHidesWorkerPrivateDeltas(t *
 func TestRunServiceApplyProviderProfile(t *testing.T) {
 	repos, service := newRunServiceTestFixture(t)
 	profile, err := repos.Providers.Create(model.ProviderProfile{
-		Name:         "openai",
-		Provider:     "openai_compatible",
-		BaseURL:      "https://provider.invalid/v1",
-		Model:        "profile-model",
+		Name:     "openai",
+		Provider: "openai_compatible",
+		BaseURL:  "https://provider.invalid/v1",
+		Model:    "profile-model",
+		Models: []model.ProviderModel{
+			{Model: "profile-model", ReasoningEffort: "medium"},
+			{Model: "explicit-model", ReasoningEffort: "high"},
+		},
 		APIKeySecret: "sk-profile",
 		IsDefault:    true,
 		Stream:       false,
@@ -767,16 +771,21 @@ func TestRunServiceApplyProviderProfile(t *testing.T) {
 		params.Options.ProviderBaseURL != "https://provider.invalid/v1" ||
 		params.Options.ProviderAPIKey != "sk-profile" ||
 		params.Options.ProviderStream == nil || *params.Options.ProviderStream ||
-		params.Options.Model != "profile-model" {
+		params.Options.Model != "profile-model" || params.Options.ReasoningEffort != "medium" {
 		t.Fatalf("provider profile options mismatch: %#v", params.Options)
 	}
 
 	params.Options.Model = "explicit-model"
+	params.Options.ReasoningEffort = "low"
 	if err := service.applyProviderProfile(&params); err != nil {
 		t.Fatal(err)
 	}
-	if params.Options.Model != "explicit-model" {
-		t.Fatalf("explicit run model should win, got %q", params.Options.Model)
+	if params.Options.Model != "explicit-model" || params.Options.ReasoningEffort != "low" {
+		t.Fatalf("explicit run model/effort should win, got %#v", params.Options)
+	}
+	params.Options.Model = "unknown"
+	if err := service.applyProviderProfile(&params); err == nil {
+		t.Fatal("unconfigured model should be rejected")
 	}
 }
 

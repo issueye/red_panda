@@ -150,7 +150,7 @@ func TestToolTimeoutForSelfManagedTools(t *testing.T) {
 	if got := toolTimeoutFor("workspace.read_file"); got != defaultLocalToolTimeout {
 		t.Fatalf("workspace.read_file timeout = %s, want %s", got, defaultLocalToolTimeout)
 	}
-	for _, name := range []string{"worker.delegate", "worker.send", "worker.receive"} {
+	for _, name := range []string{"worker.delegate", "worker.cancel", "worker.send", "worker.receive"} {
 		if got := toolTimeoutFor(name); got != 0 {
 			t.Fatalf("%s timeout = %s, want 0 (self-managed)", name, got)
 		}

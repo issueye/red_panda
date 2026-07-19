@@ -13,26 +13,28 @@ type ProviderProfileController struct {
 }
 
 type providerProfileCreateRequest struct {
-	Name      string `json:"name"`
-	Provider  string `json:"provider"`
-	BaseURL   string `json:"base_url"`
-	Model     string `json:"model"`
-	MaxTokens int    `json:"max_tokens"`
-	APIKey    string `json:"api_key"`
-	IsDefault bool   `json:"is_default"`
-	Stream    *bool  `json:"stream"`
+	Name      string                       `json:"name"`
+	Provider  string                       `json:"provider"`
+	BaseURL   string                       `json:"base_url"`
+	Model     string                       `json:"model"`
+	MaxTokens int                          `json:"max_tokens"`
+	Models    []service.ProviderModelInput `json:"models"`
+	APIKey    string                       `json:"api_key"`
+	IsDefault bool                         `json:"is_default"`
+	Stream    *bool                        `json:"stream"`
 }
 
 type providerProfileUpdateRequest struct {
-	Name      *string `json:"name"`
-	Provider  *string `json:"provider"`
-	BaseURL   *string `json:"base_url"`
-	Model     *string `json:"model"`
-	MaxTokens *int    `json:"max_tokens"`
-	APIKey    *string `json:"api_key"`
-	IsDefault *bool   `json:"is_default"`
-	Stream    *bool   `json:"stream"`
-	Active    *bool   `json:"active"`
+	Name      *string                       `json:"name"`
+	Provider  *string                       `json:"provider"`
+	BaseURL   *string                       `json:"base_url"`
+	Model     *string                       `json:"model"`
+	MaxTokens *int                          `json:"max_tokens"`
+	Models    *[]service.ProviderModelInput `json:"models"`
+	APIKey    *string                       `json:"api_key"`
+	IsDefault *bool                         `json:"is_default"`
+	Stream    *bool                         `json:"stream"`
+	Active    *bool                         `json:"active"`
 }
 
 func (p ProviderProfileController) List(c *gin.Context) {
@@ -56,6 +58,7 @@ func (p ProviderProfileController) Create(c *gin.Context) {
 		BaseURL:   req.BaseURL,
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
+		Models:    req.Models,
 		APIKey:    req.APIKey,
 		IsDefault: req.IsDefault,
 		Stream:    req.Stream,
@@ -88,6 +91,7 @@ func (p ProviderProfileController) Update(c *gin.Context) {
 		BaseURL:   req.BaseURL,
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
+		Models:    req.Models,
 		APIKey:    req.APIKey,
 		IsDefault: req.IsDefault,
 		Stream:    req.Stream,

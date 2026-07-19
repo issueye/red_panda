@@ -236,41 +236,40 @@ export function ToolCallCard({ item }) {
         </span>
 
         <span className="tool-card-content">
-          <span className="tool-card-top">
-            <span className="tool-card-title">
-              <strong>{title}</strong>
-              {toolName ? <code className="tool-card-name">{toolName}</code> : null}
-            </span>
-            <span className="tool-card-meta">
-              {duration ? <span className="tool-duration">{duration}</span> : null}
-              {isRunning ? (
-                <span className={classNames('tool-live', isStale && 'is-stale')}>
-                  {isStale ? '可能卡住' : '进行中'}
-                </span>
-              ) : null}
-              {hasBody ? (
-                <ChevronRight
-                  aria-hidden="true"
-                  className={classNames('tool-card-chevron', cardOpen && 'is-open')}
-                  size={14}
-                />
-              ) : null}
-            </span>
+          <span className="tool-card-title">
+            <strong>{title}</strong>
+            {toolName ? <code className="tool-card-name">{toolName}</code> : null}
           </span>
-          {isStale ? (
-            <span className="tool-card-summary is-stale">
-              已运行 {duration || '较久'}，超过网络工具超时阈值时会自动失败
-            </span>
-          ) : summary ? (
+          {summary ? (
             <span className="tool-card-summary" title={summary}>{summary}</span>
           ) : hasBody ? (
             <span className="tool-card-summary is-empty">点击展开参数与输出</span>
           ) : null}
+          <span className="tool-card-meta">
+            {duration ? <span className="tool-duration">{duration}</span> : null}
+            {isRunning ? (
+              <span className={classNames('tool-live', isStale && 'is-stale')}>
+                {isStale ? '可能卡住' : '进行中'}
+              </span>
+            ) : null}
+            {hasBody ? (
+              <ChevronRight
+                aria-hidden="true"
+                className={classNames('tool-card-chevron', cardOpen && 'is-open')}
+                size={14}
+              />
+            ) : null}
+          </span>
         </span>
       </button>
 
       {cardOpen && hasBody ? (
         <div className="tool-card-body" data-testid="tool-card-body">
+          {isStale ? (
+            <div className="tool-stale-note">
+              已运行 {duration || '较久'}，超过网络工具超时阈值时会自动失败
+            </div>
+          ) : null}
           <ToolDetail
             open={argsOpen}
             onToggle={() => setArgsOpen((current) => !current)}

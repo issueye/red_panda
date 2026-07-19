@@ -5,6 +5,7 @@ export const defaultRunSettings = {
   permissionMode: 'strict',
   providerProfileId: '',
   model: '',
+  reasoningEffort: '',
   toolAllowlist: '',
   toolDenylist: '',
   webSearchResults: 8,
@@ -78,6 +79,7 @@ export function buildRunStartOptions(settings, workspace, text, overrides = {}) 
     permission_mode: current.permissionMode,
     provider_profile_id: current.providerProfileId,
     model: String(current.model || '').trim(),
+    reasoning_effort: String(current.reasoningEffort || '').trim(),
     tool_allowlist: splitOptionList(current.toolAllowlist),
     tool_denylist: splitOptionList(current.toolDenylist),
     web_search_max_results: Number.isFinite(Number(current.webSearchResults))

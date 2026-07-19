@@ -35,6 +35,7 @@ export function beginRunProjection(runtime, displayText) {
     ...appendMessages(runtime, createUserMessage(displayText)),
     draft: '',
     running: true,
+    cancelRequested: false,
     runSeq: 0,
     assignmentsById: {},
     assignmentOrder: [],
@@ -60,7 +61,8 @@ export function applyStartedRunProjection(runtime, {
   const nextRunId = result?.run_id || '';
   return {
     ...runtime,
-    running: true,
+    running: runtime.cancelRequested ? false : true,
+    cancelRequested: runtime.cancelRequested || false,
     currentRunId: nextRunId || runtime.currentRunId,
     runSeq: nextRunId ? (Number(runtime.runSeqByRun?.[nextRunId]) || 0) : runtime.runSeq,
     runs: nextRunId

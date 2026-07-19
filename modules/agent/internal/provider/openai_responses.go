@@ -36,6 +36,9 @@ func (p OpenAIResponsesProvider) completeAttempt(ctx context.Context, req Reques
 		model = p.Model
 	}
 	body := map[string]any{"model": model, "input": openAIResponsesInput(req), "stream": p.Stream}
+	if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
+		body["reasoning"] = map[string]any{"effort": effort}
+	}
 	if len(req.Tools) > 0 {
 		body["tools"] = openAIResponsesTools(req.Tools)
 		body["tool_choice"] = "auto"

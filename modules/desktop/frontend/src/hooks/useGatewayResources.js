@@ -51,10 +51,17 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
       const normalized = Array.isArray(items) ? items.map(normalizeProviderProfile) : [];
       setProviderProfiles(normalized);
       setRunSettings((current) => {
-        if (!current.providerProfileId || normalized.some((item) => item.id === current.providerProfileId)) {
+        if (!current.providerProfileId) {
           return current;
         }
-        return { ...current, providerProfileId: '' };
+        const profile = normalized.find((item) => item.id === current.providerProfileId);
+        if (!profile) {
+          return { ...current, providerProfileId: '', model: '', reasoningEffort: '' };
+        }
+        const configured = profile.models?.some((item) => item.model === current.model);
+        return configured
+          ? current
+          : { ...current, model: profile.model || profile.models?.[0]?.model || '', reasoningEffort: '' };
       });
       return normalized;
     } catch (error) {
@@ -72,7 +79,12 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     });
     const normalized = normalizeProviderProfile(created);
     setProviderProfiles((items) => [normalized, ...items.filter((item) => item.id !== normalized.id)]);
-    setRunSettings((current) => ({ ...current, providerProfileId: normalized.id }));
+    setRunSettings((current) => ({
+      ...current,
+      providerProfileId: normalized.id,
+      model: normalized.model || normalized.models?.[0]?.model || '',
+      reasoningEffort: '',
+    }));
     return normalized;
   }, [setRunSettings]);
 
@@ -86,15 +98,24 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
       normalized,
       ...items.filter((item) => item.id !== normalized.id),
     ]);
+    setRunSettings((current) => {
+      if (current.providerProfileId !== normalized.id) return current;
+      const configured = normalized.models?.some((item) => item.model === current.model);
+      return configured ? current : {
+        ...current,
+        model: normalized.model || normalized.models?.[0]?.model || '',
+        reasoningEffort: '',
+      };
+    });
     return normalized;
-  }, []);
+  }, [setRunSettings]);
 
   const deleteProviderProfile = useCallback(async (id) => {
     await apiJson(`/api/v1/provider-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
     setProviderProfiles((items) => items.filter((item) => item.id !== id));
     setRunSettings((current) => (
       current.providerProfileId === id
-        ? { ...current, providerProfileId: '' }
+        ? { ...current, providerProfileId: '', model: '', reasoningEffort: '' }
         : current
     ));
   }, [setRunSettings]);

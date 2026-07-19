@@ -97,6 +97,7 @@ func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartP
 		Options: methods.RunExecuteOptions{
 			ProviderProfileID:   stringOption(payload.Options, "provider_profile_id"),
 			Model:               stringOption(payload.Options, "model"),
+			ReasoningEffort:     stringOption(payload.Options, "reasoning_effort"),
 			PermissionMode:      stringOption(payload.Options, "permission_mode"),
 			ToolPolicy:          stringOption(payload.Options, "tool_policy"),
 			ToolAllowlist:       stringSliceOption(payload.Options, "tool_allowlist"),
@@ -274,5 +275,27 @@ func (r RunService) applyProviderProfile(params *methods.RunExecuteParams) error
 	if params.Options.Model == "" {
 		params.Options.Model = profile.Model
 	}
+	models := providerModelsForRead(profile)
+	if len(models) > 0 {
+		found := false
+		for _, item := range models {
+			if item.Model != params.Options.Model {
+				continue
+			}
+			found = true
+			if params.Options.ReasoningEffort == "" {
+				params.Options.ReasoningEffort = item.ReasoningEffort
+			}
+			break
+		}
+		if !found {
+			return fmt.Errorf("model %q is not configured for provider profile %s", params.Options.Model, profileID)
+		}
+	}
+	effort, err := NormalizeReasoningEffort(params.Options.ReasoningEffort)
+	if err != nil {
+		return err
+	}
+	params.Options.ReasoningEffort = effort
 	return nil
 }

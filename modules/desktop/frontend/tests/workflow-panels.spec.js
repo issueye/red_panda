@@ -89,6 +89,64 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await expect(page.getByTestId('chat-tab-main')).toHaveAttribute('aria-selected', 'true');
 });
 
+test('Completed tool calls stay compact until expanded', async ({ page }) => {
+  await page.goto('/tool-card-fixture.html');
+
+  const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
+  await expect(readTool).toHaveClass(/is-collapsed/);
+  await expect(readTool.getByTestId('tool-card-body')).toHaveCount(0);
+  expect((await readTool.boundingBox()).height).toBeLessThanOrEqual(26);
+
+  const cards = page.getByTestId('tool-card');
+  const cardBoxes = await cards.evaluateAll((items) => items.map((item) => {
+    const box = item.getBoundingClientRect();
+    return { top: box.top, bottom: box.bottom };
+  }));
+  expect(cardBoxes[1].top - cardBoxes[0].bottom).toBeLessThanOrEqual(2);
+
+  await readTool.getByTestId('tool-card-toggle').click();
+  await expect(readTool).toHaveClass(/is-expanded/);
+  await expect(readTool.getByTestId('tool-card-body')).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 720 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  expect(await page.locator('.tool-card-name').evaluateAll((items) => (
+    items.every((item) => getComputedStyle(item).display === 'none')
+  ))).toBe(true);
+});
+
+test('Composer switches provider models and reasoning effort', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+
+  const modelMenu = page.getByTestId('composer-model-menu');
+  await expect(modelMenu).toContainText('Fast');
+  await modelMenu.click();
+  await page.getByTestId('composer-model-menu-models').click();
+  const desktopSubmenu = page.getByTestId('composer-model-models-submenu');
+  await expect(desktopSubmenu).toBeVisible();
+  expect(await desktopSubmenu.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return box.left >= 0 && box.right <= window.innerWidth;
+  })).toBe(true);
+  await page.getByRole('menuitemradio', { name: 'Deep', exact: true }).click();
+  await expect(modelMenu).toContainText('Deep');
+
+  await modelMenu.click();
+  await page.getByTestId('composer-model-menu-reasoning').click();
+  await page.getByRole('menuitemradio', { name: '高', exact: true }).click();
+  await expect(modelMenu).toContainText('高');
+
+  await page.setViewportSize({ width: 390, height: 720 });
+  await modelMenu.click();
+  await page.getByTestId('composer-model-menu-models').click();
+  const mobileSubmenu = page.getByTestId('composer-model-models-submenu');
+  expect(await mobileSubmenu.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return box.left >= 0 && box.right <= window.innerWidth;
+  })).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+});
+
 test('Worker panel only shows assignments in a scrollable region', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 
@@ -137,6 +195,14 @@ test('Worker panel only shows assignments in a scrollable region', async ({ page
 test('Conversation pauses following after manual scroll and can return to latest', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
   const conversation = page.getByTestId('chat-conversation');
+
+  await conversation.evaluate((element) => {
+    const spacer = document.createElement('div');
+    spacer.style.height = '1000px';
+    spacer.dataset.testid = 'scroll-spacer';
+    element.prepend(spacer);
+    element.scrollTop = element.scrollHeight;
+  });
 
   await expect.poll(() => conversation.evaluate((element) => (
     element.scrollHeight - element.scrollTop - element.clientHeight

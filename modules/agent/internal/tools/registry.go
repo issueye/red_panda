@@ -730,6 +730,7 @@ func timeoutClassForStableTool(name string) toolTimeoutClass {
 	case name == "shell.exec",
 		name == "skill.run",
 		name == "worker.delegate",
+		name == "worker.cancel",
 		name == "worker.send",
 		name == "worker.receive",
 		strings.HasPrefix(name, "web."):

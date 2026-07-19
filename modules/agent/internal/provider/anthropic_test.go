@@ -34,6 +34,7 @@ func TestAnthropicProviderRequestAndNonStreamToolUse(t *testing.T) {
 	var chunks []ProviderChunk
 	err := p.Complete(context.Background(), Request{
 		Messages:    []Message{{Role: "system", Content: "be direct"}, {Role: "user", Content: "inspect"}},
+		Options:     RequestOptions{ReasoningEffort: "xhigh"},
 		Tools:       []tools.Definition{{Name: "workspace.read_file", Description: "Read", Parameters: map[string]any{"type": "object"}}},
 		ToolHistory: []ToolExchange{{Call: tools.Call{ID: "call_1", Name: "workspace.list", Arguments: map[string]any{"path": "."}}, Result: tools.Result{Status: tools.CallStatusFailed, Error: "denied"}}},
 	}, func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil })
@@ -42,6 +43,9 @@ func TestAnthropicProviderRequestAndNonStreamToolUse(t *testing.T) {
 	}
 	if body["system"] != "be direct" || body["max_tokens"] != float64(defaultAnthropicMaxTokens) || body["tool_choice"].(map[string]any)["type"] != "auto" {
 		t.Fatalf("body = %#v", body)
+	}
+	if body["output_config"].(map[string]any)["effort"] != "max" {
+		t.Fatalf("output_config = %#v", body["output_config"])
 	}
 	messages := body["messages"].([]any)
 	if len(messages) != 3 {

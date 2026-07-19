@@ -4,8 +4,8 @@ import { listCommands } from '../../lib/commands.js';
 import { classNames } from '../../lib/format.js';
 import { formatTokenCount } from '../../lib/tokenBudget.js';
 import { IconButton } from '../ui/button.jsx';
-import { SelectMenu } from '../ui/select.jsx';
 import { CommandPalette } from './CommandPalette.jsx';
+import { ComposerModelMenu } from './ComposerModelMenu.jsx';
 
 const MIN_COMPOSER_HEIGHT = 72;
 const MAX_COMPOSER_HEIGHT = 220;
@@ -100,7 +100,10 @@ export function ChatComposer({
   onCancel,
   providerProfiles = [],
   providerProfileId = '',
+  model = '',
+  reasoningEffort = '',
   onProviderProfileChange,
+  onReasoningEffortChange,
   tokenUsed = 0,
   tokenMax = 0,
   tokenRatio = 0,
@@ -120,27 +123,6 @@ export function ChatComposer({
   const shortcutHint = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')
     ? '⌘ + Enter 发送'
     : 'Ctrl + Enter 发送';
-
-  const providerOptions = useMemo(() => {
-    const active = providerProfiles.filter((item) => item.active !== false);
-    const options = [
-      { value: '', label: '默认模型' },
-      ...active.map((item) => ({
-        value: item.id,
-        label: item.model ? `${item.name} · ${item.model}` : item.name,
-      })),
-    ];
-    if (providerProfileId && !options.some((item) => item.value === providerProfileId)) {
-      const missing = providerProfiles.find((item) => item.id === providerProfileId);
-      if (missing) {
-        options.push({
-          value: missing.id,
-          label: missing.model ? `${missing.name} · ${missing.model}` : missing.name,
-        });
-      }
-    }
-    return options;
-  }, [providerProfiles, providerProfileId]);
 
   useEffect(() => {
     resizeComposer(textareaRef.current);
@@ -266,15 +248,14 @@ export function ChatComposer({
             >
               <Terminal size={15} />
             </IconButton>
-            <SelectMenu
-              ariaLabel="选择供应商模型"
-              className="composer-provider-select"
+            <ComposerModelMenu
               disabled={running}
-              onChange={(next) => onProviderProfileChange?.(next)}
-              options={providerOptions}
-              placement="top"
-              testId="composer-provider-select"
-              value={providerProfileId || ''}
+              model={model}
+              onProviderProfileChange={onProviderProfileChange}
+              onReasoningEffortChange={onReasoningEffortChange}
+              providerProfileId={providerProfileId}
+              providerProfiles={providerProfiles}
+              reasoningEffort={reasoningEffort}
             />
             <span className="composer-hint">
               {paletteOpen

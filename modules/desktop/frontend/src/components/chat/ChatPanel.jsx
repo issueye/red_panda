@@ -24,7 +24,10 @@ export function ChatPanel({
   onResolvePermission,
   providerProfiles = [],
   providerProfileId = '',
+  model = '',
+  reasoningEffort = '',
   onProviderProfileChange,
+  onReasoningEffortChange,
   conversationTabs = [],
   activeConversationTab = 'main',
   onSelectConversationTab,
@@ -143,12 +146,15 @@ export function ChatPanel({
         onGoalContinue={onGoalContinue}
         onGoalExpandToggle={onGoalExpandToggle}
         onProviderProfileChange={onProviderProfileChange}
+        onReasoningEffortChange={onReasoningEffortChange}
         onResolvePermission={onResolvePermission}
         onSend={onSend}
         onTodosExpandToggle={onTodosExpandToggle}
         onTodosRefresh={onTodosRefresh}
         permissions={scoped.permissions}
         providerProfileId={providerProfileId}
+        model={model}
+        reasoningEffort={reasoningEffort}
         providerProfiles={providerProfiles}
         readOnlyHint={scoped.readOnlyHint}
         running={running}

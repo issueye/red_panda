@@ -23,7 +23,7 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 			{Role: "worker", Content: []methods.ContentBlock{{Type: "text", Text: "ignored"}}},
 		}},
 		Options: methods.ReplyOptions{
-			ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1", ProviderAPIKey: "secret", ProviderStream: &stream, Model: "model-a", LogLLMRequests: true,
+			ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1", ProviderAPIKey: "secret", ProviderStream: &stream, Model: "model-a", ReasoningEffort: "high", LogLLMRequests: true,
 			SpecialistContext: &methods.SpecialistContext{Context: " specialist "},
 			MemoryContext:     &methods.MemoryContext{Context: " memory "},
 			TodoContext:       &methods.TodoContext{Context: " todo context "},
@@ -40,7 +40,7 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 	if request.RunID != "run_1" || request.SessionID != "session_1" || request.Input != "current" {
 		t.Fatalf("identity/input changed: %#v", request)
 	}
-	wantOptions := provider.RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1", ProviderAPIKey: "secret", Stream: &stream, Model: "model-a", LogLLMRequests: true}
+	wantOptions := provider.RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1", ProviderAPIKey: "secret", Stream: &stream, Model: "model-a", ReasoningEffort: "high", LogLLMRequests: true}
 	if !reflect.DeepEqual(request.Options, wantOptions) {
 		t.Fatalf("options = %#v, want %#v", request.Options, wantOptions)
 	}

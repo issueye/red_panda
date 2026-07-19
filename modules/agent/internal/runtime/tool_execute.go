@@ -69,12 +69,18 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		WorkerID:     string(assignment.WorkerID),
 		Reply:        &params,
 	}, invocation)
+	eventCtx := ctx
+	if ctx.Err() != nil {
+		// Tool cancellation must not suppress the terminal event. WithoutCancel
+		// preserves assignment/run values used to build the envelope.
+		eventCtx = context.WithoutCancel(ctx)
+	}
 	if output != "" {
 		streamKind := events.StreamToolStdout
 		if result.Status == tools.CallStatusFailed {
 			streamKind = events.StreamToolStderr
 		}
-		_ = r.emitEvent(ctx, params, events.EventToolOutput, &events.StreamRef{
+		_ = r.emitEvent(eventCtx, params, events.EventToolOutput, &events.StreamRef{
 			StreamID: "stream_" + call.ID,
 			Kind:     streamKind,
 			Seq:      1,
@@ -86,14 +92,14 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 		})
 	}
 	if result.Status == tools.CallStatusFailed {
-		_ = r.emitEvent(ctx, params, events.EventToolFailed, nil, toolResultPayload(result))
+		_ = r.emitEvent(eventCtx, params, events.EventToolFailed, nil, toolResultPayload(result))
 		return result, output, false
 	}
-	_ = r.emitEvent(ctx, params, events.EventToolFinished, nil, toolResultPayload(result))
+	_ = r.emitEvent(eventCtx, params, events.EventToolFinished, nil, toolResultPayload(result))
 	if call.Name == "todo.write" || call.Name == "todo_write" {
 		items := r.getRunTodos(params.RunID)
 		open, completed, cancelled := todoStatusCounts(items)
-		_ = r.emitEvent(ctx, params, events.EventTodoUpdated, nil, map[string]any{
+		_ = r.emitEvent(eventCtx, params, events.EventTodoUpdated, nil, map[string]any{
 			"session_id":      params.Session.ID,
 			"run_id":          params.RunID,
 			"tool_call_id":    call.ID,

@@ -14,19 +14,34 @@ type ProviderProfileService struct {
 }
 
 type ProviderProfileDTO struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Provider     string    `json:"provider"`
-	BaseURL      string    `json:"base_url"`
-	Model        string    `json:"model"`
-	MaxTokens    int       `json:"max_tokens"`
-	APIKeySet    bool      `json:"api_key_set"`
-	APIKeyMasked string    `json:"api_key_masked,omitempty"`
-	IsDefault    bool      `json:"is_default"`
-	Stream       bool      `json:"stream"`
-	Active       bool      `json:"active"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Provider     string             `json:"provider"`
+	BaseURL      string             `json:"base_url"`
+	Model        string             `json:"model"`
+	MaxTokens    int                `json:"max_tokens"`
+	Models       []ProviderModelDTO `json:"models"`
+	APIKeySet    bool               `json:"api_key_set"`
+	APIKeyMasked string             `json:"api_key_masked,omitempty"`
+	IsDefault    bool               `json:"is_default"`
+	Stream       bool               `json:"stream"`
+	Active       bool               `json:"active"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+}
+
+type ProviderModelDTO struct {
+	Model           string `json:"model"`
+	Label           string `json:"label,omitempty"`
+	MaxTokens       int    `json:"max_tokens,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+type ProviderModelInput struct {
+	Model           string `json:"model"`
+	Label           string `json:"label,omitempty"`
+	MaxTokens       int    `json:"max_tokens,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type ProviderProfileCreate struct {
@@ -35,6 +50,7 @@ type ProviderProfileCreate struct {
 	BaseURL   string
 	Model     string
 	MaxTokens int
+	Models    []ProviderModelInput
 	APIKey    string
 	IsDefault bool
 	Stream    *bool
@@ -46,6 +62,7 @@ type ProviderProfileUpdate struct {
 	BaseURL   *string
 	Model     *string
 	MaxTokens *int
+	Models    *[]ProviderModelInput
 	APIKey    *string
 	IsDefault *bool
 	Stream    *bool
@@ -65,7 +82,7 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 	if baseURL == "" {
 		return ProviderProfileDTO{}, fmt.Errorf("base_url is required")
 	}
-	maxTokens, err := normalizeMaxTokens(input.MaxTokens)
+	models, defaultModel, maxTokens, err := normalizeProviderModels(input.Models, input.Model, input.MaxTokens)
 	if err != nil {
 		return ProviderProfileDTO{}, err
 	}
@@ -77,8 +94,9 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 		Name:         strings.TrimSpace(input.Name),
 		Provider:     profile,
 		BaseURL:      strings.TrimRight(baseURL, "/"),
-		Model:        strings.TrimSpace(input.Model),
+		Model:        defaultModel,
 		MaxTokens:    maxTokens,
+		Models:       models,
 		APIKeySecret: input.APIKey,
 		IsDefault:    input.IsDefault,
 		Stream:       stream,
@@ -101,6 +119,7 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 		BaseURL:      current.BaseURL,
 		Model:        current.Model,
 		MaxTokens:    current.MaxTokens,
+		Models:       current.Models,
 		APIKeySecret: current.APIKeySecret,
 		IsDefault:    current.IsDefault,
 		Stream:       current.Stream,
@@ -130,6 +149,23 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 		if err != nil {
 			return ProviderProfileDTO{}, err
 		}
+		next.MaxTokens = maxTokens
+	}
+	if input.Models != nil {
+		models, defaultModel, maxTokens, err := normalizeProviderModels(*input.Models, next.Model, next.MaxTokens)
+		if err != nil {
+			return ProviderProfileDTO{}, err
+		}
+		next.Models = models
+		next.Model = defaultModel
+		next.MaxTokens = maxTokens
+	} else if input.Model != nil {
+		models, defaultModel, maxTokens, err := normalizeProviderModels(nil, next.Model, next.MaxTokens)
+		if err != nil {
+			return ProviderProfileDTO{}, err
+		}
+		next.Models = models
+		next.Model = defaultModel
 		next.MaxTokens = maxTokens
 	}
 	if input.APIKey != nil {
@@ -191,6 +227,14 @@ func normalizeProvider(value string) (string, error) {
 }
 
 func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
+	models := providerModelsForRead(row)
+	modelItems := make([]ProviderModelDTO, 0, len(models))
+	for _, item := range models {
+		modelItems = append(modelItems, ProviderModelDTO{
+			Model: item.Model, Label: item.Label, MaxTokens: item.MaxTokens,
+			ReasoningEffort: item.ReasoningEffort,
+		})
+	}
 	return ProviderProfileDTO{
 		ID:           row.ID,
 		Name:         row.Name,
@@ -198,6 +242,7 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		BaseURL:      row.BaseURL,
 		Model:        row.Model,
 		MaxTokens:    row.MaxTokens,
+		Models:       modelItems,
 		APIKeySet:    row.APIKeySecret != "",
 		APIKeyMasked: maskSecret(row.APIKeySecret),
 		IsDefault:    row.IsDefault,
@@ -205,6 +250,73 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		Active:       row.Active,
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,
+	}
+}
+
+func providerModelsForRead(row model.ProviderProfile) []model.ProviderModel {
+	if len(row.Models) > 0 {
+		return row.Models
+	}
+	if strings.TrimSpace(row.Model) == "" {
+		return []model.ProviderModel{}
+	}
+	return []model.ProviderModel{{Model: strings.TrimSpace(row.Model), MaxTokens: row.MaxTokens}}
+}
+
+func normalizeProviderModels(input []ProviderModelInput, legacyModel string, legacyMaxTokens int) ([]model.ProviderModel, string, int, error) {
+	defaultModel := strings.TrimSpace(legacyModel)
+	if len(input) == 0 {
+		maxTokens, err := normalizeMaxTokens(legacyMaxTokens)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		if defaultModel == "" {
+			return []model.ProviderModel{}, "", maxTokens, nil
+		}
+		return []model.ProviderModel{{Model: defaultModel, MaxTokens: maxTokens}}, defaultModel, maxTokens, nil
+	}
+
+	items := make([]model.ProviderModel, 0, len(input))
+	seen := map[string]struct{}{}
+	for index, raw := range input {
+		name := strings.TrimSpace(raw.Model)
+		if name == "" {
+			return nil, "", 0, fmt.Errorf("models[%d].model is required", index)
+		}
+		if _, exists := seen[name]; exists {
+			return nil, "", 0, fmt.Errorf("duplicate model %q", name)
+		}
+		seen[name] = struct{}{}
+		maxTokens, err := normalizeMaxTokens(raw.MaxTokens)
+		if err != nil {
+			return nil, "", 0, fmt.Errorf("models[%d]: %w", index, err)
+		}
+		effort, err := NormalizeReasoningEffort(raw.ReasoningEffort)
+		if err != nil {
+			return nil, "", 0, fmt.Errorf("models[%d]: %w", index, err)
+		}
+		items = append(items, model.ProviderModel{
+			Model: name, Label: strings.TrimSpace(raw.Label), MaxTokens: maxTokens, ReasoningEffort: effort,
+		})
+	}
+	if defaultModel == "" {
+		defaultModel = items[0].Model
+	}
+	for _, item := range items {
+		if item.Model == defaultModel {
+			return items, defaultModel, item.MaxTokens, nil
+		}
+	}
+	return nil, "", 0, fmt.Errorf("default model %q is not in models", defaultModel)
+}
+
+func NormalizeReasoningEffort(value string) (string, error) {
+	effort := strings.ToLower(strings.TrimSpace(value))
+	switch effort {
+	case "", "low", "medium", "high", "xhigh":
+		return effort, nil
+	default:
+		return "", fmt.Errorf("unsupported reasoning_effort %q", value)
 	}
 }
 

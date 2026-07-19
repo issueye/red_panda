@@ -287,6 +287,7 @@ export function reduceRunEvent(runtime, event) {
     next = {
       ...next,
       running: false,
+      cancelRequested: false,
       currentRunId: next.currentRunId === runId ? '' : next.currentRunId,
       runEventsByRun,
       assignmentsById: Object.fromEntries(assignments.map((assignment) => [assignment.id, assignment])),

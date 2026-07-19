@@ -4,8 +4,9 @@ import {
   emptyProfileDraft,
   profileDraftFrom,
   providerTypeOptions,
+  reasoningEffortOptions,
 } from '../../lib/providerProfiles.js';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/button.jsx';
 import { ErrorMessage } from '../ui/feedback.jsx';
 import { Field } from '../ui/field.jsx';
@@ -37,6 +38,29 @@ export function ProvidersTab({
   deleteSelectedProfile,
   onRefreshProviderProfiles,
 }) {
+  const models = Array.isArray(profileDraft.models) ? profileDraft.models : [];
+
+  function updateModel(index, key, value) {
+    const previous = models[index];
+    const next = models.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, [key]: value } : item
+    ));
+    updateProfileDraft('models', next);
+    if (key === 'model' && profileDraft.model === previous?.model) {
+      updateProfileDraft('model', value);
+    }
+  }
+
+  function removeModel(index) {
+    const removed = models[index];
+    const next = models.filter((_, itemIndex) => itemIndex !== index);
+    const ensured = next.length > 0 ? next : [{ model: '', label: '', maxTokens: '', reasoningEffort: '' }];
+    updateProfileDraft('models', ensured);
+    if (profileDraft.model === removed?.model) {
+      updateProfileDraft('model', ensured[0].model || '');
+    }
+  }
+
   return (
     <>
           <ModuleHeader badge={`${providerProfiles.length} 个配置`} title="供应商管理">
@@ -102,29 +126,70 @@ export function ProvidersTab({
                   value={profileDraft.provider}
                 />
               </Field>
-              <Field className="settings-row" label="配置模型">
-                <input
-                  onChange={(event) => updateProfileDraft('model', event.target.value)}
-                  placeholder={profileDraft.provider === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4.1-mini'}
-                  type="text"
-                  value={profileDraft.model}
-                />
-              </Field>
-              <Field
-                className="settings-row"
-                label="最大 Token 数"
-                tooltip="上下文窗口预算，用于输入框旁进度环。达到 80% 时自动更新同一会话的上下文摘要。留空表示不限制。"
-              >
-                <input
-                  data-testid="provider-max-tokens"
-                  min={0}
-                  onChange={(event) => updateProfileDraft('maxTokens', event.target.value)}
-                  placeholder="例如 128000"
-                  step={1000}
-                  type="number"
-                  value={profileDraft.maxTokens}
-                />
-              </Field>
+              <div className="settings-model-editor settings-form-span" data-testid="provider-model-editor">
+                <div className="settings-model-editor-header">
+                  <div>
+                    <strong>模型</strong>
+                    <span>配置可选模型、上下文窗口和默认思考等级</span>
+                  </div>
+                  <Button
+                    icon={<Plus size={14} />}
+                    onClick={() => updateProfileDraft('models', [
+                      ...models,
+                      { model: '', label: '', maxTokens: '', reasoningEffort: '' },
+                    ])}
+                    variant="ghost"
+                  >
+                    添加模型
+                  </Button>
+                </div>
+                <div className="settings-model-list">
+                  {models.map((item, index) => (
+                    <div className="settings-model-row" data-testid="provider-model-row" key={index}>
+                      <IconButton
+                        className={profileDraft.model === item.model && item.model ? 'is-selected' : ''}
+                        label={profileDraft.model === item.model && item.model ? '默认模型' : '设为默认模型'}
+                        onClick={() => updateProfileDraft('model', item.model)}
+                        type="button"
+                      >
+                        <Check size={14} />
+                      </IconButton>
+                      <input
+                        aria-label={`模型 ${index + 1} ID`}
+                        onChange={(event) => updateModel(index, 'model', event.target.value)}
+                        placeholder={profileDraft.provider === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4.1-mini'}
+                        type="text"
+                        value={item.model}
+                      />
+                      <input
+                        aria-label={`模型 ${index + 1} 显示名`}
+                        onChange={(event) => updateModel(index, 'label', event.target.value)}
+                        placeholder="显示名（可选）"
+                        type="text"
+                        value={item.label}
+                      />
+                      <input
+                        aria-label={`模型 ${index + 1} 最大 Token 数`}
+                        min={0}
+                        onChange={(event) => updateModel(index, 'maxTokens', event.target.value)}
+                        placeholder="Token 上限"
+                        step={1000}
+                        type="number"
+                        value={item.maxTokens}
+                      />
+                      <SelectMenu
+                        ariaLabel={`模型 ${index + 1} 默认思考等级`}
+                        onChange={(value) => updateModel(index, 'reasoningEffort', value)}
+                        options={reasoningEffortOptions}
+                        value={item.reasoningEffort || ''}
+                      />
+                      <IconButton label={`删除模型 ${index + 1}`} onClick={() => removeModel(index)} type="button">
+                        <Trash2 size={14} />
+                      </IconButton>
+                    </div>
+                  ))}
+                </div>
+              </div>
               <Field className="settings-row settings-form-span" label="基础 URL">
                 <input
                   onChange={(event) => updateProfileDraft('baseUrl', event.target.value)}
@@ -177,7 +242,7 @@ export function ProvidersTab({
                 >
                   <Trash2 size={15} />
                 </IconButton>
-                <Button disabled={profileSaving || !profileDraft.baseUrl} onClick={saveProviderProfile}>
+                <Button disabled={profileSaving || !profileDraft.baseUrl || !models.some((item) => item.model.trim())} onClick={saveProviderProfile}>
                   {profileSaving ? '保存中' : settings.providerProfileId ? '保存供应商' : '创建供应商'}
                 </Button>
               </div>

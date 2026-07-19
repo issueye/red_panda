@@ -74,6 +74,17 @@ const tools = [
   },
 ];
 
+const providerProfiles = [{
+  id: 'provider_fixture',
+  name: 'Work',
+  model: 'model-fast',
+  active: true,
+  models: [
+    { model: 'model-fast', label: 'Fast', maxTokens: 128000, reasoningEffort: 'low' },
+    { model: 'model-deep', label: 'Deep', maxTokens: 200000, reasoningEffort: 'high' },
+  ],
+}];
+
 const permissions = [
   {
     id: 'perm_approve_restore',
@@ -126,6 +137,9 @@ function WorkflowFixture() {
   ]);
   const [activeConversationTab, setActiveConversationTab] = useState('main');
   const [goal, setGoal] = useState(null);
+  const [providerSelection, setProviderSelection] = useState({
+    providerProfileId: 'provider_fixture', model: 'model-fast', reasoningEffort: '',
+  });
 
   function openAssignment(assignment) {
     const tabId = `worker:${assignment.id}`;
@@ -181,10 +195,20 @@ function WorkflowFixture() {
             goalExpanded={Boolean(goal)}
             goalSessionId="local-design"
             messages={messages}
+            model={providerSelection.model}
             onCloseConversationTab={closeConversationTab}
             onResolvePermission={resolvePermission}
+            onProviderProfileChange={(providerProfileId, model) => setProviderSelection({
+              providerProfileId, model, reasoningEffort: '',
+            })}
+            onReasoningEffortChange={(reasoningEffort) => setProviderSelection((current) => ({
+              ...current, reasoningEffort,
+            }))}
             onSelectConversationTab={setActiveConversationTab}
             permissions={permissionItems}
+            providerProfileId={providerSelection.providerProfileId}
+            providerProfiles={providerProfiles}
+            reasoningEffort={providerSelection.reasoningEffort}
             showComposer
             todos={[{
               id: 'todo_restore', content: 'Verify restored workflow', status: 'in_progress',

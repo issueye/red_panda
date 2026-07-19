@@ -43,6 +43,7 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 	var auth string
 	var model string
 	var stream bool
+	var reasoningEffort string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
 		var body map[string]any
@@ -51,6 +52,7 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 		}
 		model, _ = body["model"].(string)
 		stream, _ = body["stream"].(bool)
+		reasoningEffort, _ = body["reasoning_effort"].(string)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"profile ok\"}}]}\n\ndata: [DONE]\n\n")
 	}))
@@ -59,13 +61,13 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 	var chunks []ProviderChunk
 	err := (EchoProvider{}).Complete(context.Background(), ProviderRequest{
 		RunID: "run_profile", Input: "hello", Messages: []Message{{Role: "user", Content: "hello"}},
-		Options: RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: server.URL, ProviderAPIKey: "sk-profile", Model: "profile-model"},
+		Options: RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: server.URL, ProviderAPIKey: "sk-profile", Model: "profile-model", ReasoningEffort: "low"},
 	}, func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if auth != "Bearer sk-profile" || model != "profile-model" || !stream {
-		t.Fatalf("override mismatch auth=%q model=%q stream=%v", auth, model, stream)
+	if auth != "Bearer sk-profile" || model != "profile-model" || !stream || reasoningEffort != "low" {
+		t.Fatalf("override mismatch auth=%q model=%q stream=%v effort=%q", auth, model, stream, reasoningEffort)
 	}
 	if len(chunks) != 2 || chunks[0].Delta != "profile ok" || !chunks[1].Final {
 		t.Fatalf("chunks = %#v", chunks)

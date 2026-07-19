@@ -22,6 +22,7 @@ test('buildRunStartOptions includes provider profile and tool policy fields', ()
     permissionMode: 'permissive',
     providerProfileId: 'provider_1',
     model: ' model-a ',
+    reasoningEffort: ' high ',
     toolAllowlist: 'workspace.read_file, workspace.list',
     toolDenylist: 'shell.exec',
   }, { root_path: 'D:/workspace' }, 'do work /permission');
@@ -32,6 +33,7 @@ test('buildRunStartOptions includes provider profile and tool policy fields', ()
   assert.equal(options.permission_mode, 'permissive');
   assert.equal(options.provider_profile_id, 'provider_1');
   assert.equal(options.model, 'model-a');
+  assert.equal(options.reasoning_effort, 'high');
   assert.deepEqual(options.tool_allowlist, ['workspace.read_file', 'workspace.list']);
   assert.deepEqual(options.tool_denylist, ['shell.exec']);
   assert.equal(options.require_permission, true);

@@ -15,6 +15,7 @@ export function createEmptySessionRuntime(overrides = {}) {
     assignmentsById: {},
     assignmentOrder: [],
     running: false,
+    cancelRequested: false,
     currentRunId: '',
     runSeq: 0,
     // run_seq restarts at 1 for every Run; never compare it across Runs.

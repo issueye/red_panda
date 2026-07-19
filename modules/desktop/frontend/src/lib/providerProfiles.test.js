@@ -22,6 +22,10 @@ test('normalizeProviderProfile maps masked key state and defaults', () => {
     base_url: 'https://provider.invalid',
     model: 'model-a',
     max_tokens: 128000,
+    models: [
+      { model: 'model-a', label: 'Fast', max_tokens: 128000, reasoning_effort: 'medium' },
+      { model: 'model-b', max_tokens: 200000, reasoning_effort: 'high' },
+    ],
     api_key_set: true,
     api_key_masked: '****1234',
     is_default: true,
@@ -32,6 +36,10 @@ test('normalizeProviderProfile maps masked key state and defaults', () => {
   assert.equal(profile.baseUrl, 'https://provider.invalid');
   assert.equal(profile.model, 'model-a');
   assert.equal(profile.maxTokens, 128000);
+  assert.deepEqual(profile.models, [
+    { model: 'model-a', label: 'Fast', maxTokens: 128000, reasoningEffort: 'medium' },
+    { model: 'model-b', label: '', maxTokens: 200000, reasoningEffort: 'high' },
+  ]);
   assert.equal(profile.apiKeySet, true);
   assert.equal(profile.apiKeyMasked, '****1234');
   assert.equal(profile.isDefault, true);
@@ -54,6 +62,7 @@ test('profileDraftFrom never copies saved API key state into editable draft', ()
   assert.equal(draft.name, 'Work');
   assert.equal(draft.apiKey, '');
   assert.equal(draft.maxTokens, '64000');
+  assert.deepEqual(draft.models, [{ model: 'model-a', label: '', maxTokens: '64000', reasoningEffort: '' }]);
   assert.equal(draft.isDefault, true);
   assert.equal(draft.stream, true);
 });
@@ -65,6 +74,10 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     baseUrl: 'https://provider.invalid',
     model: 'model-a',
     maxTokens: '128000',
+    models: [
+      { model: 'model-a', label: 'Fast', maxTokens: '128000', reasoningEffort: 'medium' },
+      { model: 'model-b', label: '', maxTokens: '200000', reasoningEffort: 'high' },
+    ],
     apiKey: 'sk-live',
     isDefault: true,
     stream: false,
@@ -74,6 +87,10 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     base_url: 'https://provider.invalid',
     model: 'model-a',
     max_tokens: 128000,
+    models: [
+      { model: 'model-a', label: 'Fast', max_tokens: 128000, reasoning_effort: 'medium' },
+      { model: 'model-b', label: '', max_tokens: 200000, reasoning_effort: 'high' },
+    ],
     api_key: 'sk-live',
     is_default: true,
     stream: false,
@@ -85,6 +102,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     baseUrl: 'https://provider.invalid',
     model: 'model-b',
     maxTokens: '',
+    models: [{ model: 'model-b', label: '', maxTokens: '', reasoningEffort: 'high' }],
     apiKey: '',
     isDefault: false,
     stream: true,
@@ -93,6 +111,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
   assert.equal(Object.hasOwn(update, 'api_key'), false);
   assert.equal(update.model, 'model-b');
   assert.equal(update.max_tokens, 0);
+  assert.deepEqual(update.models, [{ model: 'model-b', label: '', max_tokens: 0, reasoning_effort: 'high' }]);
   assert.equal(update.active, true);
   assert.equal(update.stream, true);
 
@@ -102,6 +121,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     baseUrl: 'https://api.anthropic.com',
     model: 'claude-sonnet-4-5',
     maxTokens: '',
+    models: [{ model: 'claude-sonnet-4-5', label: '', maxTokens: '', reasoningEffort: 'high' }],
     apiKey: 'secret',
     isDefault: false,
   });

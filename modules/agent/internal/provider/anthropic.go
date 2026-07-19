@@ -38,6 +38,12 @@ func (p AnthropicProvider) completeAttempt(ctx context.Context, req Request, emi
 	}
 	system, messages := anthropicMessages(req)
 	body := map[string]any{"model": model, "max_tokens": defaultAnthropicMaxTokens, "messages": messages, "stream": p.Stream}
+	if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
+		if effort == "xhigh" {
+			effort = "max"
+		}
+		body["output_config"] = map[string]any{"effort": effort}
+	}
 	if system != "" {
 		body["system"] = system
 	}

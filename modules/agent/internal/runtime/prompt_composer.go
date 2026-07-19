@@ -87,6 +87,7 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 			ProviderAPIKey:  options.ProviderAPIKey,
 			Stream:          options.ProviderStream,
 			Model:           options.Model,
+			ReasoningEffort: options.ReasoningEffort,
 			LogLLMRequests:  options.LogLLMRequests,
 		},
 		Tools:       definitions,
