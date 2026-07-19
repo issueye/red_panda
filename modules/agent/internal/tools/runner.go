@@ -151,6 +151,10 @@ func (runner ToolRunner) Run(ctx context.Context, workingDir string, invocation 
 func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunContext, invocation ToolInvocation) (ptools.Result, string) {
 	started := time.Now()
 	call := invocation.Call
+	// Normalize legacy aliases once so timeout class + dispatch share one name.
+	if canon := CanonicalToolName(call.Name); canon != "" {
+		call.Name = canon
+	}
 	result := ptools.Result{
 		ToolCallID: call.ID,
 		Name:       call.Name,
@@ -176,11 +180,9 @@ func (runner ToolRunner) RunWithContext(ctx context.Context, runCtx ToolRunConte
 // toolTimeoutFor 返回工具的硬性时限；工具已自行管理期限时返回 0，
 // 例如 shell、web、Worker 和 skill。
 func toolTimeoutFor(name string) time.Duration {
+	name = CanonicalToolName(name)
 	if timeout, ok := stableToolTimeoutFor(name); ok {
 		return timeout
-	}
-	if name == "todo_write" {
-		return defaultGatewayToolTimeout
 	}
 	// MCP 工具在内部管理启动、初始化和调用超时（文档 19）。
 	if IsMCPToolName(name) {
@@ -305,7 +307,7 @@ func (runner ToolRunner) dispatchTool(ctx context.Context, runCtx ToolRunContext
 			return "", fmt.Errorf("worker receive executor is not available")
 		}
 		return runner.WorkerReceive(ctx, runCtx, call)
-	case "todo.write", "todo_write", "todo.list":
+	case "todo.write", "todo.list":
 		return runner.runTodoTool(ctx, runCtx, call)
 	case "goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish", "goal.list":
 		return runner.runGoalTool(ctx, runCtx, call)

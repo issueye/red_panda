@@ -544,14 +544,10 @@ func memoryToolItem(item MemoryDTO) methods.MemoryToolItem {
 }
 
 func runtimeMemoryOutput(action string, items []methods.MemoryToolItem) string {
-	raw, err := json.Marshal(map[string]any{
+	return marshalRuntimeToolJSON(map[string]any{
 		"action": action,
 		"items":  items,
-	})
-	if err != nil {
-		return fmt.Sprintf("%s completed", action)
-	}
-	return string(raw)
+	}, fmt.Sprintf("%s completed", action))
 }
 
 func stringArgFromMap(args map[string]any, key string) string {

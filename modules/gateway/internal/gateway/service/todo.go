@@ -531,7 +531,7 @@ func runtimeTodoOutput(tool string, items []methods.TodoItemDTO, open int, data 
 		}
 		text += "\n" + strings.Join(parts, "\n")
 	}
-	env := map[string]any{
+	return marshalRuntimeToolJSON(map[string]any{
 		"schema": "red_panda.tool_result.v1",
 		"tool":   tool,
 		"status": "completed",
@@ -539,9 +539,7 @@ func runtimeTodoOutput(tool string, items []methods.TodoItemDTO, open int, data 
 		"text":   text,
 		"data":   data,
 		"meta":   map[string]any{},
-	}
-	raw, _ := json.Marshal(env)
-	return string(raw)
+	}, text)
 }
 
 func formatTodoContextLine(row model.TodoItem) string {

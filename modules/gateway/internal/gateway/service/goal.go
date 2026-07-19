@@ -655,11 +655,7 @@ func runtimeGoalOutput(tool string, goal *methods.GoalDTO, goals []methods.GoalD
 	if len(goals) > 0 {
 		payload["goals"] = goals
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return tool + " ok"
-	}
-	return string(raw)
+	return marshalRuntimeToolJSON(payload, tool+" ok")
 }
 
 func boolArgFromMap(args map[string]any, key string, def bool) bool {

@@ -41,16 +41,12 @@ func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext,
 	if runner.TodoExecutor == nil {
 		return "", fmt.Errorf("todo tool executor is not available")
 	}
-	name := call.Name
-	if name == "todo_write" {
-		name = "todo.write"
-	}
 	result, err := runner.TodoExecutor(ctx, methods.TodoToolExecuteParams{
 		RunID:         runCtx.RunID,
 		SessionID:     runCtx.SessionID,
 		WorkspaceRoot: runCtx.WorkingDir,
 		ToolCallID:    call.ID,
-		ToolName:      name,
+		ToolName:      CanonicalToolName(call.Name),
 		Arguments:     call.Arguments,
 	})
 	if err != nil {

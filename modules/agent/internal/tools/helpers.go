@@ -4,6 +4,18 @@ import "strings"
 
 const maxToolOutputBytes = 64 * 1024
 
+// CanonicalToolName maps legacy aliases to the stable tool name used in
+// schemas and dispatch (docs/47 Wave B). Call once at the runner entry so
+// policy and switch cases can converge over time without breaking callers.
+func CanonicalToolName(name string) string {
+	switch strings.TrimSpace(name) {
+	case "todo_write":
+		return "todo.write"
+	default:
+		return strings.TrimSpace(name)
+	}
+}
+
 func TruncateToolOutput(value string) string {
 	if len(value) <= maxToolOutputBytes {
 		return value

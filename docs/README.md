@@ -17,6 +17,7 @@
 | [44-v0.2.1-development-plan.md](44-v0.2.1-development-plan.md) | **v0.2.1 plan** — scheduled tasks delivery slices |
 | [45-session-system-abstraction-design.md](45-session-system-abstraction-design.md) | **Session system abstraction & optimization** |
 | [46-session-store-development-plan.md](46-session-store-development-plan.md) | **Session store, context, summary, and lifecycle implementation plan** |
+| [47-complexity-redundancy-development-plan.md](47-complexity-redundancy-development-plan.md) | **Complexity & redundancy wave** (Goal loop pure decisions, state-tool boilerplate, alias cleanup) |
 | [34-goal-implementation-optimization-plan.md](34-goal-implementation-optimization-plan.md) | Goal state-machine invariants (Track A detail) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |

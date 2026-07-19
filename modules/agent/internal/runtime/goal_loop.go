@@ -254,10 +254,7 @@ func (r *Runtime) runWithGoalLoop(
 	if !configureDeadline(state, 0) {
 		return providerSegmentResult{Reason: loopEndBudget}
 	}
-	maxSeg := 1
-	if state != nil && state.BoundToThisRun && !state.Terminal {
-		maxSeg = goalRunSegmentLimit(state.Goal, 0)
-	}
+	maxSeg := initialGoalMaxSegments(state)
 
 	seedHistory := append([]provider.ToolExchange(nil), history...)
 	var last providerSegmentResult
@@ -289,17 +286,7 @@ func (r *Runtime) runWithGoalLoop(
 
 		// 每个分段以 Goal 预算为准；剩余工具回合只能进一步收紧，不能提高客户端选项。
 		if state := r.getRunGoal(params.RunID); state != nil {
-			limit := state.Goal.MaxToolTurnsSeg
-			if state.Goal.MaxTotalToolTurns > 0 {
-				remaining := state.Goal.MaxTotalToolTurns - state.Goal.UsedToolTurns
-				if remaining < 1 {
-					remaining = 1
-				}
-				if limit <= 0 || remaining < limit {
-					limit = remaining
-				}
-			}
-			if limit > 0 {
+			if limit := effectiveSegmentToolLimit(state.Goal); limit > 0 {
 				params.Options.MaxToolTurns = limit
 			}
 		}
@@ -321,34 +308,9 @@ func (r *Runtime) runWithGoalLoop(
 			return providerSegmentResult{Reason: loopEndBudget, ToolTurns: last.ToolTurns, History: last.History}
 		}
 
-		if last.Reason == loopEndCancelled || last.Reason == loopEndFailed || last.Reason == loopEndBudget {
-			return last
-		}
-		if state != nil && state.Terminal {
-			return last
-		}
-
-		// 运行中激活目标后，首个分段之后可能扩展 maxSeg。
-		if state != nil && state.BoundToThisRun {
-			want := goalRunSegmentLimit(state.Goal, seg+1)
-			if want > maxSeg {
-				maxSeg = want
-			}
-		} else if state == nil || !state.BoundToThisRun {
-			// 未绑定时仅执行单个分段。
-			return last
-		}
-
-		// 总预算耗尽，Gateway 可能已结束目标。
-		if state != nil && state.Goal.MaxTotalToolTurns > 0 && state.Goal.UsedToolTurns >= state.Goal.MaxTotalToolTurns {
-			return last
-		}
-
-		// 仅在软分段边界继续外层循环。
-		if last.Reason != loopEndNoTools && last.Reason != loopEndMaxTurns {
-			return last
-		}
-		if seg+1 >= maxSeg {
+		decision := decideGoalLoopContinue(state, last.Reason, seg, maxSeg)
+		maxSeg = decision.MaxSeg
+		if !decision.Continue {
 			return last
 		}
 
