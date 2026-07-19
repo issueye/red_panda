@@ -17,21 +17,34 @@ import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
 import { useGatewayResources } from './hooks/useGatewayResources.js';
 import { useGoalSession } from './hooks/useGoalSession.js';
+import { useResizablePanels } from './hooks/useResizablePanels.js';
 import { useSessionActions } from './hooks/useSessionActions.js';
 import {
   useSessionBootstrap,
 } from './hooks/useSessionBootstrap.js';
 import { normalizeRunEvent } from './lib/activityEvents.js';
 import { apiJson, gatewayBase } from './lib/api.js';
+import { normalizeAssignment } from './lib/assignments.js';
 import {
   filterMainMessages,
   filterMainTools,
   filterVisibleMessagesAfterCompaction,
 } from './lib/conversationScope.js';
 import { displayRuntimeMode, displayStatus, displayWorkerProfileName } from './lib/displayLabels.js';
-import { defaultRunSettings, normalizeStoredRunSettings } from './lib/runOptions.js';
+import {
+  clampLeftPanelWidth,
+  clampRightPanelWidth,
+  LEFT_PANEL_WIDTH_DEFAULT,
+  LEFT_PANEL_WIDTH_MAX,
+  LEFT_PANEL_WIDTH_MIN,
+  RIGHT_PANEL_WIDTH_DEFAULT,
+  RIGHT_PANEL_WIDTH_MAX,
+  RIGHT_PANEL_WIDTH_MIN,
+  rightPanelTabs,
+} from './lib/panelLayout.js';
 import { providerModelFor } from './lib/providerProfiles.js';
 import { isRunTerminalEvent } from './lib/runEventLifecycle.js';
+import { loadRunSettings, persistRunSettings } from './lib/runSettingsStorage.js';
 import { reconcileAssignmentsWithRuns, reduceRunEvent, upsertByID } from './lib/reduceRunEvent.js';
 import {
   collectResumeCursors,
@@ -56,93 +69,6 @@ const initialMessages = [
   },
 ];
 
-const rightPanelTabs = [
-  { id: 'workers', label: 'Worker', testId: 'right-tab-workers' },
-  { id: 'activity', label: '活动', testId: 'right-tab-activity' },
-  { id: 'memory', label: '记忆', testId: 'right-tab-memory' },
-];
-
-function loadRunSettings() {
-  if (typeof window === 'undefined') {
-    return defaultRunSettings;
-  }
-  try {
-    const saved = window.localStorage.getItem('red_panda_run_settings');
-    if (!saved) {
-      return defaultRunSettings;
-    }
-    return normalizeStoredRunSettings(JSON.parse(saved));
-  } catch {
-    return defaultRunSettings;
-  }
-}
-
-const RIGHT_PANEL_WIDTH_KEY = 'red_panda_right_panel_width';
-const RIGHT_PANEL_WIDTH_DEFAULT = 300;
-const RIGHT_PANEL_WIDTH_MIN = 220;
-const RIGHT_PANEL_WIDTH_MAX = 560;
-const LEFT_PANEL_WIDTH_KEY = 'red_panda_left_panel_width';
-const LEFT_PANEL_WIDTH_DEFAULT = 280;
-const LEFT_PANEL_WIDTH_MIN = 220;
-const LEFT_PANEL_WIDTH_MAX = 480;
-
-function clampLeftPanelWidth(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return LEFT_PANEL_WIDTH_DEFAULT;
-  return Math.min(LEFT_PANEL_WIDTH_MAX, Math.max(LEFT_PANEL_WIDTH_MIN, Math.round(n)));
-}
-
-function loadLeftPanelWidth() {
-  if (typeof window === 'undefined') return LEFT_PANEL_WIDTH_DEFAULT;
-  try {
-    const saved = window.localStorage.getItem(LEFT_PANEL_WIDTH_KEY);
-    return saved == null ? LEFT_PANEL_WIDTH_DEFAULT : clampLeftPanelWidth(saved);
-  } catch {
-    return LEFT_PANEL_WIDTH_DEFAULT;
-  }
-}
-
-function clampRightPanelWidth(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return RIGHT_PANEL_WIDTH_DEFAULT;
-  return Math.min(RIGHT_PANEL_WIDTH_MAX, Math.max(RIGHT_PANEL_WIDTH_MIN, Math.round(n)));
-}
-
-function loadRightPanelWidth() {
-  if (typeof window === 'undefined') {
-    return RIGHT_PANEL_WIDTH_DEFAULT;
-  }
-  try {
-    const saved = window.localStorage.getItem(RIGHT_PANEL_WIDTH_KEY);
-    return saved == null ? RIGHT_PANEL_WIDTH_DEFAULT : clampRightPanelWidth(saved);
-  } catch {
-    return RIGHT_PANEL_WIDTH_DEFAULT;
-  }
-}
-
-function normalizeAssignment(item = {}) {
-  return {
-    id: item.id || '',
-    runId: item.run_id || item.runId || '',
-    workerId: item.worker_id || item.workerId || '',
-    originWorkerId: item.origin_worker_id || item.originWorkerId || '',
-    profileKey: item.profile_key || item.profileKey || '',
-    task: item.task || '',
-    attempt: Number(item.attempt) || 1,
-    retryOf: item.retry_of || item.retryOf || '',
-    retrying: Boolean(item.retrying),
-    retryInMs: Number(item.retry_in_ms ?? item.retryInMs) || 0,
-    status: item.status || 'queued',
-    result: item.result || '',
-    error: item.error || '',
-    summary: item.summary || '',
-    createdAt: item.created_at || item.createdAt,
-    startedAt: item.started_at || item.startedAt,
-    finishedAt: item.finished_at || item.finishedAt,
-    workerSeq: Number(item.worker_seq ?? item.workerSeq) || 0,
-  };
-}
-
 export function App() {
   const dialog = useDialog();
   const [sessionRuntimes, setSessionRuntimes] = useState(() => ({}));
@@ -151,13 +77,19 @@ export function App() {
   const [rightPanelTab, setRightPanelTab] = useState('activity');
   const [rightPanelDrawerOpen, setRightPanelDrawerOpen] = useState(false);
   const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(false);
-  const [leftPanelWidth, setLeftPanelWidth] = useState(loadLeftPanelWidth);
-  const [leftPanelResizing, setLeftPanelResizing] = useState(false);
-  const [rightPanelWidth, setRightPanelWidth] = useState(loadRightPanelWidth);
-  const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [compactLayout, setCompactLayout] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 1100px)').matches
   ));
+  const {
+    leftPanelWidth,
+    setLeftPanelWidth,
+    leftPanelResizing,
+    rightPanelWidth,
+    setRightPanelWidth,
+    rightPanelResizing,
+    startLeftPanelResize,
+    startRightPanelResize,
+  } = useResizablePanels({ compactLayout });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [runSettings, setRunSettings] = useState(loadRunSettings);
@@ -205,8 +137,6 @@ export function App() {
 
   const rightPanelCloseRef = useRef(null);
   const rightPanelReturnFocusRef = useRef(null);
-  const rightPanelResizeRef = useRef(null);
-  const leftPanelResizeRef = useRef(null);
   const hydrateGoalsRef = useRef(async () => {});
   const upsertSessionRef = useRef(null);
   const selectSessionRef = useRef(null);
@@ -352,108 +282,8 @@ export function App() {
   ]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(LEFT_PANEL_WIDTH_KEY, String(leftPanelWidth));
-    } catch {
-      // Local storage is optional in embedded desktop previews.
-    }
-  }, [leftPanelWidth]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('red_panda_run_settings', JSON.stringify(runSettings));
-    } catch {
-      // Local storage is optional in embedded desktop previews.
-    }
+    persistRunSettings(runSettings);
   }, [runSettings]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(RIGHT_PANEL_WIDTH_KEY, String(rightPanelWidth));
-    } catch {
-      // Local storage is optional in embedded desktop previews.
-    }
-  }, [rightPanelWidth]);
-
-  useEffect(() => {
-    if (!leftPanelResizing) return undefined;
-
-    function onPointerMove(event) {
-      const start = leftPanelResizeRef.current;
-      if (!start) return;
-      setLeftPanelWidth(clampLeftPanelWidth(start.startWidth + (event.clientX - start.startX)));
-    }
-
-    function onPointerUp() {
-      setLeftPanelResizing(false);
-      leftPanelResizeRef.current = null;
-    }
-
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerUp);
-    return () => {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerUp);
-    };
-  }, [leftPanelResizing]);
-
-  useEffect(() => {
-    if (!rightPanelResizing) return undefined;
-
-    function onPointerMove(event) {
-      const start = rightPanelResizeRef.current;
-      if (!start) return;
-      // Drag left = widen right panel.
-      const next = clampRightPanelWidth(start.startWidth + (start.startX - event.clientX));
-      setRightPanelWidth(next);
-    }
-
-    function onPointerUp() {
-      setRightPanelResizing(false);
-      rightPanelResizeRef.current = null;
-    }
-
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerUp);
-    return () => {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerUp);
-    };
-  }, [rightPanelResizing]);
-
-  function startRightPanelResize(event) {
-    if (compactLayout) return;
-    event.preventDefault();
-    rightPanelResizeRef.current = {
-      startX: event.clientX,
-      startWidth: rightPanelWidth,
-    };
-    setRightPanelResizing(true);
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // Pointer capture is optional.
-    }
-  }
-
-  function startLeftPanelResize(event) {
-    if (compactLayout) return;
-    event.preventDefault();
-    leftPanelResizeRef.current = {
-      startX: event.clientX,
-      startWidth: leftPanelWidth,
-    };
-    setLeftPanelResizing(true);
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // Pointer capture is optional.
-    }
-  }
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1100px)');
