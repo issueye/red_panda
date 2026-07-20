@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/jsonrpc"
@@ -32,6 +34,11 @@ func (r *Runtime) toolsForReply(ctx context.Context, params methods.ReplyParams)
 	base := r.tools.AvailableTools()
 	if r.mcp == nil || len(params.Options.MCPServers) == 0 {
 		return base
+	}
+	// Surface any servers that the crash budget has auto-disabled (docs/19 §7.7).
+	// Diagnostics only — provider tool list is governed by DefinitionsForRun below.
+	if disabled := r.mcp.DisabledServers(); len(disabled) > 0 {
+		fmt.Fprintf(r.log, "mcp disabled servers (crash budget): %s\n", strings.Join(disabled, ", "))
 	}
 	if len(r.mcp.DefinitionsForRun(params.RunID)) == 0 {
 		_ = r.mcp.PrepareToolsForRun(ctx, params)

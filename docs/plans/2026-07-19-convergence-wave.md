@@ -370,11 +370,12 @@ go test ./modules/gateway/internal/gateway/service/... -count=1 -run "JSONL|Arch
 | 项 | 现有位置 | 收益 |
 |---|---|---|
 | MCP 进程复用 / 长生命周期 session | `modules/agent/internal/mcp/tools.go:121` 注释"进程复用延后至 D3"；当前每次 call spawn 新进程 | 性能：避免每次 call 的 spawn+initialize 开销 |
-| Crash/restart budget（3 次/60 秒禁用） | `modules/agent/internal/mcp/manager.go` 无相关字段 | 健壮性：避免坏 server 拖垮 run |
 | 跨运行 discovery 缓存 | `modules/agent/internal/mcp/manager.go`、`mcp_bridge.go:31-47` 每次运行重新 discover | 性能：同 server 配置不变时复用 tools/list |
 | 协议级 cancellation notification | `modules/mcpkit/session.go` 无 Cancel 方法 | 健壮性：当前仅靠 ctx cancel 让 call 立即结束，无 MCP 协议层通知 |
 | 协议违规专门状态码 | `modules/mcpkit/session.go:127-137` 靠 mcp-go 静默吞非 JSON 行 + initialize timeout 兜底 | 容错：能区分"server 卡住"与"server 输出垃圾" |
 | 试运行 tools/call 按钮 | Desktop `McpTab.jsx` 无 call UI | UX：发现工具后能手动测试 |
+
+**Note (2026-07-20):** Crash/restart budget was originally listed here and has been delivered as Wave D-1 (see [docs/19 §7.7 implementation status](../19-mcp-stdio-tools-design.md)). The table above reflects the remaining backlog.
 
 ---
 

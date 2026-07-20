@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -17,6 +18,9 @@ const maxToolOutputBytes = 64 * 1024
 // PrepareToolsForRun 根据回复选项中启用的 MCP 服务配置发现工具，
 // 并注册 tools/call 所需的绑定关系（文档 36 D2 / 文档 19）。
 // 单个服务发现失败时仅忽略该服务的工具，Runtime 仍会继续运行。
+// 启动阶失败（spawn/open/initialize）会计入 crash budget
+// （文档 19 §7.7）；达到阈值后该 server 在本 Runtime 进程生命周期内被禁用，
+// 后续 PrepareToolsForRun 直接跳过它，不再 spawn 新进程。
 func (m *Manager) PrepareToolsForRun(ctx context.Context, params methods.ReplyParams) []tools.Definition {
 	servers := params.Options.MCPServers
 	if len(servers) == 0 {
@@ -32,9 +36,19 @@ func (m *Manager) PrepareToolsForRun(ctx context.Context, params methods.ReplyPa
 		if strings.TrimSpace(server.Command) == "" || strings.TrimSpace(server.Name) == "" {
 			continue
 		}
+		if m.isDisabled(server.Name) {
+			fmt.Fprintf(m.log, "mcp skip %s: disabled by crash budget\n", server.Name)
+			continue
+		}
 		discovery := m.DiscoverServer(ctx, workspace, server)
 		if discovery.Status != "ready" {
 			fmt.Fprintf(m.log, "mcp discover %s: %s (%s)\n", server.Name, discovery.Status, discovery.Error)
+			// 启动阶失败才计入 crash budget；tools/list 阶段失败由 isStartupPhaseFailure 区分。
+			if isStartupPhaseFailure(errors.New(discovery.Error)) {
+				if m.recordStartupFailure(server.Name) {
+					fmt.Fprintf(m.log, "mcp %s: disabled by crash budget\n", server.Name)
+				}
+			}
 			continue
 		}
 		for _, tool := range discovery.Tools {
@@ -113,7 +127,18 @@ func (m *Manager) ExecuteTool(ctx context.Context, runID string, workingDir stri
 	if !ok {
 		return "", fmt.Errorf("unknown MCP tool %s", call.Name)
 	}
-	return m.CallTool(ctx, workingDir, binding.Config, binding.RawName, call.Arguments)
+	if m.isDisabled(binding.Config.Name) {
+		// 已被 crash budget 禁用：不再 spawn 子进程，直接拒绝（文档 19 §7.7）。
+		return "", disabledServerError(binding.Config.Name)
+	}
+	output, err := m.CallTool(ctx, workingDir, binding.Config, binding.RawName, call.Arguments)
+	if err != nil && isStartupPhaseFailure(err) {
+		// 启动阶失败计入 budget；业务阶失败（tools/call）不计入。
+		if m.recordStartupFailure(binding.Config.Name) {
+			fmt.Fprintf(m.log, "mcp %s: disabled by crash budget after ExecuteTool failure\n", binding.Config.Name)
+		}
+	}
+	return output, err
 }
 
 // CallTool 启动一次性 MCP stdio 会话，执行 tools/call 后清理资源。

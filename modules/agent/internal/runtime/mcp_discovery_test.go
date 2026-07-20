@@ -240,6 +240,15 @@ func TestMCPHelperProcess(t *testing.T) {
 	if mode == "secret-stderr" {
 		_, _ = fmt.Fprintf(os.Stderr, "diagnostic=%s", os.Getenv("MCP_API_KEY"))
 	}
+	if mode == "exit-immediately" {
+		// Simulate a server whose process dies right after spawn — before any
+		// MCP initialize handshake. Used to drive the crash budget tests: each
+		// discovery / ExecuteTool against this mode is a startup-phase failure.
+		if path := os.Getenv("RED_PANDA_MCP_CLEANUP"); path != "" {
+			_ = os.WriteFile(path, []byte("closed"), 0o600)
+		}
+		os.Exit(3)
+	}
 	// Flush stderr before serving so the client drain can observe diagnostics
 	// even when initialize fails immediately.
 	_ = os.Stderr.Sync()

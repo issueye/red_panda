@@ -37,7 +37,7 @@ v0.1.1 scope:
 5. Define stdout/stderr isolation rules and fake server test coverage.
 6. Define implementation order for later slices.
 
-## 2.1 Implementation status (2026-07-19)
+## 2.1 Implementation status (2026-07-20)
 
 The design below is now partially realized in code. See [docs/10-development-status.md](10-development-status.md) §MCP for the authoritative truth.
 
@@ -49,11 +49,11 @@ The design below is now partially realized in code. See [docs/10-development-sta
 - `tools/call` executes one-shot stdio sessions with start/initialize/list/call/shutdown timeouts; multi-content text concatenation; 64KB max output truncation; bounded (8KB) stderr drain; secret redaction in diagnostics.
 - MCP tools default to `RiskHigh` and flow through the existing ToolRunner policy / permission / event pipeline (`tool_started` / `tool_output` / `tool_finished` / `tool_failed`). Per-server allowlists and risk overrides apply.
 - `core.shutdown` and Runtime `Close` close all MCP child processes; end-to-end integration tests (`mcp_tools_integration_test.go`) cover success / timeout / `isError` paths.
+- Crash/restart budget (§7.7): Manager tracks startup-phase failures per server and auto-disables a server after the configured threshold. `tools/call` business failures are not counted.
 
 **Not yet implemented (tracked as backlog, see [docs/plans/2026-07-19-convergence-wave.md](plans/2026-07-19-convergence-wave.md) Wave D):**
 
 - MCP process reuse across calls (each call currently spawns a fresh child).
-- Crash/restart budget (e.g. auto-disable a server after 3 failures within 60s).
 - Cross-run discovery cache (every run re-discovers tool lists for enabled servers).
 - MCP protocol-level cancellation notifications (run-level cancel currently relies on context cancellation).
 - Desktop "try-call" UI for manually invoking a discovered tool.
@@ -317,6 +317,8 @@ Restart policy:
 - Use a bounded restart budget per server, for example 3 crashes in 60 seconds.
 - After budget exhaustion, mark the server disabled for the Runtime process lifetime or until config changes.
 - Surface failures through ordinary tool errors and optional diagnostics, not a separate required UI.
+
+**Implementation status (2026-07-20):** the budget is enforced by `modules/agent/internal/mcp` on the Runtime-side Manager. Only **startup-phase** failures count toward the threshold — spawn / open / start-timeout / initialize failures (i.e. errors without the `tools/call failed:` prefix). Business `tools/call` failures (timeouts, `isError`, stderr) do **not** count, because they indicate a tool problem rather than a broken server. State lives on the Manager (one Runtime process); it is keyed by `MCPServerConfig.Name` and shared across runs, so a server that crashes in one run stays disabled in the next. Defaults: 3 failures within a 60s sliding window. Override via `RED_PANDA_MCP_CRASH_LIMIT` and `RED_PANDA_MCP_CRASH_WINDOW_MS`; set `RED_PANDA_MCP_CRASH_LIMIT=0` to turn the feature off entirely (escape hatch). Disabled servers are hidden from `PrepareToolsForRun` (no new spawn) and rejected at `ExecuteTool` with a `disabled by crash budget` error. The "until config changes" recovery path is not yet wired — currently the budget only resets when the Runtime process restarts.
 
 ### 7.8 Timeout and cancel
 

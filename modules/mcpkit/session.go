@@ -399,7 +399,11 @@ func Call(ctx context.Context, cfg SessionConfig, toolName string, arguments map
 		if text == "" {
 			text = "MCP tool returned isError"
 		}
-		return text, fmt.Errorf("%s", text)
+		// Wrap with the same "tools/call failed:" prefix used by callErr above so
+		// callers can classify this as a business-phase failure (vs startup-phase
+		// spawn/initialize failures, which carry no such prefix). The text stays
+		// intact as the user-visible tool output; only err.Error() gains a tag.
+		return text, fmt.Errorf("tools/call failed: %s", text)
 	}
 	if text == "" {
 		text = `{"content":[],"isError":false}`
