@@ -156,6 +156,31 @@ func (s MCPServerConfigService) Discover(ctx context.Context, id string, workspa
 	})
 }
 
+// CallTool is the Settings try-call path: one tools/call against an enabled
+// server without starting a chat run. Gateway still never owns MCP processes.
+func (s MCPServerConfigService) CallTool(ctx context.Context, id string, workspaceRoot string, toolName string, arguments map[string]any) (methods.MCPCallResult, error) {
+	row, err := s.repos.MCPServers.Get(id)
+	if err != nil {
+		return methods.MCPCallResult{}, err
+	}
+	if !row.Enabled {
+		return methods.MCPCallResult{}, fmt.Errorf("%w: server must be enabled before tool call", ErrInvalidMCPServerConfig)
+	}
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return methods.MCPCallResult{}, fmt.Errorf("%w: tool_name is required", ErrInvalidMCPServerConfig)
+	}
+	if s.runtime == nil {
+		return methods.MCPCallResult{}, fmt.Errorf("runtime client not configured")
+	}
+	return s.runtime.CallMCP(ctx, methods.MCPCallParams{
+		WorkspaceRoot: workspaceRoot,
+		Server:        mcpServerProtocolConfig(row, false),
+		ToolName:      toolName,
+		Arguments:     arguments,
+	})
+}
+
 func validateAndNormalizeMCPServerConfig(input protocolmcp.MCPServerConfig) (protocolmcp.MCPServerConfig, error) {
 	if !mcpServerNamePattern.MatchString(input.Name) || strings.Contains(input.Name, "__") {
 		return protocolmcp.MCPServerConfig{}, invalidMCPConfig("name must be lowercase ASCII and may not contain whitespace, __, path separators, or shell metacharacters")

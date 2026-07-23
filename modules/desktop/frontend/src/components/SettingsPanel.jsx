@@ -59,6 +59,7 @@ export function SettingsPanel({
   const [mcpDraft, setMcpDraft] = useState(null);
   const [mcpSaving, setMcpSaving] = useState(false);
   const [mcpError, setMcpError] = useState('');
+  const [mcpCallBusy, setMcpCallBusy] = useState(false);
   const [diagnosticLogs, setDiagnosticLogs] = useState(() => getDiagnosticLogs());
   const visibleAgents = Array.isArray(workerProfiles) ? workerProfiles : [];
 
@@ -417,9 +418,29 @@ export function SettingsPanel({
     setMcpError('');
     setMcpDraft({ ...server });
     try {
-      await mcp.discover(server.id);
+      await mcp.discover(server.id, workspaceRoot);
     } catch (error) {
       setMcpError(error.message);
+    }
+  }
+
+  async function callMcpTool(toolName, argumentsValue) {
+    if (!mcpDraft?.id) {
+      throw new Error('请先选择已保存的 MCP 服务器');
+    }
+    setMcpError('');
+    setMcpCallBusy(true);
+    try {
+      return await mcp.callTool(mcpDraft.id, {
+        toolName,
+        arguments: argumentsValue,
+        workspaceRoot,
+      });
+    } catch (error) {
+      setMcpError(error.message);
+      throw error;
+    } finally {
+      setMcpCallBusy(false);
     }
   }
 
@@ -509,8 +530,10 @@ export function SettingsPanel({
 
   const mcpContent = (
     <McpTab
+      callMcpTool={callMcpTool}
       deleteMcpServer={deleteMcpServer}
       discoverMcpServer={discoverMcpServer}
+      mcpCallBusy={mcpCallBusy}
       mcpDiscoveryByServer={mcpDiscoveryByServer}
       mcpDraft={mcpDraft}
       mcpError={mcpError}

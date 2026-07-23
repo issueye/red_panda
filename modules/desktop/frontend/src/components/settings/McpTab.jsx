@@ -23,6 +23,8 @@ export function McpTab({
   toggleMcpServer,
   refreshMcpServers,
   discoverMcpServer,
+  callMcpTool,
+  mcpCallBusy = false,
 }) {
   return (
     <>
@@ -144,7 +146,11 @@ export function McpTab({
                     </Button>
                   </div>
                   {mcpDraft.id ? (
-                    <McpDiscoveryPanel state={mcpDiscoveryByServer[mcpDraft.id]} />
+                    <McpDiscoveryPanel
+                      callBusy={mcpCallBusy}
+                      onCallTool={callMcpTool}
+                      state={mcpDiscoveryByServer[mcpDraft.id]}
+                    />
                   ) : null}
                 </>
               ) : (

@@ -232,7 +232,7 @@ Desktop SettingsPanel manages these profiles through the Gateway APIs. It lists 
 
 ## MCP Configuration
 
-Gateway manages MCP server configuration records through `/api/v1/mcp/servers`. The Desktop MCP Settings tab uses these APIs for list, create, edit, enable/disable, delete, and discovery operations (the discovery button only issues `tools/list` and does not call tools itself — call happens through the normal provider tool flow during a run). Configuration includes command argv, environment entries, working directory, normalized phase timeouts, raw tool allowlists, and risk overrides. Sensitive environment values are masked in API responses.
+Gateway manages MCP server configuration records through `/api/v1/mcp/servers`. The Desktop MCP Settings tab uses these APIs for list, create, edit, enable/disable, delete, discovery (`POST .../discover`), and try-call (`POST .../call` with `tool_name` + JSON arguments). Try-call runs a management-path `tools/call` without starting a chat run; conversation-time MCP calls still go through the provider tool loop. Configuration includes command argv, environment entries, working directory, normalized phase timeouts, raw tool allowlists, and risk overrides. Sensitive environment values are masked in API responses.
 
 For discovery and execution, Gateway forwards enabled MCP server configurations to Agent Runtime at `run.start`. Runtime directly starts the stdio process, performs `initialize` and `tools/list`, applies the server tool allowlist, sanitizes diagnostics, and cleans up the child process. Discovered tools are then registered as provider-facing tools (canonical name `mcp__server__tool`) and can be invoked through the normal `tools/call` flow during the run, with default `RiskHigh` permission gating, bounded timeouts, and standard `tool_*` event emission.
 
@@ -240,4 +240,4 @@ For discovery and execution, Gateway forwards enabled MCP server configurations 
 
 - Treat the v0.1.2 Gateway MCP config CRUD, v0.1.4 Desktop MCP config management, v0.1.5 read-only discovery, and the v0.2.0 `tools/call` MVP as implemented.
 - Keep Runtime-owned MCP lifecycle (process spawn / initialize / list / call / shutdown) consolidated inside Runtime; Gateway only owns durable configuration and run-time handoff.
-- MCP process reuse, discovery cache, crash/restart budget, and protocol-level cancellation are implemented. Remaining product gap: Desktop "try-call" UI for discovered tools.
+- MCP process reuse, discovery cache, crash/restart budget, protocol-level cancellation, and Desktop Settings try-call UI are implemented.

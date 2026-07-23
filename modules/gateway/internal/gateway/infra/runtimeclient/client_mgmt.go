@@ -27,6 +27,21 @@ func (c *Client) DiscoverMCP(ctx context.Context, params methods.MCPDiscoverPara
 	return result, nil
 }
 
+func (c *Client) CallMCP(ctx context.Context, params methods.MCPCallParams) (methods.MCPCallResult, error) {
+	if err := c.Initialize(ctx); err != nil {
+		return methods.MCPCallResult{}, err
+	}
+	raw, err := c.call(ctx, methods.MCPCall, params)
+	if err != nil {
+		return methods.MCPCallResult{}, err
+	}
+	var result methods.MCPCallResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return methods.MCPCallResult{}, err
+	}
+	return result, nil
+}
+
 func (c *Client) ListSkills(ctx context.Context, params methods.SkillsListParams) (methods.SkillsListResult, error) {
 	if err := c.Initialize(ctx); err != nil {
 		return methods.SkillsListResult{}, err

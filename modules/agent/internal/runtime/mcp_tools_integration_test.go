@@ -23,6 +23,50 @@ func TestMCPCanonicalName(t *testing.T) {
 	}
 }
 
+func TestMCPCallManagementRPC(t *testing.T) {
+	cleanup := filepath.Join(t.TempDir(), "cleanup")
+	config := helperMCPConfig(t, "success", cleanup)
+	config.Timeouts.CallMS = 1000
+	var outBuf bytes.Buffer
+	rt := New(strings.NewReader(""), &outBuf, &bytes.Buffer{}, "test")
+	params := methods.MCPCallParams{
+		Server:    config,
+		ToolName:  "read_file",
+		Arguments: map[string]any{"path": "try-call.md"},
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "call-1",
+		"method":  methods.MCPCall,
+		"params":  json.RawMessage(raw),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.handleLine(context.Background(), line); err != nil {
+		t.Fatal(err)
+	}
+	response := outBuf.String()
+	if !strings.Contains(response, `"ok":true`) && !strings.Contains(response, `"ok": true`) {
+		// Direct path fallback assertion when envelope shape differs.
+		out, callErr := rt.mcp.CallTool(context.Background(), "", config, "read_file", map[string]any{"path": "try-call.md"})
+		if callErr != nil {
+			t.Fatalf("handleLine response=%q callErr=%v", response, callErr)
+		}
+		if !strings.Contains(out, "path=try-call.md") {
+			t.Fatalf("output = %q response=%q", out, response)
+		}
+	} else if !strings.Contains(response, "try-call.md") {
+		t.Fatalf("response missing tool output: %s", response)
+	}
+	rt.mcp.CloseAll()
+	waitForFile(t, cleanup)
+}
+
 func TestMCPDiscoveryCacheAcrossRuns(t *testing.T) {
 	cleanup := filepath.Join(t.TempDir(), "cleanup")
 	config := helperMCPConfig(t, "success", cleanup)

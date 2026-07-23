@@ -2,7 +2,7 @@
 
 Updated: 2026-07-23
 
-Status: partially implemented (v0.2.x). config CRUD + discovery + `tools/call` + process reuse + discovery cache are done; see §2.1 for remaining gaps.
+Status: implemented for config CRUD, discovery, tools/call, process reuse, discovery cache, protocol cancel, and Desktop try-call; see §2.1.
 
 This document defines the MCP stdio tool boundary for a later implementation slice. It preserves the v0.1.0 architecture:
 
@@ -55,9 +55,7 @@ The design below is now partially realized in code. See [docs/10-development-sta
 
 **Implemented (2026-07-23):** protocol-level cancellation — when a call context is cancelled (run cancel or call timeout), Runtime sends `notifications/cancelled` with the in-flight `requestId` on the MCP stdio session, and still unblocks via context cancel if the server ignores the notification.
 
-**Not yet implemented (tracked as backlog):**
-
-- Desktop "try-call" UI for manually invoking a discovered tool.
+**Implemented (2026-07-23):** Desktop Settings try-call UI — discovery panel exposes per-tool「试调用」with JSON arguments; Gateway `POST /api/v1/mcp/servers/:id/call` → Runtime `mcp.call` → `Manager.CallTool` (no chat run).
 
 ## 3. Non-goals
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Blocks,
   Bot,
@@ -200,12 +201,12 @@ export function ManagerItem({ active, children, disabled = false, enabled, icon:
 export function McpDiscoveryReadOnlyNotice() {
   return (
     <small className="mcp-discovery-notice" data-testid="mcp-discovery-readonly-notice">
-      发现：已列出服务器信息与可用工具清单。这些工具在对话中可被调用（默认高风险，受工具策略与权限模式约束）。性能加固（进程复用、crash 预算等）尚未完成。
+      发现：已列出服务器信息与可用工具。可在下方「试调用」直接执行一次 tools/call（不经对话 run）；对话中调用仍受工具策略与权限模式约束。
     </small>
   );
 }
 
-export function McpDiscoveryPanel({ state }) {
+export function McpDiscoveryPanel({ state, onCallTool, callBusy = false }) {
   if (!state) {
     return (
       <section className="mcp-discovery" data-testid="mcp-discovery-empty">
@@ -254,15 +255,107 @@ export function McpDiscoveryPanel({ state }) {
             {server.stderrSummary ? <small className="mcp-discovery-stderr">{server.stderrSummary}</small> : null}
             <div className="mcp-tool-list">
               {server.tools.length === 0 ? <small>未发现工具。</small> : server.tools.map((tool) => (
-                <div className="mcp-tool-item" key={tool.name}>
-                  <strong>{tool.name}</strong>
-                  {tool.description ? <small>{tool.description}</small> : null}
-                </div>
+                <McpToolTryCall
+                  busy={callBusy}
+                  key={tool.name}
+                  onCallTool={onCallTool}
+                  tool={tool}
+                />
               ))}
             </div>
           </div>
         );
       })}
     </section>
+  );
+}
+
+function McpToolTryCall({ tool, onCallTool, busy }) {
+  const [open, setOpen] = useState(false);
+  const [argsText, setArgsText] = useState('{}');
+  const [calling, setCalling] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  async function runCall() {
+    if (!onCallTool || calling || busy) {
+      return;
+    }
+    let argumentsValue = {};
+    try {
+      argumentsValue = argsText.trim() ? JSON.parse(argsText) : {};
+      if (!argumentsValue || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
+        throw new Error('arguments must be a JSON object');
+      }
+    } catch (parseError) {
+      setError(`参数 JSON 无效：${parseError.message}`);
+      setResult(null);
+      return;
+    }
+    setCalling(true);
+    setError('');
+    setResult(null);
+    try {
+      const callResult = await onCallTool(tool.name, argumentsValue);
+      setResult(callResult);
+      if (callResult?.error && !callResult.ok) {
+        setError(callResult.error);
+      }
+    } catch (callError) {
+      setError(callError.message || String(callError));
+    } finally {
+      setCalling(false);
+    }
+  }
+
+  return (
+    <div className="mcp-tool-item" data-testid={`mcp-tool-${tool.name}`}>
+      <div className="mcp-tool-item-head">
+        <strong>{tool.name}</strong>
+        {typeof onCallTool === 'function' ? (
+          <Button
+            data-testid={`mcp-try-call-toggle-${tool.name}`}
+            disabled={busy || calling}
+            onClick={() => setOpen((value) => !value)}
+            variant="ghost"
+          >
+            {open ? '收起' : '试调用'}
+          </Button>
+        ) : null}
+      </div>
+      {tool.description ? <small>{tool.description}</small> : null}
+      {open ? (
+        <div className="mcp-try-call" data-testid={`mcp-try-call-${tool.name}`}>
+          <label className="mcp-try-call-label">
+            <span>Arguments (JSON)</span>
+            <textarea
+              className="mcp-try-call-args"
+              data-testid={`mcp-try-call-args-${tool.name}`}
+              onChange={(event) => setArgsText(event.target.value)}
+              rows={4}
+              spellCheck={false}
+              value={argsText}
+            />
+          </label>
+          <div className="mcp-try-call-actions">
+            <Button
+              data-testid={`mcp-try-call-run-${tool.name}`}
+              disabled={busy || calling}
+              onClick={runCall}
+              variant="soft"
+            >
+              {calling ? '调用中…' : '执行'}
+            </Button>
+          </div>
+          {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+          {result ? (
+            <pre className="mcp-try-call-result" data-testid={`mcp-try-call-result-${tool.name}`}>
+              {result.output || (result.ok ? '(empty output)' : result.error || '')}
+              {result.durationMs > 0 ? `\n/* ${result.durationMs} ms */` : ''}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

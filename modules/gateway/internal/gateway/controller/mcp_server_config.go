@@ -111,6 +111,24 @@ func (m MCPServerConfigController) Discover(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, result))
 }
 
+func (m MCPServerConfigController) Call(c *gin.Context) {
+	var req struct {
+		WorkspaceRoot string         `json:"workspace_root"`
+		ToolName      string         `json:"tool_name"`
+		Arguments     map[string]any `json:"arguments"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_payload", "message": "invalid MCP call payload"}})
+		return
+	}
+	result, err := m.Services.MCPServers.CallTool(c.Request.Context(), c.Param("id"), req.WorkspaceRoot, req.ToolName, req.Arguments)
+	if err != nil {
+		writeMCPServerError(c, "call", err)
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, result))
+}
+
 func writeMCPServerError(c *gin.Context, operation string, err error) {
 	status := http.StatusInternalServerError
 	code := "mcp_server_" + operation + "_failed"

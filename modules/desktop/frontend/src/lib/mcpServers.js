@@ -45,12 +45,35 @@ export function normalizeMcpDiscovery(data = {}) {
       tools: Array.isArray(server.tools) ? server.tools.map((tool) => ({
         name: tool.name || '',
         description: tool.description || '',
+        // Keep schema for Settings try-call argument editor (docs/19 try-call UI).
+        inputSchema: objectValue(tool.input_schema || tool.inputSchema),
       })) : [],
       error: server.error || '',
       stderrSummary: server.stderr_summary || '',
       durationMs: Number.isFinite(server.duration_ms) ? server.duration_ms : 0,
     })) : [],
   };
+}
+
+export function normalizeMcpCallResult(data = {}) {
+  return {
+    ok: data.ok !== false && !data.error,
+    output: typeof data.output === 'string' ? data.output : '',
+    error: data.error || '',
+    durationMs: Number.isFinite(data.duration_ms) ? data.duration_ms : 0,
+    stderrSummary: data.stderr_summary || '',
+  };
+}
+
+export function mcpCallPayload({ toolName, arguments: args, workspaceRoot } = {}) {
+  const payload = {
+    tool_name: toolName || '',
+    arguments: objectValue(args),
+  };
+  if (workspaceRoot) {
+    payload.workspace_root = workspaceRoot;
+  }
+  return payload;
 }
 
 function mcpServerPayload(input) {

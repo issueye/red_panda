@@ -18,6 +18,7 @@ const (
 	AgentSkillUpdate  = "agent.skill.update"
 	AgentSkillDelete  = "agent.skill.delete"
 	MCPDiscover       = "mcp.discover"
+	MCPCall           = "mcp.call"
 	PermissionResolve = "permission.resolve"
 
 	// ScheduleToolExecute is also defined in schedule.go for discoverability.
@@ -251,6 +252,24 @@ type PingResult struct {
 type MCPDiscoverParams struct {
 	WorkspaceRoot string                        `json:"workspace_root,omitempty"`
 	Servers       []protocolmcp.MCPServerConfig `json:"servers"`
+}
+
+// MCPCallParams is a management-path tools/call (Settings try-call).
+// It does not require a run binding; Runtime uses Manager.CallTool directly.
+type MCPCallParams struct {
+	WorkspaceRoot string                      `json:"workspace_root,omitempty"`
+	Server        protocolmcp.MCPServerConfig `json:"server"`
+	ToolName      string                      `json:"tool_name"`
+	Arguments     map[string]any              `json:"arguments,omitempty"`
+}
+
+// MCPCallResult is the outcome of a management-path MCP tools/call.
+type MCPCallResult struct {
+	Output        string `json:"output,omitempty"`
+	OK            bool   `json:"ok"`
+	Error         string `json:"error,omitempty"`
+	DurationMS    int64  `json:"duration_ms,omitempty"`
+	StderrSummary string `json:"stderr_summary,omitempty"`
 }
 
 type ReplyParams struct {

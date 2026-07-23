@@ -171,6 +171,8 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 		return r.handleRunExecute(ctx, req)
 	case methods.MCPDiscover:
 		return r.handleMCPDiscover(ctx, req)
+	case methods.MCPCall:
+		return r.handleMCPCall(ctx, req)
 	case methods.AgentSkills:
 		return r.handleAgentSkills(req)
 	case methods.AgentSkillLoad:

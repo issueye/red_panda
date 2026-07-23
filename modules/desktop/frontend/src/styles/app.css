@@ -5243,6 +5243,61 @@ textarea:focus-visible {
   font-size: 11px;
 }
 
+.mcp-tool-item-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.mcp-tool-item-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-try-call {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.mcp-try-call-label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.mcp-try-call-args {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-height: 72px;
+  resize: vertical;
+  width: 100%;
+}
+
+.mcp-try-call-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mcp-try-call-result {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .mcp-discovery-stderr {
   white-space: pre-wrap;
 }

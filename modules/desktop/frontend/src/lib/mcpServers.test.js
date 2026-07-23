@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  mcpCallPayload,
   mcpServerCreatePayload,
   mcpServerUpdatePayload,
+  normalizeMcpCallResult,
   normalizeMcpDiscovery,
   normalizeMcpServer,
 } from './mcpServers.js';
@@ -45,7 +47,7 @@ test('normalizeMcpServer maps API fields and renders one argument per line', () 
   assert.equal(server.updatedAt, '2026-07-10T00:00:00Z');
 });
 
-test('normalizeMcpDiscovery keeps only read-only discovery fields', () => {
+test('normalizeMcpDiscovery keeps tool input schema for try-call', () => {
   const result = normalizeMcpDiscovery({
     servers: [{
       name: 'filesystem',
@@ -62,13 +64,40 @@ test('normalizeMcpDiscovery keeps only read-only discovery fields', () => {
       name: 'filesystem',
       status: 'connected',
       serverInfo: { name: 'Filesystem MCP', version: '1.2.0' },
-      tools: [{ name: 'read_file', description: 'Read a file' }],
+      tools: [{
+        name: 'read_file',
+        description: 'Read a file',
+        inputSchema: { type: 'object' },
+      }],
       error: '',
       stderrSummary: '',
       durationMs: 37,
     }],
   });
   assert.equal(JSON.stringify(result).includes('SECRET'), false);
+});
+
+test('mcpCallPayload and normalizeMcpCallResult', () => {
+  assert.deepEqual(mcpCallPayload({
+    toolName: 'read_file',
+    arguments: { path: 'a.md' },
+    workspaceRoot: 'E:/ws',
+  }), {
+    tool_name: 'read_file',
+    arguments: { path: 'a.md' },
+    workspace_root: 'E:/ws',
+  });
+  assert.deepEqual(normalizeMcpCallResult({
+    ok: true,
+    output: 'hello',
+    duration_ms: 12,
+  }), {
+    ok: true,
+    output: 'hello',
+    error: '',
+    durationMs: 12,
+    stderrSummary: '',
+  });
 });
 
 test('normalizeMcpServer keeps masked env values exactly as returned by API', () => {

@@ -2,8 +2,10 @@ import { useCallback, useMemo, useState } from 'react';
 import { apiJson } from '../lib/api.js';
 import { normalizeAgentList } from '../lib/agents.js';
 import {
+  mcpCallPayload,
   mcpServerCreatePayload,
   mcpServerUpdatePayload,
+  normalizeMcpCallResult,
   normalizeMcpDiscovery,
   normalizeMcpServer,
 } from '../lib/mcpServers.js';
@@ -228,14 +230,16 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     }
   }, []);
 
-  const discoverMcpServer = useCallback(async (id) => {
+  const discoverMcpServer = useCallback(async (id, workspaceRootOverride) => {
     setMcpDiscoveryByServer((current) => ({
       ...current,
       [id]: { ...current[id], loading: true, error: '' },
     }));
     try {
+      const workspaceRoot = workspaceRootOverride || getWorkspaceRoot?.() || '';
       const data = await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}/discover`, {
         method: 'POST',
+        body: JSON.stringify(workspaceRoot ? { workspace_root: workspaceRoot } : {}),
       });
       const result = normalizeMcpDiscovery(data);
       setMcpDiscoveryByServer((current) => ({
@@ -250,7 +254,20 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
       }));
       throw error;
     }
-  }, []);
+  }, [getWorkspaceRoot]);
+
+  const callMcpTool = useCallback(async (id, { toolName, arguments: args, workspaceRoot: workspaceRootOverride } = {}) => {
+    const workspaceRoot = workspaceRootOverride || getWorkspaceRoot?.() || '';
+    const data = await apiJson(`/api/v1/mcp/servers/${encodeURIComponent(id)}/call`, {
+      method: 'POST',
+      body: JSON.stringify(mcpCallPayload({
+        toolName,
+        arguments: args,
+        workspaceRoot,
+      })),
+    });
+    return normalizeMcpCallResult(data);
+  }, [getWorkspaceRoot]);
 
   const loadSkills = useCallback(async (workspaceRootOverride) => {
     const root = workspaceRootOverride || getWorkspaceRoot?.() || '';
@@ -377,6 +394,7 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     update: updateMcpServer,
     remove: deleteMcpServer,
     discover: discoverMcpServer,
+    callTool: callMcpTool,
   }), [
     mcpServers,
     mcpServersLoading,
@@ -387,6 +405,7 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     updateMcpServer,
     deleteMcpServer,
     discoverMcpServer,
+    callMcpTool,
   ]);
 
   const skillsResource = useMemo(() => ({

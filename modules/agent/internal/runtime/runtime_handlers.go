@@ -66,6 +66,7 @@ func (r *Runtime) handleInitialize(req jsonrpc.Request) error {
 			{Name: methods.AgentSkillUpdate, Version: 1},
 			{Name: methods.AgentSkillDelete, Version: 1},
 			{Name: methods.MCPDiscover, Version: 1},
+			{Name: methods.MCPCall, Version: 1},
 			{Name: methods.PermissionResolve, Version: 1},
 		},
 	}
