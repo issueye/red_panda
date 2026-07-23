@@ -27,6 +27,41 @@ function timelineItem(type, value, index) {
   };
 }
 
+/**
+ * Stable chronological order for tool-call counters.
+ * Prefer startedSeq / runSeq, then startedAt, then id.
+ * @param {Record<string, unknown>} left
+ * @param {Record<string, unknown>} right
+ */
+export function compareToolCallOrder(left, right) {
+  const leftSeq = positiveNumber(left?.startedSeq || left?.runSeq);
+  const rightSeq = positiveNumber(right?.startedSeq || right?.runSeq);
+  if (leftSeq && rightSeq && leftSeq !== rightSeq) return leftSeq - rightSeq;
+  if (leftSeq !== rightSeq) return leftSeq ? -1 : 1;
+
+  const leftTime = timestamp(left?.startedAt || left?.createdAt);
+  const rightTime = timestamp(right?.startedAt || right?.createdAt);
+  if (leftTime && rightTime && leftTime !== rightTime) return leftTime - rightTime;
+  if (leftTime !== rightTime) return leftTime ? -1 : 1;
+
+  return String(left?.id || '').localeCompare(String(right?.id || ''));
+}
+
+/**
+ * Map tool id → 1-based call index for display (e.g. 1/12).
+ * @param {Array<Record<string, unknown>>} tools
+ * @returns {Map<string, number>}
+ */
+export function buildToolCallIndexMap(tools = []) {
+  const sorted = [...tools].sort(compareToolCallOrder);
+  const map = new Map();
+  sorted.forEach((tool, index) => {
+    if (tool?.id == null || tool.id === '') return;
+    map.set(String(tool.id), index + 1);
+  });
+  return map;
+}
+
 export function buildConversationTimeline(messages = [], tools = [], permissions = []) {
   const items = [];
   messages.forEach((item) => items.push(timelineItem('message', item, items.length)));

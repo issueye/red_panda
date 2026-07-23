@@ -36,10 +36,18 @@ const tools = [
 ];
 
 function ToolCardFixture() {
+  const total = tools.length;
   return (
     <main style={{ margin: '48px auto', maxWidth: 760, padding: '0 20px' }}>
       <section className="conversation" style={{ padding: 0 }}>
-        {tools.map((tool) => <ToolCallCard item={tool} key={tool.id} />)}
+        {tools.map((tool, index) => (
+          <ToolCallCard
+            callIndex={index + 1}
+            callTotal={total}
+            item={tool}
+            key={tool.id}
+          />
+        ))}
       </section>
     </main>
   );

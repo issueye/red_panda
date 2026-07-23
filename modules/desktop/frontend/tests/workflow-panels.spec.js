@@ -95,7 +95,10 @@ test('Completed tool calls stay compact until expanded', async ({ page }) => {
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
   await expect(readTool).toHaveClass(/is-collapsed/);
   await expect(readTool.getByTestId('tool-card-body')).toHaveCount(0);
-  expect((await readTool.boundingBox()).height).toBeLessThanOrEqual(26);
+  await expect(readTool.getByTestId('tool-call-index')).toHaveText('1/3');
+  await expect(page.getByTestId('tool-card').nth(1).getByTestId('tool-call-index')).toHaveText('2/3');
+  await expect(page.getByTestId('tool-card').nth(2).getByTestId('tool-call-index')).toHaveText('3/3');
+  expect((await readTool.boundingBox()).height).toBeLessThanOrEqual(28);
 
   const cards = page.getByTestId('tool-card');
   const cardBoxes = await cards.evaluateAll((items) => items.map((item) => {

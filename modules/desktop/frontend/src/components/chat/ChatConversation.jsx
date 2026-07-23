@@ -1,6 +1,9 @@
 import { ArrowDown, Bot, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildConversationTimeline } from '../../lib/conversationTimeline.js';
+import {
+  buildConversationTimeline,
+  buildToolCallIndexMap,
+} from '../../lib/conversationTimeline.js';
 import { classNames, formatSeq } from '../../lib/format.js';
 import { isWorkerToolFallback } from '../../lib/toolResultDisplay.js';
 import {
@@ -29,7 +32,12 @@ function displayMessageAgent(message) {
 }
 
 /** Render assistant message body and convert embedded tool markup into cards. */
-function AssistantMessageBody({ message, workspaceRoot = '' }) {
+function AssistantMessageBody({
+  message,
+  workspaceRoot = '',
+  toolIndexById,
+  toolTotal = 0,
+}) {
   const text = message.text || '';
   if (isWorkerToolFallback(message)) {
     return (
@@ -50,6 +58,7 @@ function AssistantMessageBody({ message, workspaceRoot = '' }) {
     return <Markdown className="message-markdown" workspaceRoot={workspaceRoot}>{text}</Markdown>;
   }
 
+  const inlineToolTotal = segments.filter((segment) => segment.type === 'tool_call').length;
   let toolIndex = 0;
   return (
     <div className="message-rich-body" data-testid="message-rich-body">
@@ -57,9 +66,12 @@ function AssistantMessageBody({ message, workspaceRoot = '' }) {
         if (segment.type === 'tool_call') {
           const item = toolItemFromMessageSegment(segment, message, toolIndex);
           toolIndex += 1;
+          const mappedIndex = toolIndexById?.get(String(item.id));
+          const callIndex = mappedIndex || toolIndex;
+          const callTotal = mappedIndex ? toolTotal : inlineToolTotal;
           return (
             <div className="message-inline-tool" key={`${item.id}:${index}`}>
-              <ToolCallCard item={item} />
+              <ToolCallCard callIndex={callIndex} callTotal={callTotal} item={item} />
             </div>
           );
         }
@@ -91,6 +103,8 @@ export function ChatConversation({
     () => buildConversationTimeline(messages, tools, permissions),
     [messages, permissions, tools],
   );
+  const toolIndexById = useMemo(() => buildToolCallIndexMap(tools), [tools]);
+  const toolTotal = tools.length;
 
   useEffect(() => {
     if (!followingLatest) return undefined;
@@ -128,7 +142,16 @@ export function ChatConversation({
 
         {timeline.map((item) => {
           if (item.type === 'tool') {
-            return <ToolCallCard item={item.value} key={item.key} />;
+            const tool = item.value;
+            const callIndex = toolIndexById.get(String(tool.id));
+            return (
+              <ToolCallCard
+                callIndex={callIndex}
+                callTotal={toolTotal}
+                item={tool}
+                key={item.key}
+              />
+            );
           }
           if (item.type === 'permission') {
             return <PermissionCard item={item.value} key={item.key} onResolve={onResolvePermission} />;
@@ -150,7 +173,12 @@ export function ChatConversation({
               {isUser ? (
                 <p className="message-plain">{message.text}</p>
               ) : (
-                <AssistantMessageBody message={message} workspaceRoot={workspaceRoot} />
+                <AssistantMessageBody
+                  message={message}
+                  toolIndexById={toolIndexById}
+                  toolTotal={toolTotal}
+                  workspaceRoot={workspaceRoot}
+                />
               )}
             </div>
           );

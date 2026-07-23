@@ -146,8 +146,9 @@ function ToolDetail({ title, text, open, onToggle, testId }) {
 
 /**
  * Compact but readable tool-call card for the conversation timeline.
+ * @param {{ item: Record<string, unknown>, callIndex?: number, callTotal?: number }} props
  */
-export function ToolCallCard({ item }) {
+export function ToolCallCard({ item, callIndex, callTotal }) {
   const status = item.status || 'running';
   const isRunning = status === 'running' || status === 'pending' || status === 'waiting_permission';
   const isFailed = status === 'failed' || status === 'denied';
@@ -171,6 +172,16 @@ export function ToolCallCard({ item }) {
   const title = item.displayName || item.name || '工具';
   const toolName = item.name && item.name !== title ? item.name : '';
   const hasBody = Boolean(argsText || errorText || outputText);
+  const index = Number(callIndex ?? item.callIndex);
+  const total = Number(callTotal ?? item.callTotal);
+  const hasIndex = Number.isFinite(index) && index > 0;
+  const hasTotal = Number.isFinite(total) && total > 0;
+  const indexLabel = hasIndex
+    ? (hasTotal ? `${index}/${total}` : `#${index}`)
+    : '';
+  const indexTitle = hasIndex
+    ? (hasTotal ? `第 ${index} 次工具调用，共 ${total} 次` : `第 ${index} 次工具调用`)
+    : '';
 
   const [cardOpen, setCardOpen] = useState(isRunning || isFailed);
   const [argsOpen, setArgsOpen] = useState(false);
@@ -237,6 +248,15 @@ export function ToolCallCard({ item }) {
 
         <span className="tool-card-content">
           <span className="tool-card-title">
+            {indexLabel ? (
+              <span
+                className="tool-call-index"
+                data-testid="tool-call-index"
+                title={indexTitle}
+              >
+                {indexLabel}
+              </span>
+            ) : null}
             <strong>{title}</strong>
             {toolName ? <code className="tool-card-name">{toolName}</code> : null}
           </span>

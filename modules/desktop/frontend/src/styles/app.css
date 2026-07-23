@@ -4260,6 +4260,20 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.tool-call-index {
+  color: var(--color-text-soft);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  min-width: 1.75em;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
 .tool-card-title strong {
   color: var(--color-text-muted);
   flex: 0 1 auto;

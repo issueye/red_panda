@@ -13,6 +13,10 @@ import {
   getRunEventTimelineMeta,
   groupRunEventsByKind,
 } from '../lib/activityEvents.js';
+import {
+  buildToolCallIndexMap,
+  compareToolCallOrder,
+} from '../lib/conversationTimeline.js';
 import { formatSeq } from '../lib/format.js';
 import { StatusBadge } from './ui/badge.jsx';
 import { Button } from './ui/button.jsx';
@@ -78,6 +82,11 @@ export function RunActivityPanel({
   const [eventScopeFilter, setEventScopeFilter] = useState('all');
   const [expandedPayloads, setExpandedPayloads] = useState({});
   const [expandedRunId, setExpandedRunId] = useState(currentRunId || '');
+  const toolIndexById = useMemo(() => buildToolCallIndexMap(safeTools), [safeTools]);
+  const orderedTools = useMemo(
+    () => [...safeTools].sort(compareToolCallOrder),
+    [safeTools],
+  );
   const filteredRuns = useMemo(() => (
     safeRuns.filter((run) => runStatusMatches(run, statusFilter) && matchesQuery(run, query))
   ), [query, safeRuns, statusFilter]);
@@ -195,7 +204,9 @@ export function RunActivityPanel({
           ) : filteredRuns.length === 0 ? (
             <InlineEmpty className="activity-empty">没有符合当前筛选条件的运行。</InlineEmpty>
           ) : filteredRuns.slice(0, 12).map((run) => {
-            const runTools = safeTools.filter((tool) => tool.runId === run.id);
+            const runTools = safeTools
+              .filter((tool) => tool.runId === run.id)
+              .sort(compareToolCallOrder);
             const runPermissions = safePermissions.filter((item) => item.runId === run.id);
             const runEvents = runEventsByRun?.[run.id] || [];
             const eventsLoading = Boolean(runEventsLoading?.[run.id]);
@@ -245,8 +256,11 @@ export function RunActivityPanel({
                     </dl>
                     <div className="activity-detail-group">
                       <strong>工具</strong>
-                      {runTools.length === 0 ? <span>本次运行没有工具调用。</span> : runTools.map((tool) => (
-                        <p key={tool.id}>{tool.displayName || tool.name} - {displayStatus(tool.status || 'running')} - 事件 {formatSeq(tool.runSeq || 0)}</p>
+                      {runTools.length === 0 ? <span>本次运行没有工具调用。</span> : runTools.map((tool, index) => (
+                        <p key={tool.id}>
+                          {index + 1}/{runTools.length}{' '}
+                          {tool.displayName || tool.name} - {displayStatus(tool.status || 'running')} - 事件 {formatSeq(tool.runSeq || 0)}
+                        </p>
                       ))}
                     </div>
                     <div className="activity-detail-group">
@@ -338,19 +352,33 @@ export function RunActivityPanel({
         <div className="activity-section-title">
           <Wrench size={14} />
           <span>工具调用</span>
+          {safeTools.length > 0 ? (
+            <em data-testid="activity-tool-count">{safeTools.length}</em>
+          ) : null}
         </div>
         <div className="activity-list compact">
-          {safeTools.length === 0 ? (
+          {orderedTools.length === 0 ? (
             <InlineEmpty className="activity-empty">暂无工具调用。</InlineEmpty>
-          ) : safeTools.slice(0, 8).map((tool) => (
-            <article className="activity-line" key={tool.id}>
-              <div>
-                <strong>{tool.displayName || tool.name}</strong>
-                <span>{tool.name} - {displayRisk(tool.risk || 'low')}风险</span>
-              </div>
-              <StatusBadge className={`activity-badge activity-badge-${tool.status || 'running'}`} status={tool.status || 'running'} />
-            </article>
-          ))}
+          ) : orderedTools.slice(0, 8).map((tool) => {
+            const callIndex = toolIndexById.get(String(tool.id));
+            return (
+              <article className="activity-line" key={tool.id}>
+                <div>
+                  <strong>
+                    {callIndex ? (
+                      <span className="tool-call-index" data-testid="tool-call-index">
+                        {callIndex}/{safeTools.length}
+                      </span>
+                    ) : null}
+                    {' '}
+                    {tool.displayName || tool.name}
+                  </strong>
+                  <span>{tool.name} - {displayRisk(tool.risk || 'low')}风险</span>
+                </div>
+                <StatusBadge className={`activity-badge activity-badge-${tool.status || 'running'}`} status={tool.status || 'running'} />
+              </article>
+            );
+          })}
         </div>
       </div>
 

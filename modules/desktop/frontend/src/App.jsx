@@ -832,6 +832,7 @@ export function App() {
             : `${displayRuntimeMode(runSettings.runtimeMode)} 待命`
         }
         status={status}
+        toolCount={tools.length}
       />
     </div>
   );
