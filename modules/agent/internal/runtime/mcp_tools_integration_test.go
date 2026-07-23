@@ -3,9 +3,12 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	agentmcp "redpanda/agent/internal/mcp"
 	agenttools "redpanda/agent/internal/tools"
@@ -18,6 +21,37 @@ func TestMCPCanonicalName(t *testing.T) {
 	if got := agentmcp.CanonicalName("filesystem", "read.file"); got != "mcp__filesystem__read_file" {
 		t.Fatalf("canonical = %q", got)
 	}
+}
+
+func TestMCPDiscoveryCacheAcrossRuns(t *testing.T) {
+	cleanup := filepath.Join(t.TempDir(), "cleanup")
+	config := helperMCPConfig(t, "success", cleanup)
+	rt := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "test")
+	params1 := methods.ReplyParams{
+		RunID: "run_cache_1",
+		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
+	}
+	defs1 := rt.mcp.PrepareToolsForRun(context.Background(), params1)
+	if len(defs1) != 1 {
+		t.Fatalf("first prepare: %#v", defs1)
+	}
+	if rt.mcp.LiveSessionCount() != 1 {
+		t.Fatalf("live sessions after first prepare = %d", rt.mcp.LiveSessionCount())
+	}
+	// Second run on same Manager should hit discovery cache and keep the same process.
+	params2 := methods.ReplyParams{
+		RunID: "run_cache_2",
+		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
+	}
+	defs2 := rt.mcp.PrepareToolsForRun(context.Background(), params2)
+	if len(defs2) != 1 {
+		t.Fatalf("second prepare: %#v", defs2)
+	}
+	if rt.mcp.LiveSessionCount() != 1 {
+		t.Fatalf("cache path should not spawn another process, live=%d", rt.mcp.LiveSessionCount())
+	}
+	rt.mcp.CloseAll()
+	waitForFile(t, cleanup)
 }
 
 func TestPrepareMCPToolsAndCall(t *testing.T) {
@@ -71,8 +105,90 @@ func TestPrepareMCPToolsAndCall(t *testing.T) {
 	if !strings.Contains(out, "ok tool=read_file") || !strings.Contains(out, "path=README.md") {
 		t.Fatalf("unexpected call output: %q", out)
 	}
+	if rt.mcp.LiveSessionCount() != 1 {
+		t.Fatalf("expected one reused MCP session after discover+call, got %d", rt.mcp.LiveSessionCount())
+	}
+	// Second call must reuse the same process (no extra spawn).
+	out2, err := rt.executeMCPTool(context.Background(), agenttools.ToolRunContext{
+		RunID: params.RunID, WorkingDir: "",
+	}, tools.Call{Name: "mcp__fake__read_file", Arguments: map[string]any{"path": "main.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out2, "path=main.go") {
+		t.Fatalf("second call output: %q", out2)
+	}
+	if rt.mcp.LiveSessionCount() != 1 {
+		t.Fatalf("expected still one session after reuse, got %d", rt.mcp.LiveSessionCount())
+	}
+	rt.mcp.CloseAll()
 	waitForFile(t, cleanup)
 	rt.mcp.ClearBindings(params.RunID)
+}
+
+func TestMCPCallSendsCancelledNotification(t *testing.T) {
+	cleanup := filepath.Join(t.TempDir(), "cleanup")
+	cancelMark := filepath.Join(t.TempDir(), "cancelled.json")
+	config := helperMCPConfig(t, "call-hang-cancel", cleanup)
+	config.Env["RED_PANDA_MCP_CANCEL_MARK"] = cancelMark
+	config.Timeouts.CallMS = 5000
+	config.Timeouts.InitializeMS = 2000
+	config.Timeouts.StartMS = 2000
+	rt := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "test")
+	params := methods.ReplyParams{
+		RunID:   "run_mcp_cancel_proto",
+		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
+	}
+	if defs := rt.mcp.PrepareToolsForRun(context.Background(), params); len(defs) != 1 {
+		t.Fatalf("discover: %#v", defs)
+	}
+
+	callCtx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := rt.executeMCPTool(callCtx, agenttools.ToolRunContext{RunID: params.RunID}, tools.Call{
+			Name:      "mcp__fake__read_file",
+			Arguments: map[string]any{"path": "x"},
+		})
+		errCh <- err
+	}()
+
+	// Let the call leave the client and hang on the server before cancelling.
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected cancel error")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("call did not unblock after cancel")
+	}
+
+	waitForFile(t, cancelMark)
+	raw, err := os.ReadFile(cancelMark)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var note struct {
+		Method string `json:"method"`
+		Params struct {
+			RequestID any    `json:"requestId"`
+			Reason    string `json:"reason"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &note); err != nil {
+		t.Fatalf("cancelled payload %q: %v", raw, err)
+	}
+	if note.Method != "notifications/cancelled" {
+		t.Fatalf("method = %q, payload %s", note.Method, raw)
+	}
+	if note.Params.RequestID == nil {
+		t.Fatalf("missing requestId in %s", raw)
+	}
+	rt.mcp.CloseAll()
+	waitForFile(t, cleanup)
 }
 
 func TestMCPCallTimeoutAndCleanup(t *testing.T) {
@@ -99,7 +215,9 @@ func TestMCPCallTimeoutAndCleanup(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "tools/call failed") {
 		t.Fatalf("expected tools/call timeout, got %v", err)
 	}
+	// Transport timeout drops the pooled session and kills the child.
 	waitForFile(t, cleanup)
+	rt.mcp.CloseAll()
 }
 
 func TestMCPCallIsError(t *testing.T) {
@@ -120,6 +238,11 @@ func TestMCPCallIsError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "permission denied by server") {
 		t.Fatalf("expected isError tool failure, got %v", err)
 	}
+	// Business isError keeps the process; cleanup runs on explicit CloseAll.
+	if rt.mcp.LiveSessionCount() != 1 {
+		t.Fatalf("isError should not drop live session, got %d", rt.mcp.LiveSessionCount())
+	}
+	rt.mcp.CloseAll()
 	waitForFile(t, cleanup)
 }
 
@@ -166,5 +289,6 @@ func TestDispatchMCPToolViaRunner(t *testing.T) {
 	if !strings.Contains(result.Output, "path=x.go") {
 		t.Fatalf("output missing path: %s", result.Output)
 	}
+	rt.mcp.CloseAll()
 	waitForFile(t, cleanup)
 }

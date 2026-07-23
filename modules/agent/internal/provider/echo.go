@@ -35,7 +35,7 @@ func (EchoProvider) Name() string {
 }
 
 func (p EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
-	if override, ok := providerFromOptions(req.Options, p.streamByDefault()); ok {
+	if override, ok := Resolve(req.Options, p.streamByDefault()); ok {
 		return completeResolvedProvider(ctx, override, req, emit)
 	}
 	if len(req.ToolHistory) > 0 {

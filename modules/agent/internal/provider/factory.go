@@ -23,7 +23,7 @@ func NewFromEnv(log io.Writer) Provider {
 			fmt.Fprintln(log, "provider base url is empty; falling back to echo provider")
 			return newEchoProvider(stream)
 		}
-		resolved, ok := providerFromOptions(RequestOptions{
+		resolved, ok := Resolve(RequestOptions{
 			ProviderName: provider, ProviderBaseURL: baseURL,
 			ProviderAPIKey: apiKey, Model: model,
 		}, stream)
@@ -33,6 +33,13 @@ func NewFromEnv(log io.Writer) Provider {
 		fmt.Fprintf(log, "unsupported provider %q; falling back to echo provider\n", provider)
 	}
 	return newEchoProvider(stream)
+}
+
+// Resolve builds a concrete provider from per-run options (profile override).
+// Environment defaults and per-run profile selection share this resolver
+// (docs/39 Wave 2). fallbackStream is used when options.Stream is nil.
+func Resolve(options RequestOptions, fallbackStream bool) (Provider, bool) {
+	return providerFromOptions(options, fallbackStream)
 }
 
 func providerFromOptions(options RequestOptions, fallbackStream bool) (Provider, bool) {

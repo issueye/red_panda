@@ -1,7 +1,7 @@
 # Provider-Runtime Decoupling Plan
 
-Updated: 2026-07-15
-Status: Wave 1 complete; Wave 2/3 planned
+Updated: 2026-07-23
+Status: Wave 1–2 complete; Wave 3 planned
 Baseline commit: `3544c7a` plus the verified, uncommitted Wave 1 changes recorded in doc 38
 
 ## 1. Objective
@@ -124,6 +124,17 @@ Start after Wave 1 is integrated and green.
 
 Wave 2 completion requires golden request-body tests proving OpenAI-compatible payload equivalence before and after migration.
 
+### Wave 2 status (2026-07-23)
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| Neutral `provider.Request` / `Message` / `RequestOptions` | done | `provider/provider.go`; Runtime `prompt_composer.go` builds requests |
+| Runtime prompt composer owns policy | done | `runtime/prompt_policies.go` + `prompt_composer.go`; provider has no policy assembly |
+| Provider does not import `protocol/methods` | done | `boundary_test.go` AST guard |
+| Model-facing tool content without `internal/tools` | done | `protocol/tools.ModelFacingContent`; provider `messages.go` uses it; AST guard bans `internal/tools` |
+| Public `Resolve` for env + profile | done | `provider.Resolve` wraps shared `providerFromOptions` |
+| Golden OpenAI-compatible messages | done | `TestOpenAICompatibleMessagesGolden` + `TestModelFacingContentGoldenLegacyPair` |
+
 ## 6. Wave 3 - Multi-provider Extension
 
 - add a second adapter only after the neutral contract is stable;
@@ -180,3 +191,11 @@ The requested parallel development wave is complete when W1-A, W1-B, and W1-C ar
 | W1-C Boundary tests | Added AST import guard, Provider contract/name checks, per-run override compatibility, and stream/non-stream tool-call normalization coverage | uncached provider tests and `go vet` |
 
 Wave 1 deliberately preserves the broad `Reply*` request DTO and provider-owned prompt composition. Those are the semantic coupling points assigned to Wave 2, where request-body equivalence tests are required before migration.
+
+### 2026-07-23 - Wave 2 implementation
+
+| Workstream | Result | Verification |
+| --- | --- | --- |
+| Model-facing content | Moved model-context tool-result formatting to `protocol/tools.ModelFacingContent`; agent `ModelFacingToolContent` delegates; provider no longer imports `internal/tools` | protocol + provider + tools tests |
+| Public resolver | Exported `provider.Resolve` as the single env/profile selection entry; adapters call `Resolve` | factory/boundary tests |
+| Boundary guards | Production provider files must not import `internal/runtime`, `protocol/methods`, or `internal/tools` | AST boundary test |

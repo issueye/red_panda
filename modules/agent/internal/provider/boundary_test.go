@@ -57,6 +57,9 @@ func TestProviderProductionFilesDoNotImportRuntime(t *testing.T) {
 				if strings.HasSuffix(path, "/protocol/methods") {
 					t.Errorf("production provider file %s imports broad wire DTO package %q", name, path)
 				}
+				if strings.HasSuffix(path, "/internal/tools") || strings.Contains(path, "/internal/tools/") {
+					t.Errorf("production provider file %s imports agent tools package %q", name, path)
+				}
 			}
 		}
 	}
@@ -159,9 +162,9 @@ func TestProviderFromOptionsCompatibility(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, ok := providerFromOptions(test.options, test.fallbackStream)
+			got, ok := Resolve(test.options, test.fallbackStream)
 			if ok != test.wantOK {
-				t.Fatalf("providerFromOptions() ok = %v, want %v", ok, test.wantOK)
+				t.Fatalf("Resolve() ok = %v, want %v", ok, test.wantOK)
 			}
 			if !ok {
 				return

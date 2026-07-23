@@ -23,7 +23,11 @@ discovery := mcpkit.Discover(ctx, mcpkit.SessionConfig{
 })
 ```
 
-`Call` starts a one-shot session: initialize → `tools/call` → close.
+`Call` / `Discover` remain one-shot helpers for tests and ad-hoc probes.
+
+Agent Runtime (`internal/mcp.Manager`) reuses long-lived sessions: one process per server config identity, shared across list/call, with Manager-level discovery cache.
+
+`Session.CallTool` / `ListTools` issue transport RPCs with Session-owned request ids. When the call context is cancelled, `notifications/cancelled` is sent best-effort so servers can stop work (docs/19 §7.8).
 
 ## Server (stdio)
 

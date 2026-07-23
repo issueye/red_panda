@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"redpanda/mcpkit"
@@ -141,8 +142,9 @@ func (m *Manager) ExecuteTool(ctx context.Context, runID string, workingDir stri
 	return output, err
 }
 
-// CallTool 启动一次性 MCP stdio 会话，执行 tools/call 后清理资源。
-// 进程复用延后至 D3 实现。
+// CallTool 在复用的 MCP stdio 会话上执行 tools/call（docs/19 进程复用）。
+// 会话在首次 Discover/Call 时 initialize，后续调用共享同一子进程；
+// 传输层失败会丢弃会话，下一次调用自动重建。
 func (m *Manager) CallTool(
 	ctx context.Context,
 	workspaceRoot string,
@@ -156,15 +158,56 @@ func (m *Manager) CallTool(
 	if strings.TrimSpace(config.Command) == "" {
 		return "", fmt.Errorf("MCP server %s has empty command", config.Name)
 	}
+	if strings.TrimSpace(rawToolName) == "" {
+		return "", fmt.Errorf("MCP tool name is required")
+	}
 	timeouts := config.Timeouts.Normalized()
-	return mcpkit.Call(ctx, sessionConfig(m, workspaceRoot, config), rawToolName, arguments, mcpkit.CallOptions{
-		StartMS:      timeouts.StartMS,
-		InitializeMS: timeouts.InitializeMS,
-		CallMS:       timeouts.CallMS,
-		ShutdownMS:   timeouts.ShutdownMS,
-		MaxOutput:    maxToolOutputBytes,
-		Tracker:      m.tracker,
-	})
+
+	callOnce := func() (string, error) {
+		var text string
+		callErr := m.withSession(ctx, workspaceRoot, config, timeouts.StartMS, timeouts.InitializeMS, func(session *mcpkit.Session, _ *liveEntry) error {
+			callCtx := ctx
+			var callCancel context.CancelFunc
+			if timeouts.CallMS > 0 {
+				callCtx, callCancel = context.WithTimeout(ctx, time.Duration(timeouts.CallMS)*time.Millisecond)
+				defer callCancel()
+			}
+			out, isErr, err := session.CallTool(callCtx, rawToolName, arguments)
+			if err != nil {
+				msg := formatInitError(err)
+				if summary := mcpkit.RedactSecrets(session.StderrSummary(), config.Env); summary != "" {
+					return fmt.Errorf("tools/call failed: %s (stderr: %s)", msg, summary)
+				}
+				return fmt.Errorf("tools/call failed: %s", msg)
+			}
+			if isErr {
+				if out == "" {
+					out = "MCP tool returned isError"
+				}
+				return fmt.Errorf("tools/call failed: %s", out)
+			}
+			if out == "" {
+				out = `{"content":[],"isError":false}`
+			}
+			if len(out) > maxToolOutputBytes {
+				out = out[:maxToolOutputBytes] + "\n…(truncated)"
+			}
+			text = out
+			return nil
+		})
+		return text, callErr
+	}
+
+	output, err = callOnce()
+	if err != nil && isSessionTransportFailure(err) {
+		// One recovery attempt after process death / timeout.
+		m.invalidateDiscovery(configIdentity(workspaceRoot, config))
+		output, err = callOnce()
+	}
+	if err != nil {
+		err = fmt.Errorf("%s", mcpkit.RedactSecrets(err.Error(), config.Env))
+	}
+	return output, err
 }
 
 // CanonicalName 构建 mcp__server__tool 名称（设计文档 19，第 8.1 节）。

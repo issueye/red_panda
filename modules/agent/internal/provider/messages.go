@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/tools"
 )
 
@@ -62,14 +61,11 @@ func toolRoundsForRequest(req ProviderRequest) [][]ToolExchange {
 	return rounds
 }
 
-// maxToolResultForModel 限制每条回传给下一轮 LLM 的工具结果。
-// 完整标准输出仍保留在工具事件和 UI 工具卡片中。
-const maxToolResultForModel = 16 * 1024
-
 // toolExchangeContent 为下一轮提供方调用格式化工具结果。
 // 始终返回标准 JSON 封装，绝不静默丢弃字段。
+// 格式化归属 protocol/tools，避免 provider 依赖 agent/internal/tools（docs/39 Wave 2）。
 func toolExchangeContent(result tools.Result) string {
-	return agenttools.ModelFacingToolContent(result)
+	return tools.ModelFacingContent(result)
 }
 
 func openAICompatibleTools(definitions []tools.Definition) []map[string]any {

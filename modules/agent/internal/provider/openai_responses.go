@@ -20,7 +20,7 @@ type OpenAIResponsesProvider struct{ providerConfig }
 func (OpenAIResponsesProvider) Name() string { return "openai_responses" }
 
 func (p OpenAIResponsesProvider) Complete(ctx context.Context, req Request, emit func(ProviderChunk) error) error {
-	if override, ok := providerFromOptions(req.Options, p.Stream); ok {
+	if override, ok := Resolve(req.Options, p.Stream); ok {
 		return completeResolvedProvider(ctx, override, req, emit)
 	}
 	return p.complete(ctx, req, emit)

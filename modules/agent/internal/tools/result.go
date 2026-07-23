@@ -10,7 +10,7 @@ import (
 )
 
 // 标准工具结果架构版本。所有工具均应返回此封装，便于 UI、模型和恢复流程一致解析。
-const toolResultSchemaV1 = "red_panda.tool_result.v1"
+const toolResultSchemaV1 = ptools.ResultSchemaV1
 
 // maxToolResultForModel 限制每条回传给下一轮 LLM 的工具结果大小。
 const maxToolResultForModel = 16 * 1024
@@ -233,83 +233,9 @@ func CompactOneLine(value string, max int) string {
 
 // ModelFacingToolContent 返回供下一轮 LLM 使用的标准化、限长工具结果视图。
 // 完整的 Result.Output 仍保留给 UI 和事件流。
+// 实现位于 protocol/tools，供 provider 适配器在不依赖本包的情况下复用。
 func ModelFacingToolContent(result ptools.Result) string {
-	env, ok := ParseStandardToolResult(result.Output)
-	if !ok {
-		// 旧版或非标准输出也要封装，确保模型始终收到统一架构。
-		raw := strings.TrimSpace(result.Output)
-		if raw == "" {
-			raw = strings.TrimSpace(result.Error)
-		}
-		env = StandardToolResult{
-			Schema: toolResultSchemaV1,
-			Tool:   result.Name,
-			Status: string(result.Status),
-			OK:     result.Status == ptools.CallStatusCompleted,
-			Text:   raw,
-			Error:  strings.TrimSpace(result.Error),
-			Data:   map[string]any{"content": raw},
-			Meta: ToolResultMeta{
-				DurationMS: result.DurationMS,
-				Note:       "legacy output wrapped for model",
-			},
-		}
-	}
-
-	text := strings.TrimSpace(env.Text)
-	if text == "" {
-		text = strings.TrimSpace(env.Error)
-	}
-	if text == "" && env.Data != nil {
-		text = PreferReadableText(env.Data, "")
-	}
-
-	original := len(text)
-	truncated := env.Meta.Truncated
-	if original > maxToolResultForModel {
-		text = trimToBytes(text, maxToolResultForModel)
-		truncated = true
-	}
-	env.Text = text
-	env.Meta.Truncated = truncated
-	if original > 0 {
-		env.Meta.OriginalBytes = original
-	}
-	if truncated {
-		if env.Meta.Note == "" {
-			env.Meta.Note = truncationNote(true, original)
-		}
-		// 数据较大时不将完整内容传给模型，但不能静默丢弃；
-		// 改为指针说明，使模型知道 UI 仍保有完整载荷。
-		if env.Data != nil {
-			env.Data = map[string]any{
-				"omitted":        true,
-				"reason":         "size_limit_for_model_context",
-				"original_bytes": original,
-				"full_output_in": "tool_finished.event / UI tool card",
-				"preview":        text,
-			}
-		}
-	}
-	return mustMarshalToolResult(env)
-}
-
-func trimToBytes(value string, max int) string {
-	if max <= 0 || len(value) <= max {
-		return value
-	}
-	// 优先在接近上限的位置按 UTF-8 字符安全截断。
-	if max < 4 {
-		return value[:max]
-	}
-	cut := max - 1
-	for cut > 0 && !utf8.RuneStart(value[cut]) {
-		cut--
-	}
-	if cut <= 0 {
-		cut = max
-	}
-	return value[:cut] + "…"
+	return ptools.ModelFacingContent(result)
 }
 
 // ReadableToolResultText 从标准工具结果中提取人类可读文本。

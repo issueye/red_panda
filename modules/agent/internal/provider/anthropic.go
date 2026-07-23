@@ -21,7 +21,7 @@ type AnthropicProvider struct{ providerConfig }
 func (AnthropicProvider) Name() string { return "anthropic" }
 
 func (p AnthropicProvider) Complete(ctx context.Context, req Request, emit func(ProviderChunk) error) error {
-	if override, ok := providerFromOptions(req.Options, p.Stream); ok {
+	if override, ok := Resolve(req.Options, p.Stream); ok {
 		return completeResolvedProvider(ctx, override, req, emit)
 	}
 	return p.complete(ctx, req, emit)

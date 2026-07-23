@@ -38,7 +38,7 @@ func (p HTTPCompatibleProvider) Name() string {
 }
 
 func (p HTTPCompatibleProvider) Complete(ctx context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
-	if override, ok := providerFromOptions(req.Options, p.Stream); ok {
+	if override, ok := Resolve(req.Options, p.Stream); ok {
 		return completeResolvedProvider(ctx, override, req, emit)
 	}
 	return p.complete(ctx, req, emit)

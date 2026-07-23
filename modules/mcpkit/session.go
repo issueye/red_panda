@@ -15,12 +15,18 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	mcpsdk "github.com/mark3labs/mcp-go/mcp"
 )
+
+// MethodNotificationCancelled is the MCP protocol cancellation notification.
+// Spec: either side may send this for an in-flight request previously issued
+// in the same direction (docs/19 §7.8).
+const MethodNotificationCancelled = "notifications/cancelled"
 
 const (
 	// DefaultProtocolVersion matches widely-deployed stdio servers.
@@ -44,11 +50,15 @@ type SessionConfig struct {
 	StderrLimit     int
 }
 
-// Session is a short-lived MCP stdio client session (initialize + tools/* + close).
+// Session is an MCP stdio client session (initialize + tools/* + close).
+// After Initialize, tools/list and tools/call use the transport layer with a
+// Session-owned request id so cancellations can emit notifications/cancelled.
 type Session struct {
 	client *client.Client
 	cfg    SessionConfig
 	stderr *boundedBuffer
+
+	requestSeq atomic.Int64
 
 	mu     sync.Mutex
 	closed bool
@@ -76,12 +86,15 @@ func Open(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	dir := resolveDir(cfg.Dir, cfg.WorkspaceRoot)
 	env := mergeEnv(cfg.Env)
 
+	// Process lifetime must outlive the Open/start timeout context. CommandContext
+	// would kill the child when the start deadline cancels, which breaks session
+	// reuse (docs/19). Close() remains the authority for process teardown.
 	stdioTransport := transport.NewStdioWithOptions(
 		cfg.Command,
 		env,
 		cfg.Args,
-		transport.WithCommandFunc(func(ctx context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
-			cmd := exec.CommandContext(ctx, command, args...)
+		transport.WithCommandFunc(func(_ context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
+			cmd := exec.Command(command, args...)
 			cmd.Env = env
 			if dir != "" {
 				cmd.Dir = dir
@@ -120,32 +133,46 @@ func (s *Session) Initialize(ctx context.Context) (mcpsdk.Implementation, error)
 	if err != nil {
 		return mcpsdk.Implementation{}, err
 	}
+	// Client.Initialize consumes request id 1; Session RPCs continue from 2+.
+	s.requestSeq.Store(1)
 	return result.ServerInfo, nil
 }
 
-// ListTools calls tools/list (all pages) and returns tool definitions.
+// ListTools calls tools/list (first page) and returns tool definitions.
 func (s *Session) ListTools(ctx context.Context) ([]ToolDefinition, error) {
-	result, err := s.client.ListTools(ctx, mcpsdk.ListToolsRequest{})
+	raw, err := s.sendRPC(ctx, "tools/list", map[string]any{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ToolDefinition, 0, len(result.Tools))
-	for _, tool := range result.Tools {
+	var parsed struct {
+		Tools []mcpsdk.Tool `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("decode tools/list: %w", err)
+	}
+	out := make([]ToolDefinition, 0, len(parsed.Tools))
+	for _, tool := range parsed.Tools {
 		out = append(out, toolDefinitionFromSDK(tool))
 	}
 	return out, nil
 }
 
 // CallTool invokes tools/call and returns concatenated text content.
+// When ctx is cancelled (run cancel or call timeout), Runtime sends
+// notifications/cancelled with the in-flight request id (docs/19 §7.8) and
+// still unblocks via context cancellation even if the server ignores it.
 func (s *Session) CallTool(ctx context.Context, name string, arguments map[string]any) (text string, isError bool, err error) {
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
-	req := mcpsdk.CallToolRequest{}
-	req.Params.Name = name
-	req.Params.Arguments = arguments
-
-	result, err := s.client.CallTool(ctx, req)
+	raw, err := s.sendRPC(ctx, "tools/call", map[string]any{
+		"name":      name,
+		"arguments": arguments,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	result, err := mcpsdk.ParseCallToolResult(&raw)
 	if err != nil {
 		return "", false, err
 	}
@@ -160,12 +187,121 @@ func (s *Session) CallTool(ctx context.Context, name string, arguments map[strin
 	return text, result.IsError, nil
 }
 
+// sendRPC issues a JSON-RPC request on the underlying transport with a
+// Session-owned id. On ctx cancellation it best-effort emits
+// notifications/cancelled so MCP servers can stop work (protocol-level cancel).
+func (s *Session) sendRPC(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if s == nil || s.client == nil {
+		return nil, fmt.Errorf("session closed")
+	}
+	if s.Closed() {
+		return nil, fmt.Errorf("session closed")
+	}
+	tr := s.client.GetTransport()
+	if tr == nil {
+		return nil, fmt.Errorf("transport unavailable")
+	}
+
+	// Prefer ids >= 2 after Initialize (which uses id 1 via the mcp-go client).
+	idValue := s.requestSeq.Add(1)
+	if idValue < 2 {
+		s.requestSeq.Store(1)
+		idValue = s.requestSeq.Add(1)
+	}
+	reqID := mcpsdk.NewRequestId(idValue)
+
+	// Detach cancel notification from the call ctx so we can still write after cancel.
+	notifyCtx := context.WithoutCancel(ctx)
+	callCtx, cancelWatch := context.WithCancel(ctx)
+	defer cancelWatch()
+
+	var cancelOnce sync.Once
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancelOnce.Do(func() {
+				reason := "context canceled"
+				if ctx.Err() != nil {
+					reason = ctx.Err().Error()
+				}
+				_ = s.NotifyCancelled(notifyCtx, reqID, reason)
+				cancelWatch()
+			})
+		case <-callCtx.Done():
+		}
+	}()
+
+	resp, err := tr.SendRequest(callCtx, transport.JSONRPCRequest{
+		JSONRPC: mcpsdk.JSONRPC_VERSION,
+		ID:      reqID,
+		Method:  method,
+		Params:  params,
+	})
+	if err != nil {
+		// Ensure cancel was attempted when the caller cancelled/timed out.
+		if ctx.Err() != nil {
+			cancelOnce.Do(func() {
+				reason := ctx.Err().Error()
+				_ = s.NotifyCancelled(notifyCtx, reqID, reason)
+			})
+		}
+		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("empty response")
+	}
+	if resp.Error != nil {
+		return nil, resp.Error.AsError()
+	}
+	if len(resp.Result) == 0 {
+		return json.RawMessage(`{}`), nil
+	}
+	return resp.Result, nil
+}
+
+// NotifyCancelled sends notifications/cancelled for a previously issued request id.
+func (s *Session) NotifyCancelled(ctx context.Context, requestID mcpsdk.RequestId, reason string) error {
+	if s == nil || s.client == nil || s.Closed() {
+		return fmt.Errorf("session closed")
+	}
+	tr := s.client.GetTransport()
+	if tr == nil {
+		return fmt.Errorf("transport unavailable")
+	}
+	if strings.TrimSpace(reason) == "" {
+		reason = "cancelled"
+	}
+	notification := mcpsdk.JSONRPCNotification{
+		JSONRPC: mcpsdk.JSONRPC_VERSION,
+		Notification: mcpsdk.Notification{
+			Method: MethodNotificationCancelled,
+			Params: mcpsdk.NotificationParams{
+				AdditionalFields: map[string]any{
+					"requestId": requestID.Value(),
+					"reason":    reason,
+				},
+			},
+		},
+	}
+	return tr.SendNotification(ctx, notification)
+}
+
 // StderrSummary returns a bounded, already-captured stderr snapshot.
 func (s *Session) StderrSummary() string {
 	if s.stderr == nil {
 		return ""
 	}
 	return s.stderr.String()
+}
+
+// Closed reports whether Close has already been called.
+func (s *Session) Closed() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
 }
 
 // Close shuts down the transport and child process.

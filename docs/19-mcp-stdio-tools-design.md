@@ -1,8 +1,8 @@
 # MCP stdio Tools Design
 
-Updated: 2026-07-09
+Updated: 2026-07-23
 
-Status: partially implemented (v0.2.0). config CRUD + discovery + `tools/call` MVP are done; see §2.1 for the current truth and remaining gaps.
+Status: partially implemented (v0.2.x). config CRUD + discovery + `tools/call` + process reuse + discovery cache are done; see §2.1 for remaining gaps.
 
 This document defines the MCP stdio tool boundary for a later implementation slice. It preserves the v0.1.0 architecture:
 
@@ -45,17 +45,18 @@ The design below is now partially realized in code. See [docs/10-development-sta
 
 - Gateway config CRUD + validation + masked env + `/api/v1/mcp/servers/:id/discover` endpoint.
 - `run.start` injects enabled server configs into `RunExecuteOptions.MCPServers` with plaintext secrets (Gateway-side only).
-- Runtime lazily spawns the stdio child process per call, performs `initialize` + notifications/initialized, paginates `tools/list`, and registers discovered tools under canonical names (`mcp__server__tool`) into the provider-facing tool table for the run.
-- `tools/call` executes one-shot stdio sessions with start/initialize/list/call/shutdown timeouts; multi-content text concatenation; 64KB max output truncation; bounded (8KB) stderr drain; secret redaction in diagnostics.
+- Runtime lazily spawns the stdio child process, performs `initialize` + notifications/initialized, paginates `tools/list`, and registers discovered tools under canonical names (`mcp__server__tool`) into the provider-facing tool table for the run.
+- **Process reuse:** one long-lived stdio session per server config identity (name/command/args/cwd/env/workspace) is shared across `tools/list` and `tools/call` for the Runtime process lifetime; per-server mutex serializes concurrent calls; transport failures drop the session and the next call rebuilds it.
+- **Discovery cache:** successful `tools/list` results are cached per config identity for the Manager lifetime so subsequent runs skip re-list when config is unchanged.
+- `tools/call` uses the pooled session with start/initialize/call timeouts; multi-content text concatenation; 64KB max output truncation; bounded (8KB) stderr drain; secret redaction in diagnostics.
 - MCP tools default to `RiskHigh` and flow through the existing ToolRunner policy / permission / event pipeline (`tool_started` / `tool_output` / `tool_finished` / `tool_failed`). Per-server allowlists and risk overrides apply.
-- `core.shutdown` and Runtime `Close` close all MCP child processes; end-to-end integration tests (`mcp_tools_integration_test.go`) cover success / timeout / `isError` paths.
+- `core.shutdown` and Runtime `Close` close all MCP child processes; end-to-end integration tests (`mcp_tools_integration_test.go`) cover success / timeout / `isError` / reuse / discovery-cache paths.
 - Crash/restart budget (§7.7): Manager tracks startup-phase failures per server and auto-disables a server after the configured threshold. `tools/call` business failures are not counted.
 
-**Not yet implemented (tracked as backlog, see [docs/plans/2026-07-19-convergence-wave.md](plans/2026-07-19-convergence-wave.md) Wave D):**
+**Implemented (2026-07-23):** protocol-level cancellation — when a call context is cancelled (run cancel or call timeout), Runtime sends `notifications/cancelled` with the in-flight `requestId` on the MCP stdio session, and still unblocks via context cancel if the server ignores the notification.
 
-- MCP process reuse across calls (each call currently spawns a fresh child).
-- Cross-run discovery cache (every run re-discovers tool lists for enabled servers).
-- MCP protocol-level cancellation notifications (run-level cancel currently relies on context cancellation).
+**Not yet implemented (tracked as backlog):**
+
 - Desktop "try-call" UI for manually invoking a discovered tool.
 
 ## 3. Non-goals
@@ -332,10 +333,10 @@ Timeouts:
 
 Cancellation:
 
-- `agent.cancel` for a root run must cancel active MCP calls for that run.
-- If the MCP protocol version supports request cancellation, Runtime should send it.
-- Runtime must also cancel the local context so the caller unblocks even if the MCP server ignores cancellation.
-- Ignored cancellation may lead to server restart or kill if the call cannot be isolated safely.
+- `run.cancel` / `agent.cancel` for a root run cancels the run context, which cancels active MCP calls for that run.
+- Runtime sends MCP `notifications/cancelled` with the in-flight `requestId` and reason when the call context ends (run cancel or call timeout). Implemented in `mcpkit.Session.sendRPC` / `NotifyCancelled`.
+- Runtime also cancels the local context so the caller unblocks even if the MCP server ignores cancellation.
+- Transport-level failure after cancel drops the pooled session so the next call can rebuild it; ordinary business `isError` results keep the process.
 
 Tool timeout result:
 

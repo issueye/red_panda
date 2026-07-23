@@ -204,7 +204,10 @@ func helperMCPConfig(t *testing.T, mode, cleanup string) protomcp.MCPServerConfi
 func runMCPDiscover(t *testing.T, config protomcp.MCPServerConfig) protomcp.MCPServerDiscovery {
 	t.Helper()
 	rt := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "test")
-	return rt.mcp.DiscoverServer(context.Background(), "", config)
+	result := rt.mcp.DiscoverServer(context.Background(), "", config)
+	// Reused sessions stay open until CloseAll; tests that assert cleanup markers need shutdown.
+	rt.mcp.CloseAll()
+	return result
 }
 
 func waitForFile(t *testing.T, path string) {
@@ -330,7 +333,9 @@ func TestMCPHelperProcess(t *testing.T) {
 				})
 			}
 		case "tools/call":
-			if mode == "call-timeout" {
+			if mode == "call-timeout" || mode == "call-hang-cancel" {
+				// Hang until cancelled (or process exit). call-hang-cancel writes a marker
+				// when notifications/cancelled arrives so tests can assert protocol cancel.
 				continue
 			}
 			if !initialized {
@@ -355,6 +360,10 @@ func TestMCPHelperProcess(t *testing.T) {
 				"content": []map[string]any{{"type": "text", "text": text}},
 				"isError": false,
 			})
+		case "notifications/cancelled":
+			if path := os.Getenv("RED_PANDA_MCP_CANCEL_MARK"); path != "" {
+				_ = os.WriteFile(path, scanner.Bytes(), 0o600)
+			}
 		}
 	}
 	if path := os.Getenv("RED_PANDA_MCP_CLEANUP"); path != "" {

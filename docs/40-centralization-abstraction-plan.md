@@ -1,7 +1,7 @@
 # Centralization and Abstraction Implementation Plan
 
-Updated: 2026-07-15
-Status: Wave 1 complete; deferred work planned
+Updated: 2026-07-23
+Status: Wave 1 complete; provider-neutral request path closed via docs/39 Wave 2
 Baseline: `225f14b`
 
 ## 1. Objective

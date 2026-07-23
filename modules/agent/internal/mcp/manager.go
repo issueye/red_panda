@@ -24,6 +24,13 @@ type Manager struct {
 	// 绑定关系：runID -> 规范名称 -> 绑定信息。
 	bindings map[string]map[string]ToolBinding
 
+	// sessions reuses one stdio process per server config identity across
+	// tools/list and tools/call (docs/19 process reuse backlog).
+	sessions map[string]*liveEntry
+	// discovery caches tools/list results for the Manager lifetime when the
+	// server config identity is unchanged (cross-run discovery cache).
+	discovery map[string]discoveryCacheEntry
+
 	// failures tracks startup-phase failures per server Name (docs/19 §7.7).
 	// Lifetime is the Manager (= Runtime process); state is shared across runs
 	// so a server that crashes in one run stays disabled in the next. Keyed by
@@ -50,17 +57,17 @@ func NewManager(version string, log io.Writer) *Manager {
 		log:         log,
 		tracker:     mcpkit.NewTracker(),
 		bindings:    map[string]map[string]ToolBinding{},
+		sessions:    map[string]*liveEntry{},
+		discovery:   map[string]discoveryCacheEntry{},
 		failures:    map[string]*serverFailure{},
 		crashLimit:  crashLimitFromEnv(),
 		crashWindow: crashWindowFromEnv(),
 	}
 }
 
-// CloseAll 关闭所有由 Manager 跟踪的 MCP 会话（Runtime core.shutdown）。
+// CloseAll 关闭所有复用中的 MCP 会话与 Tracker（Runtime core.shutdown）。
 func (m *Manager) CloseAll() {
-	if m.tracker != nil {
-		m.tracker.CloseAll()
-	}
+	m.closeAllSessions()
 }
 
 // isDisabled reports whether serverName has been auto-disabled by the crash
