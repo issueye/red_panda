@@ -1,5 +1,5 @@
 // Split from SettingsPanel.jsx (checklist R7c)
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Blocks, Plus, RefreshCw } from 'lucide-react';
 import { emptySkillDraft, ModuleHeader, ManagerItem } from './shared.jsx';
 import { Button, IconButton } from '../ui/button.jsx';
 import { EmptyState, ErrorMessage } from '../ui/feedback.jsx';
@@ -16,6 +16,7 @@ export function SkillsTab({
   skillError,
   workspaceRoot,
   setSkillDraft,
+  setSkillError,
   saveSkill,
   selectSkill,
   deleteSkill,
@@ -35,7 +36,7 @@ export function SkillsTab({
               disabled={!workspaceRoot || skillSaving}
               icon={<Plus size={15} />}
               onClick={() => {
-                setSkillError('');
+                setSkillError?.('');
                 setSkillDraft({ ...emptySkillDraft });
               }}
               variant="soft"

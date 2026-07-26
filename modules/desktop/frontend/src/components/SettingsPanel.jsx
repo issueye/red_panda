@@ -518,6 +518,7 @@ export function SettingsPanel({
       saveSkill={saveSkill}
       selectSkill={selectSkill}
       setSkillDraft={setSkillDraft}
+      setSkillError={setSkillError}
       skillDraft={skillDraft}
       skillError={skillError}
       skillSaving={skillSaving}
