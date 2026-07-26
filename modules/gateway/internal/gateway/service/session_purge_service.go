@@ -17,10 +17,11 @@ import (
 // WorkspaceService.Remove) depend on it
 // (docs/plans/2026-07-19-convergence-wave.md Wave B Task B3).
 type PurgeService struct {
-	repos   repository.Set
-	store   sessionStore
-	runtime *runtimeclient.Client
-	hub     *eventhub.Hub
+	repos       repository.Set
+	store       sessionStore
+	runtime     *runtimeclient.Client
+	hub         *eventhub.Hub
+	attachments *AttachmentService // optional; cascades image assets on hard-delete
 }
 
 func newPurgeService(repos repository.Set, runtime *runtimeclient.Client, hub *eventhub.Hub, archiveDir string) PurgeService {
@@ -49,10 +50,24 @@ func (l PurgeService) PurgeSessions(sessionIDs []string, reason string) (int64, 
 			}
 		}
 	}
+	// Soft-delete + unlink attachments before DB hard-delete so orphan GC
+	// does not race with shared storage_path rows still referenced by forks
+	// (docs/51 §10 / docs/52 Slice D).
+	if l.attachments != nil {
+		if err := l.attachments.DeleteBySessions(sessionIDs); err != nil {
+			log.Printf("attachment cascade during session purge: %v", err)
+		}
+	}
 	// Archive to JSONL then hard-delete (docs/49).
 	deleted, err := l.store.deleteSessions(sessionIDs, reason)
 	if err != nil {
 		return 0, err
+	}
+	// Best-effort permanent purge of soft-deleted attachment rows/files.
+	if l.attachments != nil {
+		if _, err := l.attachments.PurgeOrphans(500); err != nil {
+			log.Printf("attachment orphan purge after session delete: %v", err)
+		}
 	}
 	for _, sessionID := range sessionIDs {
 		broadcastSessionDeleted(l.hub, sessionID, reason)

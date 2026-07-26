@@ -76,6 +76,48 @@ function Send-WsText($ws, [string]$text) {
   ).GetAwaiter().GetResult() | Out-Null
 }
 
+# Upload-Attachment POSTs a multipart/form-data file to the sessions attachment
+# endpoint and returns the AttachmentDTO (docs/51 §6.1).
+function Upload-Attachment([string]$sessionId, [byte[]]$bytes, [string]$fileName) {
+  $boundary = "----redpanda$([Guid]::NewGuid().ToString('N'))"
+  $crlf = "`r`n"
+  $enc = [Text.Encoding]::UTF8
+  $ms = New-Object IO.MemoryStream
+  $header = "--$boundary$crlf" +
+    "Content-Disposition: form-data; name=`"alt`"$crlf$crlf$fileName$crlf" +
+    "--$boundary$crlf" +
+    "Content-Disposition: form-data; name=`"file`"; filename=`"$fileName`"$crlf" +
+    "Content-Type: application/octet-stream$crlf$crlf"
+  $ms.Write($enc.GetBytes($header), 0, $enc.GetByteCount($header))
+  $ms.Write($bytes, 0, $bytes.Length)
+  $footer = "$crlf--$boundary--$crlf"
+  $ms.Write($enc.GetBytes($footer), 0, $enc.GetByteCount($footer))
+  $body = $ms.ToArray()
+  $response = Invoke-WebRequest -Uri "http://$Addr/api/v1/sessions/$sessionId/attachments" `
+    -Method Post `
+    -ContentType "multipart/form-data; boundary=$boundary" `
+    -Body $body `
+    -UseBasicParsing `
+    -TimeoutSec 5
+  $obj = $response.Content | ConvertFrom-Json
+  Assert-True $obj.ok "attachment upload did not return ok envelope"
+  return $obj.data
+}
+
+# New-OnePixelPng returns a minimal valid PNG byte array for compat fixtures.
+function New-OnePixelPng {
+  Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
+  $ms = New-Object IO.MemoryStream
+  $bmp = New-Object Drawing.Bitmap 1, 1
+  try {
+    $bmp.SetPixel(0, 0, [Drawing.Color]::Black)
+    $bmp.Save($ms, [Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $bmp.Dispose()
+  }
+  return $ms.ToArray()
+}
+
 function New-WsClient {
   $ws = [System.Net.WebSockets.ClientWebSocket]::new()
   $ws.ConnectAsync([Uri]"ws://$Addr/api/v1/ws", [Threading.CancellationToken]::None).GetAwaiter().GetResult() | Out-Null
@@ -497,6 +539,94 @@ try {
   } finally {
     $inactiveProviderWs.Dispose()
   }
+
+  # --- Image attachments (docs/51 Slice A) -------------------------------------
+  # 1. Upload a 1×1 PNG via multipart, assert AttachmentDTO metadata.
+  $pngBytes = New-OnePixelPng
+  $attachment = Upload-Attachment $session.id $pngBytes "compat-1x1.png"
+  Assert-True ($attachment.id -ne "") "attachment upload missing id"
+  Assert-True ($attachment.mime -eq "image/png") "attachment mime mismatch: $($attachment.mime)"
+  Assert-True ($attachment.byte_size -gt 0) "attachment byte_size must be positive"
+  Assert-True ($attachment.url -like "/api/v1/attachments/*") "attachment url mismatch"
+
+  # GET the bytes back and confirm the served content matches the upload.
+  $bytesResponse = Invoke-WebRequest -Uri "http://$Addr$($attachment.url)" `
+    -Method Get -UseBasicParsing -TimeoutSec 5
+  Assert-True ($bytesResponse.Content.Length -eq $pngBytes.Length) "attachment GET byte length mismatch"
+  Assert-True ($bytesResponse.Headers["Content-Type"] -like "image/png*") "attachment GET content-type mismatch: $($bytesResponse.Headers['Content-Type'])"
+
+  # 2. run.start with an attachment but NO vision-capable profile → must error.
+  $visionRejectWs = New-WsClient
+  try {
+    Send-WsJson $visionRejectWs @{
+      id = "vision_reject_run"
+      type = "request"
+      method = "run.start"
+      payload = @{
+        session_id = $session.id
+        input = @{
+          text = "describe this image"
+          attachments = @(@{ attachment_id = $attachment.id })
+        }
+        options = @{
+          working_dir = "$Root"
+          provider_profile_id = $profile.id
+        }
+        subscribe = $true
+      }
+    }
+    $visionReject = Wait-WsResponse $visionRejectWs "vision_reject_run"
+    Assert-True ($visionReject.type -eq "error") "vision-not-supported run did not return error"
+    Assert-True ($visionReject.error.message -match "(?i)vision|image") "vision-not-supported error message mismatch: $($visionReject.error.message)"
+  } finally {
+    $visionRejectWs.Dispose()
+  }
+
+  # 3. run.start with an attachment and a vision-capable profile → accepted,
+  #    and the persisted history exposes an image_ref block / parallel attachments.
+  $visionProfile = Invoke-Api "PUT" "/api/v1/provider-profiles/$($profile.id)" @{
+    supports_vision = $true
+  }
+  Assert-True ($visionProfile.supports_vision -eq $true) "provider profile supports_vision not persisted"
+
+  $visionWs = New-WsClient
+  try {
+    Send-WsJson $visionWs @{
+      id = "vision_run"
+      type = "request"
+      method = "run.start"
+      payload = @{
+        session_id = $session.id
+        input = @{
+          text = "describe this image"
+          attachments = @(@{ attachment_id = $attachment.id })
+        }
+        options = @{
+          working_dir = "$Root"
+          provider_profile_id = $profile.id
+        }
+        subscribe = $true
+      }
+    }
+    $visionInitial = @()
+    $visionResponse = Wait-WsResponseWithEvents $visionWs "vision_run" ([ref]$visionInitial)
+    Assert-True ($visionResponse.type -eq "response" -and $visionResponse.payload.accepted) "vision run.start not accepted"
+    $visionEvents = Wait-RunFinishWithInitialEvents $visionWs $visionInitial
+    Assert-True ($visionEvents[-1].type -eq "finish") "vision run did not finish"
+  } finally {
+    $visionWs.Dispose()
+  }
+
+  # History must contain the image_ref block + parallel attachments field.
+  $history = Invoke-Api "GET" "/api/v1/sessions/$($session.id)/history"
+  $userMsgs = @($history.items | Where-Object { $_.role -eq "user" })
+  $attachmentMsg = $userMsgs | Where-Object {
+    @($_.attachments | Where-Object { $_.id -eq $attachment.id }).Count -gt 0
+  } | Select-Object -First 1
+  Assert-True ($null -ne $attachmentMsg) "history did not surface image attachment on a user message"
+  $imageRefBlocks = @($attachmentMsg.content | Where-Object { $_.type -eq "image_ref" })
+  Assert-True ($imageRefBlocks.Count -ge 1) "history user message missing image_ref content block"
+  Assert-True ($imageRefBlocks[0].attachment_id -eq $attachment.id) "image_ref attachment_id mismatch"
 
   $ws = New-WsClient
   try {
@@ -997,6 +1127,7 @@ try {
     skill_crud = "compat-skill"
     provider_profile = $profile.id
     inactive_provider_profile = $inactiveProfile.id
+    image_attachment = $attachment.id
   } | ConvertTo-Json -Compress
 } finally {
   if ($providerJob) {

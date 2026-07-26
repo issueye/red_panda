@@ -101,12 +101,13 @@ func anthropicMessages(req Request) (string, []map[string]any) {
 	messages := make([]map[string]any, 0, len(req.Messages)+len(req.ToolHistory)*2)
 	for _, message := range req.Messages {
 		if message.Role == "system" {
-			if message.Content != "" {
-				systems = append(systems, message.Content)
+			// System prompts stay plain text (Anthropic top-level "system" field).
+			if text := strings.TrimSpace(MessageText(message.Content)); text != "" {
+				systems = append(systems, text)
 			}
 			continue
 		}
-		messages = append(messages, map[string]any{"role": message.Role, "content": message.Content})
+		messages = append(messages, map[string]any{"role": message.Role, "content": anthropicMessageContent(message.Content)})
 	}
 	for _, round := range toolRoundsForRequest(req) {
 		uses := make([]map[string]any, 0, len(round))

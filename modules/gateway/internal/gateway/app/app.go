@@ -35,6 +35,9 @@ type Config struct {
 	// SessionArchiveDir holds JSONL snapshots of hard-deleted sessions (docs/49).
 	// Empty → DefaultSessionArchiveDir(DatabaseDSN).
 	SessionArchiveDir string
+	// AttachmentsDir holds binary image assets (docs/51). Empty →
+	// DefaultAttachmentsDir(DatabaseDSN).
+	AttachmentsDir string
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -84,13 +87,27 @@ func Run(ctx context.Context, cfg Config) error {
 	if strings.TrimSpace(archiveDir) == "" {
 		archiveDir = service.DefaultSessionArchiveDir(cfg.DatabaseDSN)
 	}
+	attachmentsDir := cfg.AttachmentsDir
+	if strings.TrimSpace(attachmentsDir) == "" {
+		attachmentsDir = service.DefaultAttachmentsDir(cfg.DatabaseDSN)
+	}
+	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
+		return fmt.Errorf("create attachments dir: %w", err)
+	}
 	services = service.NewSet(service.Options{
 		Version:           cfg.Version,
 		Repos:             repos,
 		Hub:               hub,
 		RuntimeClient:     runtime,
 		SessionArchiveDir: archiveDir,
+		AttachmentsDir:    attachmentsDir,
 	})
+	// Reclaim disk from soft-deleted attachments left by a prior shutdown (docs/51 §10).
+	if n, err := services.Attachments.PurgeOrphans(200); err != nil {
+		log.Printf("attachment orphan gc failed: %v", err)
+	} else if n > 0 {
+		log.Printf("purged %d orphaned attachment file(s)", n)
+	}
 	controllers := controller.NewSet(services, hub)
 
 	// Scheduler loop: durable schedule → RunService.Start (docs/43, v0.2.1).
@@ -143,6 +160,12 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/sessions/:id/runs", controllers.Run.ListBySession)
 	api.GET("/sessions/:id/tools", controllers.Tool.ListBySession)
 	api.GET("/sessions/:id/todos", controllers.Todo.ListBySession)
+	api.GET("/sessions/:id/attachments", controllers.Attachments.List)
+	api.POST("/sessions/:id/attachments", controllers.Attachments.Upload)
+	api.POST("/sessions/:id/attachments/from-workspace", controllers.Attachments.FromWorkspace)
+	api.GET("/attachments/:id", controllers.Attachments.Bytes)
+	api.GET("/attachments/:id/meta", controllers.Attachments.Meta)
+	api.DELETE("/attachments/:id", controllers.Attachments.Delete)
 	api.GET("/memory", controllers.Memory.List)
 	api.POST("/memory", controllers.Memory.Create)
 	api.PUT("/memory/:id", controllers.Memory.Update)

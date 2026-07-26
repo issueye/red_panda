@@ -227,6 +227,14 @@ export function ProvidersTab({
                 </label>
                 <label className="settings-check">
                   <input
+                    checked={Boolean(profileDraft.supportsVision)}
+                    onChange={(event) => updateProfileDraft("supportsVision", event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>支持视觉</span>
+                </label>
+                <label className="settings-check">
+                  <input
                     checked={profileDraft.active !== false}
                     onChange={(event) => updateProfileDraft('active', event.target.checked)}
                     type="checkbox"

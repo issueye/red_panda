@@ -81,6 +81,10 @@ type RunExecuteOptions struct {
 	WorkerContext       *WorkerExecutionContext       `json:"worker_context,omitempty"`
 	DebugTools          bool                          `json:"debug_tools,omitempty"`
 	MCPServers          []protocolmcp.MCPServerConfig `json:"mcp_servers,omitempty"`
+	// SupportsVision reflects whether the resolved provider profile can accept
+	// image attachments (docs/51 §6.5). Gateway sets this; Runtime uses it to
+	// decide whether to map image_ref blocks to provider multimodal parts.
+	SupportsVision bool `json:"supports_vision,omitempty"`
 }
 
 // WorkerExecutionContext is trusted Runtime-to-Runtime execution metadata.
@@ -281,7 +285,19 @@ type ReplySession struct {
 }
 
 type ReplyInput struct {
-	Text string `json:"text"`
+	Text        string            `json:"text"`
+	Attachments []InputAttachment `json:"attachments,omitempty"`
+}
+
+// InputAttachment is the per-run attachment reference (docs/51 §5.3). The
+// Desktop→Gateway wire only carries AttachmentID or Path. The Gateway→Runtime
+// wire may additionally inline MIME/DataB64 (ephemeral, never persisted).
+type InputAttachment struct {
+	AttachmentID string `json:"attachment_id,omitempty"`
+	Path         string `json:"path,omitempty"`
+	MIME         string `json:"mime,omitempty"`
+	DataB64      string `json:"data_b64,omitempty"` // Gateway→Runtime only
+	ByteSize     int64  `json:"byte_size,omitempty"`
 }
 
 type ReplyOptions struct {
@@ -372,6 +388,17 @@ type Message struct {
 type ContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
+
+	// image_ref fields (when Type == "image_ref", docs/51 §5.2). Exactly one of
+	// AttachmentID or Path must be set. These are reference-only; base64/data
+	// is never persisted in a message block.
+	AttachmentID string `json:"attachment_id,omitempty"`
+	Path         string `json:"path,omitempty"` // workspace-relative (current session workspace)
+	MIME         string `json:"mime,omitempty"`
+	Alt          string `json:"alt,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	ByteSize     int64  `json:"byte_size,omitempty"`
 }
 
 type ReplyAccepted struct {

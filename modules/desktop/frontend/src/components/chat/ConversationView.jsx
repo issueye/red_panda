@@ -20,6 +20,10 @@ export function ConversationView({
   onSend,
   onCancel,
   onResolvePermission,
+  attachments = [],
+  onAttachmentsChange,
+  onAddFiles,
+  uploading = false,
   providerProfiles = [],
   providerProfileId = '',
   model = '',
@@ -65,8 +69,11 @@ export function ConversationView({
             />
           </div>
           <ChatComposer
+            attachments={attachments}
             onCancel={onCancel}
             onChange={onDraftChange}
+            onAttachmentsChange={onAttachmentsChange}
+            onAddFiles={onAddFiles}
             onProviderProfileChange={onProviderProfileChange}
             onReasoningEffortChange={onReasoningEffortChange}
             onSend={onSend}
@@ -81,6 +88,7 @@ export function ConversationView({
             tokenRatio={tokenRatio}
             tokenSoftBudget={tokenSoftBudget}
             tokenUsed={tokenUsed}
+            uploading={uploading}
             value={draft}
           />
         </div>

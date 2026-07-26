@@ -12,7 +12,7 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 	for _, message := range req.Messages {
 		messages = append(messages, map[string]any{
 			"role":    message.Role,
-			"content": message.Content,
+			"content": openAICompatibleContent(message.Content),
 		})
 	}
 	for _, round := range toolRoundsForRequest(req) {

@@ -17,6 +17,7 @@ import { Button } from '../ui/button.jsx';
 import { EmptyState } from '../ui/feedback.jsx';
 import { Markdown } from '../ui/Markdown.jsx';
 import { RunningPanda } from '../ui/RunningPanda.jsx';
+import { AttachmentThumbs } from './AttachmentThumbs.jsx';
 
 function displayMessageAgent(message) {
   if (message.agentLabel) return message.agentLabel;
@@ -171,7 +172,10 @@ export function ChatConversation({
                 {!message.runSeq && message.messageSeq ? <span title={`消息 ${formatSeq(message.messageSeq)}`}>{formatSeq(message.messageSeq)}</span> : null}
               </div>
               {isUser ? (
-                <p className="message-plain">{message.text}</p>
+                <>
+                  <AttachmentThumbs attachments={message.attachments} />
+                  <p className="message-plain">{message.text}</p>
+                </>
               ) : (
                 <AssistantMessageBody
                   message={message}

@@ -1,6 +1,6 @@
 # Current Development Status
 
-Updated: 2026-07-13
+Updated: 2026-07-26
 
 ## Overall Status
 
@@ -49,6 +49,8 @@ Updated: 2026-07-13
 - Session-scoped TODO checklist is implemented end to end (design: `docs/30-todo-feature-design.md`): Runtime tools `todo.write`/`todo.list` (low risk) via Gateway-mediated `todo.tool.execute`, SQLite `todo_items` with Gateway PK + `client_key` merge, `todo_updated` events, `ReplyOptions.TodoContext` injection on run start and mid-loop, compact/fork copy of open/all todos, and Desktop collapsible **任务** strip above the chat input (`TodoComposerStrip`).
 - Goal scratchpad (shared context store) is implemented: a SQLite `goal_notes` table scoped per goal holds structured notes (kind=finding/decision/risk/fact/handoff/note, title, body, pinned, phase, source). Five `context.*` tools (`context.read`/`context.search` low-risk, `context.write`/`context.replace`/`context.delete` high-risk) are exposed to both the root run and specialist children via `context.tool.execute` Gateway RPC (intentionally NOT on `subagentRunDenylist`, so specialists share the same scratchpad). Allowlisted specialists (`goal-analyst` / `planner` / `verifier` / `evaluator`) also list `context.*` via `withContextShareTools` so policy does not hide them. Notes auto-inject uses a **single path**: Runtime `fetchGoalNotes` → `context.read` with session_id (segment digests + specialist briefs). Dead dual-path `AutoInjectNotes` was removed (checklist R3). Read/search require the goal to belong to the caller's session. Writes are authorized by non-terminal goal + session scope; root writes are tagged `source=root`, specialist writes `source=specialist:<run_id>`. Append is idempotent by `tool_call_id`; `replace` upserts by `(goal_id, kind, title)`; `search` uses SQLite `LIKE` on title+body.
 - Goal specialist prompts are Gateway-authoritative on each reply (checklist R2): `applyAgentDefinitions` attaches enabled `agent_definitions` to `ReplyOptions`; Runtime `resolveGoalSpecialist` overrides builtin prompt/turns/phase/name_zh while keeping Runtime tool allow/deny policy.
+
+- **Image / multimodal chat (docs/51, docs/52 Slice A–D) is implemented end to end**: Gateway multipart upload + `attachments` table (MIME sniff, 8 MiB/file, 512 MiB/session soft quota, symlink-safe workspace path refs), message `image_ref` persistence with parallel DTO `attachments` for Desktop thumbnails, `supports_vision` provider profile gate, Strategy A Gateway→Runtime `data_b64` inline (≤24 MiB/run), Runtime PromptComposer multimodal parts, OpenAI-compatible / Anthropic / Responses image adapters, Echo receipt `Received N image(s)`, ContextPacker image token estimate + drop-oldest-pixels, session hard-delete cascade + orphan GC, fork copies attachment metadata sharing `storage_path` and rewrites `image_ref` ids, compact summary mentions screenshot counts without embedding pixels, optional `POST /sessions/:id/attachments/from-workspace`. Desktop: paste/drag/file chips, bubble thumbs + lightbox, ProvidersTab vision toggle, WorkspacePanel "附加到对话" path refs.
 
 ## Completed
 

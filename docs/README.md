@@ -21,6 +21,8 @@
 | [48-session-correctness-optimization-plan.md](48-session-correctness-optimization-plan.md) | **Session correctness P0** (compact mutex, preserveLive merge, hydrate generation) |
 | [49-session-hard-delete-jsonl-archive.md](49-session-hard-delete-jsonl-archive.md) | **Session hard-delete + JSONL archive** (replace soft-delete) |
 | [50-session-service-decomposition.md](50-session-service-decomposition.md) | **SessionService decomposition** (extract ContextPacker/Compactor/PurgeService) |
+| [51-image-multimodal-design.md](51-image-multimodal-design.md) | **Image / multimodal attachments** (Implemented: upload, image_ref, vision, fork/GC) |
+| [52-image-multimodal-development-plan.md](52-image-multimodal-development-plan.md) | **Image / multimodal implementation plan** (Slice A–D delivered) |
 | [plans/2026-07-19-convergence-wave.md](plans/2026-07-19-convergence-wave.md) | **Convergence wave** (doc/UI sync, Session service decomposition, large-file splits) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |
@@ -45,6 +47,7 @@
 | [30-todo-feature-design.md](30-todo-feature-design.md) | Todo checklist |
 | [43-scheduled-task-design.md](43-scheduled-task-design.md) | Scheduled tasks (cron / interval / one-shot) |
 | [44-v0.2.1-development-plan.md](44-v0.2.1-development-plan.md) | v0.2.1 development plan |
+| [51-image-multimodal-design.md](51-image-multimodal-design.md) | Image / multimodal chat attachments |
 | [33-agent-management.md](33-agent-management.md) | v0.1 Agent definitions (renamed WorkerProfile in v0.2.0) |
 | [37-worker-pool-v0.2.0-refactor-design.md](37-worker-pool-v0.2.0-refactor-design.md) | WorkerPool / Assignment / Mailbox refactor |
 

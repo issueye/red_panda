@@ -37,10 +37,14 @@ func Migrate(db *gorm.DB) error {
 			&model.WorkerProfile{},
 			&model.ScheduledTask{},
 			&model.ScheduledTaskRun{},
+			&model.Attachment{},
 		); err != nil {
 			return err
 		}
 		if err := migrateWorkerProfiles(tx); err != nil {
+			return err
+		}
+		if err := migrateProviderProfileSupportsVision(tx); err != nil {
 			return err
 		}
 		// Goal feature removed (docs/37, docs/31-34): drop legacy tables + column
@@ -143,6 +147,17 @@ func migrateProviderProfileStream(db *gorm.DB) error {
 	// Profiles created before the setting existed used the application's
 	// streaming default, so preserve that behavior when adding the column.
 	return db.Exec("ALTER TABLE provider_profiles ADD COLUMN stream numeric NOT NULL DEFAULT 1").Error
+}
+
+// migrateProviderProfileSupportsVision adds the supports_vision column to
+// legacy provider_profiles rows. New profiles default to vision off to avoid
+// silently routing images to models that cannot handle them (docs/51 §6.5).
+func migrateProviderProfileSupportsVision(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.ProviderProfile{}) ||
+		db.Migrator().HasColumn(&model.ProviderProfile{}, "supports_vision") {
+		return nil
+	}
+	return db.Exec("ALTER TABLE provider_profiles ADD COLUMN supports_vision numeric NOT NULL DEFAULT 0").Error
 }
 
 type legacyAgentDefinition struct {

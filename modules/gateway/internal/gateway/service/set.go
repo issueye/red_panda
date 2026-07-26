@@ -12,6 +12,7 @@ type Options struct {
 	Hub               *eventhub.Hub
 	RuntimeClient     *runtimeclient.Client
 	SessionArchiveDir string // JSONL archives for hard-deleted sessions (docs/49)
+	AttachmentsDir    string // binary asset storage root (docs/51); empty → DefaultAttachmentsDir(dsn)
 }
 
 type Set struct {
@@ -28,6 +29,7 @@ type Set struct {
 	Skills         SkillService
 	WorkerProfiles WorkerProfileService
 	Schedule       ScheduleService
+	Attachments    AttachmentService
 }
 
 type AppService struct {
@@ -40,12 +42,18 @@ func NewSet(opts Options) Set {
 	packer := NewSessionContextPacker(opts.Repos)
 	purge := newPurgeService(opts.Repos, opts.RuntimeClient, opts.Hub, archiveDir)
 	run := NewRunServiceWithPacker(opts.Repos, opts.Hub, opts.RuntimeClient, packer)
+	workspace := NewWorkspaceService(opts.Repos, purge)
+	attachments := NewAttachmentService(opts.Repos, opts.AttachmentsDir, workspace)
+	run.AttachAttachmentService(&attachments)
+	session := NewSessionServiceWithPacker(opts.Repos, opts.RuntimeClient, opts.Hub, archiveDir, packer)
+	session.AttachAttachmentService(&attachments)
 	return Set{
 		App:            AppService{Version: opts.Version},
 		Run:            run,
-		Workspace:      NewWorkspaceService(opts.Repos, purge),
+		Workspace:      workspace,
+		Attachments:    attachments,
 		// SessionService internally shares one sessionStore with its SessionCompactor.
-		Session:        NewSessionServiceWithPacker(opts.Repos, opts.RuntimeClient, opts.Hub, archiveDir, packer),
+		Session:        session,
 		Memory:         NewMemoryService(opts.Repos),
 		Todo:           NewTodoService(opts.Repos),
 		Tool:           NewToolService(opts.Repos),

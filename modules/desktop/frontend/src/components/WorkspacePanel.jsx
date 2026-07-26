@@ -3,6 +3,7 @@ import {
   ChevronRight,
   ExternalLink,
   FileText,
+  ImagePlus,
   Folder,
   GitCompare,
   Maximize2,
@@ -33,11 +34,18 @@ function displayContent(file, diff) {
   return file.content || '';
 }
 
+const IMAGE_PATH_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+function isImageBinaryPath(path) {
+  if (!path) return false;
+  const lower = String(path).toLowerCase();
+  return IMAGE_PATH_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 export function isMarkdownPath(path) {
   return /\.(?:md|markdown)$/i.test(String(path || ''));
 }
 
-export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, onExpandedChange, workspace }) {
+export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, onExpandedChange, workspace, onAttachImage }) {
   const [tree, setTree] = useState(null);
   const [selectedPath, setSelectedPath] = useState('');
   const [file, setFile] = useState(null);
@@ -204,6 +212,15 @@ export function WorkspacePanel({ apiJson, canFloat = false, expanded = false, on
           <div className="workspace-preview-head">
             <span>{selectedPath || '预览'}</span>
             <div className="workspace-preview-actions">
+              {isImageBinaryPath(selectedPath) ? (
+                <Button
+                  title="附加到对话"
+                  data-testid="workspace-attach-image"
+                  icon={<ImagePlus size={14} />}
+                  onClick={() => onAttachImage?.(selectedPath)}
+                  variant="soft"
+                />
+              ) : null}
               <Button
                 title="打开位置"
                 data-testid="workspace-file-open-explorer"

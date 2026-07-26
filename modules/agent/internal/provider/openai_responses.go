@@ -90,7 +90,7 @@ func openAIResponsesURL(raw string) string {
 func openAIResponsesInput(req Request) []map[string]any {
 	items := make([]map[string]any, 0, len(req.Messages)+len(req.ToolHistory)*2)
 	for _, message := range req.Messages {
-		items = append(items, map[string]any{"role": message.Role, "content": message.Content})
+		items = append(items, map[string]any{"role": message.Role, "content": openAIResponsesContent(message.Content)})
 	}
 	for _, round := range toolRoundsForRequest(req) {
 		for _, exchange := range round {

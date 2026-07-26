@@ -28,6 +28,16 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 	inputText := stringInput(payload.Input, "text")
 	runtimeMode := normalizedRuntimeMode(stringOption(payload.Options, "runtime_mode"))
 
+	// Resolve image attachments before reserving the run slot so a validation
+	// failure does not leak a running run record (docs/51 §6.2).
+	attachmentRefs := parseInputAttachments(payload.Input)
+	resolvedAttachments, err := r.validateAndResolveAttachments(&runAdmission{
+		session: model.Session{ID: sessionID, WorkspaceRoot: session.WorkspaceRoot},
+	}, attachmentRefs, payload.Options)
+	if err != nil {
+		return runAdmission{}, err
+	}
+
 	// Atomic admission: session serial + global concurrent budget + reserve active slot.
 	if r.startMu != nil {
 		r.startMu.Lock()
@@ -67,10 +77,11 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 		return runAdmission{}, err
 	}
 	return runAdmission{
-		runID:       runID,
-		session:     session,
-		inputText:   inputText,
-		runtimeMode: runtimeMode,
+		runID:            runID,
+		session:          session,
+		inputText:        inputText,
+		runtimeMode:      runtimeMode,
+		attachments:      resolvedAttachments,
 	}, nil
 }
 
@@ -79,8 +90,17 @@ func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartP
 	if err != nil {
 		return methods.RunExecuteParams{}, err
 	}
-	if _, err := r.repos.Messages.Add(admission.session.ID, "user", admission.inputText, admission.runID); err != nil {
-		return methods.RunExecuteParams{}, err
+	// Persist the user message with image_ref blocks when attachments are present
+	// (docs/51 §5.2). Pure-text runs keep the existing single-block path.
+	if len(admission.attachments) == 0 {
+		if _, err := r.repos.Messages.Add(admission.session.ID, "user", admission.inputText, admission.runID); err != nil {
+			return methods.RunExecuteParams{}, err
+		}
+	} else {
+		content := userMessageContent(admission.inputText, admission.attachments)
+		if _, err := r.repos.Messages.AddWithMetadata(admission.session.ID, "user", content, admission.runID, ""); err != nil {
+			return methods.RunExecuteParams{}, err
+		}
 	}
 
 	params := methods.RunExecuteParams{
@@ -93,6 +113,8 @@ func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartP
 		},
 		Input: methods.ReplyInput{
 			Text: admission.inputText,
+			// Attachments are filled after applyProviderProfile + visionGate so
+			// Strategy A can inline DataB64 only for vision-capable profiles.
 		},
 		Options: methods.RunExecuteOptions{
 			ProviderProfileID:   stringOption(payload.Options, "provider_profile_id"),
@@ -117,6 +139,15 @@ func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartP
 	if err := r.applyProviderProfile(&params); err != nil {
 		return methods.RunExecuteParams{}, err
 	}
+	// Vision gate: attachments require a vision-capable profile (docs/51 §6.5).
+	// Refuse explicitly rather than silently dropping images.
+	if err := visionGate(params, admission.attachments); err != nil {
+		return methods.RunExecuteParams{}, err
+	}
+	// Strategy A: inline image bytes onto the Gateway→Runtime wire only after
+	// the vision gate passes (docs/51 §4, docs/52 Slice C). Message rows stay
+	// ref-only — DataB64 is never written to content_json.
+	params.Input.Attachments = toInputAttachments(admission.attachments, params.Options.SupportsVision)
 	if err := r.applyMemoryContext(&params); err != nil {
 		return methods.RunExecuteParams{}, err
 	}
@@ -264,6 +295,7 @@ func (r RunService) applyProviderProfile(params *methods.RunExecuteParams) error
 	params.Options.ProviderBaseURL = profile.BaseURL
 	params.Options.ProviderAPIKey = profile.APIKeySecret
 	params.Options.ProviderStream = &profile.Stream
+	params.Options.SupportsVision = profile.SupportsVision
 	if params.Options.Model == "" {
 		params.Options.Model = profile.Model
 	}

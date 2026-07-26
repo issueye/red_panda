@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const maxLLMLogBodyBytes = 4 << 20 // 4 MiB per request file
@@ -48,7 +49,10 @@ func logLLMRequest(enabled bool, runID string, sessionID string, model string, u
 	name := fmt.Sprintf("%s_%s.json", stamp, safeRun)
 	path := filepath.Join(dir, name)
 
-	body := rawBody
+	// Redact image base64 payloads before any truncation / write so vision
+	// requests never leak pixel data into llm-requests logs (docs/51 §9).
+	sanitized := redactImagePayloads(rawBody)
+	body := sanitized
 	truncated := false
 	if len(body) > maxLLMLogBodyBytes {
 		body = body[:maxLLMLogBodyBytes]
@@ -65,7 +69,7 @@ func logLLMRequest(enabled bool, runID string, sessionID string, model string, u
 		"url":        url,
 		"body_bytes": len(rawBody),
 		"truncated":  truncated,
-		"note":       "API keys are never written to this log. Enable via Desktop settings → 记录 LLM 请求.",
+		"note":       "API keys are never written to this log. Image base64 payloads are redacted. Enable via Desktop settings → 记录 LLM 请求.",
 	}
 	if json.Valid(body) {
 		pretty = json.RawMessage(body)
@@ -103,4 +107,113 @@ func sanitizeLogToken(value string) string {
 		out = out[:48]
 	}
 	return out
+}
+
+// redactImagePayloads walks a JSON request body and replaces base64 image
+// payloads with short placeholders. Falls back to a data-URL strip when the
+// body is not JSON.
+func redactImagePayloads(raw []byte) []byte {
+	if len(raw) == 0 {
+		return raw
+	}
+	var root any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return []byte(stripDataURLs(string(raw)))
+	}
+	redactValue(root)
+	out, err := json.Marshal(root)
+	if err != nil {
+		return []byte(stripDataURLs(string(raw)))
+	}
+	return out
+}
+
+func redactValue(v any) {
+	switch node := v.(type) {
+	case map[string]any:
+		for k, child := range node {
+			key := strings.ToLower(k)
+			switch key {
+			case "data", "data_b64", "b64_json":
+				if s, ok := child.(string); ok && looksLikeBase64(s) {
+					node[k] = fmt.Sprintf("[redacted base64 %d chars]", len(s))
+					continue
+				}
+			case "url":
+				if s, ok := child.(string); ok {
+					node[k] = stripDataURLs(s)
+					continue
+				}
+			case "image_url":
+				switch c := child.(type) {
+				case string:
+					node[k] = stripDataURLs(c)
+					continue
+				case map[string]any:
+					if u, ok := c["url"].(string); ok {
+						c["url"] = stripDataURLs(u)
+					}
+				}
+			case "source":
+				if m, ok := child.(map[string]any); ok {
+					if s, ok := m["data"].(string); ok && looksLikeBase64(s) {
+						m["data"] = fmt.Sprintf("[redacted base64 %d chars]", len(s))
+					}
+				}
+			}
+			redactValue(child)
+		}
+	case []any:
+		for _, child := range node {
+			redactValue(child)
+		}
+	}
+}
+
+func looksLikeBase64(s string) bool {
+	if len(s) < 64 {
+		return false
+	}
+	// Heuristic: long strings without spaces that are mostly base64 alphabet.
+	limit := len(s)
+	if limit > 128 {
+		limit = 128
+	}
+	for i := 0; i < limit; i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '+' || c == '/' || c == '=' || c == '\n' || c == '\r' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func stripDataURLs(s string) string {
+	const marker = "data:"
+	const b64mark = ";base64,"
+	out := s
+	for {
+		idx := strings.Index(out, marker)
+		if idx < 0 {
+			return out
+		}
+		rest := out[idx:]
+		b64 := strings.Index(rest, b64mark)
+		if b64 < 0 {
+			return out
+		}
+		start := b64 + len(b64mark)
+		j := start
+		for j < len(rest) {
+			c := rest[j]
+			if c == '"' || c == '\'' || unicode.IsSpace(rune(c)) || c == '}' || c == ',' {
+				break
+			}
+			j++
+		}
+		placeholder := fmt.Sprintf("data:[redacted base64 %d chars]", j-start)
+		out = out[:idx] + placeholder + rest[j:]
+	}
 }

@@ -3,6 +3,12 @@ import { parseCommand } from '../lib/commands.js';
 import { appendDiagnosticLog } from '../lib/diagnosticLog.js';
 import { buildRunStartOptions } from '../lib/runOptions.js';
 import {
+  ATTACHMENT_MAX_PER_RUN,
+  toRunStartAttachment,
+  uploadAttachment,
+  validateImageFile,
+} from '../lib/attachments.js';
+import {
   appendMessages,
   applyStartedRunProjection,
   beginRunProjection,
@@ -31,12 +37,48 @@ export function useSessionRunActions({
     }));
   }, [patchRuntime]);
 
-  const startRun = useCallback(async (sessionId, text, command) => {
+  // uploadAndStageFiles uploads each picked image to the session and stages it
+  // in draftAttachments. Files that fail validation/upload are surfaced as
+  // error chips so the user can retry/remove (docs/51 §8.1).
+  const uploadAndStageFiles = useCallback(async (sessionId, files) => {
+    if (!sessionId || !files?.length) return;
+    patchRuntime(sessionId, (runtime) => ({ ...runtime, uploadingAttachments: true }));
+
+    const staged = [];
+    for (const file of files) {
+      if (staged.length >= ATTACHMENT_MAX_PER_RUN) break;
+      const validationError = validateImageFile(file);
+      if (validationError) {
+        staged.push({ clientKey: `err_${Date.now()}_${Math.random()}`, error: validationError, alt: file?.name });
+        continue;
+      }
+      try {
+        const dto = await uploadAttachment(sessionId, file);
+        staged.push(dto);
+      } catch (error) {
+        staged.push({ clientKey: `err_${Date.now()}_${Math.random()}`, error: error.message, alt: file?.name });
+      }
+    }
+
+    patchRuntime(sessionId, (runtime) => ({
+      ...runtime,
+      uploadingAttachments: false,
+      draftAttachments: [...(runtime.draftAttachments || []), ...staged].slice(0, ATTACHMENT_MAX_PER_RUN),
+    }));
+  }, [patchRuntime]);
+
+  const startRun = useCallback(async (sessionId, text, command, attachments = []) => {
     const displayText = command.displayText || text;
     const inputText = command.inputText || text;
     const optionOverrides = { require_permission: command.requirePermission };
 
-    patchRuntime(sessionId, (runtime) => beginRunProjection(runtime, displayText));
+    // Only attachment references that resolved to an id/path may be sent. Error
+    // chips are dropped (and should already have been removed by the user).
+    const wireAttachments = attachments
+      .map(toRunStartAttachment)
+      .filter(Boolean);
+
+    patchRuntime(sessionId, (runtime) => beginRunProjection(runtime, displayText, wireAttachments));
     loadSkills?.().catch(() => {});
 
     try {
@@ -47,9 +89,11 @@ export function useSessionRunActions({
           detail: { sessionId, log_llm_requests: true },
         });
       }
+      const input = { text: inputText };
+      if (wireAttachments.length) input.attachments = wireAttachments;
       const result = await request('run.start', {
         session_id: sessionId,
-        input: { text: inputText },
+        input,
         options: runOptions,
         subscribe: true,
       });
@@ -64,6 +108,7 @@ export function useSessionRunActions({
             runId: nextRunId,
             runtimeMode: result?.runtime_mode,
             command: command.name,
+            attachments: wireAttachments.length,
           },
         },
       );
@@ -92,6 +137,7 @@ export function useSessionRunActions({
           runtime,
           createSystemMessage('gateway_error', `启动运行失败：${error.message}`),
         ),
+        // Keep attachments so the user can retry after a vision/size failure.
         running: false,
         currentRunId: '',
       }));
@@ -102,14 +148,15 @@ export function useSessionRunActions({
     const sessionId = currentSessionIdRef.current;
     const runtime = sessionRuntimesRef.current[sessionId];
     const text = (runtime?.draft || '').trim();
-    if (!text || !sessionId || runtime?.running || runtime?.compacting) return;
+    const attachments = runtime?.draftAttachments || [];
+    if ((!text && attachments.length === 0) || !sessionId || runtime?.running || runtime?.compacting) return;
 
     const command = parseCommand(text);
     if (command.action === 'help' || command.action === 'error') {
       handleLocalCommand(sessionId, text, command);
       return;
     }
-    await startRun(sessionId, text, command);
+    await startRun(sessionId, text, command, attachments);
   }, [
     currentSessionIdRef,
     handleLocalCommand,
@@ -134,5 +181,5 @@ export function useSessionRunActions({
     }
   }, [currentSessionIdRef, patchRuntime, request, sessionRuntimesRef]);
 
-  return { sendTask, cancelRun };
+  return { sendTask, cancelRun, uploadAndStageFiles };
 }

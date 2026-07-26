@@ -56,6 +56,7 @@ export function normalizeHistoryMessage(message) {
     visibility: message.visibility || 'run_public',
     createdAt: message.created_at,
     text: firstText || '',
+    attachments: Array.isArray(message.attachments) ? message.attachments : [],
   };
 }
 

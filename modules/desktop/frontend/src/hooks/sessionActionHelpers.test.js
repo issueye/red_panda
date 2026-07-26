@@ -26,7 +26,7 @@ function runtimeFixture() {
 }
 
 test('message helpers preserve local user and system message shapes', () => {
-  assert.deepEqual(createUserMessage('hello', fixedNow), {
+  assert.deepEqual(createUserMessage('hello', undefined, fixedNow), {
     id: 'user_1784102400000',
     role: 'user',
     createdAt: '2026-07-15T08:00:00.000Z',
@@ -39,6 +39,18 @@ test('message helpers preserve local user and system message shapes', () => {
     createdAt: '2026-07-15T08:00:00.000Z',
     text: 'done',
   });
+});
+
+test('createUserMessage attaches image refs when provided (docs/51 §5.2)', () => {
+  const attachments = [{ id: 'att_1', mime: 'image/png' }];
+  const message = createUserMessage('look here', attachments, fixedNow);
+  assert.equal(message.text, 'look here');
+  assert.deepEqual(message.attachments, attachments);
+});
+
+test('createUserMessage omits attachments when empty', () => {
+  const message = createUserMessage('text only', [], fixedNow);
+  assert.equal(message.attachments, undefined);
 });
 
 test('appendMessages does not mutate the existing runtime message list', () => {

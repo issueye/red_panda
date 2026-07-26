@@ -71,6 +71,9 @@ func (r ProviderProfileRepository) Update(profile model.ProviderProfile) (model.
 	current.IsDefault = profile.IsDefault
 	current.Stream = profile.Stream
 	current.Active = profile.Active
+	// SupportsVision is intentionally always applied so callers can toggle it
+	// (docs/51 §6.5), mirroring MaxTokens' always-apply semantics.
+	current.SupportsVision = profile.SupportsVision
 	current.UpdatedAt = time.Now().UTC()
 
 	err := r.db.Transaction(func(tx *gorm.DB) error {

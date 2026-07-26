@@ -4,13 +4,19 @@ function timestamp(now) {
   return new Date(now()).toISOString();
 }
 
-export function createUserMessage(text, now = Date.now) {
-  return {
+export function createUserMessage(text, attachments, now = Date.now) {
+  const message = {
     id: `user_${now()}`,
     role: 'user',
     createdAt: timestamp(now),
     text,
   };
+  // Only attach the field when there are image refs so deepEqual stays clean on
+  // the pure-text path (docs/51 §2.1 goal 7 — wire/UI shape unchanged).
+  if (attachments && attachments.length) {
+    message.attachments = attachments;
+  }
+  return message;
 }
 
 export function createSystemMessage(idPrefix, text, { includeCreatedAt = false, now = Date.now } = {}) {
@@ -30,10 +36,12 @@ export function appendMessages(runtime, ...messages) {
   };
 }
 
-export function beginRunProjection(runtime, displayText) {
+export function beginRunProjection(runtime, displayText, attachments = []) {
   return {
-    ...appendMessages(runtime, createUserMessage(displayText)),
+    ...appendMessages(runtime, createUserMessage(displayText, attachments)),
     draft: '',
+    draftAttachments: [],
+    uploadingAttachments: false,
     running: true,
     cancelRequested: false,
     runSeq: 0,

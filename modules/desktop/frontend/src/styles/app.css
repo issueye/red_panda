@@ -2219,6 +2219,215 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
+/* Image attachment chip bar + thumbnails (docs/51 §8.1, §8.2) */
+.attachment-chip-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px 0;
+}
+
+.attachment-chip {
+  align-items: center;
+  background: var(--bg-elevated, #f4f4f5);
+  border: 1px solid var(--border-subtle, #e4e4e7);
+  border-radius: 8px;
+  display: flex;
+  gap: 6px;
+  max-width: 200px;
+  padding: 3px 4px 3px 3px;
+}
+
+.attachment-chip.is-error {
+  border-color: var(--danger, #dc2626);
+  background: var(--danger-soft, #fef2f2);
+}
+
+.attachment-chip-loading {
+  color: var(--text-muted, #71717a);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.attachment-chip-thumb {
+  align-items: center;
+  background: var(--bg-sunken, #e4e4e7);
+  border-radius: 5px;
+  display: flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  overflow: hidden;
+  width: 28px;
+}
+
+.attachment-chip-thumb img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.attachment-chip-meta {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.attachment-chip-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-chip-size,
+.attachment-chip-error {
+  color: var(--danger, #dc2626);
+  font-size: 11px;
+}
+
+.attachment-chip-size {
+  color: var(--text-muted, #71717a);
+}
+
+.attachment-chip-remove {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted, #71717a);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  height: 20px;
+  justify-content: center;
+  padding: 0;
+  width: 20px;
+}
+
+.attachment-chip-remove:hover:not(:disabled) {
+  background: var(--bg-sunken, #e4e4e7);
+  color: var(--text-strong, #18181b);
+}
+
+.attachment-chip-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.attachment-add-btn {
+  align-items: center;
+  background: transparent;
+  border: 1px dashed var(--border-subtle, #e4e4e7);
+  border-radius: 8px;
+  color: var(--text-muted, #71717a);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+.attachment-add-btn:hover:not(.is-disabled) {
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+}
+
+.attachment-add-btn.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.composer-attachment-trigger {
+  color: var(--text-muted, #71717a);
+}
+
+.chat-composer.is-drag-over .composer-shell {
+  border-color: var(--accent, #2563eb);
+  box-shadow: 0 0 0 2px var(--accent-soft, rgba(37, 99, 235, 0.2));
+}
+
+/* Message bubble image thumbnails */
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+
+.message-attachment-thumb {
+  background: var(--bg-sunken, #e4e4e7);
+  border: 1px solid var(--border-subtle, #e4e4e7);
+  border-radius: 8px;
+  cursor: zoom-in;
+  height: 96px;
+  overflow: hidden;
+  padding: 0;
+  width: 96px;
+}
+
+.message-attachment-thumb img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.message-attachment-thumb.is-placeholder {
+  align-items: center;
+  color: var(--text-muted, #71717a);
+  display: flex;
+  font-size: 11px;
+  justify-content: center;
+  padding: 4px;
+  text-align: center;
+}
+
+.attachment-lightbox {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.82);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  left: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 1000;
+}
+
+.attachment-lightbox img {
+  max-height: 85vh;
+  max-width: 90vw;
+  object-fit: contain;
+}
+
+.attachment-lightbox-caption {
+  color: #fff;
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+.attachment-lightbox-close {
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  height: 36px;
+  padding: 0;
+  position: absolute;
+  right: 24px;
+  top: 24px;
+  width: 36px;
+}
+
+.attachment-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
 .composer-toolbar {
   align-items: center;
   display: flex;

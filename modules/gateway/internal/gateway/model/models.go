@@ -244,6 +244,10 @@ type ProviderProfile struct {
 	IsDefault    bool `gorm:"index"`
 	Stream       bool `gorm:"not null"`
 	Active       bool `gorm:"index"`
+	// SupportsVision marks the profile as capable of multimodal image input
+	// (docs/51 §6.5). Default false: refuse attachments to avoid silent
+	// expensive/visionless calls. The user opts in per profile.
+	SupportsVision bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
@@ -254,6 +258,31 @@ type ProviderModel struct {
 	Label           string `json:"label,omitempty"`
 	MaxTokens       int    `json:"max_tokens,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+// Attachment is the Gateway-authoritative record of a session/workspace image
+// asset (docs/51 §5.1). Binary bytes live on disk at StoragePath; this row
+// only holds metadata + reference so messages store refs, not base64 blobs.
+type Attachment struct {
+	ID            string `gorm:"primaryKey"`
+	SessionID     string `gorm:"index"`
+	WorkspaceRoot string `gorm:"index"`
+	// Kind: "upload" (binary persisted here) | "workspace_cache" (deduped copy
+	// of a workspace file).
+	Kind         string
+	SourcePath   string // workspace-relative path when kind=workspace_cache
+	StoragePath  string // Gateway data dir relative path
+	MIME         string
+	ByteSize     int64
+	SHA256       string `gorm:"index"`
+	Width        int
+	Height       int
+	OriginalName string
+	// CreatedBy: user | system | tool
+	CreatedBy  string
+	CreatedAt  time.Time
+	LastRefAt  time.Time
+	DeletedAt  *time.Time `gorm:"index"`
 }
 
 type MCPTimeouts struct {

@@ -94,6 +94,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     api_key: 'sk-live',
     is_default: true,
     stream: false,
+    supports_vision: false,
   });
 
   const update = providerProfileUpdatePayload({
@@ -107,6 +108,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     isDefault: false,
     stream: true,
     active: true,
+    supportsVision: true,
   });
   assert.equal(Object.hasOwn(update, 'api_key'), false);
   assert.equal(update.model, 'model-b');
@@ -114,6 +116,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
   assert.deepEqual(update.models, [{ model: 'model-b', label: '', max_tokens: 0, reasoning_effort: 'high' }]);
   assert.equal(update.active, true);
   assert.equal(update.stream, true);
+  assert.equal(update.supports_vision, true);
 
   const anthropic = providerProfileCreatePayload({
     name: 'Claude',

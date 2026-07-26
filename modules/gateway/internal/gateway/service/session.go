@@ -29,6 +29,9 @@ type SessionService struct {
 	// (docs/plans/2026-07-19-convergence-wave.md Wave B Task B2). Injected by Set
 	// as a pointer so all SessionService value copies share the same compact gate.
 	compactor *SessionCompactor
+	// attachments is optional; when set, Fork copies attachment metadata and
+	// hard-delete cascades via PurgeService (docs/52 Slice D).
+	attachments *AttachmentService
 }
 
 // SessionDTO is the single-path session wire shape (BREAKING: no title/working_dir aliases).
@@ -57,13 +60,17 @@ type MessageDTO struct {
 	SessionID    string                 `json:"session_id"`
 	Role         string                 `json:"role"`
 	Content      []methods.ContentBlock `json:"content"`
-	Seq          uint64                 `json:"seq"`
-	RunID        string                 `json:"run_id,omitempty"`
-	AssignmentID string                 `json:"assignment_id,omitempty"`
-	WorkerID     string                 `json:"worker_id,omitempty"`
-	ProfileKey   string                 `json:"profile_key,omitempty"`
-	Visibility   string                 `json:"visibility,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
+	// Attachments is a parallel render surface for image_ref blocks (docs/51).
+	// The Desktop reads this without touching the text pipeline; the underlying
+	// content array still carries the authoritative image_ref blocks.
+	Attachments []AttachmentRef `json:"attachments,omitempty"`
+	Seq         uint64          `json:"seq"`
+	RunID       string          `json:"run_id,omitempty"`
+	AssignmentID string         `json:"assignment_id,omitempty"`
+	WorkerID    string          `json:"worker_id,omitempty"`
+	ProfileKey  string          `json:"profile_key,omitempty"`
+	Visibility  string          `json:"visibility,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
 }
 
 type MessagePageDTO struct {
@@ -229,7 +236,14 @@ func NewSessionServiceWithPacker(
 // SessionCompactor (session_compactor.go, docs/plans/2026-07-19-convergence-wave.md
 // Wave B Task B2). Tests should call them on s.compactor directly.
 
+// AttachAttachmentService wires image assets for fork/cascade (docs/52 Slice D).
+func (s *SessionService) AttachAttachmentService(att *AttachmentService) {
+	s.attachments = att
+	s.purge.attachments = att
+}
+
 func (s SessionService) Create(name string, workspaceRoot string) (SessionDTO, error) {
+
 	session, err := s.repos.Sessions.Create(name, workspaceRoot)
 	if err != nil {
 		return SessionDTO{}, err
@@ -332,6 +346,18 @@ func (s SessionService) Fork(sessionID string, req ForkSessionRequest) (ForkSess
 		if err != nil {
 			return err
 		}
+		// Fork attachments: clone metadata rows that share storage_path, then
+		// rewrite image_ref attachment_id values in the copied messages so both
+		// sessions can independently GET /attachments/:id (docs/52 Slice D).
+		idMap, err := txRepos.Attachments.CopyToSession(source.ID, target.ID)
+		if err != nil {
+			return err
+		}
+		if len(idMap) > 0 {
+			if err := rewriteCopiedMessageAttachmentIDs(txRepos, target.ID, idMap); err != nil {
+				return err
+			}
+		}
 		if _, err := txRepos.Todos.CopySessionTodos(source.ID, target.ID, false); err != nil {
 			return err
 		}
@@ -422,7 +448,7 @@ func estimateStoredContextUsage(context storedSessionContext, coveredEnd uint64)
 		usage.EstimatedTokens += estimateContextTextTokens(context.Summary.SummaryJSON) + 8
 	}
 	for _, message := range context.Messages {
-		usage.EstimatedTokens += estimateContextTextTokens(messageText(message)) + 4
+		usage.EstimatedTokens += estimateMessageTokens(message) + 4
 	}
 	return usage
 }
@@ -438,6 +464,41 @@ func estimateContextTextTokens(text string) int {
 		}
 	}
 	return tokens + (latinRunes+3)/4
+}
+
+// estimateImageTokens approximates vision-model image tokens (docs/51 §7.2):
+// tokens ≈ width*height/750, floored at 85 and capped at 1600 per image.
+func estimateImageTokens(width, height int) int {
+	const (
+		minTokens = 85
+		maxTokens = 1600
+	)
+	if width <= 0 || height <= 0 {
+		return 1200 // unknown dimensions → fixed mid estimate
+	}
+	tokens := (width * height) / 750
+	if tokens < minTokens {
+		return minTokens
+	}
+	if tokens > maxTokens {
+		return maxTokens
+	}
+	return tokens
+}
+
+// estimateMessageTokens sums text tokens plus image estimates for image_ref blocks.
+func estimateMessageTokens(row model.Message) int {
+	var content []methods.ContentBlock
+	if row.ContentJSON != "" {
+		_ = json.Unmarshal([]byte(row.ContentJSON), &content)
+	}
+	total := estimateContextTextTokens(messageText(row))
+	for _, block := range content {
+		if block.Type == "image_ref" {
+			total += estimateImageTokens(block.Width, block.Height)
+		}
+	}
+	return total
 }
 
 func sessionDTO(row model.Session) SessionDTO {
@@ -507,10 +568,39 @@ func messageDTO(row model.Message) (MessageDTO, error) {
 	}
 	return MessageDTO{
 		ID: row.ID, SessionID: row.SessionID, Role: row.Role, Content: content,
+		Attachments: attachmentRefsFromContent(content),
 		Seq: row.Seq, RunID: row.RunID, AssignmentID: metadata.AssignmentID,
 		WorkerID: metadata.WorkerID, ProfileKey: metadata.ProfileKey,
 		Visibility: metadata.Visibility, CreatedAt: row.CreatedAt,
 	}, nil
+}
+
+// attachmentRefsFromContent extracts image_ref blocks into the parallel render
+// surface (docs/51). Keeps content authoritative; the DTO field is a
+// convenience so the Desktop renders thumbnails without a ContentBlock parser.
+func attachmentRefsFromContent(content []methods.ContentBlock) []AttachmentRef {
+	if len(content) == 0 {
+		return nil
+	}
+	refs := make([]AttachmentRef, 0)
+	for _, block := range content {
+		if block.Type != "image_ref" {
+			continue
+		}
+		refs = append(refs, AttachmentRefFromBlock(blockLike{
+			AttachmentID: block.AttachmentID,
+			Path:         block.Path,
+			MIME:         block.MIME,
+			Alt:          block.Alt,
+			Width:        block.Width,
+			Height:       block.Height,
+			ByteSize:     block.ByteSize,
+		}))
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return refs
 }
 
 func formatCompactSummaryMessage(summary CompactSummary) string {
@@ -569,4 +659,46 @@ func lastMessageSeq(messages []model.Message) uint64 {
 		return 0
 	}
 	return messages[len(messages)-1].Seq
+}
+
+
+// rewriteCopiedMessageAttachmentIDs remaps image_ref.attachment_id values in
+// the target session's messages according to the fork id map.
+func rewriteCopiedMessageAttachmentIDs(repos repository.Set, targetSessionID string, idMap map[string]string) error {
+	messages, err := repos.Messages.ListLatestConversation(targetSessionID, 10000)
+	if err != nil {
+		return err
+	}
+	for _, msg := range messages {
+		if msg.ContentJSON == "" || !strings.Contains(msg.ContentJSON, "image_ref") {
+			continue
+		}
+		var content []methods.ContentBlock
+		if err := json.Unmarshal([]byte(msg.ContentJSON), &content); err != nil {
+			continue
+		}
+		changed := false
+		for i, block := range content {
+			if block.Type != "image_ref" {
+				continue
+			}
+			if next, ok := idMap[block.AttachmentID]; ok && next != "" {
+				content[i].AttachmentID = next
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		raw, err := json.Marshal(content)
+		if err != nil {
+			return err
+		}
+		if err := repos.DB.Model(&model.Message{}).
+			Where("id = ?", msg.ID).
+			Update("content_json", string(raw)).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

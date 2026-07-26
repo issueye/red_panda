@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"redpanda/gateway/internal/gateway/model"
+	"redpanda/protocol/methods"
 )
 
 const (
@@ -234,7 +235,7 @@ func summarizeMessagesLocal(messages []model.Message, startSeq uint64, endSeq ui
 		if message.Role != "user" && message.Role != "assistant" {
 			continue
 		}
-		text := strings.TrimSpace(messageText(message))
+		text := strings.TrimSpace(messageTextWithImagePlaceholders(message))
 		if text == "" {
 			continue
 		}
@@ -267,10 +268,35 @@ func summarizeMessagesLocal(messages []model.Message, startSeq uint64, endSeq ui
 		texts = append(texts, item.text)
 	}
 	workspace := extractPathHintsFromTexts(texts)
+	summaryText := strings.TrimSpace(b.String())
+	if n := countImageRefs(messages); n > 0 {
+		summaryText = summaryText + fmt.Sprintf("\n\nUser provided %d image attachment(s) (pixels omitted from summary).", n)
+	}
 	return CompactSummary{
-		Summary:          strings.TrimSpace(b.String()),
+		Summary:          summaryText,
 		WorkspaceContext: workspace,
 	}
+}
+
+// countImageRefs counts image_ref blocks in compacted messages so the summary
+// can mention screenshots without embedding pixels (docs/52 Slice D).
+func countImageRefs(messages []model.Message) int {
+	total := 0
+	for _, message := range messages {
+		if message.ContentJSON == "" || !strings.Contains(message.ContentJSON, "image_ref") {
+			continue
+		}
+		var content []methods.ContentBlock
+		if err := json.Unmarshal([]byte(message.ContentJSON), &content); err != nil {
+			continue
+		}
+		for _, block := range content {
+			if block.Type == "image_ref" {
+				total++
+			}
+		}
+	}
+	return total
 }
 
 func extractPathHintsFromTexts(texts []string) []string {
@@ -466,7 +492,7 @@ func buildCompactTranscript(messages []model.Message, maxRunes int) string {
 		if message.Role != "user" && message.Role != "assistant" {
 			continue
 		}
-		text := strings.TrimSpace(messageText(message))
+		text := strings.TrimSpace(messageTextWithImagePlaceholders(message))
 		if text == "" {
 			continue
 		}
@@ -582,4 +608,39 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+
+// messageTextWithImagePlaceholders is like messageText but keeps [image: alt]
+// placeholders so compact summaries mention screenshots without pixels.
+func messageTextWithImagePlaceholders(row model.Message) string {
+	var content []methods.ContentBlock
+	if row.ContentJSON == "" {
+		return ""
+	}
+	if err := json.Unmarshal([]byte(row.ContentJSON), &content); err != nil {
+		return ""
+	}
+	parts := make([]string, 0, len(content))
+	for _, block := range content {
+		switch block.Type {
+		case "image_ref":
+			alt := strings.TrimSpace(block.Alt)
+			if alt == "" {
+				alt = strings.TrimSpace(block.AttachmentID)
+			}
+			if alt == "" {
+				alt = strings.TrimSpace(block.Path)
+			}
+			if alt == "" {
+				alt = "image"
+			}
+			parts = append(parts, "[image: "+alt+"]")
+		default:
+			if strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, strings.TrimSpace(block.Text))
+			}
+		}
+	}
+	return strings.Join(parts, " ")
 }

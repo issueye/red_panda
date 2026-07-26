@@ -178,6 +178,8 @@ export function App() {
     runEventsLoading,
     runEventsError,
     draft,
+    draftAttachments = [],
+    uploadingAttachments = false,
     todos = [],
     todoOpenCount = 0,
     todosExpanded = false,
@@ -207,6 +209,23 @@ export function App() {
   const setRunEventsLoading = bindRuntimeField('runEventsLoading');
   const setRunEventsError = bindRuntimeField('runEventsError');
   const setDraft = bindRuntimeField('draft');
+  const setDraftAttachments = bindRuntimeField('draftAttachments');
+
+  function handleAddFiles(files) {
+    if (!currentSessionId) return;
+    uploadAndStageFiles(currentSessionId, files);
+  }
+
+  // Attach a workspace image by path reference (no upload; the Gateway reads
+  // the file at run.start admission time, docs/51 §6.1 from-workspace).
+  function handleAttachWorkspaceImage(path) {
+    if (!path || !currentSessionId) return;
+    const ref = { path, alt: path, kind: 'workspace_path', clientKey: `ws_${Date.now()}` };
+    patchCurrentRuntime((rt) => ({
+      ...rt,
+      draftAttachments: [...(rt.draftAttachments || []), ref],
+    }));
+  }
 
   const assignments = useMemo(
     () => assignmentOrder.map((id) => assignmentsById[id]).filter(Boolean),
@@ -434,6 +453,7 @@ export function App() {
     selectSession,
     sendTask,
     cancelRun,
+    uploadAndStageFiles,
     upsertSession,
     refreshSessions,
   } = useSessionActions({
@@ -498,6 +518,7 @@ export function App() {
       canFloat={!compactLayout}
       expanded={workspacePanelExpanded}
       onExpandedChange={setWorkspacePanelExpanded}
+      onAttachImage={handleAttachWorkspaceImage}
       workspace={workspace}
     />
   );
@@ -636,6 +657,10 @@ export function App() {
           activeConversationTab={activeConversationTab}
           conversationTabs={displayedConversationTabs}
           draft={draft}
+          attachments={draftAttachments}
+          uploading={uploadingAttachments}
+          onAddFiles={handleAddFiles}
+          onAttachmentsChange={setDraftAttachments}
           messages={visibleMessages}
           onCancel={cancelRun}
           onCloseConversationTab={closeConversationTab}

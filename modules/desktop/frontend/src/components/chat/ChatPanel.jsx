@@ -22,6 +22,10 @@ export function ChatPanel({
   onSend,
   onCancel,
   onResolvePermission,
+  attachments = [],
+  onAttachmentsChange,
+  onAddFiles,
+  uploading = false,
   providerProfiles = [],
   providerProfileId = '',
   model = '',
@@ -129,6 +133,8 @@ export function ChatPanel({
         messages={scoped.messages}
         onCancel={onCancel}
         onDraftChange={onDraftChange}
+        onAttachmentsChange={onAttachmentsChange}
+        onAddFiles={onAddFiles}
         onProviderProfileChange={onProviderProfileChange}
         onReasoningEffortChange={onReasoningEffortChange}
         onResolvePermission={onResolvePermission}
@@ -143,6 +149,8 @@ export function ChatPanel({
         readOnlyHint={scoped.readOnlyHint}
         running={running}
         showComposer={scoped.showComposer}
+        attachments={attachments}
+        uploading={uploading}
         todoOpenCount={todoOpenCount}
         todos={todos}
         todosExpanded={todosExpanded}

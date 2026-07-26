@@ -19,6 +19,7 @@ type Set struct {
 	MCPServers     MCPServerConfigRepository
 	WorkerProfiles WorkerProfileRepository
 	Schedules      ScheduleRepository
+	Attachments    AttachmentRepository
 }
 
 func NewSet(db *gorm.DB) Set {
@@ -39,5 +40,6 @@ func NewSet(db *gorm.DB) Set {
 		MCPServers:     NewMCPServerConfigRepository(db),
 		WorkerProfiles: NewWorkerProfileRepository(db),
 		Schedules:      NewScheduleRepository(db),
+		Attachments:    NewAttachmentRepository(db),
 	}
 }

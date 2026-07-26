@@ -39,7 +39,14 @@ type RunService struct {
 	packer *SessionContextPacker
 	// startMu serializes admission so concurrent budget checks and slot reservation are atomic.
 	startMu *sync.Mutex
+	// attachments resolves workspace path / upload refs during run.start admission
+	// (docs/51 §6.2). Wired by Set after construction.
+	attachments *AttachmentService
 }
+
+// AttachAttachmentService wires the attachment resolver. Called by Set once
+// both services exist (avoids an init-order cycle).
+func (r *RunService) AttachAttachmentService(s *AttachmentService) { r.attachments = s }
 
 type StartRunResult struct {
 	RunID       string `json:"run_id"`
@@ -55,6 +62,7 @@ type runAdmission struct {
 	session     model.Session
 	inputText   string
 	runtimeMode string
+	attachments []resolvedAttachment // validated image refs (docs/51 §6.2)
 }
 
 type RunRecordDTO struct {

@@ -1,9 +1,11 @@
-import { Send, Square, Terminal } from 'lucide-react';
+import { ImagePlus, Send, Square, Terminal } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { listCommands } from '../../lib/commands.js';
+import { ATTACHMENT_MAX_PER_RUN } from '../../lib/attachments.js';
 import { classNames } from '../../lib/format.js';
 import { formatTokenCount } from '../../lib/tokenBudget.js';
 import { IconButton } from '../ui/button.jsx';
+import { AttachmentChipBar } from './AttachmentChipBar.jsx';
 import { CommandPalette } from './CommandPalette.jsx';
 import { ComposerModelMenu } from './ComposerModelMenu.jsx';
 
@@ -110,16 +112,26 @@ export function ChatComposer({
   tokenDisplayRatio = 0,
   tokenBudgetEnabled = false,
   tokenSoftBudget = false,
+  attachments = [],
+  onAttachmentsChange,
+  onAddFiles,
+  uploading = false,
 }) {
   const composerRef = useRef(null);
   const shellRef = useRef(null);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [dragOver, setDragOver] = useState(false);
 
   const suggestions = useMemo(() => listCommands(), []);
 
-  const canSend = value.trim().length > 0 && !running;
+  const hasAttachments = attachments.length > 0;
+  // Allow send when there's text OR at least one attachment (docs/51 §8.1).
+  const canSend = (value.trim().length > 0 || hasAttachments) && !running && !uploading;
+  const attachmentsDisabled = running || uploading || !onAddFiles;
+  const attachmentCountLabel = hasAttachments ? `${attachments.length}/${ATTACHMENT_MAX_PER_RUN}` : '';
   const shortcutHint = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')
     ? '⌘ + Enter 发送'
     : 'Ctrl + Enter 发送';
@@ -204,10 +216,72 @@ export function ChatComposer({
     onChange?.(event.target.value);
   }
 
+  // Collect image files from a paste / drop / picker event. Returns [] if none
+  // or attachments are disabled (docs/51 §8.1).
+  function collectImageFiles(items) {
+    if (attachmentsDisabled) return [];
+    const files = [];
+    items.forEach((item) => {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    });
+    return files;
+  }
+
+  function handlePaste(event) {
+    if (!event.clipboardData) return;
+    const files = collectImageFiles(Array.from(event.clipboardData.items));
+    if (files.length) {
+      event.preventDefault();
+      onAddFiles?.(files);
+    }
+  }
+
+  function handleDrop(event) {
+    if (!event.dataTransfer) return;
+    const files = collectImageFiles(Array.from(event.dataTransfer.items));
+    setDragOver(false);
+    if (files.length) {
+      event.preventDefault();
+      onAddFiles?.(files);
+    }
+  }
+
+  function handleDragOver(event) {
+    if (attachmentsDisabled) return;
+    if (!Array.from(event.dataTransfer?.items || []).some((i) => i.kind === 'file' && i.type.startsWith('image/'))) {
+      return;
+    }
+    event.preventDefault();
+    setDragOver(true);
+  }
+
+  function handleDragLeave(event) {
+    if (!composerRef.current?.contains(event.relatedTarget)) {
+      setDragOver(false);
+    }
+  }
+
+  function pickFiles() {
+    if (attachmentsDisabled || attachments.length >= ATTACHMENT_MAX_PER_RUN) return;
+    fileInputRef.current?.click();
+  }
+
+  function handleFileInputChange(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length) onAddFiles?.(files);
+  }
+
   return (
     <form
       aria-label="任务输入"
-      className={classNames('chat-composer', running && 'is-running', paletteOpen && 'has-command-panel')}
+      className={classNames('chat-composer', running && 'is-running', paletteOpen && 'has-command-panel', dragOver && 'is-drag-over')}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
       onSubmit={submit}
       ref={composerRef}
     >
@@ -220,6 +294,25 @@ export function ChatComposer({
           onSelect={applyCommand}
           visible={paletteOpen}
         />
+        <input
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          aria-label="选择图片附件"
+          data-testid="chat-composer-attachment-input"
+          multiple
+          onChange={handleFileInputChange}
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+          type="file"
+        />
+        {hasAttachments || uploading ? (
+          <AttachmentChipBar
+            attachments={attachments}
+            disabled={attachmentsDisabled}
+            onChange={onAttachmentsChange}
+            onAddFiles={onAddFiles}
+            uploading={uploading}
+          />
+        ) : null}
         <textarea
           aria-autocomplete={paletteOpen ? 'list' : undefined}
           aria-controls={paletteOpen ? 'composer-command-panel' : undefined}
@@ -228,6 +321,7 @@ export function ChatComposer({
           data-testid="chat-composer-input"
           onChange={handleChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={running ? '运行中，可继续编辑下一条任务…' : '描述任务…'}
           ref={textareaRef}
           rows={1}
@@ -247,6 +341,17 @@ export function ChatComposer({
               variant={paletteOpen ? 'soft' : 'ghost'}
             >
               <Terminal size={15} />
+            </IconButton>
+            <IconButton
+              className="composer-attachment-trigger"
+              data-testid="composer-attachment-trigger"
+              disabled={attachmentsDisabled || attachments.length >= ATTACHMENT_MAX_PER_RUN}
+              label={attachmentCountLabel ? `图片 ${attachmentCountLabel}` : '添加图片'}
+              onClick={pickFiles}
+              type="button"
+              variant="ghost"
+            >
+              <ImagePlus size={15} />
             </IconButton>
             <ComposerModelMenu
               disabled={running}

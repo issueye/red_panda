@@ -57,6 +57,11 @@ func (p EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit fu
 	if text == "" {
 		text = "ok"
 	}
+	// Multimodal receipt (docs/51 / docs/52 Slice C): acknowledge images
+	// without pretending to OCR.
+	if receipt := echoAttachmentReceipt(req); receipt != "" {
+		text = text + "\n" + receipt
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -67,6 +72,59 @@ func (p EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit fu
 	}
 	time.Sleep(30 * time.Millisecond)
 	return emit(ProviderChunk{Final: true})
+}
+
+// echoAttachmentReceipt builds a human-readable summary of image attachments
+// so automated tests can assert vision delivery without a real VL model.
+func echoAttachmentReceipt(req ProviderRequest) string {
+	items := append([]RequestAttachment(nil), req.Attachments...)
+	if len(items) == 0 {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role != "user" {
+				continue
+			}
+			parts, ok := req.Messages[i].Content.([]Part)
+			if !ok {
+				break
+			}
+			for _, p := range parts {
+				switch {
+				case p.ImageURL != nil || p.Type == "image_url" || p.Type == "input_image":
+					items = append(items, RequestAttachment{MIME: "image/*"})
+				case p.Source != nil || p.Type == "image":
+					mime := "image/*"
+					if p.Source != nil && p.Source.MediaType != "" {
+						mime = p.Source.MediaType
+					}
+					items = append(items, RequestAttachment{MIME: mime})
+				}
+			}
+			break
+		}
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	descs := make([]string, 0, len(items))
+	for _, att := range items {
+		id := strings.TrimSpace(att.ID)
+		if id == "" {
+			id = strings.TrimSpace(att.Path)
+		}
+		if id == "" {
+			id = "att_?"
+		}
+		mime := strings.TrimSpace(att.MIME)
+		if mime == "" {
+			mime = "image/*"
+		}
+		if att.ByteSize > 0 {
+			descs = append(descs, fmt.Sprintf("%s (%s, %d bytes)", id, mime, att.ByteSize))
+		} else {
+			descs = append(descs, fmt.Sprintf("%s (%s)", id, mime))
+		}
+	}
+	return fmt.Sprintf("Received %d image(s): %s", len(items), strings.Join(descs, "; "))
 }
 
 func echoToolCalls(req ProviderRequest) []tools.Call {

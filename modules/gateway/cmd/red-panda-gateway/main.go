@@ -18,6 +18,7 @@ func main() {
 		Version:           version,
 		AgentCommand:      os.Getenv("RED_PANDA_AGENT_COMMAND"),
 		SessionArchiveDir: os.Getenv("RED_PANDA_SESSION_ARCHIVE_DIR"),
+		AttachmentsDir:    os.Getenv("RED_PANDA_ATTACHMENTS_DIR"),
 	}
 	if err := app.Run(context.Background(), cfg); err != nil {
 		log.Fatal(err)

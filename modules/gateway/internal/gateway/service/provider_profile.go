@@ -26,6 +26,7 @@ type ProviderProfileDTO struct {
 	IsDefault    bool               `json:"is_default"`
 	Stream       bool               `json:"stream"`
 	Active       bool               `json:"active"`
+	SupportsVision bool             `json:"supports_vision"`
 	CreatedAt    time.Time          `json:"created_at"`
 	UpdatedAt    time.Time          `json:"updated_at"`
 }
@@ -54,6 +55,7 @@ type ProviderProfileCreate struct {
 	APIKey    string
 	IsDefault bool
 	Stream    *bool
+	SupportsVision *bool
 }
 
 type ProviderProfileUpdate struct {
@@ -67,6 +69,7 @@ type ProviderProfileUpdate struct {
 	IsDefault *bool
 	Stream    *bool
 	Active    *bool
+	SupportsVision *bool
 }
 
 func NewProviderProfileService(repos repository.Set) ProviderProfileService {
@@ -90,16 +93,21 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 	if input.Stream != nil {
 		stream = *input.Stream
 	}
+	supportsVision := false
+	if input.SupportsVision != nil {
+		supportsVision = *input.SupportsVision
+	}
 	row, err := s.repos.Providers.Create(model.ProviderProfile{
-		Name:         strings.TrimSpace(input.Name),
-		Provider:     profile,
-		BaseURL:      strings.TrimRight(baseURL, "/"),
-		Model:        defaultModel,
-		MaxTokens:    maxTokens,
-		Models:       models,
-		APIKeySecret: input.APIKey,
-		IsDefault:    input.IsDefault,
-		Stream:       stream,
+		Name:           strings.TrimSpace(input.Name),
+		Provider:       profile,
+		BaseURL:        strings.TrimRight(baseURL, "/"),
+		Model:          defaultModel,
+		MaxTokens:      maxTokens,
+		Models:         models,
+		APIKeySecret:   input.APIKey,
+		IsDefault:      input.IsDefault,
+		Stream:         stream,
+		SupportsVision: supportsVision,
 	})
 	if err != nil {
 		return ProviderProfileDTO{}, err
@@ -113,17 +121,18 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 		return ProviderProfileDTO{}, err
 	}
 	next := model.ProviderProfile{
-		ID:           id,
-		Name:         current.Name,
-		Provider:     current.Provider,
-		BaseURL:      current.BaseURL,
-		Model:        current.Model,
-		MaxTokens:    current.MaxTokens,
-		Models:       current.Models,
-		APIKeySecret: current.APIKeySecret,
-		IsDefault:    current.IsDefault,
-		Stream:       current.Stream,
-		Active:       current.Active,
+		ID:             id,
+		Name:           current.Name,
+		Provider:       current.Provider,
+		BaseURL:        current.BaseURL,
+		Model:          current.Model,
+		MaxTokens:      current.MaxTokens,
+		Models:         current.Models,
+		APIKeySecret:   current.APIKeySecret,
+		IsDefault:      current.IsDefault,
+		Stream:         current.Stream,
+		Active:         current.Active,
+		SupportsVision: current.SupportsVision,
 	}
 	if input.Name != nil {
 		next.Name = strings.TrimSpace(*input.Name)
@@ -176,6 +185,9 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 	}
 	if input.Stream != nil {
 		next.Stream = *input.Stream
+	}
+	if input.SupportsVision != nil {
+		next.SupportsVision = *input.SupportsVision
 	}
 	if input.Active != nil {
 		next.Active = *input.Active
@@ -248,6 +260,7 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		IsDefault:    row.IsDefault,
 		Stream:       row.Stream,
 		Active:       row.Active,
+		SupportsVision: row.SupportsVision,
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,
 	}

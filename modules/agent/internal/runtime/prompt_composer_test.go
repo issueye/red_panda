@@ -56,8 +56,9 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 		t.Fatalf("messages = %#v", request.Messages)
 	}
 	for i, want := range wantContents {
-		if request.Messages[i].Content != want {
-			t.Fatalf("messages[%d].Content = %q, want %q", i, request.Messages[i].Content, want)
+		got := provider.MessageText(request.Messages[i].Content)
+		if got != want {
+			t.Fatalf("messages[%d].Content = %q, want %q", i, got, want)
 		}
 	}
 	if got := []string{request.Messages[8].Role, request.Messages[9].Role, request.Messages[10].Role}; !reflect.DeepEqual(got, []string{"user", "assistant", "user"}) {
@@ -72,7 +73,8 @@ func TestPromptComposerAddsFileChangeReportPolicyOnlyToRoot(t *testing.T) {
 	composer := promptComposer{now: time.Now}
 	definitions := []tools.Definition{{Name: "git.status"}, {Name: "workspace.write_file"}}
 	root := composer.compose(methods.ReplyParams{}, "edit", definitions, nil)
-	if !strings.Contains(root.Messages[1].Content, "变更文件") || !strings.Contains(root.Messages[1].Content, "Markdown link") {
+	rootPolicy := provider.MessageText(root.Messages[1].Content)
+	if !strings.Contains(rootPolicy, "变更文件") || !strings.Contains(rootPolicy, "Markdown link") {
 		t.Fatalf("root file report policy missing: %#v", root.Messages)
 	}
 
@@ -80,7 +82,7 @@ func TestPromptComposerAddsFileChangeReportPolicyOnlyToRoot(t *testing.T) {
 		SpecialistContext: &methods.SpecialistContext{Context: "specialist"},
 	}}, "edit", definitions, nil)
 	for _, message := range specialist.Messages {
-		if strings.Contains(message.Content, "变更文件") {
+		if strings.Contains(provider.MessageText(message.Content), "变更文件") {
 			t.Fatalf("specialist received root report policy: %#v", specialist.Messages)
 		}
 	}
@@ -94,5 +96,98 @@ func TestFormatUTCOffset(t *testing.T) {
 		if got := formatUTCOffset(tt.seconds); got != tt.want {
 			t.Fatalf("formatUTCOffset(%d) = %q, want %q", tt.seconds, got, tt.want)
 		}
+	}
+}
+
+func TestPromptComposerMultimodalAttachments(t *testing.T) {
+	composer := promptComposer{now: time.Now}
+	params := methods.ReplyParams{
+		RunID: "run_img",
+		Session: methods.ReplySession{ID: "session_img", Conversation: []methods.Message{
+			{Role: "user", Content: []methods.ContentBlock{
+				{Type: "text", Text: "older"},
+				{Type: "image_ref", AttachmentID: "att_old", MIME: "image/png", Alt: "old.png", Width: 10, Height: 10},
+			}},
+			{Role: "assistant", Content: []methods.ContentBlock{{Type: "text", Text: "saw it"}}},
+		}},
+		Input: methods.ReplyInput{
+			Text: "what color?",
+			Attachments: []methods.InputAttachment{{
+				AttachmentID: "att_new",
+				MIME:         "image/png",
+				DataB64:      "QQ==",
+				ByteSize:     1,
+			}},
+		},
+	}
+	request := composer.compose(params, "what color?", nil, nil)
+	if len(request.Attachments) != 1 || request.Attachments[0].ID != "att_new" {
+		t.Fatalf("Attachments = %#v", request.Attachments)
+	}
+	// Last message is the current user turn with multimodal parts.
+	last := request.Messages[len(request.Messages)-1]
+	parts, ok := last.Content.([]provider.Part)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("current user content = %#v", last.Content)
+	}
+	if parts[0].Type != "text" || parts[0].Text != "what color?" {
+		t.Fatalf("text part = %#v", parts[0])
+	}
+	if parts[1].ImageURL == nil || !strings.Contains(parts[1].ImageURL.URL, "base64,QQ==") {
+		t.Fatalf("image part = %#v", parts[1])
+	}
+	// History image_ref without inline bytes becomes a text placeholder.
+	var historyUser provider.Message
+	foundHistory := false
+	for _, m := range request.Messages {
+		if m.Role != "user" {
+			continue
+		}
+		// Skip the trailing current-turn message.
+		if &m == &request.Messages[len(request.Messages)-1] || m.Content == nil {
+			// fall through to identity by text placeholder presence
+		}
+		parts, ok := m.Content.([]provider.Part)
+		if !ok {
+			continue
+		}
+		hasPlaceholder := false
+		for _, p := range parts {
+			if strings.Contains(p.Text, "[image:") {
+				hasPlaceholder = true
+				break
+			}
+		}
+		if hasPlaceholder {
+			historyUser = m
+			foundHistory = true
+			break
+		}
+	}
+	if !foundHistory {
+		t.Fatalf("history user with image placeholder not found: %#v", request.Messages)
+	}
+	hParts, ok := historyUser.Content.([]provider.Part)
+	if !ok {
+		t.Fatalf("history user content should be []Part, got %#v", historyUser.Content)
+	}
+	foundPlaceholder := false
+	for _, p := range hParts {
+		if strings.Contains(p.Text, "[image:") {
+			foundPlaceholder = true
+		}
+	}
+	if !foundPlaceholder {
+		t.Fatalf("expected image placeholder in history, got %#v", hParts)
+	}
+}
+
+func TestConversationMessageTextKeepsImagePlaceholder(t *testing.T) {
+	got := conversationMessageText(methods.Message{Content: []methods.ContentBlock{
+		{Type: "text", Text: "see"},
+		{Type: "image_ref", AttachmentID: "att_1", Alt: "shot.png"},
+	}})
+	if got != "see\n[image: shot.png]" {
+		t.Fatalf("got %q", got)
 	}
 }
