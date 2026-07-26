@@ -20,6 +20,8 @@ export const defaultRunSettings = {
   workerPoolSize: 8,
   // When true, Agent Runtime writes each LLM request payload to local diagnostic logs.
   logLlmRequests: false,
+  // When true, plain Enter sends the composer message; Shift+Enter inserts a newline.
+  enterToSend: true,
 };
 
 export function normalizeStoredRunSettings(settings) {
@@ -35,6 +37,7 @@ export function normalizeStoredRunSettings(settings) {
   }
   // Clamp worker pool size to valid range (0 = use default, 1-8 otherwise)
   current.workerPoolSize = clampWorkerPoolSize(current.workerPoolSize);
+  current.enterToSend = current.enterToSend !== false;
   return current;
 }
 

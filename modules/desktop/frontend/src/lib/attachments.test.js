@@ -6,6 +6,7 @@ import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_PER_RUN,
   attachmentImageUrl,
+  formatAttachmentRunError,
   formatBytes,
   toRunStartAttachment,
   validateImageFile,
@@ -44,6 +45,15 @@ test('attachmentImageUrl prefixes the gateway base for relative urls', () => {
   assert.equal(attachmentImageUrl({ url: '/api/v1/attachments/att_1' }), `${gatewayBase}/api/v1/attachments/att_1`);
   assert.equal(attachmentImageUrl({ url: 'https://cdn.test/x.png' }), 'https://cdn.test/x.png');
   assert.equal(attachmentImageUrl({}), '');
+  // Optimistic local bubbles may only carry id / attachment_id.
+  assert.equal(attachmentImageUrl({ id: 'att_2' }), `${gatewayBase}/api/v1/attachments/att_2`);
+  assert.equal(attachmentImageUrl({ attachment_id: 'att_3' }), `${gatewayBase}/api/v1/attachments/att_3`);
+});
+
+test('formatAttachmentRunError localizes vision gate failures', () => {
+  const text = formatAttachmentRunError('provider profile does not support image input (vision_not_supported)');
+  assert.match(text, /支持视觉/);
+  assert.equal(formatAttachmentRunError('other error'), 'other error');
 });
 
 test('formatBytes renders human-readable sizes', () => {

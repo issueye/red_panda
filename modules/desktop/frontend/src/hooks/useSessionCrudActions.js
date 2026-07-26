@@ -63,7 +63,9 @@ export function useSessionCrudActions({
     }
     setCurrentSessionId(id);
     if (target?.workspaceRoot) {
-      openWorkspaceRoot(target.workspaceRoot).catch(() => {});
+      // Sync file-browser workspace without promoting recent list / reshuffling
+      // the sidebar tree when the user is only switching sessions.
+      openWorkspaceRoot(target.workspaceRoot, { promoteRecent: false }).catch(() => {});
     }
     const existing = sessionRuntimes[id];
     if (!existing?.hydrated || (!existing.running && (existing.messages || []).length === 0)) {

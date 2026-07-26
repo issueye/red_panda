@@ -702,6 +702,7 @@ export function App() {
           tokenSoftBudget={contextTokenBudget.softBudget}
           tokenUsed={contextTokenBudget.used}
           tools={tools}
+          enterToSend={runSettings.enterToSend !== false}
           workspaceRoot={currentWorkspaceRoot()}
         />
         <div

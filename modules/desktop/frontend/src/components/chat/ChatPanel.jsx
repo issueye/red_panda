@@ -49,6 +49,7 @@ export function ChatPanel({
   tokenBudgetEnabled = false,
   tokenSoftBudget = false,
   workspaceRoot = '',
+  enterToSend = true,
 }) {
   const activeTab = conversationTabs.find((tab) => tab.id === activeConversationTab)
     || conversationTabs[0]
@@ -130,6 +131,7 @@ export function ChatPanel({
       <ConversationView
         draft={draft}
         emptyTitle={scoped.emptyTitle}
+        enterToSend={enterToSend}
         messages={scoped.messages}
         onCancel={onCancel}
         onDraftChange={onDraftChange}

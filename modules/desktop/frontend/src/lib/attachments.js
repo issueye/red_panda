@@ -74,13 +74,36 @@ export function toRunStartAttachment(attachment) {
  * Resolve an attachment into an authenticated-ish URL for <img src>. Desktop
  * runs the gateway without a token locally, so the bare URL works. Absolute
  * attachment.url values from the gateway are relative paths; prefix the base.
+ * Optimistic local messages may only carry {attachment_id}; synthesize the
+ * URL from id so thumbs still render before history rehydrate.
  * @param {object} attachment
  */
 export function attachmentImageUrl(attachment) {
-  const url = attachment?.url;
-  if (!url) return '';
-  if (/^https?:/i.test(url)) return url;
-  return `${gatewayBase}${url}`;
+  const raw = attachment?.url
+    || (attachment?.id ? `/api/v1/attachments/${attachment.id}` : '')
+    || (attachment?.attachment_id ? `/api/v1/attachments/${attachment.attachment_id}` : '');
+  if (!raw) return '';
+  if (/^https?:/i.test(raw)) return raw;
+  return `${gatewayBase}${raw}`;
+}
+
+/**
+ * Map gateway/runtime attachment errors into short Chinese copy for the chat
+ * system bubble. Falls back to the original message when no mapping matches.
+ * @param {string} message
+ */
+export function formatAttachmentRunError(message) {
+  const text = String(message || '');
+  if (/vision_not_supported|does not support image input/i.test(text)) {
+    return '当前供应商未开启「支持视觉」。请到 设置 → 供应商 勾选「支持视觉」后重试（需模型本身支持图片输入）。';
+  }
+  if (/attachment exceeds|image too large|quota exceeded/i.test(text)) {
+    return '图片过大或会话附件配额已满，请缩小图片后重试。';
+  }
+  if (/not a supported image|unsupported image/i.test(text)) {
+    return '不支持的图片格式，仅支持 PNG / JPEG / WebP / GIF。';
+  }
+  return text;
 }
 
 /**

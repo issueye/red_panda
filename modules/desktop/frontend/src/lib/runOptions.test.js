@@ -119,3 +119,11 @@ test('buildRunStartOptions passes max concurrent runs', () => {
   }, { root: 'D:/ws' }, 'parallel sessions');
   assert.equal(options.max_concurrent_runs, 5);
 });
+
+test('enterToSend defaults to true and normalizes missing values', () => {
+  assert.equal(defaultRunSettings.enterToSend, true);
+  assert.equal(normalizeStoredRunSettings({}).enterToSend, true);
+  assert.equal(normalizeStoredRunSettings({ enterToSend: false }).enterToSend, false);
+  assert.equal(normalizeStoredRunSettings({ enterToSend: true }).enterToSend, true);
+});
+

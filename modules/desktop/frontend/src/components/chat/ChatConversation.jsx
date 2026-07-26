@@ -17,6 +17,7 @@ import { Button } from '../ui/button.jsx';
 import { EmptyState } from '../ui/feedback.jsx';
 import { Markdown } from '../ui/Markdown.jsx';
 import { RunningPanda } from '../ui/RunningPanda.jsx';
+import mark from '../../assets/red-panda-mark.svg';
 import { AttachmentThumbs } from './AttachmentThumbs.jsx';
 
 function displayMessageAgent(message) {
@@ -138,7 +139,9 @@ export function ChatConversation({
         ref={viewportRef}
       >
         {timeline.length === 0 ? (
-          <EmptyState className="empty-conversation" title={emptyTitle} />
+          <EmptyState className="empty-conversation" title={emptyTitle}>
+            <img alt="" className="empty-conversation-logo" draggable={false} src={mark} />
+          </EmptyState>
         ) : null}
 
         {timeline.map((item) => {

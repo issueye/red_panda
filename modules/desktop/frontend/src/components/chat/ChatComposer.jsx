@@ -116,6 +116,7 @@ export function ChatComposer({
   onAttachmentsChange,
   onAddFiles,
   uploading = false,
+  enterToSend = true,
 }) {
   const composerRef = useRef(null);
   const shellRef = useRef(null);
@@ -132,9 +133,12 @@ export function ChatComposer({
   const canSend = (value.trim().length > 0 || hasAttachments) && !running && !uploading;
   const attachmentsDisabled = running || uploading || !onAddFiles;
   const attachmentCountLabel = hasAttachments ? `${attachments.length}/${ATTACHMENT_MAX_PER_RUN}` : '';
-  const shortcutHint = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')
-    ? '⌘ + Enter 发送'
-    : 'Ctrl + Enter 发送';
+  const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')
+    ? '⌘'
+    : 'Ctrl';
+  const shortcutHint = enterToSend
+    ? 'Enter 发送 · Shift + Enter 换行'
+    : `Enter 换行 · ${modKey} + Enter 发送`;
 
   useEffect(() => {
     resizeComposer(textareaRef.current);
@@ -206,7 +210,25 @@ export function ChatComposer({
       }
     }
 
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    if (event.key !== 'Enter') {
+      return;
+    }
+
+    // IME composition: don't send/newline while composing CJK text.
+    if (event.isComposing || event.keyCode === 229) {
+      return;
+    }
+
+    if (enterToSend) {
+      if (event.shiftKey) {
+        return; // allow newline
+      }
+      event.preventDefault();
+      submit();
+      return;
+    }
+
+    if (event.ctrlKey || event.metaKey) {
       event.preventDefault();
       submit();
     }
@@ -366,8 +388,8 @@ export function ChatComposer({
               {paletteOpen
                 ? '指令模式 · ↑↓ 选择 · Tab 填入'
                 : running
-                  ? '运行中 · Enter 换行'
-                  : `Enter 换行 · ${shortcutHint}`}
+                  ? (enterToSend ? '运行中 · Shift + Enter 换行' : '运行中 · Enter 换行')
+                  : shortcutHint}
             </span>
           </div>
           <div className="composer-actions">

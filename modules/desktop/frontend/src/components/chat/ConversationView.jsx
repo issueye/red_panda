@@ -44,6 +44,7 @@ export function ConversationView({
   tokenBudgetEnabled = false,
   tokenSoftBudget = false,
   workspaceRoot = '',
+  enterToSend = true,
 }) {
   return (
     <section className={classNames('conversation-view', className)}>
@@ -70,6 +71,7 @@ export function ConversationView({
           </div>
           <ChatComposer
             attachments={attachments}
+            enterToSend={enterToSend}
             onCancel={onCancel}
             onChange={onDraftChange}
             onAttachmentsChange={onAttachmentsChange}

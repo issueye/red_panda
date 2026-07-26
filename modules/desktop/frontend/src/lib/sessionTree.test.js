@@ -34,3 +34,21 @@ test('buildWorkspaceSessionTree groups sessions under workspace nodes', () => {
   assert.equal(tree.find((item) => item.name === 'Beta')?.sessions[0].id, 's3');
   assert.equal(tree.find((item) => !item.root)?.sessions[0].id, 's4');
 });
+
+test('buildWorkspaceSessionTree keeps recent order even when current workspace is later', () => {
+  const tree = buildWorkspaceSessionTree(
+    [
+      { id: 's1', title: 'A', workspaceRoot: 'E:/ws/alpha' },
+      { id: 's2', title: 'B', workspaceRoot: 'E:/ws/beta' },
+    ],
+    [
+      { id: 'ws1', root: 'E:/ws/alpha', name: 'Alpha' },
+      { id: 'ws2', root: 'E:/ws/beta', name: 'Beta' },
+    ],
+    { id: 'ws2', root: 'E:/ws/beta', name: 'Beta' },
+  );
+
+  assert.equal(tree.map((node) => node.name).join(','), 'Alpha,Beta');
+  assert.equal(tree[0].isCurrent, false);
+  assert.equal(tree[1].isCurrent, true);
+});

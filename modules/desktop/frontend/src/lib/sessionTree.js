@@ -84,10 +84,24 @@ export function buildWorkspaceSessionTree(sessions, workspaces = [], currentWork
     (node) => node.sessions.length > 0 || node.root || node.isCurrent,
   );
 
+  // Preserve the caller's workspace list order (recent list). Never pin the
+  // active/current workspace to the top — selecting a session must not reshuffle
+  // the sidebar tree (isCurrent is still used for styling only).
+  const orderIndex = new Map();
+  workspaces.forEach((workspace, index) => {
+    const root = workspace.root_path || workspace.root || workspace.rootPath || '';
+    const key = normalizeWorkspaceRoot(root);
+    if (key && !orderIndex.has(key)) {
+      orderIndex.set(key, index);
+    }
+  });
+
   ordered.sort((a, b) => {
-    if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
     if (!a.root && b.root) return 1;
     if (a.root && !b.root) return -1;
+    const ai = orderIndex.has(a.key) ? orderIndex.get(a.key) : Number.MAX_SAFE_INTEGER;
+    const bi = orderIndex.has(b.key) ? orderIndex.get(b.key) : Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
     return a.name.localeCompare(b.name, 'zh-CN');
   });
 

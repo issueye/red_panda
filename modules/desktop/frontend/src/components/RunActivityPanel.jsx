@@ -1,4 +1,4 @@
-import { Activity, Braces, CheckCircle2, ChevronDown, ChevronRight, Clock3, KeyRound, Loader2, Search, ShieldAlert, Wrench, XCircle } from 'lucide-react';
+import { Braces, CheckCircle2, ChevronDown, ChevronRight, Clock3, KeyRound, Loader2, Search, ShieldAlert, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   displayRisk,
@@ -13,15 +13,11 @@ import {
   getRunEventTimelineMeta,
   groupRunEventsByKind,
 } from '../lib/activityEvents.js';
-import {
-  buildToolCallIndexMap,
-  compareToolCallOrder,
-} from '../lib/conversationTimeline.js';
+import { compareToolCallOrder } from '../lib/conversationTimeline.js';
 import { formatSeq } from '../lib/format.js';
 import { StatusBadge } from './ui/badge.jsx';
 import { Button } from './ui/button.jsx';
 import { ErrorMessage, InlineEmpty } from './ui/feedback.jsx';
-import { PanelHeader } from './ui/panel.jsx';
 import { SelectMenu } from './ui/select.jsx';
 
 function statusIcon(status) {
@@ -82,11 +78,6 @@ export function RunActivityPanel({
   const [eventScopeFilter, setEventScopeFilter] = useState('all');
   const [expandedPayloads, setExpandedPayloads] = useState({});
   const [expandedRunId, setExpandedRunId] = useState(currentRunId || '');
-  const toolIndexById = useMemo(() => buildToolCallIndexMap(safeTools), [safeTools]);
-  const orderedTools = useMemo(
-    () => [...safeTools].sort(compareToolCallOrder),
-    [safeTools],
-  );
   const filteredRuns = useMemo(() => (
     safeRuns.filter((run) => runStatusMatches(run, statusFilter) && matchesQuery(run, query))
   ), [query, safeRuns, statusFilter]);
@@ -342,40 +333,6 @@ export function RunActivityPanel({
                     </div>
                   </div>
                 ) : null}
-              </article>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="activity-section" style={{ height: '40%' }}>
-        <div className="activity-section-title">
-          <Wrench size={14} />
-          <span>工具调用</span>
-          {safeTools.length > 0 ? (
-            <em data-testid="activity-tool-count">{safeTools.length}</em>
-          ) : null}
-        </div>
-        <div className="activity-list compact">
-          {orderedTools.length === 0 ? (
-            <InlineEmpty className="activity-empty">暂无工具调用。</InlineEmpty>
-          ) : orderedTools.slice(0, 8).map((tool) => {
-            const callIndex = toolIndexById.get(String(tool.id));
-            return (
-              <article className="activity-line" key={tool.id}>
-                <div>
-                  <strong>
-                    {callIndex ? (
-                      <span className="tool-call-index" data-testid="tool-call-index">
-                        {callIndex}/{safeTools.length}
-                      </span>
-                    ) : null}
-                    {' '}
-                    {tool.displayName || tool.name}
-                  </strong>
-                  <span>{tool.name} - {displayRisk(tool.risk || 'low')}风险</span>
-                </div>
-                <StatusBadge className={`activity-badge activity-badge-${tool.status || 'running'}`} status={tool.status || 'running'} />
               </article>
             );
           })}

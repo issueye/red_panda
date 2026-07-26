@@ -5,6 +5,7 @@ import {
   TOOL_POLICIES,
   PERMISSION_MODES,
   WEB_SEARCH_PROVIDERS,
+  SettingCheck,
   SettingSelect,
   SettingTextInput,
 } from './shared.jsx';
@@ -40,6 +41,18 @@ export function OtherTab({
                 tooltip="可选覆盖本轮使用的模型名。留空则使用所选供应商配置中的模型。"
               />
             </div>
+          </section>
+          <section className="settings-section">
+            <h3>输入</h3>
+            <SettingCheck
+              checked={settings?.enterToSend !== false}
+              label="Enter 直接发送"
+              onChange={(next) => updateSetting('enterToSend', next)}
+              tooltip={
+                '开启后：Enter 发送任务，Shift + Enter 换行。\n'
+                + '关闭后：Enter 换行，Ctrl / ⌘ + Enter 发送（旧行为）。'
+              }
+            />
           </section>
           <section className="settings-section">
             <h3>工具与授权</h3>

@@ -169,8 +169,13 @@ export function useSessionBootstrap({
     }
   }, [loadGlobalPendingPermissions, patchRuntime]);
 
-  const openWorkspaceRoot = useCallback(async (root) => {
+  // openWorkspaceRoot loads a workspace as the active file-browser context.
+  // options.promoteRecent (default true): move it to the front of recentWorkspaces.
+  // Session selection passes promoteRecent:false so switching chats does not
+  // reshuffle the sidebar workspace tree.
+  const openWorkspaceRoot = useCallback(async (root, options = {}) => {
     if (!root) return null;
+    const promoteRecent = options.promoteRecent !== false;
     const currentRoot = workspace?.root_path || workspace?.root || '';
     if (currentRoot && currentRoot.replace(/\\/g, '/').toLowerCase() === root.replace(/\\/g, '/').toLowerCase()) {
       return workspace;
@@ -182,8 +187,20 @@ export function useSessionBootstrap({
     const normalized = normalizeWorkspace(opened);
     setWorkspace(normalized);
     setRecentWorkspaces((items) => {
-      const next = [normalized, ...items.filter((item) => item.id !== normalized.id && item.root !== normalized.root)];
-      return next.slice(0, 20);
+      const normRoot = (item) => (item?.root_path || item?.root || '').replace(/\\/g, '/').toLowerCase();
+      const targetRoot = normRoot(normalized);
+      const same = (item) => (
+        (normalized.id && item.id === normalized.id)
+        || (targetRoot && normRoot(item) === targetRoot)
+      );
+      if (promoteRecent) {
+        return [normalized, ...items.filter((item) => !same(item))].slice(0, 20);
+      }
+      if (items.some(same)) {
+        return items.map((item) => (same(item) ? normalized : item));
+      }
+      // First time this workspace appears: append so existing order stays stable.
+      return [...items, normalized].slice(0, 20);
     });
     if (typeof loadSkills === 'function') {
       loadSkills(normalized?.root_path || normalized?.root || '');

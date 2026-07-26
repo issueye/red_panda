@@ -4,6 +4,7 @@ import { appendDiagnosticLog } from '../lib/diagnosticLog.js';
 import { buildRunStartOptions } from '../lib/runOptions.js';
 import {
   ATTACHMENT_MAX_PER_RUN,
+  formatAttachmentRunError,
   toRunStartAttachment,
   uploadAttachment,
   validateImageFile,
@@ -25,6 +26,7 @@ export function useSessionRunActions({
   runSettings,
   request,
   setRightPanelTab,
+  providerProfiles = [],
 }) {
   const handleLocalCommand = useCallback((sessionId, text, command) => {
     patchRuntime(sessionId, (runtime) => ({
@@ -74,11 +76,32 @@ export function useSessionRunActions({
 
     // Only attachment references that resolved to an id/path may be sent. Error
     // chips are dropped (and should already have been removed by the user).
-    const wireAttachments = attachments
+    const displayAttachments = attachments.filter((item) => item && (item.id || item.path) && !item.error);
+    const wireAttachments = displayAttachments
       .map(toRunStartAttachment)
       .filter(Boolean);
 
-    patchRuntime(sessionId, (runtime) => beginRunProjection(runtime, displayText, wireAttachments));
+    // Client-side vision gate (docs/51 §6.5): fail fast with a localized message
+    // before optimistically projecting the user bubble / calling run.start.
+    if (wireAttachments.length) {
+      const profileId = runSettings?.providerProfileId;
+      const profile = providerProfiles.find((item) => item.id === profileId)
+        || providerProfiles.find((item) => item.isDefault && item.active !== false)
+        || providerProfiles.find((item) => item.active !== false)
+        || null;
+      if (profile && !profile.supportsVision) {
+        const message = formatAttachmentRunError('provider profile does not support image input (vision_not_supported)');
+        patchRuntime(sessionId, (runtime) => ({
+          ...appendMessages(runtime, createSystemMessage('gateway_error', `启动运行失败：${message}`)),
+          running: false,
+        }));
+        return;
+      }
+    }
+
+    // Keep full AttachmentDTO on the optimistic user bubble so thumbs can load
+    // via /attachments/:id even before history rehydrate (wire only carries refs).
+    patchRuntime(sessionId, (runtime) => beginRunProjection(runtime, displayText, displayAttachments));
     loadSkills?.().catch(() => {});
 
     try {
@@ -128,21 +151,24 @@ export function useSessionRunActions({
       }
       setRightPanelTab?.('activity');
     } catch (error) {
-      appendDiagnosticLog('error', `启动运行失败：${error.message}`, {
+      const friendly = formatAttachmentRunError(error.message);
+      appendDiagnosticLog('error', `启动运行失败：${friendly}`, {
         source: 'run',
-        detail: { sessionId },
+        detail: { sessionId, raw: error.message },
       });
       patchRuntime(sessionId, (runtime) => ({
         ...appendMessages(
           runtime,
-          createSystemMessage('gateway_error', `启动运行失败：${error.message}`),
+          createSystemMessage('gateway_error', `启动运行失败：${friendly}`),
         ),
         // Keep attachments so the user can retry after a vision/size failure.
+        // beginRunProjection already cleared draftAttachments — restore them.
+        draftAttachments: displayAttachments,
         running: false,
         currentRunId: '',
       }));
     }
-  }, [loadSkills, patchRuntime, request, runSettings, setRightPanelTab, workspace]);
+  }, [loadSkills, patchRuntime, providerProfiles, request, runSettings, setRightPanelTab, workspace]);
 
   const sendTask = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
