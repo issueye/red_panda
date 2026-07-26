@@ -13,10 +13,7 @@ func TestResolveStateToolDomain(t *testing.T) {
 		{domain: "", tool: "memory.list", want: StateToolDomainMemory},
 		{domain: "", tool: "todo.write", want: StateToolDomainTodo},
 		{domain: "", tool: "todo_write", wantErr: true}, // removed alias
-		{domain: "", tool: "goal.assess", want: StateToolDomainGoal},
-		{domain: "", tool: "goal.segment_budget", want: StateToolDomainGoal},
 		{domain: "", tool: "segment_end", wantErr: true}, // removed internal name
-		{domain: "", tool: "context.read", want: StateToolDomainContext},
 		{domain: "unknown", tool: "memory.list", wantErr: true},
 		{domain: "", tool: "shell.exec", wantErr: true},
 		{domain: "", tool: "", wantErr: true},
@@ -42,19 +39,13 @@ func TestStateToolRequiresSession(t *testing.T) {
 	if StateToolRequiresSession(StateToolDomainMemory) {
 		t.Fatal("memory must not require session in envelope")
 	}
-	for _, domain := range []string{StateToolDomainTodo, StateToolDomainGoal, StateToolDomainContext} {
-		if !StateToolRequiresSession(domain) {
-			t.Fatalf("%s must require session", domain)
-		}
+	if !StateToolRequiresSession(StateToolDomainTodo) {
+		t.Fatal("todo must require session")
 	}
 }
 
 func TestStateToolParamsProjections(t *testing.T) {
-	p := NewStateToolParams(StateToolDomainGoal, "run_1", "sess_1", "/ws", "tc_1", "goal.list", map[string]any{"x": 1})
-	goal := p.AsGoalParams()
-	if goal.RunID != "run_1" || goal.SessionID != "sess_1" || goal.ToolName != "goal.list" || goal.Arguments["x"] != 1 {
-		t.Fatalf("goal projection mismatch: %#v", goal)
-	}
+	p := NewStateToolParams(StateToolDomainMemory, "run_1", "sess_1", "/ws", "tc_1", "memory.list", map[string]any{"x": 1})
 	mem := p.AsMemoryParams()
 	if mem.WorkspaceRoot != "/ws" || mem.ToolCallID != "tc_1" {
 		t.Fatalf("memory projection mismatch: %#v", mem)

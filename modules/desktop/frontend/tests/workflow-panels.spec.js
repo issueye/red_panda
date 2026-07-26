@@ -95,17 +95,28 @@ test('Completed tool calls stay compact until expanded', async ({ page }) => {
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
   await expect(readTool).toHaveClass(/is-collapsed/);
   await expect(readTool.getByTestId('tool-card-body')).toHaveCount(0);
-  await expect(readTool.getByTestId('tool-call-index')).toHaveText('1/3');
-  await expect(page.getByTestId('tool-card').nth(1).getByTestId('tool-call-index')).toHaveText('2/3');
-  await expect(page.getByTestId('tool-card').nth(2).getByTestId('tool-call-index')).toHaveText('3/3');
-  expect((await readTool.boundingBox()).height).toBeLessThanOrEqual(28);
+  await expect(readTool.getByTestId('tool-call-index')).toHaveText('54/70');
+  await expect(page.getByTestId('tool-card').nth(1).getByTestId('tool-call-index')).toHaveText('55/70');
+  await expect(page.getByTestId('tool-card').nth(2).getByTestId('tool-call-index')).toHaveText('56/70');
+  expect((await readTool.boundingBox()).height).toBeLessThanOrEqual(30);
 
   const cards = page.getByTestId('tool-card');
   const cardBoxes = await cards.evaluateAll((items) => items.map((item) => {
     const box = item.getBoundingClientRect();
     return { top: box.top, bottom: box.bottom };
   }));
-  expect(cardBoxes[1].top - cardBoxes[0].bottom).toBeLessThanOrEqual(2);
+  expect(cardBoxes[1].top - cardBoxes[0].bottom).toBeGreaterThanOrEqual(4);
+  expect(cardBoxes[1].top - cardBoxes[0].bottom).toBeLessThanOrEqual(8);
+
+  const columnsDoNotOverlap = await page.locator('.tool-card-content').evaluateAll((items) => (
+    items.every((item) => {
+      const title = item.querySelector('.tool-card-title')?.getBoundingClientRect();
+      const summary = item.querySelector('.tool-card-summary')?.getBoundingClientRect();
+      const meta = item.querySelector('.tool-card-meta')?.getBoundingClientRect();
+      return title && summary && meta && title.right <= summary.left && summary.right <= meta.left;
+    })
+  ));
+  expect(columnsDoNotOverlap).toBe(true);
 
   await readTool.getByTestId('tool-card-toggle').click();
   await expect(readTool).toHaveClass(/is-expanded/);

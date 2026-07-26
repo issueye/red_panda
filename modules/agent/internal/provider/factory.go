@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const providerResponseHeaderTimeout = 90 * time.Second
+
 func NewFromEnv(log io.Writer) Provider {
 	stream := providerStreamFromEnv()
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER")))
@@ -61,7 +63,7 @@ func providerFromOptions(options RequestOptions, fallbackStream bool) (Provider,
 	}
 	config := providerConfig{
 		BaseURL: baseURL, APIKey: strings.TrimSpace(options.ProviderAPIKey), Model: model,
-		Stream: stream, Client: &http.Client{Timeout: 90 * time.Second},
+		Stream: stream, Client: newProviderHTTPClient(),
 	}
 	switch provider {
 	case "openai_compatible", "http_compatible":
@@ -73,6 +75,14 @@ func providerFromOptions(options RequestOptions, fallbackStream bool) (Provider,
 	default:
 		return nil, false
 	}
+}
+
+func newProviderHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = providerResponseHeaderTimeout
+	// Client.Timeout also covers response-body reads, so it cannot be used for
+	// long-lived streaming responses. Request contexts still provide cancellation.
+	return &http.Client{Transport: transport}
 }
 
 func providerStreamFromEnv() bool {

@@ -26,19 +26,6 @@ func TestIsTodoWriteTool(t *testing.T) {
 	}
 }
 
-func TestIsInternalGoalBudgetTool(t *testing.T) {
-	t.Parallel()
-	if !IsInternalGoalBudgetTool(InternalGoalSegmentEnd) {
-		t.Fatal("goal.segment_budget is internal budget tool")
-	}
-	if IsInternalGoalBudgetTool("segment_end") {
-		t.Fatal("legacy segment_end removed")
-	}
-	if IsInternalGoalBudgetTool("goal.assess") {
-		t.Fatal("goal.assess is model-facing")
-	}
-}
-
 func TestIsRemovedToolAlias(t *testing.T) {
 	t.Parallel()
 	if !IsRemovedToolAlias("todo_write") || !IsRemovedToolAlias("segment_end") {

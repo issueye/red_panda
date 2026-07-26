@@ -5,13 +5,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 type providerContractStub struct{}
@@ -180,8 +180,12 @@ func TestProviderFromOptionsCompatibility(t *testing.T) {
 			if config.Stream != wantStream {
 				t.Fatalf("Stream = %v, want %v", config.Stream, wantStream)
 			}
-			if config.Client == nil || config.Client.Timeout != 90*time.Second {
-				t.Fatalf("override client = %#v, want 90s timeout", config.Client)
+			if config.Client == nil || config.Client.Timeout != 0 {
+				t.Fatalf("override client = %#v, want no response-body timeout", config.Client)
+			}
+			transport, ok := config.Client.Transport.(*http.Transport)
+			if !ok || transport.ResponseHeaderTimeout != providerResponseHeaderTimeout {
+				t.Fatalf("override transport = %#v, want %s response-header timeout", config.Client.Transport, providerResponseHeaderTimeout)
 			}
 		})
 	}

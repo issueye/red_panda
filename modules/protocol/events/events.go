@@ -24,7 +24,6 @@ const (
 	EventPermissionRequest       EventType = "permission_required"
 	EventMemoryInjected          EventType = "memory_injected"
 	EventTodoUpdated             EventType = "todo_updated"
-	EventGoalUpdated             EventType = "goal_updated"
 	EventSkillsInjected          EventType = "skills_injected"
 	EventUsage                   EventType = "usage"
 	EventFinish                  EventType = "finish"

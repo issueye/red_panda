@@ -1220,7 +1220,7 @@ textarea:focus-visible {
 
 /* Consecutive tool calls read as one execution trace instead of separate messages. */
 .conversation > [data-timeline-type="tool"] + [data-timeline-type="tool"] {
-  margin-top: -16px;
+  margin-top: -12px;
 }
 
 .conversation-latest {
@@ -4247,17 +4247,18 @@ textarea:focus-visible {
 
 .tool-card-content {
   align-items: center;
-  display: flex;
+  display: grid;
   gap: 6px;
+  grid-template-columns: fit-content(42%) minmax(0, 1fr) max-content;
   min-width: 0;
 }
 
 .tool-card-title {
   align-items: baseline;
   display: flex;
-  flex: 0 1 auto;
   gap: 5px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .tool-call-index {
@@ -4280,6 +4281,7 @@ textarea:focus-visible {
   font-size: 13px;
   font-weight: 500;
   line-height: 1.35;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4287,9 +4289,11 @@ textarea:focus-visible {
 
 .tool-card-name {
   color: var(--color-text-soft);
+  flex: 1 1 auto;
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.35;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4300,7 +4304,7 @@ textarea:focus-visible {
   display: inline-flex;
   flex: 0 0 auto;
   gap: 6px;
-  margin-left: auto;
+  justify-self: end;
 }
 
 .tool-duration,
@@ -4365,11 +4369,6 @@ textarea:focus-visible {
 }
 
 @media (max-width: 520px) {
-  .tool-card-title {
-    flex: 0 0 auto;
-    max-width: 42%;
-  }
-
   .tool-card-name {
     display: none;
   }

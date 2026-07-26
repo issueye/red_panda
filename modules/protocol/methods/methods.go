@@ -27,10 +27,8 @@ const (
 	StateToolExecute = "state.tool.execute"
 
 	// State tool domains for StateToolExecuteParams.Domain.
-	StateToolDomainMemory  = "memory"
-	StateToolDomainTodo    = "todo"
-	StateToolDomainGoal    = "goal"
-	StateToolDomainContext = "context"
+	StateToolDomainMemory = "memory"
+	StateToolDomainTodo   = "todo"
 	// StateToolDomainSchedule is also defined in schedule.go.
 
 	// v0.2 primary execution protocol (no legacy subagent/root model).
@@ -70,10 +68,6 @@ type RunExecuteOptions struct {
 	RequirePermission   bool                          `json:"require_permission,omitempty"`
 	MemoryContext       *MemoryContext                `json:"memory_context,omitempty"`
 	TodoContext         *TodoContext                  `json:"todo_context,omitempty"`
-	GoalContext         *GoalContext                  `json:"goal_context,omitempty"`
-	GoalsEnabled        *bool                         `json:"goals_enabled,omitempty"`
-	GoalID              string                        `json:"goal_id,omitempty"`
-	ContinueGoal        bool                          `json:"continue_goal,omitempty"`
 	SkillsContext       *SkillsContext                `json:"skills_context,omitempty"`
 	WebSearchMaxResults int                           `json:"web_search_max_results,omitempty"`
 	WebFetchMaxBytes    int                           `json:"web_fetch_max_bytes,omitempty"`
@@ -307,14 +301,6 @@ type ReplyOptions struct {
 	MemoryContext     *MemoryContext `json:"memory_context,omitempty"`
 	// TodoContext is the session checklist injected into provider messages.
 	TodoContext *TodoContext `json:"todo_context,omitempty"`
-	// GoalContext is the active/bound goal for long-horizon runs.
-	GoalContext *GoalContext `json:"goal_context,omitempty"`
-	// GoalsEnabled when false omits goal tools (nil/true = enabled).
-	GoalsEnabled *bool `json:"goals_enabled,omitempty"`
-	// GoalID binds this run to an existing goal (pending/paused → active).
-	GoalID string `json:"goal_id,omitempty"`
-	// ContinueGoal binds the latest paused (or pending) goal for the session.
-	ContinueGoal bool `json:"continue_goal,omitempty"`
 	// SkillsContext is refreshed on every conversation start so newly created
 	// managed skills are immediately visible to the model.
 	SkillsContext       *SkillsContext `json:"skills_context,omitempty"`
@@ -374,22 +360,6 @@ type MemoryItem struct {
 	Kind    string `json:"kind"`
 	Title   string `json:"title"`
 	Content string `json:"content,omitempty"`
-}
-
-// GoalNoteDTO is the shared shape for a goal scratchpad note.
-type GoalNoteDTO struct {
-	ID        string `json:"id"`
-	GoalID    string `json:"goal_id"`
-	Kind      string `json:"kind"`
-	Title     string `json:"title"`
-	Body      string `json:"body,omitempty"`
-	Phase     string `json:"phase,omitempty"`
-	Source    string `json:"source,omitempty"`
-	RunID     string `json:"run_id,omitempty"`
-	Seq       int    `json:"seq"`
-	Pinned    int    `json:"pinned"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 type Message struct {

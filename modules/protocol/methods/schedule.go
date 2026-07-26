@@ -14,7 +14,6 @@ const (
 	ScheduleSessionNewEach  = "new_each_run"
 	ScheduleSessionFixed    = "fixed_session"
 	ScheduleRunKindChat     = "chat"
-	ScheduleRunKindGoal     = "goal"
 	ScheduleOverlapSkip     = "skip"
 	ScheduleMissedSkip      = "skip_missed"
 	ScheduleCatchUpOne      = "one"
