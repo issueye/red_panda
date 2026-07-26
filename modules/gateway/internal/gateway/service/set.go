@@ -27,8 +27,6 @@ type Set struct {
 	MCPServers     MCPServerConfigService
 	Skills         SkillService
 	WorkerProfiles WorkerProfileService
-	Goal           GoalService
-	Context        ContextService
 	Schedule       ScheduleService
 }
 
@@ -56,8 +54,6 @@ func NewSet(opts Options) Set {
 		MCPServers:     NewMCPServerConfigService(opts.Repos, opts.RuntimeClient),
 		Skills:         NewSkillService(opts.RuntimeClient),
 		WorkerProfiles: NewWorkerProfileService(opts.Repos),
-		Goal:           NewGoalService(opts.Repos),
-		Context:        NewContextService(opts.Repos),
 		Schedule:       NewScheduleService(opts.Repos, opts.Hub, run),
 	}
 }

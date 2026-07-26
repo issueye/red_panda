@@ -187,13 +187,11 @@ type SessionSummaryDTO struct {
 }
 
 type SessionContextState struct {
-	SessionID        string                `json:"session_id"`
-	SummaryActive    bool                  `json:"summary_active"`
-	ActiveSummary    *SessionSummaryDTO    `json:"active_summary,omitempty"`
-	TailMessageCount int64                 `json:"tail_message_count"`
-	GoalID           string                `json:"goal_id,omitempty"`
-	ContextItems     []methods.GoalNoteDTO `json:"context_items"`
-	Usage            ContextUsageDTO       `json:"usage"`
+	SessionID        string             `json:"session_id"`
+	SummaryActive    bool               `json:"summary_active"`
+	ActiveSummary    *SessionSummaryDTO `json:"active_summary,omitempty"`
+	TailMessageCount int64              `json:"tail_message_count"`
+	Usage            ContextUsageDTO    `json:"usage"`
 }
 
 type ContextUsageDTO struct {
@@ -389,7 +387,7 @@ func (s SessionService) ContextState(sessionID string) (SessionContextState, err
 	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
 		return SessionContextState{}, err
 	}
-	state := SessionContextState{SessionID: sessionID, ContextItems: []methods.GoalNoteDTO{}}
+	state := SessionContextState{SessionID: sessionID}
 	summary, err := s.store.activeSummary(sessionID)
 	if err != nil {
 		return SessionContextState{}, err
@@ -414,27 +412,6 @@ func (s SessionService) ContextState(sessionID string) (SessionContextState, err
 		return SessionContextState{}, err
 	}
 	state.Usage = estimateStoredContextUsage(modelContext, coveredEnd)
-	goal, err := s.repos.Goals.GetActiveBySession(sessionID)
-	if err == gorm.ErrRecordNotFound {
-		goal, err = s.repos.Goals.GetLatestPausedBySession(sessionID)
-	}
-	if err == gorm.ErrRecordNotFound {
-		goal, err = s.repos.Goals.GetLatestPendingBySession(sessionID)
-	}
-	if err == gorm.ErrRecordNotFound {
-		return state, nil
-	}
-	if err != nil {
-		return SessionContextState{}, err
-	}
-	state.GoalID = goal.ID
-	notes, err := s.repos.Contexts.List(goal.ID, repository.NoteListOpts{Limit: contextMaxListLimit})
-	if err != nil {
-		return SessionContextState{}, err
-	}
-	for _, note := range notes {
-		state.ContextItems = append(state.ContextItems, noteToDTO(note))
-	}
 	return state, nil
 }
 

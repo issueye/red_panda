@@ -73,43 +73,6 @@ func (r RunEventRepository) ListByRunIDs(runIDs []string) ([]model.RunEvent, err
 	return rows, err
 }
 
-// DeleteBySessions removes goal-scoped satellites and goals for sessions.
-func (r GoalRepository) PurgeBySessions(sessionIDs []string) error {
-	if len(sessionIDs) == 0 {
-		return nil
-	}
-	// Children first (segments are by goal_id).
-	var goalIDs []string
-	if err := r.db.Model(&model.Goal{}).Where("session_id IN ?", sessionIDs).Pluck("id", &goalIDs).Error; err != nil {
-		return err
-	}
-	if len(goalIDs) > 0 {
-		if err := r.db.Where("goal_id IN ?", goalIDs).Delete(&model.GoalSegment{}).Error; err != nil {
-			return err
-		}
-		if err := r.db.Where("goal_id IN ?", goalIDs).Delete(&model.GoalNote{}).Error; err != nil {
-			return err
-		}
-		if err := r.db.Where("goal_id IN ?", goalIDs).Delete(&model.GoalAction{}).Error; err != nil {
-			return err
-		}
-		if err := r.db.Where("goal_id IN ?", goalIDs).Delete(&model.GoalEvent{}).Error; err != nil {
-			return err
-		}
-	}
-	// Also clear any orphan rows keyed only by session_id.
-	if err := r.db.Where("session_id IN ?", sessionIDs).Delete(&model.GoalNote{}).Error; err != nil {
-		return err
-	}
-	if err := r.db.Where("session_id IN ?", sessionIDs).Delete(&model.GoalAction{}).Error; err != nil {
-		return err
-	}
-	if err := r.db.Where("session_id IN ?", sessionIDs).Delete(&model.GoalEvent{}).Error; err != nil {
-		return err
-	}
-	return r.db.Where("session_id IN ?", sessionIDs).Delete(&model.Goal{}).Error
-}
-
 // DeleteBySessions removes compactions referencing the sessions as source or target.
 func (r SessionCompactionRepository) DeleteBySessions(sessionIDs []string) error {
 	if len(sessionIDs) == 0 {
@@ -209,9 +172,6 @@ func (s Set) HardDeleteCascade(sessionIDs []string) (int64, error) {
 		return 0, err
 	}
 	if err := s.Todos.DeleteBySessions(sessionIDs); err != nil {
-		return 0, err
-	}
-	if err := s.Goals.PurgeBySessions(sessionIDs); err != nil {
 		return 0, err
 	}
 	if err := s.Compactions.DeleteBySessions(sessionIDs); err != nil {

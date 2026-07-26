@@ -18,8 +18,6 @@ type Set struct {
 	Providers      ProviderProfileRepository
 	MCPServers     MCPServerConfigRepository
 	WorkerProfiles WorkerProfileRepository
-	Goals          GoalRepository
-	Contexts       ContextRepository
 	Schedules      ScheduleRepository
 }
 
@@ -40,8 +38,6 @@ func NewSet(db *gorm.DB) Set {
 		Providers:      NewProviderProfileRepository(db),
 		MCPServers:     NewMCPServerConfigRepository(db),
 		WorkerProfiles: NewWorkerProfileRepository(db),
-		Goals:          NewGoalRepository(db),
-		Contexts:       NewContextRepository(db),
 		Schedules:      NewScheduleRepository(db),
 	}
 }

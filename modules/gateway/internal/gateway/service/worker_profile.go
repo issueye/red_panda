@@ -129,9 +129,6 @@ func (s WorkerProfileService) Create(input WorkerProfileCreate) (WorkerProfileDT
 	if err != nil {
 		return WorkerProfileDTO{}, err
 	}
-	if strings.HasPrefix(key, "goal-") {
-		return WorkerProfileDTO{}, fmt.Errorf("key prefix goal- is reserved for builtin worker profiles")
-	}
 	description, err := clampWorkerProfileText(strings.TrimSpace(input.Description), workerProfileMaxDescRunes)
 	if err != nil {
 		return WorkerProfileDTO{}, err
@@ -239,28 +236,11 @@ func (s WorkerProfileService) EnsureBuiltins() error {
 	return nil
 }
 
+// builtinWorkerProfileSeeds returns the catalog of builtin worker profiles
+// shipped by default. Currently empty — custom profiles are created via the
+// Settings UI. Retained as a hook for future builtin seeds.
 func builtinWorkerProfileSeeds() []model.WorkerProfile {
-	readonlyDeny := []string{
-		"workspace.write_file", "workspace.edit_file", "workspace.apply_patch",
-		"goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish", "goal.list",
-		"todo.write", "todo.list", "worker.delegate",
-		"skill.run", "skill.create", "skill.update",
-	}
-	implementDeny := []string{
-		"goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish", "goal.list",
-		"todo.write", "todo.list", "worker.delegate",
-		"skill.run", "skill.create", "skill.update", "web.search", "web.fetch",
-	}
-	// Default roster is three specialists (docs/41 W4-A): research → build → review.
-	// Planner/evaluator remain in the catalog but disabled by default; root owns
-	// goal.plan / goal.assess. Operators may re-enable them in Settings.
-	return []model.WorkerProfile{
-		{ID: "worker_profile_builtin_goal_analyst", Key: "goal-analyst", Name: "Goal Analyst", NameZH: "目标分析师", Kind: "builtin", Phase: "research", Builtin: true, Enabled: true, SortOrder: 10, DefaultMaxTurns: 12, Description: "调研差距、约束与风险，并给出可执行的行动建议（只读）。规划落库由 root goal.plan 完成。", SystemPrompt: "You are goal-analyst for red_panda. Investigate the assigned outcome gap. Produce evidence, constraints, risks, viable approaches, and suggested actions with acceptance checks. Do not modify files or mutate goal state. Parent will call goal.plan.", ToolDenylist: append([]string{"shell.exec"}, readonlyDeny...)},
-		{ID: "worker_profile_builtin_goal_planner", Key: "goal-planner", Name: "Goal Planner", NameZH: "目标规划师", Kind: "builtin", Phase: "strategy", Builtin: true, Enabled: false, SortOrder: 20, DefaultMaxTurns: 8, Description: "默认关闭（W4-A）。规划由 root goal.plan 与分析师建议承担；需要时可在设置中重新启用。", SystemPrompt: "You are goal-planner. Propose the smallest useful actions for the assigned outcome gap, each with observable acceptance. Do not write files or mutate goal state.", ToolDenylist: append([]string{"shell.exec"}, readonlyDeny...)},
-		{ID: "worker_profile_builtin_goal_implementer", Key: "goal-implementer", Name: "Goal Implementer", NameZH: "目标实施者", Kind: "builtin", Phase: "build", Builtin: true, Enabled: true, SortOrder: 30, DefaultMaxTurns: 24, Description: "执行指定 Goal action，最小改动并报告实际结果。", SystemPrompt: "You are goal-implementer. Execute only the assigned Goal action. Prefer minimal diffs and report changes, commands, blockers, and evidence for review.", ToolDenylist: implementDeny},
-		{ID: "worker_profile_builtin_goal_verifier", Key: "goal-verifier", Name: "Goal Verifier", NameZH: "目标验证者", Kind: "builtin", Phase: "review", Builtin: true, Enabled: true, SortOrder: 40, DefaultMaxTurns: 12, Description: "独立验证 action 与成功标准；默认不改业务代码。终态评估由 root goal.assess 落库。", SystemPrompt: "You are goal-verifier. Independently verify the assigned claim with tests or inspection. Report concrete evidence, criterion-level status hints, failures, and remaining gaps for the parent goal.assess. Do not edit product source.", ToolDenylist: append([]string{"workspace.write_file", "workspace.edit_file", "workspace.apply_patch"}, readonlyDeny...)},
-		{ID: "worker_profile_builtin_goal_evaluator", Key: "goal-evaluator", Name: "Goal Evaluator", NameZH: "目标评估者", Kind: "builtin", Phase: "assess", Builtin: true, Enabled: false, SortOrder: 50, DefaultMaxTurns: 8, Description: "默认关闭（W4-A）。终评由 root goal.assess 与验证者证据承担；需要时可在设置中重新启用。", SystemPrompt: "You are goal-evaluator. Compare all available evidence to every success criterion. Report met, not_met, or blocked with concrete evidence and remaining gaps. Do not mutate goal state.", ToolDenylist: append([]string{"shell.exec"}, readonlyDeny...)},
-	}
+	return nil
 }
 
 func workerProfileDTOs(rows []model.WorkerProfile) []WorkerProfileDTO {

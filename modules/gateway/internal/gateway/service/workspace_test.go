@@ -31,9 +31,6 @@ func TestWorkspaceRemoveUsesSessionLifecycle(t *testing.T) {
 		if err := repos.Runs.Start(model.RunRecord{ID: "run-" + session.ID, SessionID: session.ID, Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repos.Goals.Create(model.Goal{ID: "goal-" + session.ID, SessionID: session.ID, Status: "active"}); err != nil {
-			t.Fatal(err)
-		}
 		if _, err := repos.Schedules.Create(model.ScheduledTask{
 			ID: "schedule-" + session.ID, Name: "fixed", SessionID: session.ID,
 			SessionMode: methods.ScheduleSessionFixed, Enabled: true,
@@ -73,12 +70,9 @@ func TestWorkspaceRemoveUsesSessionLifecycle(t *testing.T) {
 		if _, err := repos.Sessions.Get(sessionID); err != gorm.ErrRecordNotFound {
 			t.Fatalf("session %s still active: %v", sessionID, err)
 		}
-		// docs/49: hard-delete removes runs/goals/todos; schedules are disabled only.
+		// docs/49: hard-delete removes runs/todos; schedules are disabled only.
 		if _, err := repos.Runs.Get("run-" + sessionID); err != gorm.ErrRecordNotFound {
 			t.Fatalf("run should be hard-deleted: %v", err)
-		}
-		if _, err := repos.Goals.Get("goal-" + sessionID); err != gorm.ErrRecordNotFound {
-			t.Fatalf("goal should be hard-deleted: %v", err)
 		}
 		schedule, err := repos.Schedules.Get("schedule-" + sessionID)
 		if err != nil || schedule.Enabled || schedule.NextRunAt != nil {

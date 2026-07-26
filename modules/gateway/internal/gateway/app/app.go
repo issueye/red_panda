@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -76,9 +75,6 @@ func Run(ctx context.Context, cfg Config) error {
 			if err != nil {
 				return nil, err
 			}
-			if goalResult, ok := result.(methods.GoalToolExecuteResult); ok {
-				return scheduleGoalRunCancel(services, goalResult), nil
-			}
 			return result, nil
 		default:
 			return nil, fmt.Errorf("method not found: %s", method)
@@ -120,23 +116,6 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 }
 
-// scheduleGoalRunCancel clears CancelRunID on the RPC result and cancels the
-// bound run asynchronously so AgentCancel never runs while Runtime is blocked
-// on the tool request.
-func scheduleGoalRunCancel(services service.Set, result methods.GoalToolExecuteResult) methods.GoalToolExecuteResult {
-	if result.CancelRunID == "" {
-		return result
-	}
-	runToCancel := result.CancelRunID
-	result.CancelRunID = ""
-	go func() {
-		cancelCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_ = services.Run.Cancel(cancelCtx, runToCancel, "goal cancelled")
-	}()
-	return result
-}
-
 func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -164,13 +143,6 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/sessions/:id/runs", controllers.Run.ListBySession)
 	api.GET("/sessions/:id/tools", controllers.Tool.ListBySession)
 	api.GET("/sessions/:id/todos", controllers.Todo.ListBySession)
-	api.GET("/sessions/:id/goals", controllers.Goal.ListBySession)
-	api.POST("/sessions/:id/goals/start", controllers.Goal.Start)
-	api.GET("/sessions/:id/goals/:goalId", controllers.Goal.Get)
-	api.GET("/sessions/:id/goals/:goalId/notes", controllers.Goal.ListNotes)
-	api.GET("/sessions/:id/goals/:goalId/journal", controllers.Goal.ListJournal)
-	api.POST("/sessions/:id/goals/:goalId/cancel", controllers.Goal.Cancel)
-	api.POST("/sessions/:id/goals/:goalId/continue", controllers.Goal.Continue)
 	api.GET("/memory", controllers.Memory.List)
 	api.POST("/memory", controllers.Memory.Create)
 	api.PUT("/memory/:id", controllers.Memory.Update)

@@ -1,5 +1,5 @@
 // RunService types, lifecycle queries, Start/Cancel entrypoints, and runtime proxies.
-// Start pipeline helpers: run_start.go; Goal bind: run_goal.go; events: run_events.go (docs/41 W5-4).
+// Start pipeline helpers: run_start.go; events: run_events.go (docs/41 W5-4).
 
 package service
 
@@ -200,18 +200,14 @@ func (r RunService) Start(ctx context.Context, payload protows.RunStartPayload) 
 		return StartRunResult{}, err
 	}
 
-	pauseGoalOnFailure := false
 	defer func() {
 		if err == nil {
 			return
 		}
-		if pauseGoalOnFailure {
-			_ = NewGoalService(r.repos).PauseByRun(admission.runID, "run_failed")
-		}
 		_ = r.repos.Runs.Finish(admission.runID, "failed", err.Error())
 	}()
 
-	params, pauseGoalOnFailure, err := r.prepareRun(admission, payload)
+	params, err := r.prepareRun(admission, payload)
 	if err != nil {
 		return StartRunResult{}, err
 	}
@@ -224,12 +220,6 @@ func (r RunService) Cancel(ctx context.Context, runID string, reason string) err
 	if r.runtime == nil {
 		return fmt.Errorf("runtime client not configured")
 	}
-	// Pause bound Goal before killing the process so force-finish still leaves a clean pause.
-	pauseReason := "user_cancel"
-	if strings.Contains(strings.ToLower(reason), "compact") {
-		pauseReason = "session_compact"
-	}
-	_ = NewGoalService(r.repos).PauseByRun(runID, pauseReason)
 	_, err := r.runtime.CancelRun(ctx, methods.RunCancelParams{RunID: runID, Reason: reason})
 	return err
 }

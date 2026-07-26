@@ -71,14 +71,8 @@ func TestRunServiceStartPassesExistingConversationToRuntime(t *testing.T) {
 		strings.Contains(string(raw), "agent_definitions") {
 		t.Fatalf("v0.2 run request contains legacy agent fields: %s", raw)
 	}
-	if len(params.Options.WorkerProfiles) == 0 {
-		t.Fatal("run request did not include enabled worker profiles")
-	}
 	if params.Input.Text != "follow-up question" {
 		t.Fatalf("input text = %q, want follow-up question", params.Input.Text)
-	}
-	if params.Options.GoalsEnabled == nil || *params.Options.GoalsEnabled {
-		t.Fatalf("regular run goals enabled = %#v, want false", params.Options.GoalsEnabled)
 	}
 	if len(params.Session.Conversation) != 2 {
 		t.Fatalf("conversation len = %d, want 2: %#v", len(params.Session.Conversation), params.Session.Conversation)
@@ -95,38 +89,6 @@ func TestRunServiceStartPassesExistingConversationToRuntime(t *testing.T) {
 	}
 	assertServiceMessage(t, rows[2], "subagent", "run_1", "private planner detail")
 	assertServiceMessage(t, rows[3], "user", result.RunID, "follow-up question")
-}
-
-func TestRunServiceStartEnablesGoalsOnlyWhenExplicitlyRequested(t *testing.T) {
-	repos, _ := newRunServiceTestFixture(t)
-	session, err := repos.Sessions.Ensure("session_goal_opt_in", "Goal opt-in", "D:/workspace")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	capturePath := filepath.Join(t.TempDir(), "reply-params.json")
-	runtime := useStdioRuntimeHelper(t, capturePath)
-	service := NewRunService(repos, eventhub.New(), runtime)
-
-	if _, err := service.Start(context.Background(), protows.RunStartPayload{
-		SessionID: session.ID,
-		Input:     map[string]any{"text": "explicit goal run"},
-		Options:   map[string]any{"goals_enabled": true},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	raw, err := os.ReadFile(capturePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var params methods.RunExecuteParams
-	if err := json.Unmarshal(raw, &params); err != nil {
-		t.Fatal(err)
-	}
-	if params.Options.GoalsEnabled == nil || !*params.Options.GoalsEnabled {
-		t.Fatalf("explicit goal run goals enabled = %#v, want true", params.Options.GoalsEnabled)
-	}
 }
 
 func TestRunServiceStartFinishesAdmittedRunWhenPreparationFails(t *testing.T) {
@@ -156,123 +118,6 @@ func TestRunServiceStartFinishesAdmittedRunWhenPreparationFails(t *testing.T) {
 	}
 	if runs[0].Status != "failed" || runs[0].FinishedAt == nil {
 		t.Fatalf("admitted run was not finished after preparation failure: %#v", runs[0])
-	}
-}
-
-func TestRunServiceStartPausesBoundGoalWhenDispatchFails(t *testing.T) {
-	repos, _ := newRunServiceTestFixture(t)
-	session, err := repos.Sessions.Ensure("session_dispatch_failure", "Dispatch failure", "D:/workspace")
-	if err != nil {
-		t.Fatal(err)
-	}
-	goal, err := NewGoalService(repos).CreateUserInitiated(session.ID, "dispatch must fail", "Dispatch", "runtime rejected")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	runtime := runtimeclient.New(filepath.Join(t.TempDir(), "missing-runtime.exe"), nil, "test", nil, nil)
-	service := NewRunService(repos, eventhub.New(), runtime)
-	_, err = service.Start(context.Background(), protows.RunStartPayload{
-		SessionID: session.ID,
-		Input:     map[string]any{"text": "bind then dispatch"},
-		Options: map[string]any{
-			"goal_id":       goal.ID,
-			"goals_enabled": true,
-			"runtime_mode":  "single_core",
-		},
-	})
-	if err == nil {
-		t.Fatal("expected runtime dispatch to fail")
-	}
-
-	runs, listErr := repos.Runs.ListBySession(session.ID, 10)
-	if listErr != nil {
-		t.Fatal(listErr)
-	}
-	if len(runs) != 1 || runs[0].Status != "failed" || runs[0].FinishedAt == nil {
-		t.Fatalf("run was not finished after dispatch failure: %#v", runs)
-	}
-	paused, getErr := repos.Goals.Get(goal.ID)
-	if getErr != nil {
-		t.Fatal(getErr)
-	}
-	if paused.Status != "paused" || paused.PauseReason != "run_failed" || paused.ActiveRunID != "" {
-		t.Fatalf("bound goal was not paused after dispatch failure: %#v", paused)
-	}
-	if paused.LastRunID != runs[0].ID {
-		t.Fatalf("goal last run = %q, want %q", paused.LastRunID, runs[0].ID)
-	}
-}
-
-func TestClampClientMaxToolTurnsNeverRaisesGoalBudget(t *testing.T) {
-	bound := methods.GoalDTO{MaxToolTurnsSeg: 12, MaxTotalToolTurns: 96, UsedToolTurns: 0}
-	if got := clampClientMaxToolTurns(48, bound); got != 12 {
-		t.Fatalf("client 48 clamped to %d, want 12", got)
-	}
-	if got := clampClientMaxToolTurns(0, bound); got != 12 {
-		t.Fatalf("client 0 filled to %d, want 12", got)
-	}
-	if got := clampClientMaxToolTurns(6, bound); got != 6 {
-		t.Fatalf("client tighten 6 became %d", got)
-	}
-	// Remaining total budget is tighter than segment default.
-	bound.UsedToolTurns = 90
-	if got := clampClientMaxToolTurns(48, bound); got != 6 {
-		t.Fatalf("remaining total clamp = %d, want 6", got)
-	}
-}
-
-func TestRunServiceStartClampsMaxToolTurnsToGoalSegment(t *testing.T) {
-	repos, _ := newRunServiceTestFixture(t)
-	session, err := repos.Sessions.Ensure("session_goal_clamp", "Goal clamp", "D:/workspace")
-	if err != nil {
-		t.Fatal(err)
-	}
-	goalSvc := NewGoalService(repos)
-	created, err := goalSvc.CreateUserInitiated(session.ID, "clamp budget", "clamp", "done")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Force a known segment budget of 12 (defaults) and ensure client 48 is clamped.
-	row, err := repos.Goals.Get(created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	row.MaxToolTurnsPerSegment = 12
-	row.MaxTotalToolTurns = 96
-	if _, err := repos.Goals.Update(row); err != nil {
-		t.Fatal(err)
-	}
-
-	capturePath := filepath.Join(t.TempDir(), "reply-params-clamp.json")
-	runtime := useStdioRuntimeHelper(t, capturePath)
-	service := NewRunService(repos, eventhub.New(), runtime)
-
-	if _, err := service.Start(context.Background(), protows.RunStartPayload{
-		SessionID: session.ID,
-		Input:     map[string]any{"text": "work on goal"},
-		Options: map[string]any{
-			"goals_enabled":  true,
-			"goal_id":        created.ID,
-			"max_tool_turns": 48,
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	raw, err := os.ReadFile(capturePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var params methods.RunExecuteParams
-	if err := json.Unmarshal(raw, &params); err != nil {
-		t.Fatal(err)
-	}
-	if params.Options.MaxToolTurns != 12 {
-		t.Fatalf("MaxToolTurns = %d, want Goal segment limit 12", params.Options.MaxToolTurns)
-	}
-	if params.Options.GoalID != created.ID {
-		t.Fatalf("GoalID = %q, want %q", params.Options.GoalID, created.ID)
 	}
 }
 
@@ -792,19 +637,19 @@ func TestRunServiceApplyProviderProfile(t *testing.T) {
 func TestRunServiceApplyWorkerProfilesUsesWorkerProfileSourceOfTruth(t *testing.T) {
 	repos, service := newRunServiceTestFixture(t)
 	workerSvc := NewWorkerProfileService(repos)
-	if err := workerSvc.EnsureBuiltins(); err != nil {
-		t.Fatal(err)
-	}
-	row, err := repos.WorkerProfiles.GetByKey("goal-analyst")
+	created, err := workerSvc.Create(WorkerProfileCreate{
+		Key: "custom-worker", Name: "Custom Worker", Phase: "build",
+		SystemPrompt: "WORKER PROFILE AUTHORITATIVE PROMPT", DefaultMaxTurns: 9,
+		Provider: "openai_compatible", Model: "worker-model",
+		ToolAllowlist: []string{"workspace.read_file"}, ToolDenylist: []string{"shell.exec"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	row.SystemPrompt = "WORKER PROFILE AUTHORITATIVE PROMPT"
-	row.DefaultMaxTurns = 9
-	row.Provider = "openai_compatible"
-	row.Model = "worker-model"
-	row.ToolAllowlist = []string{"workspace.read_file"}
-	row.ToolDenylist = []string{"shell.exec"}
+	row, err := repos.WorkerProfiles.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := repos.WorkerProfiles.Update(row); err != nil {
 		t.Fatal(err)
 	}
@@ -812,19 +657,19 @@ func TestRunServiceApplyWorkerProfilesUsesWorkerProfileSourceOfTruth(t *testing.
 	if err := service.applyWorkerProfiles(&params); err != nil {
 		t.Fatal(err)
 	}
-	// W4-A: three default-enabled specialists (planner/evaluator disabled).
-	if len(params.Options.WorkerProfiles) != 3 {
-		t.Fatalf("expected 3 default-enabled builtin worker profiles, got %d", len(params.Options.WorkerProfiles))
+	// Custom profile is enabled by default and should be attached.
+	if len(params.Options.WorkerProfiles) != 1 {
+		t.Fatalf("expected 1 default-enabled worker profile, got %d", len(params.Options.WorkerProfiles))
 	}
 	var found *methods.WorkerProfileRef
 	for i := range params.Options.WorkerProfiles {
-		if params.Options.WorkerProfiles[i].Key == "goal-analyst" {
+		if params.Options.WorkerProfiles[i].Key == "custom-worker" {
 			found = &params.Options.WorkerProfiles[i]
 			break
 		}
 	}
 	if found == nil {
-		t.Fatal("goal-analyst missing from run options")
+		t.Fatal("custom-worker missing from run options")
 	}
 	if found.SystemPrompt != "WORKER PROFILE AUTHORITATIVE PROMPT" || found.DefaultMaxTurns != 9 {
 		t.Fatalf("worker profile not attached: %#v", found)

@@ -174,11 +174,6 @@ func (s SessionController) Bootstrap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
 		return
 	}
-	goals, err := s.Services.Goal.ListBySession(id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
-		return
-	}
 	c.JSON(http.StatusOK, envelope(c, service.SessionBootstrapResult{
 		History:     history,
 		Runs:        runs,
@@ -186,7 +181,6 @@ func (s SessionController) Bootstrap(c *gin.Context) {
 		Permissions: permissions,
 		Todos:       todos,
 		Context:     contextState,
-		Goals:       goals,
 	}))
 }
 

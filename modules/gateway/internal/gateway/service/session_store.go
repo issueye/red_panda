@@ -86,9 +86,6 @@ func (s sessionStore) deleteSessions(sessionIDs []string, reason string) (int64,
 		if _, err := repos.Runs.CancelActiveBySessions(sessionIDs, "session deleted"); err != nil {
 			return err
 		}
-		if _, err := repos.Goals.CancelActiveBySessions(sessionIDs, "session deleted"); err != nil {
-			return err
-		}
 		n, err := repos.HardDeleteCascade(sessionIDs)
 		if err != nil {
 			return err

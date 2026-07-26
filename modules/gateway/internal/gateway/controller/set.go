@@ -20,7 +20,6 @@ type Set struct {
 	MCPServers     MCPServerConfigController
 	Skills         SkillController
 	WorkerProfiles WorkerProfileController
-	Goal           GoalController
 	Schedule       ScheduleController
 	WebSocket      WebSocketController
 }
@@ -41,7 +40,6 @@ func NewSet(services service.Set, hub *eventhub.Hub) Set {
 		MCPServers:     MCPServerConfigController{Services: services},
 		Skills:         SkillController{Services: services},
 		WorkerProfiles: WorkerProfileController{Services: services},
-		Goal:           GoalController{Services: services},
 		Schedule:       ScheduleController{Services: services},
 		WebSocket: WebSocketController{
 			Services: services,

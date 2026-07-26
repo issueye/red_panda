@@ -151,56 +151,6 @@ func archiveSessionJSONL(repos repository.Set, archiveDir, sessionID, reason str
 		}
 	}
 
-	var goals []model.Goal
-	if err := repos.DB.Where("session_id = ?", sessionID).Order("created_at asc").Find(&goals).Error; err != nil {
-		return "", err
-	}
-	goalIDs := make([]string, 0, len(goals))
-	for i := range goals {
-		goalIDs = append(goalIDs, goals[i].ID)
-		if err := write("goal", goals[i]); err != nil {
-			return "", err
-		}
-	}
-	if len(goalIDs) > 0 {
-		var notes []model.GoalNote
-		if err := repos.DB.Where("goal_id IN ?", goalIDs).Order("seq asc").Find(&notes).Error; err != nil {
-			return "", err
-		}
-		for i := range notes {
-			if err := write("goal_note", notes[i]); err != nil {
-				return "", err
-			}
-		}
-		var actions []model.GoalAction
-		if err := repos.DB.Where("goal_id IN ?", goalIDs).Order("sort_order asc").Find(&actions).Error; err != nil {
-			return "", err
-		}
-		for i := range actions {
-			if err := write("goal_action", actions[i]); err != nil {
-				return "", err
-			}
-		}
-		var gevents []model.GoalEvent
-		if err := repos.DB.Where("goal_id IN ?", goalIDs).Order("seq asc").Find(&gevents).Error; err != nil {
-			return "", err
-		}
-		for i := range gevents {
-			if err := write("goal_event", gevents[i]); err != nil {
-				return "", err
-			}
-		}
-		var segs []model.GoalSegment
-		if err := repos.DB.Where("goal_id IN ?", goalIDs).Order("created_at asc").Find(&segs).Error; err != nil {
-			return "", err
-		}
-		for i := range segs {
-			if err := write("goal_segment", segs[i]); err != nil {
-				return "", err
-			}
-		}
-	}
-
 	compactions, err := repos.Compactions.ListBySessions([]string{sessionID})
 	if err != nil {
 		return "", err

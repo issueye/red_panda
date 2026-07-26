@@ -112,7 +112,6 @@ type RunRecord struct {
 	RuntimeMode   string
 	Status        string `gorm:"index"`
 	Input         string
-	GoalID        string `gorm:"index"`
 	// TriggerSource identifies non-user starters (e.g. "schedule"); empty = interactive.
 	TriggerSource string `gorm:"index"`
 	// TriggerRef is the source entity id (e.g. schedule id).
@@ -139,7 +138,7 @@ type ScheduledTask struct {
 	RunAt             *time.Time
 	Timezone          string
 	Prompt            string `gorm:"type:text"`
-	RunKind           string // chat|goal
+	RunKind           string // chat (legacy field; previously also "goal")
 	SessionMode       string // new_each_run|fixed_session
 	SessionID         string `gorm:"index"`
 	WorkspaceRoot     string `gorm:"index"`
@@ -176,110 +175,6 @@ type ScheduledTaskRun struct {
 	FinishedAt   *time.Time
 	Error        string `gorm:"type:text"`
 	CreatedAt    time.Time
-}
-
-// Goal is a session-scoped long-horizon objective with feedback-control state and budgets.
-type Goal struct {
-	ID                     string `gorm:"primaryKey"`
-	SessionID              string `gorm:"index;uniqueIndex:idx_goals_one_active,where:status = 'active'"`
-	Title                  string
-	Objective              string `gorm:"type:text"`
-	Status                 string `gorm:"index"` // pending|active|paused|succeeded|failed|cancelled
-	PauseReason            string
-	FailReason             string
-	ReportMarkdown         string `gorm:"type:text"`
-	MaxSegmentsPerRun      int
-	MaxToolTurnsPerSegment int
-	MaxTotalToolTurns      int
-	MaxWallTimeSec         int
-	UsedToolTurns          int
-	UsedSegments           int
-	UsedWallTimeSec        int
-	ActiveRunID            string `gorm:"index"`
-	LastRunID              string `gorm:"index"`
-	SourceRunID            string
-	SourceToolCallID       string
-	StartedAt              *time.Time
-	FinishedAt             *time.Time
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-	// Feedback-control projection.
-	CriteriaJSON       string `gorm:"type:text"`
-	ConstraintsJSON    string `gorm:"type:text"`
-	Strategy           string `gorm:"type:text"`
-	CurrentActionID    string `gorm:"index"`
-	CurrentAction      string `gorm:"type:text"`
-	LastObservation    string `gorm:"type:text"`
-	LastAssessmentJSON string `gorm:"type:text"`
-	LastDecision       string `gorm:"type:text"`
-	OutcomeSummary     string `gorm:"type:text"`
-	Iteration          int
-	MaxIterations      int
-	StagnationCount    int
-	MaxStagnation      int
-	Version            int
-}
-
-// GoalAction is a Goal-scoped, revisable unit of work. It intentionally does
-// not reuse TodoItem because session checklists and outcome execution have
-// different ownership and lifecycle rules.
-type GoalAction struct {
-	ID          string `gorm:"primaryKey"`
-	GoalID      string `gorm:"index;uniqueIndex:idx_goal_action_key"`
-	SessionID   string `gorm:"index"`
-	ActionKey   string `gorm:"uniqueIndex:idx_goal_action_key"`
-	Title       string
-	Description string `gorm:"type:text"`
-	Acceptance  string `gorm:"type:text"`
-	Status      string `gorm:"index"` // queued|active|done|blocked|dropped
-	Result      string `gorm:"type:text"`
-	Evidence    string `gorm:"type:text"`
-	Attempt     int
-	SortOrder   int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	FinishedAt  *time.Time
-}
-
-// GoalEvent is the append-only decision journal behind the Goal projection.
-type GoalEvent struct {
-	ID        string `gorm:"primaryKey"`
-	GoalID    string `gorm:"index;uniqueIndex:idx_goal_event_seq"`
-	SessionID string `gorm:"index"`
-	RunID     string `gorm:"index"`
-	Seq       int    `gorm:"uniqueIndex:idx_goal_event_seq"`
-	Kind      string `gorm:"index"`
-	Summary   string `gorm:"type:text"`
-	Payload   string `gorm:"type:text"`
-	CreatedAt time.Time
-}
-
-// GoalSegment makes Runtime segment accounting idempotent across retries.
-type GoalSegment struct {
-	ID           string `gorm:"primaryKey"`
-	GoalID       string `gorm:"index;uniqueIndex:idx_goal_run_segment"`
-	RunID        string `gorm:"index;uniqueIndex:idx_goal_run_segment"`
-	SegmentIndex int    `gorm:"uniqueIndex:idx_goal_run_segment"`
-	ToolTurns    int
-	CreatedAt    time.Time
-}
-
-// GoalNote is a structured scratchpad entry scoped to a goal, shared across
-// segments, runs, and specialist workers via the context.* tools.
-type GoalNote struct {
-	ID        string `gorm:"primaryKey"`
-	GoalID    string `gorm:"index;uniqueIndex:idx_goal_note_seq"`
-	SessionID string `gorm:"index"`
-	Seq       int    `gorm:"uniqueIndex:idx_goal_note_seq"`
-	Kind      string `gorm:"index"`
-	Title     string
-	Body      string `gorm:"type:text"`
-	Phase     string `gorm:"index"`
-	Source    string
-	RunID     string `gorm:"index"`
-	Pinned    bool   `gorm:"index"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 type ToolCall struct {

@@ -57,8 +57,8 @@ func TestWorkerProfileRoutesCRUDAndEnabledList(t *testing.T) {
 	listed := performWorkerProfileRequest(t, router, http.MethodGet, "/api/v1/worker-profiles", nil, http.StatusOK)
 	var profiles []service.WorkerProfileDTO
 	decodeWorkerProfileData(t, listed, &profiles)
-	if len(profiles) < 6 {
-		t.Fatalf("list returned %d profiles, want custom plus builtins", len(profiles))
+	if len(profiles) != 1 {
+		t.Fatalf("list returned %d profiles, want 1 custom profile", len(profiles))
 	}
 
 	performWorkerProfileRequest(t, router, http.MethodDelete, "/api/v1/worker-profiles/"+profile.ID, nil, http.StatusOK)

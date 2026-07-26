@@ -74,16 +74,16 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 	}, nil
 }
 
-func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartPayload) (params methods.RunExecuteParams, pauseGoalOnFailure bool, err error) {
+func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartPayload) (methods.RunExecuteParams, error) {
 	conversation, err := r.packer.BuildModelConversation(admission.session.ID)
 	if err != nil {
-		return methods.RunExecuteParams{}, false, err
+		return methods.RunExecuteParams{}, err
 	}
 	if _, err := r.repos.Messages.Add(admission.session.ID, "user", admission.inputText, admission.runID); err != nil {
-		return methods.RunExecuteParams{}, false, err
+		return methods.RunExecuteParams{}, err
 	}
 
-	params = methods.RunExecuteParams{
+	params := methods.RunExecuteParams{
 		RunID: admission.runID,
 		Session: methods.ReplySession{
 			ID:           admission.session.ID,
@@ -114,30 +114,22 @@ func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartP
 			WorkerPoolSize:      intOption(payload.Options, "worker_pool_size"),
 		},
 	}
-	// Goal execution is opt-in. A missing option represents a regular
-	// conversation and must not expose Goal tools or pipeline instructions.
-	goalsEnabled := boolOption(payload.Options, "goals_enabled")
-	params.Options.GoalsEnabled = &goalsEnabled
 	if err := r.applyProviderProfile(&params); err != nil {
-		return methods.RunExecuteParams{}, false, err
+		return methods.RunExecuteParams{}, err
 	}
 	if err := r.applyMemoryContext(&params); err != nil {
-		return methods.RunExecuteParams{}, false, err
+		return methods.RunExecuteParams{}, err
 	}
 	if err := r.applyTodoContext(&params); err != nil {
-		return methods.RunExecuteParams{}, false, err
+		return methods.RunExecuteParams{}, err
 	}
-	if err := r.applyGoalBindingAndContext(&params, payload.Options); err != nil {
-		return methods.RunExecuteParams{}, false, err
-	}
-	// From this point the Goal may be active and bound to the admitted run.
 	if err := r.applyWorkerProfiles(&params); err != nil {
-		return methods.RunExecuteParams{}, true, err
+		return methods.RunExecuteParams{}, err
 	}
 	if err := r.applyMCPServers(&params); err != nil {
-		return methods.RunExecuteParams{}, true, err
+		return methods.RunExecuteParams{}, err
 	}
-	return params, true, nil
+	return params, nil
 }
 
 func (r RunService) dispatchRun(ctx context.Context, admission runAdmission, params methods.RunExecuteParams, subscribe bool) (StartRunResult, error) {

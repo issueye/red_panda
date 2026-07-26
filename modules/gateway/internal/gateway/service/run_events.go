@@ -32,7 +32,6 @@ func (r RunService) HandleRuntimeEvent(event events.EnvelopeV2) {
 		if reason, _ := event.Payload["loop_end_reason"].(string); reason == "budget_exhausted" {
 			status = "budget_exhausted"
 		}
-		_ = NewGoalService(r.repos).OnRootRunTerminal(event.RunID, event.SessionID, status)
 		errText, _ := event.Payload["message"].(string)
 		if errText == "" {
 			errText, _ = event.Payload["error"].(string)

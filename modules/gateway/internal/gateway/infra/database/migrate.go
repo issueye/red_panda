@@ -35,11 +35,6 @@ func Migrate(db *gorm.DB) error {
 			&model.ProviderProfile{},
 			&model.MCPServerConfig{},
 			&model.WorkerProfile{},
-			&model.Goal{},
-			&model.GoalSegment{},
-			&model.GoalNote{},
-			&model.GoalAction{},
-			&model.GoalEvent{},
 			&model.ScheduledTask{},
 			&model.ScheduledTaskRun{},
 		); err != nil {
@@ -48,8 +43,34 @@ func Migrate(db *gorm.DB) error {
 		if err := migrateWorkerProfiles(tx); err != nil {
 			return err
 		}
+		// Goal feature removed (docs/37, docs/31-34): drop legacy tables + column
+		// left behind by prior migrations. Idempotent; no-op on fresh databases.
+		if err := dropGoalLegacySchema(tx); err != nil {
+			return err
+		}
 		return tx.Migrator().DropTable("agent_definitions")
 	})
+}
+
+// dropGoalLegacySchema removes the Goal feature tables and the RunRecord.GoalID
+// column that older databases still carry. Safe to run on every boot: each step
+// checks for existence before dropping.
+func dropGoalLegacySchema(tx *gorm.DB) error {
+	for _, table := range []string{
+		"goals", "goal_segments", "goal_notes", "goal_actions", "goal_events",
+	} {
+		if tx.Migrator().HasTable(table) {
+			if err := tx.Migrator().DropTable(table); err != nil {
+				return err
+			}
+		}
+	}
+	if tx.Migrator().HasColumn(&model.RunRecord{}, "GoalID") {
+		if err := tx.Migrator().DropColumn(&model.RunRecord{}, "GoalID"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func repairLegacyActiveCompactions(db *gorm.DB) error {

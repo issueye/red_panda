@@ -356,21 +356,11 @@ func TestSessionHistoryPaginationAndLongCompactionUseCompleteHistory(t *testing.
 	if result.Compaction.SourceEndSeq != 448 {
 		t.Fatalf("compact end seq = %d, want 448", result.Compaction.SourceEndSeq)
 	}
-	goal, err := repos.Goals.Create(model.Goal{ID: "goal-long", SessionID: session.ID, Status: "active"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := repos.Contexts.Append(model.GoalNote{
-		ID: "note-long", GoalID: goal.ID, SessionID: session.ID, Kind: "decision", Title: "Keep context", Body: "Use the session context projection.", Pinned: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	state, err := service.ContextState(session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !state.SummaryActive || state.TailMessageCount != 2 || state.ActiveSummary.Compaction.KeepTailTurns != 2 ||
-		state.GoalID != goal.ID || len(state.ContextItems) != 1 || state.ContextItems[0].ID != "note-long" ||
 		state.Usage.EstimatedTokens <= 0 || state.Usage.ModelMessageCount != 3 || state.Usage.CoveredEndSeq != 448 {
 		t.Fatalf("context state = %#v", state)
 	}

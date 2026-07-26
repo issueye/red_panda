@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
-
-	"redpanda/protocol/methods"
 )
 
 // SessionBootstrapResult is a single-round-trip hydrate payload for Desktop
@@ -18,7 +16,6 @@ type SessionBootstrapResult struct {
 	Permissions []PermissionRequestDTO `json:"permissions"`
 	Todos       TodoListHTTPResult     `json:"todos"`
 	Context     SessionContextState    `json:"context"`
-	Goals       []methods.GoalDTO      `json:"goals"`
 }
 
 // HistoryAll returns the full visible message list for a session (no client paging).
