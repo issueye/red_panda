@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiJson } from '../lib/api.js';
-import { normalizeGoalList, pickFocusGoal } from '../lib/goals.js';
 import { loadSessionBootstrap } from '../lib/sessionHistory.js';
 import { mergeSessionHistoryMessages } from '../lib/sessionMessageMerge.js';
 import {
@@ -78,7 +77,6 @@ export function useSessionBootstrap({
       const permissionItems = boot.permissions;
       const todoData = boot.todos;
       const contextData = boot.context;
-      const goalData = boot.goals;
       const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
       const normalizedRuns = Array.isArray(serverRuns) ? serverRuns.map(normalizeRun) : [];
       const activeRun = latestActiveRun(serverRuns);
@@ -96,8 +94,6 @@ export function useSessionBootstrap({
       const compactKeepTailTurns = contextData?.summary_active
         ? Number(contextData.active_summary?.compaction?.keep_tail_turns) || 0
         : 0;
-      const goalItems = goalData ? normalizeGoalList(goalData) : [];
-      const focusGoal = goalData ? pickFocusGoal(goalItems) : null;
       const normalizedTools = Array.isArray(toolCalls) ? toolCalls.map(normalizeToolCall) : [];
       const normalizedPermissions = Array.isArray(permissionItems)
         ? permissionItems.map(normalizePermission)
@@ -129,9 +125,6 @@ export function useSessionBootstrap({
             todos: todoData ? todoItems : prev.todos,
             todoOpenCount: todoData ? todoOpen : prev.todoOpenCount,
             todosHydrated: true,
-            goals: goalData ? goalItems : prev.goals,
-            goal: goalData ? focusGoal : prev.goal,
-            goalHydrated: true,
             contextSummary: compactSummary,
             contextSummaryEndSeq: compactEndSeq,
             // History messages carry messageSeq; coveredCount is only needed for live rows.
@@ -158,11 +151,6 @@ export function useSessionBootstrap({
           todosHydrated: true,
           todosExpanded: false,
           todosAutoExpandedOnce: false,
-          goals: goalItems,
-          goal: focusGoal,
-          goalHydrated: true,
-          goalExpanded: false,
-          goalBusy: false,
           contextSummary: compactSummary,
           contextSummaryEndSeq: compactEndSeq,
           contextSummaryCoveredCount: 0,

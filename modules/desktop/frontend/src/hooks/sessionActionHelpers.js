@@ -42,15 +42,6 @@ export function beginRunProjection(runtime, displayText) {
   };
 }
 
-export function beginGoalContinuationProjection(runtime, displayText) {
-  return {
-    ...appendMessages(runtime, createUserMessage(displayText)),
-    draft: '',
-    running: true,
-    runSeq: 0,
-  };
-}
-
 export function applyStartedRunProjection(runtime, {
   displayText,
   result,

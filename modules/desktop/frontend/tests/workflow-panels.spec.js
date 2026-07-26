@@ -60,10 +60,9 @@ test('Restored workflow panels render permissions tools and Worker assignments',
 
   await expect(page.getByTestId('chat-tab-main')).toBeVisible();
   await expect(page.getByTestId('todo-composer-strip')).toBeVisible();
-  await expect(page.getByTestId('goal-composer-strip')).toHaveCount(0);
 
   await planner.getByTestId('worker-assignment-open').click();
-  await expect(page.getByTestId('chat-tab-worker')).toContainText('目标规划');
+  await expect(page.getByTestId('chat-tab-worker')).toContainText('planner');
   const workerConversation = page.getByTestId('chat-conversation');
   await expect(workerConversation.getByText('Reading restored context', { exact: true })).toBeVisible();
   await expect(workerConversation.getByText('任务输入', { exact: true })).toBeVisible();
@@ -74,14 +73,6 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await expect(page.getByTestId('permission-approve')).toHaveCount(0);
   await expect(page.getByTestId('permission-deny')).toHaveCount(0);
   await expect(page.getByTestId('conversation-readonly-hint')).toBeVisible();
-
-  await page.getByTestId('chat-tab-main').click();
-  await page.getByTestId('fixture-goal-mode').click();
-  await expect(page.getByTestId('goal-composer-strip')).toBeVisible();
-  await expect(page.getByTestId('todo-composer-strip')).toHaveCount(0);
-  await expect(page.getByTestId('goal-criteria')).toContainText('2/3 已满足');
-  await expect(page.getByTestId('goal-actions')).toContainText('行动 1/3');
-  await expect(page.getByTestId('goal-assessment')).toContainText('最近评估：有进展');
 
   await page.getByTestId('chat-tab-worker').click();
   await page.getByTestId('chat-tab-close').click();
@@ -231,45 +222,6 @@ test('Conversation pauses following after manual scroll and can return to latest
   await expect.poll(() => conversation.evaluate((element) => (
     element.scrollHeight - element.scrollTop - element.clientHeight
   ))).toBeLessThan(2);
-});
-
-test('Goal information can be dragged, restored, and reset', async ({ page }) => {
-  await page.goto('/workflow-fixture.html');
-  await page.getByTestId('fixture-goal-mode').click();
-
-  const strip = page.getByTestId('goal-composer-strip');
-  const handle = page.getByTestId('goal-drag-handle');
-  await expect(strip).toBeVisible();
-  await expect(handle).toHaveAttribute('aria-label', '拖动目标信息');
-
-  const initial = await strip.boundingBox();
-  const grip = await handle.boundingBox();
-  expect(initial).not.toBeNull();
-  expect(grip).not.toBeNull();
-
-  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(grip.x + grip.width / 2 + 72, grip.y + grip.height / 2 - 72, { steps: 8 });
-  await page.mouse.up();
-
-  const moved = await strip.boundingBox();
-  expect(moved.x).toBeGreaterThan(initial.x + 20);
-  expect(moved.y).toBeLessThan(initial.y - 20);
-  expect(moved.x).toBeGreaterThanOrEqual(8);
-  expect(moved.x + moved.width).toBeLessThanOrEqual(1280 - 8);
-  await expect.poll(() => page.evaluate(() => (
-    window.localStorage.getItem('red_panda_goal_strip_position_v1')
-  ))).not.toBeNull();
-
-  await page.reload();
-  await page.getByTestId('fixture-goal-mode').click();
-  const restored = await strip.boundingBox();
-  expect(restored.x).toBeGreaterThan(initial.x + 20);
-  expect(restored.y).toBeLessThan(initial.y - 20);
-
-  await handle.dblclick();
-  await expect.poll(async () => (await strip.boundingBox()).x).toBeLessThan(initial.x + 8);
-  await expect.poll(async () => (await strip.boundingBox()).y).toBeGreaterThan(initial.y - 8);
 });
 
 test('Collapsed task strip can be dragged, restored, and reset', async ({ page }) => {

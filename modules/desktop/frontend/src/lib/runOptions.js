@@ -63,7 +63,7 @@ export function splitOptionList(value) {
  * @param {object} settings
  * @param {object} workspace
  * @param {string} text raw or cleaned composer text (used for /permission flag)
- * @param {object} [overrides] extra options (create_goal, goal_objective, flags from parseCommand, …)
+ * @param {object} [overrides] extra options (flags from parseCommand, …)
  */
 export function buildRunStartOptions(settings, workspace, text, overrides = {}) {
   const current = normalizeStoredRunSettings(settings);
@@ -100,33 +100,7 @@ export function buildRunStartOptions(settings, workspace, text, overrides = {}) 
     worker_pool_size: clampWorkerPoolSize(current.workerPoolSize),
     log_llm_requests: Boolean(current.logLlmRequests),
     require_permission: requirePermission,
-    // Regular conversations must not enter the Goal pipeline implicitly.
-    goals_enabled: false,
   };
-
-  // Goal command overrides (user-initiated create/bind).
-  if (overrides.create_goal) {
-    options.create_goal = true;
-    if (overrides.goal_objective) {
-      options.goal_objective = String(overrides.goal_objective);
-    }
-    if (overrides.goal_title) {
-      options.goal_title = String(overrides.goal_title);
-    }
-    if (overrides.goal_success_criteria) {
-      options.goal_success_criteria = String(overrides.goal_success_criteria);
-    }
-    options.goals_enabled = true;
-  }
-  if (overrides.goal_id) {
-    options.goal_id = String(overrides.goal_id);
-  }
-  if (overrides.continue_goal) {
-    options.continue_goal = true;
-  }
-  if (overrides.goals_enabled != null) {
-    options.goals_enabled = Boolean(overrides.goals_enabled);
-  }
 
   return options;
 }

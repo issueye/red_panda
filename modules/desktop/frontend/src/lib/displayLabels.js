@@ -69,15 +69,6 @@ const sessionKindLabel = {
   fork: '分叉',
 };
 
-/** Goal pipeline Worker profiles. */
-const goalSpecialistLabel = {
-  'goal-analyst': '目标分析师',
-  'goal-planner': '目标规划师',
-  'goal-implementer': '目标实施者',
-  'goal-verifier': '目标验证者',
-  'goal-evaluator': '目标终评官',
-};
-
 const eventKindLabel = {
   done: '完成',
   error: '错误',
@@ -129,11 +120,10 @@ export function displaySessionKind(value) {
   return displayFrom(sessionKindLabel, value, '');
 }
 
-/** Prefer Chinese label for Goal phase specialists. */
+/** Display name for a worker profile key (falls back to the raw key). */
 export function displayWorkerProfileName(value) {
   if (value == null || value === '') return '';
-  const key = String(value).trim().toLowerCase().replaceAll('_', '-');
-  return goalSpecialistLabel[key] || String(value);
+  return String(value);
 }
 
 export function displayEventKind(value) {

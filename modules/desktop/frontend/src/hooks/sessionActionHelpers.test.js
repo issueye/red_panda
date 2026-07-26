@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   appendMessages,
   applyStartedRunProjection,
-  beginGoalContinuationProjection,
   beginRunProjection,
   createSystemMessage,
   createUserMessage,
@@ -59,17 +58,6 @@ test('beginRunProjection resets run-specific assignment projection', () => {
   assert.deepEqual(next.assignmentsById, {});
   assert.deepEqual(next.assignmentOrder, []);
   assert.equal(next.messages.at(-1).text, 'start this');
-});
-
-test('beginGoalContinuationProjection keeps current assignments intact', () => {
-  const runtime = runtimeFixture();
-  const next = beginGoalContinuationProjection(runtime, '/goal continue');
-
-  assert.equal(next.draft, '');
-  assert.equal(next.running, true);
-  assert.equal(next.runSeq, 0);
-  assert.equal(next.assignmentsById, runtime.assignmentsById);
-  assert.equal(next.messages.at(-1).text, '/goal continue');
 });
 
 test('applyStartedRunProjection inserts the normalized active run and restores its cursor', () => {

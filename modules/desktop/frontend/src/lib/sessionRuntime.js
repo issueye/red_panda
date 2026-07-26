@@ -39,12 +39,6 @@ export function createEmptySessionRuntime(overrides = {}) {
     contextSummaryKeepTailTurns: 0,
     // True while this session is pausing runs and applying a context summary.
     compacting: false,
-    // Long-horizon Goal strip (docs/32 M5).
-    goal: null,
-    goals: [],
-    goalHydrated: false,
-    goalExpanded: false,
-    goalBusy: false,
     conversationTabs: [{
       id: 'main', kind: 'main', title: '主对话', closable: false,
     }],

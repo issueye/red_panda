@@ -1,6 +1,5 @@
 import { ChatComposer } from './ChatComposer.jsx';
 import { ChatConversation } from './ChatConversation.jsx';
-import { GoalComposerStrip } from './GoalComposerStrip.jsx';
 import { TodoComposerStrip } from './TodoComposerStrip.jsx';
 import { classNames } from '../../lib/format.js';
 
@@ -28,14 +27,6 @@ export function ConversationView({
   onProviderProfileChange,
   onReasoningEffortChange,
   readOnlyHint = '',
-  goal = null,
-  goalSessionId = '',
-  goalExpanded = false,
-  goalLoading = false,
-  goalBusy = false,
-  onGoalExpandToggle,
-  onGoalContinue,
-  onGoalCancel,
   todos = [],
   todoOpenCount = 0,
   todosExpanded = false,
@@ -64,27 +55,14 @@ export function ConversationView({
       {showComposer ? (
         <div className="conversation-footer">
           <div className="composer-strips">
-            {goal ? (
-              <GoalComposerStrip
-                busy={goalBusy}
-                expanded={goalExpanded}
-                goal={goal}
-                loading={goalLoading}
-                onCancel={onGoalCancel}
-                onContinue={onGoalContinue}
-                onToggleExpanded={onGoalExpandToggle}
-                sessionId={goalSessionId}
-              />
-            ) : (
-              <TodoComposerStrip
-                expanded={todosExpanded}
-                items={todos}
-                loading={todosLoading}
-                onRefresh={onTodosRefresh}
-                onToggleExpanded={onTodosExpandToggle}
-                openCount={todoOpenCount}
-              />
-            )}
+            <TodoComposerStrip
+              expanded={todosExpanded}
+              items={todos}
+              loading={todosLoading}
+              onRefresh={onTodosRefresh}
+              onToggleExpanded={onTodosExpandToggle}
+              openCount={todoOpenCount}
+            />
           </div>
           <ChatComposer
             onCancel={onCancel}

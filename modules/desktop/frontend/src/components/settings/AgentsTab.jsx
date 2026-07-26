@@ -113,7 +113,7 @@ export function AgentsTab({
                   <Field
                     className="settings-row"
                     label="能力标签"
-                    tooltip="分组与展示用标签，不是 Goal 流水线阶段。API 字段名仍为 phase（兼容）。"
+                    tooltip="分组与展示用标签。API 字段名仍为 phase（兼容）。"
                   >
                     <SelectMenu
                       ariaLabel="能力标签"

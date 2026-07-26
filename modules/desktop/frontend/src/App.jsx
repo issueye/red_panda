@@ -17,7 +17,6 @@ import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
 import { useConversationTabs } from './hooks/useConversationTabs.js';
 import { useGatewayConnection } from './hooks/useGatewayConnection.js';
 import { useGatewayResources } from './hooks/useGatewayResources.js';
-import { useGoalSession } from './hooks/useGoalSession.js';
 import { usePermissionActions } from './hooks/usePermissionActions.js';
 import { useResizablePanels } from './hooks/useResizablePanels.js';
 import { useRightPanelChrome } from './hooks/useRightPanelChrome.js';
@@ -46,7 +45,6 @@ import {
   rightPanelTabs,
 } from './lib/panelLayout.js';
 import { providerModelFor } from './lib/providerProfiles.js';
-import { isRunTerminalEvent } from './lib/runEventLifecycle.js';
 import { loadRunSettings, persistRunSettings } from './lib/runSettingsStorage.js';
 import { reconcileAssignmentsWithRuns, reduceRunEvent, upsertByID } from './lib/reduceRunEvent.js';
 import {
@@ -154,7 +152,6 @@ export function App() {
     loadSkills,
   });
 
-  const hydrateGoalsRef = useRef(async () => {});
   const upsertSessionRef = useRef(null);
   const selectSessionRef = useRef(null);
   const refreshSessionsRef = useRef(null);
@@ -190,10 +187,6 @@ export function App() {
     contextSummaryCoveredCount = 0,
     contextSummaryKeepTailTurns = 0,
     compacting = false,
-    goal = null,
-    goalHydrated = false,
-    goalExpanded = false,
-    goalBusy = false,
     conversationTabs = [{ id: 'main', kind: 'main', title: '主对话', closable: false }],
     activeConversationTab = 'main',
   } = runtime;
@@ -373,12 +366,6 @@ export function App() {
       }
 
       const payload = event.payload || {};
-      if (isRunTerminalEvent(payload) && payload.session_id) {
-        // A6: Gateway OnRootRunTerminal mutates Goal (pause/fail/budget) before
-        // Publish; re-hydrate so the Goal strip matches persisted state without
-        // reopening the session. Live tool mutations still use goal_updated.
-        void hydrateGoalsRef.current(payload.session_id);
-      }
       let effects = [];
       setSessionRuntimes((map) => {
         const sessionId = resolveEventSessionId(payload, map, currentSessionIdRef.current);
@@ -422,25 +409,22 @@ export function App() {
     }).catch(() => {});
   }, [currentRunId, currentSessionId, patchRuntime, request, status]);
 
-  const {
-    hydrateTodos,
-    hydrateGoals,
-    continueGoal,
-    cancelGoal,
-  } = useGoalSession({
-    patchRuntime,
-    currentSessionId,
-    currentSessionIdRef,
-    sessionRuntimesRef,
-    runSettings,
-    workspace,
-    request,
-    goal,
-    running,
-    compacting,
-    goalBusy,
-  });
-  hydrateGoalsRef.current = hydrateGoals;
+  const hydrateTodos = useCallback(async (sessionId) => {
+    if (!sessionId) return;
+    try {
+      const data = await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/todos`);
+      const items = Array.isArray(data?.items) ? data.items : [];
+      patchRuntime(sessionId, (prev) => ({
+        ...prev,
+        todos: items,
+        todoOpenCount: Number(data?.open_count ?? items.filter((item) => item.status !== 'completed' && item.status !== 'cancelled').length),
+        todosHydrated: true,
+        todosVersion: (prev.todosVersion || 0) + 1,
+      }));
+    } catch {
+      patchRuntime(sessionId, (prev) => ({ ...prev, todosHydrated: true }));
+    }
+  }, [patchRuntime]);
 
   const {
     createSession,
@@ -474,9 +458,6 @@ export function App() {
     loadSkills,
     runSettings,
     request,
-    hydrateGoals,
-    continueGoal,
-    cancelGoal,
     setRightPanelTab,
     contextTokenBudget,
     compacting,
@@ -679,17 +660,6 @@ export function App() {
             todosExpanded: !rt.todosExpanded,
           }))}
           onTodosRefresh={() => hydrateTodos(currentSessionId)}
-          goal={goal}
-          goalBusy={goalBusy}
-          goalExpanded={goalExpanded}
-          goalLoading={!goalHydrated && !goal}
-          goalSessionId={currentSessionId}
-          onGoalCancel={() => { cancelGoal().catch(() => {}); }}
-          onGoalContinue={() => { continueGoal().catch(() => {}); }}
-          onGoalExpandToggle={() => patchCurrentRuntime((rt) => ({
-            ...rt,
-            goalExpanded: !rt.goalExpanded,
-          }))}
           permissions={pendingPermissions}
           providerProfileId={runSettings.providerProfileId}
           model={runSettings.model}

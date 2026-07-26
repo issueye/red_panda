@@ -32,14 +32,6 @@ export function ChatPanel({
   activeConversationTab = 'main',
   onSelectConversationTab,
   onCloseConversationTab,
-  goal = null,
-  goalSessionId = '',
-  goalExpanded = false,
-  goalLoading = false,
-  goalBusy = false,
-  onGoalExpandToggle,
-  onGoalContinue,
-  onGoalCancel,
   todos = [],
   todoOpenCount = 0,
   todosExpanded = false,
@@ -134,17 +126,9 @@ export function ChatPanel({
       <ConversationView
         draft={draft}
         emptyTitle={scoped.emptyTitle}
-        goal={goal}
-        goalBusy={goalBusy}
-        goalExpanded={goalExpanded}
-        goalLoading={goalLoading}
-        goalSessionId={goalSessionId}
         messages={scoped.messages}
         onCancel={onCancel}
         onDraftChange={onDraftChange}
-        onGoalCancel={onGoalCancel}
-        onGoalContinue={onGoalContinue}
-        onGoalExpandToggle={onGoalExpandToggle}
         onProviderProfileChange={onProviderProfileChange}
         onReasoningEffortChange={onReasoningEffortChange}
         onResolvePermission={onResolvePermission}

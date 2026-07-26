@@ -1,4 +1,3 @@
-import { goalFromUpdatedEvent, pickFocusGoal } from './goals.js';
 import { createEmptySessionRuntime } from './sessionRuntime.js';
 import { todosFromToolFinishedPayload, todosFromUpdatedEvent } from './todos.js';
 
@@ -238,19 +237,6 @@ export function reduceRunEvent(runtime, event) {
   }
 
   if (event.type === 'todo_updated') return { runtime: updateTodos(next, event.payload || {}), effects };
-
-  if (event.type === 'goal_updated') {
-    const updated = goalFromUpdatedEvent(event.payload || {});
-    if (updated) {
-      const goals = [...(next.goals || [])];
-      const index = goals.findIndex((goal) => goal.id === updated.id);
-      if (index >= 0) goals[index] = updated; else goals.unshift(updated);
-      const goal = pickFocusGoal(goals);
-      next = { ...next, goals, goal, goalHydrated: true,
-        goalExpanded: Boolean(goal && ['active', 'paused'].includes(goal.status)) || next.goalExpanded };
-    }
-    return { runtime: next, effects };
-  }
 
   if (event.type === 'tool_finished' || event.type === 'tool_failed') {
     next = {

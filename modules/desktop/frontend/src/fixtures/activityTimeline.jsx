@@ -24,7 +24,7 @@ const events = [
     type: 'message_delta',
     run_id: runId,
     session_id: 'session_fixture', assignment_id: 'assignment-planner', run_seq: 2, worker_seq: 1,
-    worker: { id: 'worker-02', profile_key: 'goal-planner' },
+    worker: { id: 'worker-02', profile_key: 'planner' },
     payload: { delta: 'planner saw the file' },
   }),
   normalizeRunEvent({
