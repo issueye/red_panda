@@ -96,8 +96,6 @@ func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version str
 	}
 	rt.tools.MemoryExecutor = rt.executeMemoryTool
 	rt.tools.TodoExecutor = rt.todoExecutor
-	rt.tools.GoalExecutor = rt.goalExecutor
-	rt.tools.ContextExecutor = rt.executeContextTool
 	rt.tools.SkillExecutor = rt.executeSkillRun
 	rt.tools.WorkerDelegate = rt.executeWorkerDelegate
 	rt.tools.WorkerList = rt.executeWorkerList

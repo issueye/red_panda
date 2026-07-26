@@ -248,22 +248,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		toolHistory = append(toolHistory, provider.ToolExchange{Call: invocation.Call, Result: result})
 	}
 
-	// Bound Goals use the controller loop; goal.create may bind mid-run.
-	seg := r.runWithGoalLoop(ctx, params, providerInput, toolHistory, messageID, streamID, &streamSeq)
-	goalStreamNeedsFinal := r.deferGoalStreamFinal(params.RunID)
-	if goalStreamNeedsFinal && ctx.Err() == nil {
-		_ = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
-			StreamID: streamID,
-			Kind:     events.StreamMessage,
-			Seq:      streamSeq,
-			Final:    true,
-		}, map[string]any{
-			"message_id":    messageID,
-			"delta":         "",
-			"provider_name": r.provider.Name(),
-		})
-		streamSeq++
-	}
+	seg := r.runProviderLoopSegment(ctx, params, providerInput, toolHistory, messageID, streamID, &streamSeq)
 	// 仅在根运行结束时清理快照，不能在分段中途清理。
 	r.clearRunSnapshots(params.RunID)
 
@@ -304,6 +289,12 @@ func (r *Runtime) emitCancelled(params methods.ReplyParams) {
 	_ = r.emitEvent(context.Background(), params, events.EventFinish, nil, map[string]any{
 		"status": "cancelled",
 	})
+}
+
+// clearRunSnapshots 清理运行快照中的 per-run 缓存上下文（如 Todo）。
+// 仅在根运行结束时调用，避免在分段循环中途清理。
+func (r *Runtime) clearRunSnapshots(runID string) {
+	r.runStates.ClearSnapshots(runID)
 }
 
 func (r *Runtime) requestPermission(ctx context.Context, params methods.ReplyParams, payload permission.RequestPayload) (permission.ResolveParams, bool) {

@@ -20,12 +20,6 @@ var DelegatedDenylist = []string{
 	"skill.run",
 	"todo.write",
 	"todo.list",
-	"goal.create",
-	"goal.plan",
-	"goal.observe",
-	"goal.assess",
-	"goal.finish",
-	"goal.list",
 }
 
 var workerNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)

@@ -68,24 +68,6 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 	}
 }
 
-func TestPromptComposerGoalControllerSuppressesWorkerAndTodoPolicies(t *testing.T) {
-	params := methods.ReplyParams{Options: methods.ReplyOptions{GoalContext: &methods.GoalContext{GoalID: "goal_1", Context: "goal context"}}}
-	request := (promptComposer{now: time.Now}).compose(params, "continue", []tools.Definition{
-		{Name: "worker.delegate"}, {Name: "todo.write"}, {Name: "goal.create"},
-	}, nil)
-	joined := make([]string, 0, len(request.Messages))
-	for _, message := range request.Messages {
-		joined = append(joined, message.Content)
-	}
-	all := strings.Join(joined, "\n")
-	if !strings.Contains(all, "largest evidence-backed gap") || !strings.Contains(all, "id=goal_1") {
-		t.Fatalf("goal policy/binding missing: %s", all)
-	}
-	if strings.Contains(all, "spawn multiple worker.delegate calls IN ONE TURN") || strings.Contains(all, "Session task list") {
-		t.Fatalf("goal controller received worker/todo policy: %s", all)
-	}
-}
-
 func TestPromptComposerAddsFileChangeReportPolicyOnlyToRoot(t *testing.T) {
 	composer := promptComposer{now: time.Now}
 	definitions := []tools.Definition{{Name: "git.status"}, {Name: "workspace.write_file"}}

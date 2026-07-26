@@ -2,9 +2,7 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strings"
 
 	"redpanda/protocol/methods"
 	ptools "redpanda/protocol/tools"
@@ -53,55 +51,4 @@ func (runner ToolRunner) runTodoTool(ctx context.Context, runCtx ToolRunContext,
 		return "", err
 	}
 	return requireGatewayToolCompleted("todo", result.Status, result.Output)
-}
-
-func (runner ToolRunner) runGoalTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
-	if runner.GoalExecutor == nil {
-		return "", fmt.Errorf("goal tool executor is not available")
-	}
-	result, err := runner.GoalExecutor(ctx, methods.GoalToolExecuteParams{
-		RunID:         runCtx.RunID,
-		SessionID:     runCtx.SessionID,
-		WorkspaceRoot: runCtx.WorkingDir,
-		ToolCallID:    call.ID,
-		ToolName:      call.Name,
-		Arguments:     call.Arguments,
-	})
-	if err != nil {
-		return "", err
-	}
-	return requireGatewayToolCompleted("goal", result.Status, result.Output)
-}
-
-// runContextTool 将 context.*（目标暂存区）工具请求转发到 Gateway。
-// context 工具不会被加入子代理拒绝列表，使专业子代理可以读取共享发现并写入交接信息。
-func (runner ToolRunner) runContextTool(ctx context.Context, runCtx ToolRunContext, call ptools.Call) (string, error) {
-	if runner.ContextExecutor == nil {
-		return "", fmt.Errorf("context tool executor is not available")
-	}
-	result, err := runner.ContextExecutor(ctx, methods.ContextToolExecuteParams{
-		RunID:         runCtx.RunID,
-		SessionID:     runCtx.SessionID,
-		WorkspaceRoot: runCtx.WorkingDir,
-		ToolCallID:    call.ID,
-		ToolName:      call.Name,
-		Arguments:     call.Arguments,
-	})
-	if err != nil {
-		return "", err
-	}
-	output, err := requireGatewayToolCompleted("context", result.Status, result.Output)
-	if err != nil {
-		return output, err
-	}
-	// 将结构化笔记加入输出，确保模型能在当前上下文中看到它们。
-	if len(result.Notes) > 0 {
-		notesJSON, _ := json.Marshal(map[string]any{"notes": result.Notes})
-		if output == "" {
-			output = string(notesJSON)
-		} else {
-			output = strings.TrimSpace(output) + "\n" + string(notesJSON)
-		}
-	}
-	return TruncateToolOutput(output), nil
 }

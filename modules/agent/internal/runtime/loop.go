@@ -105,12 +105,9 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
 			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
-		// 循环中：从运行快照刷新 Todo 和 Goal 上下文。
+		// 循环中：从运行快照刷新 Todo 上下文。
 		if ctxTodos := r.todoContextForRun(params.RunID); ctxTodos != nil {
 			params.Options.TodoContext = ctxTodos
-		}
-		if ctxGoal := r.goalContextForRun(params.RunID); ctxGoal != nil {
-			params.Options.GoalContext = ctxGoal
 		}
 		var requestedCalls []tools.Call
 		emittedText := false
@@ -149,7 +146,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 					StreamID: streamID,
 					Kind:     events.StreamMessage,
 					Seq:      *streamSeq,
-					Final:    !r.deferGoalStreamFinal(params.RunID),
+					Final:    true,
 				}, map[string]any{
 					"message_id":    messageID,
 					"delta":         fallback,
@@ -183,7 +180,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 			StreamID: streamID,
 			Kind:     events.StreamMessage,
 			Seq:      *streamSeq,
-			Final:    !r.deferGoalStreamFinal(params.RunID),
+			Final:    true,
 		}, map[string]any{
 			"message_id":    messageID,
 			"delta":         fallback,
@@ -256,12 +253,8 @@ func (r *Runtime) consumeProviderChunk(
 	if strings.TrimSpace(chunk.Delta) != "" {
 		*emittedText = true
 	}
-	// 空 Final 标记会关闭根消息流。绑定 Goal 时，外层运行器负责唯一的终止 Final（A5），
-	// 因此延后处理中间空 Final；未绑定的运行仍必须在此关闭消息流。
+	// 空 Final 标记会关闭根消息流；直接在此关闭消息流。
 	if chunk.Delta == "" && chunk.Final {
-		if r.deferGoalStreamFinal(params.RunID) {
-			return nil
-		}
 		err := r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
 			StreamID: streamID,
 			Kind:     events.StreamMessage,
@@ -279,7 +272,7 @@ func (r *Runtime) consumeProviderChunk(
 		StreamID: streamID,
 		Kind:     events.StreamMessage,
 		Seq:      *streamSeq,
-		Final:    chunk.Final && !r.deferGoalStreamFinal(params.RunID),
+		Final:    chunk.Final,
 	}, map[string]any{
 		"message_id":    messageID,
 		"delta":         chunk.Delta,
@@ -327,7 +320,7 @@ func (r *Runtime) retryFinalAnswer(
 		StreamID: streamID,
 		Kind:     events.StreamMessage,
 		Seq:      *streamSeq,
-		Final:    !r.deferGoalStreamFinal(params.RunID),
+		Final:    true,
 	}, map[string]any{
 		"message_id":    messageID,
 		"delta":         text,

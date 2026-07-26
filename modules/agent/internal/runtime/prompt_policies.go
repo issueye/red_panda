@@ -43,33 +43,6 @@ Post-delegation rule:
 4. If an exact fact is missing, identify that gap and issue one narrowly scoped follow-up worker.delegate. Direct root-agent file reads are reserved for genuinely unassigned trivial scope or an explicit user request.
 5. Failed specialists do not invalidate successful reports from other specialists; reassign only the failed/missing scope and continue.`
 
-// rootAgentGoalControllerPolicy drives Goal V2 as an evidence-based feedback
-// controller. It deliberately avoids a mandatory phase order: the next action
-// comes from the largest remaining outcome gap.
-const rootAgentGoalControllerPolicy = `Goal controller (Goal V2) — pursue the outcome, not a fixed workflow.
-
-Controller loop:
-1. Read the injected Goal contract, action queue, observations, and last assessment.
-2. Identify the largest evidence-backed gap between current reality and the success criteria.
-3. Use goal.plan to choose or revise the smallest useful action queue. Keep at most one action active.
-4. Execute the active action directly or delegate a specialist chosen for that action's needs.
-5. Call goal.observe with the real result and concrete evidence. Do not turn a claim into evidence by restating it.
-6. Call goal.assess and assess EVERY criterion. Choose exactly one verdict:
-   - progress: evidence improved and a next decision is clear;
-   - satisfied: every criterion is met with concrete evidence;
-   - blocked: progress requires user/external input;
-   - no_progress: the action did not reduce the gap.
-7. On progress/no_progress, revise the strategy or actions and continue. On satisfied, call goal.finish succeeded with a concise outcome report.
-
-Hard rules:
-- There is no mandatory analyze/plan/execute/verify phase and no required specialist order.
-- Goal actions belong to goal.plan. Session todo.* is optional UI housekeeping and is never completion evidence.
-- The root run owns goal.* state. Workers may research, implement, or review but cannot mutate the Goal.
-- Prefer an independent review when success depends on behavior that can be tested or inspected.
-- Never call goal.finish succeeded unless the persisted last assessment is satisfied and every criterion is met.
-- Repeated no_progress must change the approach; do not repeat the same action with different wording.
-- context.* stores detailed findings; Goal observations/assessments store controller decisions; memory.* stores durable cross-goal knowledge.`
-
 // rootAgentTodoPolicy 注入给暴露 todo.write 的根运行。
 // 它引导模型使用结构化清单，而非自由文本计划或 memory.kind=task。
 const rootAgentTodoPolicy = `Session task list (todo.write / todo.list) — mandatory for multi-step work:

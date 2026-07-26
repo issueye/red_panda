@@ -13,38 +13,18 @@ import (
 func TestRunStateStoreCopiesSnapshots(t *testing.T) {
 	var store RunStateStore
 	todos := []methods.TodoItemDTO{{ID: "todo-1", Content: "original"}}
-	goal := &runGoalState{Goal: methods.GoalDTO{ID: "goal-1", Status: "active"}, BoundToThisRun: true}
-	goal.Goal.Criteria = []methods.GoalCriterionDTO{{ID: "criterion-1", Status: "unknown"}}
 
 	store.SetTodos("run-1", todos)
-	store.SetGoal("run-1", goal)
 	todos[0].Content = "changed by caller"
-	goal.Goal.Status = "failed"
-	goal.Goal.Criteria[0].Status = "met"
 
 	gotTodos := store.Todos("run-1")
-	gotGoal := store.Goal("run-1")
 	if gotTodos[0].Content != "original" {
 		t.Fatalf("stored todos changed through input slice: %+v", gotTodos)
 	}
-	if gotGoal.Goal.Status != "active" {
-		t.Fatalf("stored goal changed through input pointer: %+v", gotGoal)
-	}
-	if gotGoal.Goal.Criteria[0].Status != "unknown" {
-		t.Fatalf("stored goal criteria changed through input slice: %+v", gotGoal.Goal.Criteria)
-	}
 
 	gotTodos[0].Content = "changed after read"
-	gotGoal.Goal.Status = "cancelled"
-	gotGoal.Goal.Criteria[0].Status = "blocked"
 	if store.Todos("run-1")[0].Content != "original" {
 		t.Fatal("stored todos changed through returned slice")
-	}
-	if store.Goal("run-1").Goal.Status != "active" {
-		t.Fatal("stored goal changed through returned pointer")
-	}
-	if store.Goal("run-1").Goal.Criteria[0].Status != "unknown" {
-		t.Fatal("stored goal criteria changed through returned slice")
 	}
 }
 
@@ -59,7 +39,6 @@ func TestRunStateStoreRemoveClearsLifecycleState(t *testing.T) {
 		t.Fatal("duplicate registration was accepted")
 	}
 	store.SetTodos("run-1", []methods.TodoItemDTO{{ID: "todo-1"}})
-	store.SetGoal("run-1", &runGoalState{Goal: methods.GoalDTO{ID: "goal-1"}})
 	if got := store.NextRunSeq("run-1"); got != 1 {
 		t.Fatalf("first run sequence = %d, want 1", got)
 	}
@@ -68,7 +47,7 @@ func TestRunStateStoreRemoveClearsLifecycleState(t *testing.T) {
 	}
 
 	store.Remove("run-1")
-	if store.Cancel("run-1") != nil || store.Todos("run-1") != nil || store.Goal("run-1") != nil {
+	if store.Cancel("run-1") != nil || store.Todos("run-1") != nil {
 		t.Fatal("remove retained run lifecycle state")
 	}
 	store.mu.RLock()
@@ -157,8 +136,6 @@ func TestRunStateStoreConcurrentAccess(t *testing.T) {
 				store.NextWorkerSeq("run-concurrent", "worker-shared")
 				store.SetTodos("run-concurrent", []methods.TodoItemDTO{{ID: "todo"}})
 				_ = store.Todos("run-concurrent")
-				store.SetGoal("run-concurrent", &runGoalState{Goal: methods.GoalDTO{ID: "goal"}})
-				_ = store.Goal("run-concurrent")
 			}
 		}(worker)
 	}

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/events"
@@ -112,20 +111,6 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, i
 			"completed_count": completed,
 			"cancelled_count": cancelled,
 		})
-	}
-	switch call.Name {
-	case "goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish":
-		if state := r.getRunGoal(params.RunID); state != nil && state.Goal.ID != "" {
-			_ = r.emitEvent(ctx, params, events.EventGoalUpdated, nil, map[string]any{
-				"session_id":   params.Session.ID,
-				"run_id":       params.RunID,
-				"tool_call_id": call.ID,
-				"action":       strings.TrimPrefix(call.Name, "goal."),
-				"goal":         state.Goal,
-				"iteration":    state.Goal.Iteration,
-				"status":       state.Goal.Status,
-			})
-		}
 	}
 	return result, output, true
 }

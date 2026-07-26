@@ -13,18 +13,14 @@ import (
 
 type MemoryToolExecutor func(context.Context, methods.MemoryToolExecuteParams) (methods.MemoryToolExecuteResult, error)
 type TodoToolExecutor func(context.Context, methods.TodoToolExecuteParams) (methods.TodoToolExecuteResult, error)
-type GoalToolExecutor func(context.Context, methods.GoalToolExecuteParams) (methods.GoalToolExecuteResult, error)
-type ContextToolExecutor func(context.Context, methods.ContextToolExecuteParams) (methods.ContextToolExecuteResult, error)
 type SkillRunExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
 type WorkerToolExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
 type MCPToolExecutor func(context.Context, ToolRunContext, ptools.Call) (string, error)
 
 type ToolRunner struct {
-	MemoryExecutor   MemoryToolExecutor
-	TodoExecutor     TodoToolExecutor
-	GoalExecutor     GoalToolExecutor
-	ContextExecutor  ContextToolExecutor
-	SkillExecutor    SkillRunExecutor
+	MemoryExecutor MemoryToolExecutor
+	TodoExecutor   TodoToolExecutor
+	SkillExecutor  SkillRunExecutor
 	WorkerDelegate   WorkerToolExecutor
 	WorkerList       WorkerToolExecutor
 	WorkerCancel     WorkerToolExecutor

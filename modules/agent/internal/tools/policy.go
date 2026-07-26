@@ -53,27 +53,6 @@ func opsToolExposed(options methods.ReplyOptions, name string) bool {
 	return ContainsString(options.ToolAllowlist, name)
 }
 
-func isContextTool(name string) bool {
-	return strings.HasPrefix(strings.TrimSpace(name), "context.")
-}
-
-// Context tools address a Goal-scoped scratchpad. Expose them only when the
-// run carries a concrete Goal ID, or when trusted Runtime code marks a child as
-// a Goal specialist. Generic chats/workers must not invent placeholder IDs.
-func contextToolExposed(options methods.ReplyOptions, name string) bool {
-	if !isContextTool(name) {
-		return true
-	}
-	if strings.TrimSpace(options.GoalID) != "" {
-		return true
-	}
-	if options.GoalContext != nil && strings.TrimSpace(options.GoalContext.GoalID) != "" {
-		return true
-	}
-	return options.SpecialistContext != nil &&
-		strings.EqualFold(strings.TrimSpace(options.SpecialistContext.Kind), "specialist")
-}
-
 type ToolDecisionAction string
 
 const (
@@ -88,14 +67,8 @@ type ToolDecision struct {
 }
 
 func EvaluateToolPolicy(options methods.ReplyOptions, call ptools.Call) ToolDecision {
-	if options.GoalsEnabled != nil && !*options.GoalsEnabled && strings.HasPrefix(call.Name, "goal.") {
-		return ToolDecision{Action: ToolDecisionDeny, Reason: "goals are disabled"}
-	}
 	if ContainsString(options.ToolDenylist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is denied by tool_denylist"}
-	}
-	if !contextToolExposed(options, call.Name) {
-		return ToolDecision{Action: ToolDecisionDeny, Reason: "context tool requires a bound goal"}
 	}
 	allowlist := effectiveToolAllowlist(options)
 	if len(allowlist) > 0 && !ContainsString(allowlist, call.Name) {
@@ -153,107 +126,11 @@ func ContainsString(items []string, value string) bool {
 	return false
 }
 
-// goalModeDefaultAllowlist 在目标处于活动状态时生效（检查项 O8；docs/41 W0-3 / W1-1）。
-// 它让长程任务保持聚焦：排除 memory、会话 todo（与 goal.actions 语义重叠）、
-// 多写路径中的 edit/patch（默认主推 write_file + diff 预览）、以及运维/消息工具。
-// 若客户端也提供 tool_allowlist，则取二者交集。
-var goalModeDefaultAllowlist = []string{
-	"workspace.read_file",
-	"workspace.list",
-	"workspace.stats",
-	"workspace.grep",
-	"workspace.find_files",
-	"workspace.read_files",
-	"workspace.write_file",
-	"workspace.diff_file",
-	"git.status",
-	"git.diff",
-	"git.log",
-	"git.show",
-	// workspace.edit_file / workspace.apply_patch: opt-in via client allowlist or non-goal chat.
-	"shell.exec",
-	// todo.* intentionally omitted: Goal uses goal.plan actions (docs/41 W0-3).
-	"goal.create",
-	"goal.plan",
-	"goal.observe",
-	"goal.assess",
-	"goal.finish",
-	"goal.list",
-	"context.read",
-	"context.search",
-	"context.write",
-	"context.replace",
-	"context.delete",
-	"worker.delegate",
-	"worker.list",
-	"worker.cancel",
-	// worker.send/receive are ops-only (docs/41 W1-2).
-	"skill.list",
-	"skill.run",
-	"web.search",
-	"web.fetch",
-}
-
-func goalModeTightensTools(options methods.ReplyOptions) bool {
-	if options.GoalsEnabled != nil && !*options.GoalsEnabled {
-		return false
-	}
-	if options.GoalsEnabled != nil && *options.GoalsEnabled {
-		return true
-	}
-	if options.ContinueGoal {
-		return true
-	}
-	if strings.TrimSpace(options.GoalID) != "" {
-		return true
-	}
-	if options.GoalContext != nil && strings.TrimSpace(options.GoalContext.GoalID) != "" {
-		return true
-	}
-	return false
-}
-
-// effectiveToolAllowlist 返回工具架构和策略实际使用的允许列表。
-// 目标模式下，未提供客户端列表时注入默认列表；提供时与目标默认列表求交集，
-// 因而客户端只能进一步收紧权限。
+// effectiveToolAllowlist returns the allowlist the tool schema and policy use.
+// With the Goal feature removed there is no goal-mode tightening; this is now
+// a pass-through of the client-supplied ToolAllowlist.
 func effectiveToolAllowlist(options methods.ReplyOptions) []string {
-	client := options.ToolAllowlist
-	if !goalModeTightensTools(options) {
-		return client
-	}
-	if len(client) == 0 {
-		out := make([]string, len(goalModeDefaultAllowlist))
-		copy(out, goalModeDefaultAllowlist)
-		return out
-	}
-	return intersectAllowlist(client, goalModeDefaultAllowlist)
-}
-
-func intersectAllowlist(a, b []string) []string {
-	set := map[string]struct{}{}
-	for _, item := range b {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			set[item] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(a))
-	seen := map[string]struct{}{}
-	for _, item := range a {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := set[item]; !ok {
-			continue
-		}
-		if _, dup := seen[item]; dup {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	return out
+	return options.ToolAllowlist
 }
 
 func AvailableToolsForOptions(definitions []ptools.Definition, options methods.ReplyOptions) []ptools.Definition {
@@ -265,13 +142,7 @@ func AvailableToolsForOptions(definitions []ptools.Definition, options methods.R
 
 	filtered := make([]ptools.Definition, 0, len(definitions))
 	for _, definition := range definitions {
-		if options.GoalsEnabled != nil && !*options.GoalsEnabled && strings.HasPrefix(definition.Name, "goal.") {
-			continue
-		}
 		if ContainsString(options.ToolDenylist, definition.Name) {
-			continue
-		}
-		if !contextToolExposed(options, definition.Name) {
 			continue
 		}
 		if len(allowlist) > 0 && !ContainsString(allowlist, definition.Name) {

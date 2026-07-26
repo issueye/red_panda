@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"strings"
 	"testing"
 
 	"redpanda/protocol/methods"
@@ -174,94 +173,19 @@ func TestEvaluateToolPolicyDeniesOpsToolsWhenHidden(t *testing.T) {
 	}
 }
 
-func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
-	t.Setenv("RED_PANDA_DEBUG_TOOLS", "")
-	enabled := true
+func TestContextToolsRemovedWithGoalFeature(t *testing.T) {
+	// With the Goal feature removed, context.* and goal.* tools no longer exist.
+	// Only the allowlist (pass-through) and denylist filtering remain, and no
+	// goal-mode tightening is applied. This test pins that behavior: providing
+	// a generic ToolAllowlist simply filters definitions, with no goal gating.
 	definitions := []ptools.Definition{
 		{Name: "workspace.read_file"},
-		{Name: "workspace.write_file"},
-		{Name: "workspace.edit_file"},
-		{Name: "workspace.apply_patch"},
-		{Name: "shell.exec"},
-		{Name: "goal.create"},
-		{Name: "context.read"},
-		{Name: "worker.delegate"},
-		{Name: "worker.send"},
-		{Name: "todo.write"},
-		{Name: "todo.list"},
 		{Name: "memory.create"},
-		{Name: "skill.run"},
-		{Name: "skill.create"},
-		{Name: "web.search"},
+		{Name: "todo.write"},
 	}
-	// 已绑定目标且客户端未提供允许列表时，使用 Goal 默认集合。
-	filtered := AvailableToolsForOptions(definitions, methods.ReplyOptions{
-		GoalsEnabled: &enabled,
+	open := AvailableToolsForOptions(definitions, methods.ReplyOptions{
+		ToolAllowlist: []string{"workspace.read_file", "memory.create", "todo.write"},
 	})
-	names := map[string]bool{}
-	for _, d := range filtered {
-		names[d.Name] = true
-	}
-	for _, keep := range []string{
-		"workspace.read_file", "workspace.write_file", "shell.exec",
-		"goal.create", "worker.delegate", "skill.run", "web.search",
-	} {
-		if !names[keep] {
-			t.Fatalf("goal mode should keep %s: %#v", keep, names)
-		}
-	}
-	if names["context.read"] {
-		t.Fatalf("goal mode without a concrete goal must hide context.read: %#v", names)
-	}
-	bound := AvailableToolsForOptions(definitions, methods.ReplyOptions{
-		GoalContext: &methods.GoalContext{GoalID: "goal_real"},
-	})
-	boundNames := map[string]bool{}
-	for _, d := range bound {
-		boundNames[d.Name] = true
-	}
-	if !boundNames["context.read"] {
-		t.Fatalf("bound goal should expose context.read: %#v", boundNames)
-	}
-	for _, hide := range []string{
-		"memory.create", "skill.create",
-		"todo.write", "todo.list", // docs/41 W0-3
-		"workspace.edit_file", "workspace.apply_patch", // docs/41 W1-1
-		"worker.send", // docs/41 W1-2
-	} {
-		if names[hide] {
-			t.Fatalf("goal mode should hide %s by default: %#v", hide, names)
-		}
-	}
-
-	// 客户端可显式加回 edit_file（与默认列表求交集后仍保留）。
-	withEdit := AvailableToolsForOptions(definitions, methods.ReplyOptions{
-		GoalsEnabled:  &enabled,
-		ToolAllowlist: []string{"workspace.write_file", "workspace.edit_file"},
-	})
-	withEditNames := map[string]bool{}
-	for _, d := range withEdit {
-		withEditNames[d.Name] = true
-	}
-	if withEditNames["workspace.edit_file"] {
-		t.Fatalf("edit_file is outside goal default allowlist so intersect must drop it: %#v", withEditNames)
-	}
-	if !withEditNames["workspace.write_file"] {
-		t.Fatalf("write_file should survive intersect: %#v", withEditNames)
-	}
-
-	// 客户端允许列表与目标默认值求交集，不能超出默认范围。
-	narrow := AvailableToolsForOptions(definitions, methods.ReplyOptions{
-		GoalsEnabled:  &enabled,
-		ToolAllowlist: []string{"workspace.read_file", "memory.create"},
-	})
-	if len(narrow) != 1 || narrow[0].Name != "workspace.read_file" {
-		t.Fatalf("intersect should drop memory.create: %#v", narrow)
-	}
-
-	// 非目标聊天保留记忆与 todo，但排除仅限运维的工具。
-	disabled := false
-	open := AvailableToolsForOptions(definitions, methods.ReplyOptions{GoalsEnabled: &disabled})
 	openNames := map[string]bool{}
 	for _, d := range open {
 		openNames[d.Name] = true
@@ -272,47 +196,7 @@ func TestGoalModeDefaultAllowlistTightensTools(t *testing.T) {
 	if !openNames["todo.write"] {
 		t.Fatalf("non-goal chat should expose todo.write: %#v", openNames)
 	}
-	if !openNames["workspace.edit_file"] {
-		t.Fatalf("non-goal chat should expose workspace.edit_file: %#v", openNames)
-	}
-	if openNames["goal.create"] {
-		t.Fatalf("goals disabled should hide goal.create: %#v", openNames)
-	}
-	if openNames["worker.send"] {
-		t.Fatalf("non-goal chat should still hide ops worker.send: %#v", openNames)
-	}
-	if openNames["context.read"] {
-		t.Fatalf("non-goal chat must hide context.read: %#v", openNames)
-	}
-}
-
-func TestContextToolsRequireBoundGoalOrGoalSpecialist(t *testing.T) {
-	definitions := []ptools.Definition{{Name: "workspace.read_file"}, {Name: "context.read"}, {Name: "context.write"}}
-
-	genericWorker := AvailableToolsForOptions(definitions, methods.ReplyOptions{
-		ToolAllowlist: []string{"workspace.read_file", "context.read"},
-		SpecialistContext: &methods.SpecialistContext{
-			Kind: "delegated_worker_proxy", Context: "ordinary worker",
-		},
-	})
-	if len(genericWorker) != 1 || genericWorker[0].Name != "workspace.read_file" {
-		t.Fatalf("generic worker context tools = %#v, want hidden", genericWorker)
-	}
-
-	goalSpecialist := AvailableToolsForOptions(definitions, methods.ReplyOptions{
-		ToolAllowlist: []string{"workspace.read_file", "context.read", "context.write"},
-		SpecialistContext: &methods.SpecialistContext{
-			Kind: "specialist", Context: "trusted goal specialist",
-		},
-	})
-	if len(goalSpecialist) != 3 {
-		t.Fatalf("goal specialist context tools = %#v, want exposed", goalSpecialist)
-	}
-
-	decision := EvaluateToolPolicy(methods.ReplyOptions{ToolPolicy: "allow_all"}, ptools.Call{
-		Name: "context.read", Risk: ptools.RiskLow,
-	})
-	if decision.Action != ToolDecisionDeny || !strings.Contains(decision.Reason, "bound goal") {
-		t.Fatalf("unbound context.read decision = %#v, want deny", decision)
+	if !openNames["workspace.read_file"] {
+		t.Fatalf("non-goal chat should expose workspace.read_file: %#v", openNames)
 	}
 }

@@ -14,7 +14,6 @@ type RunState struct {
 	RunSeq     uint64
 	WorkerSeq  map[string]uint64
 	Todos      []methods.TodoItemDTO
-	Goal       *runGoalState
 	registered bool
 	paused     bool
 	resume     chan struct{}
@@ -156,34 +155,11 @@ func (s *RunStateStore) Todos(runID string) []methods.TodoItemDTO {
 	return append([]methods.TodoItemDTO(nil), state.Todos...)
 }
 
-func (s *RunStateStore) SetGoal(runID string, goal *runGoalState) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if goal == nil {
-		if state := s.runs[runID]; state != nil {
-			state.Goal = nil
-		}
-		return
-	}
-	state := s.getOrCreateLocked(runID)
-	state.Goal = cloneRunGoalState(goal)
-}
-
-func (s *RunStateStore) Goal(runID string) *runGoalState {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if state := s.runs[runID]; state != nil {
-		return cloneRunGoalState(state.Goal)
-	}
-	return nil
-}
-
 func (s *RunStateStore) ClearSnapshots(runID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if state := s.runs[runID]; state != nil {
 		state.Todos = nil
-		state.Goal = nil
 	}
 }
 
@@ -197,20 +173,4 @@ func (s *RunStateStore) getOrCreateLocked(runID string) *RunState {
 		s.runs[runID] = state
 	}
 	return state
-}
-
-func cloneRunGoalState(state *runGoalState) *runGoalState {
-	if state == nil {
-		return nil
-	}
-	clone := *state
-	clone.Goal.Criteria = append([]methods.GoalCriterionDTO(nil), state.Goal.Criteria...)
-	clone.Goal.Constraints = append([]string(nil), state.Goal.Constraints...)
-	clone.Goal.Actions = append([]methods.GoalActionDTO(nil), state.Goal.Actions...)
-	if state.Goal.LastAssessment != nil {
-		assessment := *state.Goal.LastAssessment
-		assessment.Criteria = append([]methods.GoalCriterionDTO(nil), state.Goal.LastAssessment.Criteria...)
-		clone.Goal.LastAssessment = &assessment
-	}
-	return &clone
 }

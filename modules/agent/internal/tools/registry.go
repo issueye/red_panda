@@ -11,7 +11,7 @@ import (
 // that do not manage their own deadlines.
 const defaultLocalToolTimeout = 30 * time.Second
 
-// defaultGatewayToolTimeout limits memory/todo/goal/context callbacks to Gateway.
+// defaultGatewayToolTimeout limits memory/todo callbacks to Gateway.
 const defaultGatewayToolTimeout = 30 * time.Second
 
 type toolTimeoutClass uint8
@@ -46,8 +46,8 @@ func stableToolDefinitions() []ptools.Definition {
 	defs = append(defs, workspaceToolDefinitions()...)
 	defs = append(defs, codingToolDefinitions()...)
 	defs = append(defs, orchestrationToolDefinitions()...)
-	// stateToolDefinitions historically interleaves todo/goal/memory/web/context in
-	// this exact order; web sits between memory and context (locked by TestStableToolRegistryPreservesPublicOrder).
+	// stateToolDefinitions historically interleaves todo/memory/web in this exact
+	// order (locked by TestStableToolRegistryPreservesPublicOrder).
 	defs = append(defs, stateToolDefinitions()...)
 	return defs
 }
@@ -75,10 +75,8 @@ func timeoutClassForStableTool(name string) toolTimeoutClass {
 		strings.HasPrefix(name, "web."):
 		return selfManagedToolTimeout
 	case strings.HasPrefix(name, "memory."),
-		strings.HasPrefix(name, "todo."),
-		strings.HasPrefix(name, "goal."),
-		strings.HasPrefix(name, "context."):
-		// All four state domains are Gateway-mediated RPC tools (docs/41 W0-2).
+		strings.HasPrefix(name, "todo."):
+		// Both state domains are Gateway-mediated RPC tools (docs/41 W0-2).
 		return gatewayToolTimeout
 	default:
 		return localToolTimeout

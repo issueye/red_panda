@@ -48,20 +48,6 @@ func (r *Runtime) executeWorkerDelegate(ctx context.Context, runCtx agenttools.T
 	profileKey := strings.TrimSpace(agenttools.StringArg(call.Arguments, "profile_key"))
 	maxTurns := agenttools.IntArg(call.Arguments, "max_turns", 0)
 	child := delegatedWorkerReply(*runCtx.Reply, task, profileKey, maxTurns)
-	if specialist, ok := resolveGoalSpecialist(runCtx.Reply.Options.WorkerProfiles, profileKey); ok {
-		if err := r.validateGoalSpecialistPhase(runCtx.RunID, specialist); err != nil {
-			return "", err
-		}
-		goalID := strings.TrimSpace(runCtx.Reply.Options.GoalID)
-		objective := ""
-		if goal := runCtx.Reply.Options.GoalContext; goal != nil {
-			objective = goal.Objective
-			if goalID == "" {
-				goalID = strings.TrimSpace(goal.GoalID)
-			}
-		}
-		child.Options.MaxToolTurns = r.applyGoalSpecialist(&child, specialist, task, child.Options.MaxToolTurns, runCtx.RunID, runCtx.SessionID, goalID, objective)
-	}
 	assignment, result, err := r.executeDelegatedAssignment(ctx, runCtx, workerExecutionSpec{
 		Kind:       workerExecutionDelegated,
 		Params:     child,
@@ -188,6 +174,16 @@ func firstWorkerError(err error, fallback string) string {
 	return fallback
 }
 
+// firstNonEmpty returns the first trimmed-non-empty string among values.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func delegatedWorkerReply(parent methods.ReplyParams, task, profileKey string, maxTurns int) methods.ReplyParams {
 	child := parent
 	profile, hasProfile := workerProfile(parent.Options.WorkerProfiles, profileKey)
@@ -195,7 +191,6 @@ func delegatedWorkerReply(parent methods.ReplyParams, task, profileKey string, m
 	child.Input.Text = task
 	child.Options.MemoryContext = nil
 	child.Options.TodoContext = nil
-	disableGoalPipelineForChild(&child.Options)
 	if hasProfile {
 		child.Options.ProviderProfileID = profile.ProviderProfileID
 		child.Options.ProviderName = firstNonEmpty(profile.ProviderName, child.Options.ProviderName)

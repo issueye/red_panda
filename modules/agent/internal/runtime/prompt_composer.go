@@ -28,17 +28,13 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 	}
 	appendSystem(currentTimeContextMessage(c.now()))
 
-	goalController := hasToolNamed(definitions, "goal.create")
-	if hasToolNamed(definitions, "worker.delegate") && !goalController {
+	if hasToolNamed(definitions, "worker.delegate") {
 		appendSystem(rootAgentOrchestrationPolicy)
 	}
-	if hasSuccessfulWorkerResult(history) && !goalController {
+	if hasSuccessfulWorkerResult(history) {
 		appendSystem(rootAgentPostDelegationPolicy)
 	}
-	if goalController {
-		appendSystem(rootAgentGoalControllerPolicy)
-	}
-	if hasToolNamed(definitions, "todo.write") && !goalController {
+	if hasToolNamed(definitions, "todo.write") {
 		appendSystem(rootAgentTodoPolicy)
 	}
 	if options := params.Options; options.SpecialistContext == nil && hasToolNamed(definitions, "git.status") {
@@ -51,14 +47,6 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 	}
 	if options.MemoryContext != nil {
 		appendSystem(options.MemoryContext.Context)
-	}
-	if options.GoalContext != nil {
-		appendSystem(options.GoalContext.Context)
-		if id := strings.TrimSpace(options.GoalContext.GoalID); id != "" {
-			appendSystem("A Goal is already bound to this run (id=" + id + "). " +
-				"Do NOT create another. Continue from its criteria, evidence, action queue, and last assessment. " +
-				"Use goal.plan / goal.observe / goal.assess / goal.finish as the feedback loop requires.")
-		}
 	}
 	if options.TodoContext != nil {
 		appendSystem(options.TodoContext.Context)

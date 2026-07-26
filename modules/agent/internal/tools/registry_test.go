@@ -16,11 +16,9 @@ func TestStableToolRegistryPreservesPublicOrder(t *testing.T) {
 		"skill.list", "skill.create", "skill.update", "skill.delete", "skill.run",
 		"worker.delegate", "worker.list", "worker.cancel", "worker.pool_status", "worker.send", "worker.receive",
 		"todo.write",
-		"goal.create", "goal.plan", "goal.observe", "goal.assess", "goal.finish", "goal.list",
 		"todo.list",
 		"memory.list", "memory.create", "memory.update", "memory.delete",
 		"web.search", "web.fetch",
-		"context.read", "context.search", "context.write", "context.replace", "context.delete",
 	}
 
 	definitions := (ToolRunner{}).AvailableTools()
@@ -60,7 +58,7 @@ func TestStableToolRegistryProvidesDefinitionAndTimeout(t *testing.T) {
 		"workspace.read_file": {wantRisk: ptools.RiskLow, wantTimeout: int64(defaultLocalToolTimeout)},
 		"git.diff":            {wantRisk: ptools.RiskLow, wantTimeout: int64(defaultLocalToolTimeout)},
 		"memory.create":       {wantRisk: ptools.RiskHigh, wantTimeout: int64(defaultGatewayToolTimeout)},
-		"context.write":       {wantRisk: ptools.RiskHigh, wantTimeout: int64(defaultGatewayToolTimeout)},
+		"todo.write":          {wantRisk: ptools.RiskLow, wantTimeout: int64(defaultGatewayToolTimeout)},
 		"shell.exec":          {wantRisk: ptools.RiskHigh, wantTimeout: 0},
 	}
 	byName := make(map[string]ptools.Definition, len(definitions))
