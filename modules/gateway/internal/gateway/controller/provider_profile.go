@@ -23,6 +23,7 @@ type providerProfileCreateRequest struct {
 	IsDefault bool                         `json:"is_default"`
 	Stream    *bool                        `json:"stream"`
 	SupportsVision *bool                   `json:"supports_vision"`
+	HTTPProxy string                       `json:"http_proxy"`
 }
 
 type providerProfileUpdateRequest struct {
@@ -37,6 +38,7 @@ type providerProfileUpdateRequest struct {
 	Stream    *bool                         `json:"stream"`
 	Active    *bool                         `json:"active"`
 	SupportsVision *bool                   `json:"supports_vision"`
+	HTTPProxy      *string                 `json:"http_proxy"`
 }
 
 func (p ProviderProfileController) List(c *gin.Context) {
@@ -65,6 +67,7 @@ func (p ProviderProfileController) Create(c *gin.Context) {
 		IsDefault: req.IsDefault,
 		Stream:    req.Stream,
 		SupportsVision: req.SupportsVision,
+		HTTPProxy:      req.HTTPProxy,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_create_failed", "message": err.Error()}})
@@ -100,6 +103,7 @@ func (p ProviderProfileController) Update(c *gin.Context) {
 		Stream:    req.Stream,
 		Active:    req.Active,
 		SupportsVision: req.SupportsVision,
+		HTTPProxy:      req.HTTPProxy,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_update_failed", "message": err.Error()}})

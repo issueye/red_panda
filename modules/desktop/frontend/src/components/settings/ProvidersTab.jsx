@@ -206,6 +206,14 @@ export function ProvidersTab({
                   value={profileDraft.apiKey}
                 />
               </Field>
+              <Field className="settings-row settings-form-span" label="网络代理">
+                <input
+                  onChange={(event) => updateProfileDraft('httpProxy', event.target.value)}
+                  placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080（可选,留空使用环境代理）"
+                  type="text"
+                  value={profileDraft.httpProxy}
+                />
+              </Field>
             </div>
             <div className="settings-editor-footer">
               <div className="settings-profile-flags">

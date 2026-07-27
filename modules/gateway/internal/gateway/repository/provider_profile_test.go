@@ -110,6 +110,40 @@ func TestProviderProfileRepositoryPersistsMultipleModels(t *testing.T) {
 	}
 }
 
+// HTTPProxy 采用 always-apply 语义:Update 会用传入值(含空串)覆盖当前值,
+// 这样上层 service 可以通过传空串显式清空代理。
+func TestProviderProfileRepositoryHTTPProxyAlwaysApplied(t *testing.T) {
+	repo := newProviderProfileTestRepository(t)
+	profile, err := repo.Create(model.ProviderProfile{
+		Name:      "proxied",
+		Provider:  "openai_compatible",
+		BaseURL:   "https://example.invalid",
+		HTTPProxy: "http://127.0.0.1:7890",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.Get(profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.HTTPProxy != "http://127.0.0.1:7890" {
+		t.Fatalf("expected http_proxy persisted, got %q", stored.HTTPProxy)
+	}
+	// 传空串应清空代理。
+	stored.HTTPProxy = ""
+	if _, err := repo.Update(stored); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := repo.Get(profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.HTTPProxy != "" {
+		t.Fatalf("expected http_proxy cleared by empty update, got %q", cleared.HTTPProxy)
+	}
+}
+
 func newProviderProfileTestRepository(t *testing.T) ProviderProfileRepository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "providers.db")), &gorm.Config{})

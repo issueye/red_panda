@@ -47,6 +47,9 @@ func Migrate(db *gorm.DB) error {
 		if err := migrateProviderProfileSupportsVision(tx); err != nil {
 			return err
 		}
+		if err := migrateProviderProfileHTTPProxy(tx); err != nil {
+			return err
+		}
 		// Goal feature removed (docs/37, docs/31-34): drop legacy tables + column
 		// left behind by prior migrations. Idempotent; no-op on fresh databases.
 		if err := dropGoalLegacySchema(tx); err != nil {
@@ -158,6 +161,17 @@ func migrateProviderProfileSupportsVision(db *gorm.DB) error {
 		return nil
 	}
 	return db.Exec("ALTER TABLE provider_profiles ADD COLUMN supports_vision numeric NOT NULL DEFAULT 0").Error
+}
+
+// migrateProviderProfileHTTPProxy adds the http_proxy column to legacy
+// provider_profiles rows. New profiles default to empty (use environment
+// proxy). Nullable text — no default needed.
+func migrateProviderProfileHTTPProxy(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.ProviderProfile{}) ||
+		db.Migrator().HasColumn(&model.ProviderProfile{}, "http_proxy") {
+		return nil
+	}
+	return db.Exec("ALTER TABLE provider_profiles ADD COLUMN http_proxy text").Error
 }
 
 type legacyAgentDefinition struct {

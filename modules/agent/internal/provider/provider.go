@@ -57,10 +57,13 @@ type RequestOptions struct {
 	ProviderName    string
 	ProviderBaseURL string
 	ProviderAPIKey  string
-	Stream          *bool
-	Model           string
-	ReasoningEffort string
-	LogLLMRequests  bool
+	// ProviderHTTPProxy is an optional HTTP(S)/SOCKS5 proxy applied to this
+	// provider's HTTP client. Empty falls back to environment proxy.
+	ProviderHTTPProxy string
+	Stream            *bool
+	Model             string
+	ReasoningEffort   string
+	LogLLMRequests    bool
 }
 
 type Request struct {

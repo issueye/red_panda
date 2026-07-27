@@ -81,6 +81,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     apiKey: 'sk-live',
     isDefault: true,
     stream: false,
+    httpProxy: '  http://127.0.0.1:7890  ',
   }), {
     name: 'Work',
     provider: 'openai_compatible',
@@ -95,6 +96,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     is_default: true,
     stream: false,
     supports_vision: false,
+    http_proxy: 'http://127.0.0.1:7890',
   });
 
   const update = providerProfileUpdatePayload({
@@ -109,6 +111,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
     stream: true,
     active: true,
     supportsVision: true,
+    httpProxy: 'socks5://127.0.0.1:1080',
   });
   assert.equal(Object.hasOwn(update, 'api_key'), false);
   assert.equal(update.model, 'model-b');
@@ -117,6 +120,7 @@ test('provider profile payloads use Gateway field names and omit blank update ke
   assert.equal(update.active, true);
   assert.equal(update.stream, true);
   assert.equal(update.supports_vision, true);
+  assert.equal(update.http_proxy, 'socks5://127.0.0.1:1080');
 
   const anthropic = providerProfileCreatePayload({
     name: 'Claude',

@@ -248,6 +248,10 @@ type ProviderProfile struct {
 	// (docs/51 §6.5). Default false: refuse attachments to avoid silent
 	// expensive/visionless calls. The user opts in per profile.
 	SupportsVision bool
+	// HTTPProxy is an optional outbound HTTP(S)/SOCKS5 proxy used for this
+	// profile's provider requests (e.g. http://127.0.0.1:7890). Empty falls
+	// back to the environment proxy (HTTP_PROXY / HTTPS_PROXY).
+	HTTPProxy   string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time

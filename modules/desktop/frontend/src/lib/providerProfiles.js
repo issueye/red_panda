@@ -10,6 +10,7 @@ export const emptyProfileDraft = {
   stream: true,
   active: true,
   supportsVision: false,
+  httpProxy: '',
 };
 
 export const reasoningEffortOptions = [
@@ -67,6 +68,7 @@ export function normalizeProviderProfile(item) {
     stream: item.stream !== false,
     active: item.active !== false,
     supportsVision: Boolean(item.supports_vision),
+    httpProxy: item.http_proxy || '',
     createdAt: item.created_at,
     updatedAt: item.updated_at,
   };
@@ -95,6 +97,7 @@ export function profileDraftFrom(profile) {
     stream: profile.stream !== false,
     active: profile.active !== false,
     supportsVision: Boolean(profile.supportsVision),
+    httpProxy: profile.httpProxy || '',
   };
 }
 
@@ -132,6 +135,7 @@ export function providerProfileCreatePayload(input) {
     is_default: Boolean(input.isDefault),
     stream: input.stream !== false,
     supports_vision: Boolean(input.supportsVision),
+    http_proxy: String(input.httpProxy || '').trim(),
   };
 }
 
@@ -152,6 +156,7 @@ export function providerProfileUpdatePayload(input) {
     stream: input.stream !== false,
     active: input.active !== false,
     supports_vision: Boolean(input.supportsVision),
+    http_proxy: String(input.httpProxy || '').trim(),
   });
 }
 

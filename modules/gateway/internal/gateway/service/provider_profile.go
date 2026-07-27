@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ type ProviderProfileDTO struct {
 	Stream       bool               `json:"stream"`
 	Active       bool               `json:"active"`
 	SupportsVision bool             `json:"supports_vision"`
+	HTTPProxy    string             `json:"http_proxy,omitempty"`
 	CreatedAt    time.Time          `json:"created_at"`
 	UpdatedAt    time.Time          `json:"updated_at"`
 }
@@ -56,6 +58,7 @@ type ProviderProfileCreate struct {
 	IsDefault bool
 	Stream    *bool
 	SupportsVision *bool
+	HTTPProxy string
 }
 
 type ProviderProfileUpdate struct {
@@ -70,6 +73,7 @@ type ProviderProfileUpdate struct {
 	Stream    *bool
 	Active    *bool
 	SupportsVision *bool
+	HTTPProxy      *string
 }
 
 func NewProviderProfileService(repos repository.Set) ProviderProfileService {
@@ -97,6 +101,10 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 	if input.SupportsVision != nil {
 		supportsVision = *input.SupportsVision
 	}
+	proxy, err := normalizeProviderHTTPProxy(input.HTTPProxy)
+	if err != nil {
+		return ProviderProfileDTO{}, err
+	}
 	row, err := s.repos.Providers.Create(model.ProviderProfile{
 		Name:           strings.TrimSpace(input.Name),
 		Provider:       profile,
@@ -108,6 +116,7 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 		IsDefault:      input.IsDefault,
 		Stream:         stream,
 		SupportsVision: supportsVision,
+		HTTPProxy:      proxy,
 	})
 	if err != nil {
 		return ProviderProfileDTO{}, err
@@ -133,6 +142,7 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 		Stream:         current.Stream,
 		Active:         current.Active,
 		SupportsVision: current.SupportsVision,
+		HTTPProxy:      current.HTTPProxy,
 	}
 	if input.Name != nil {
 		next.Name = strings.TrimSpace(*input.Name)
@@ -189,6 +199,13 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 	if input.SupportsVision != nil {
 		next.SupportsVision = *input.SupportsVision
 	}
+	if input.HTTPProxy != nil {
+		proxy, err := normalizeProviderHTTPProxy(*input.HTTPProxy)
+		if err != nil {
+			return ProviderProfileDTO{}, err
+		}
+		next.HTTPProxy = proxy
+	}
 	if input.Active != nil {
 		next.Active = *input.Active
 	}
@@ -238,6 +255,44 @@ func normalizeProvider(value string) (string, error) {
 	}
 }
 
+// normalizeProviderHTTPProxy trims and validates an optional HTTP(S)/SOCKS5
+// proxy URL. Empty is allowed (falls back to environment proxy). Mirrors the
+// schemes accepted by the Agent Runtime provider transport.
+func normalizeProviderHTTPProxy(raw string) (string, error) {
+	proxy := strings.TrimSpace(raw)
+	if proxy == "" {
+		return "", nil
+	}
+	// 兼容粘贴时的全角标点。
+	proxy = strings.Map(func(r rune) rune {
+		switch r {
+		case '：':
+			return ':'
+		case '／':
+			return '/'
+		default:
+			return r
+		}
+	}, proxy)
+	if !strings.Contains(proxy, "://") {
+		proxy = "http://" + proxy
+	}
+	parsed, err := url.Parse(proxy)
+	if err != nil {
+		return "", fmt.Errorf("invalid http_proxy: %w", err)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "socks5", "socks5h":
+		// 支持的协议。
+	default:
+		return "", fmt.Errorf("unsupported http_proxy scheme %q (use http://, https://, or socks5://)", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("http_proxy host is required")
+	}
+	return proxy, nil
+}
+
 func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 	models := providerModelsForRead(row)
 	modelItems := make([]ProviderModelDTO, 0, len(models))
@@ -261,6 +316,7 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		Stream:       row.Stream,
 		Active:       row.Active,
 		SupportsVision: row.SupportsVision,
+		HTTPProxy:    row.HTTPProxy,
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,
 	}

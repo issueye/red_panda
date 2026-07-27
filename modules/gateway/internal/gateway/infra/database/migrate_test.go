@@ -88,6 +88,13 @@ func TestMigrateDefaultsExistingProviderProfilesToStreaming(t *testing.T) {
 	if !profile.Stream {
 		t.Fatal("existing provider profile should default to streaming")
 	}
+	// http_proxy 列在 Migrate 中为老库补建,默认空串(回退到环境代理)。
+	if profile.HTTPProxy != "" {
+		t.Fatalf("existing provider profile http_proxy should default to empty, got %q", profile.HTTPProxy)
+	}
+	if !db.Migrator().HasColumn(&model.ProviderProfile{}, "http_proxy") {
+		t.Fatal("provider_profiles.http_proxy column was not created")
+	}
 }
 
 func TestMigrateRepairsDuplicateMessageSequencesBeforeAddingUniqueIndex(t *testing.T) {
