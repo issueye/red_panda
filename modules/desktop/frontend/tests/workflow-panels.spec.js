@@ -3,29 +3,24 @@ import { expect, test } from '@playwright/test';
 test('Restored workflow panels render permissions tools and Worker assignments', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 
+  // Main tab only shows root-facing rows (user + root assistant + root tool/permission).
   await expect(page.getByTestId('message-row')).toHaveCount(2);
   await expect(page.getByText('Restore previous session state')).toBeVisible();
   await expect(page.getByText('Restored messages, tools, permissions, and Worker assignments.')).toBeVisible();
-  await expect(page.getByText('Worker worker-01 · entry', { exact: true })).toBeVisible();
+  await expect(page.getByText('助手', { exact: true })).toBeVisible();
 
-  await expect(page.getByTestId('tool-card')).toHaveCount(2);
+  await expect(page.getByTestId('tool-card')).toHaveCount(1);
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
   await expect(readTool).toHaveClass(/tool-completed/);
   await readTool.getByTestId('tool-card-toggle').click();
   await readTool.getByRole('button', { name: /^输出/ }).click();
   await expect(readTool.getByTestId('tool-output')).toHaveText('README.md loaded');
-  const failedTool = page.getByTestId('tool-card').filter({ hasText: 'shell.exec' });
-  await expect(failedTool).toContainText('Shell command');
-  await expect(failedTool).toHaveClass(/tool-failed/);
-  await expect(failedTool.getByTestId('tool-error')).toHaveText('exit status 1');
-  await expect(failedTool.getByTestId('tool-output')).toHaveText('go: cannot find main module; see go help modules');
 
   await expect(page.getByTestId('permission-card')).toHaveCount(2);
   expect(await page.locator('.conversation > [data-timeline-type]').evaluateAll((items) => (
     items.map((item) => item.dataset.timelineType)
   ))).toEqual([
     'message',
-    'tool',
     'tool',
     'message',
     'permission',
@@ -64,12 +59,18 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await planner.getByTestId('worker-assignment-open').click();
   await expect(page.getByTestId('chat-tab-worker')).toContainText('planner');
   const workerConversation = page.getByTestId('chat-conversation');
-  await expect(workerConversation.getByText('Reading restored context', { exact: true })).toBeVisible();
+  // Task input row + collaborative Worker message both contain the same task text.
+  await expect(workerConversation.getByText('Reading restored context', { exact: true })).toHaveCount(2);
   await expect(workerConversation.getByText('任务输入', { exact: true })).toBeVisible();
   await expect(page.getByText('Private planner analysis.')).toBeVisible();
   await expect(page.getByText('Restore previous session state')).toHaveCount(0);
   await expect(page.getByTestId('tool-card')).toHaveCount(1);
-  await expect(page.getByTestId('permission-card')).toHaveCount(1);
+  const failedTool = page.getByTestId('tool-card').filter({ hasText: 'shell.exec' });
+  await expect(failedTool).toContainText('Shell command');
+  await expect(failedTool).toHaveClass(/tool-failed/);
+  await expect(failedTool.getByTestId('tool-error')).toHaveText('exit status 1');
+  await expect(failedTool.getByTestId('tool-output')).toHaveText('go: cannot find main module; see go help modules');
+  // Worker conversation is read-only: no decision buttons, even if cards are shown.
   await expect(page.getByTestId('permission-approve')).toHaveCount(0);
   await expect(page.getByTestId('permission-deny')).toHaveCount(0);
   await expect(page.getByTestId('conversation-readonly-hint')).toBeVisible();

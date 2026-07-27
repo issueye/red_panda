@@ -14,12 +14,11 @@ const messages = [
     text: 'Restore previous session state',
   },
   {
+    // Root-facing assistant reply (main conversation). No worker/profile markers
+    // so isMainConversationItem keeps it public and the UI labels it as 助手.
     id: 'message_assistant_restore',
     role: 'assistant',
-    agent: 'worker',
-    assignmentId: 'assignment-entry',
-    workerId: 'worker-01',
-    profileKey: 'entry',
+    agent: 'assistant',
     runSeq: 4,
     text: 'Restored messages, tools, permissions, and Worker assignments.',
   },
@@ -29,18 +28,29 @@ const messages = [
     agent: 'worker-02',
     assignmentId: 'assignment-planner',
     workerId: 'worker-02',
+    profileKey: 'planner',
     visibility: 'worker_private',
     runSeq: 7,
     text: 'Private planner analysis.',
+  },
+  {
+    // Public collaborative Worker trail — only visible on the Worker tab.
+    id: 'message_worker_public',
+    role: 'assistant',
+    agent: 'worker-02',
+    assignmentId: 'assignment-planner',
+    workerId: 'worker-02',
+    profileKey: 'planner',
+    runSeq: 8,
+    text: 'Reading restored context',
   },
 ];
 
 const tools = [
   {
+    // Root tool call shown in the main conversation timeline.
     id: 'tool_completed',
     runId: 'run_restore',
-    workerId: 'worker-01',
-    assignmentId: 'assignment-entry',
     name: 'workspace.read_file',
     displayName: 'Read file',
     risk: 'low',
@@ -50,10 +60,12 @@ const tools = [
     runSeq: 2,
   },
   {
+    // Worker-scoped tool: appears on the planner Worker tab only.
     id: 'tool_failed',
     runId: 'run_restore',
     workerId: 'worker-02',
     assignmentId: 'assignment-planner',
+    profileKey: 'planner',
     name: 'shell.exec',
     displayName: 'Shell command',
     risk: 'high',
@@ -87,6 +99,8 @@ const providerProfiles = [{
 
 const permissions = [
   {
+    // Root-facing permission cards stay on the main timeline so approve/deny
+    // can be exercised there. Worker tabs are read-only for decisions.
     id: 'perm_approve_restore',
     runId: 'run_restore',
     summary: 'Allow shell read',
@@ -95,8 +109,6 @@ const permissions = [
     toolName: 'shell.exec',
     risk: 'medium',
     arguments: { command: 'cat README.md' },
-    workerId: 'worker-01',
-    assignmentId: 'assignment-entry',
     runSeq: 5,
   },
   {
@@ -108,8 +120,6 @@ const permissions = [
     toolName: 'shell.exec',
     risk: 'high',
     arguments: { command: 'rm generated.tmp' },
-    workerId: 'worker-02',
-    assignmentId: 'assignment-planner',
     runSeq: 6,
   },
 ];
