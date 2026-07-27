@@ -575,6 +575,55 @@ type reusableRuntimeProcess struct {
 	lifetime context.Context
 }
 
+type recoveredFallbackRuntimeProcess struct{}
+
+func (*recoveredFallbackRuntimeProcess) Start(_ context.Context, _ methods.ReplyParams, emit func(events.EnvelopeV2)) error {
+	emit(events.EnvelopeV2{
+		Type:   events.EventMessageDelta,
+		Stream: &events.StreamRef{Kind: events.StreamMessage, Final: true},
+		Payload: map[string]any{
+			"delta":     "子代理已完成工具调用，但未生成可用的最终报告。工具结果已保留在工具卡片中。",
+			"recovered": true,
+		},
+	})
+	emit(events.EnvelopeV2{Type: events.EventFinish, Payload: map[string]any{"status": "completed"}})
+	return nil
+}
+
+func (*recoveredFallbackRuntimeProcess) Cancel(context.Context, string, string) error { return nil }
+func (*recoveredFallbackRuntimeProcess) Close(context.Context) error                  { return nil }
+
+func TestDelegatedWorkerRejectsRecoveredFallbackAsFinalReport(t *testing.T) {
+	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+
+	executor := newLazyProcessExecutor(rt, "worker-02")
+	t.Cleanup(func() { _ = executor.Close(context.Background()) })
+	executor.newProcess = func(context.Context, methods.ReplyParams, string, func(context.Context, string, any) (json.RawMessage, error)) (worker.Process, error) {
+		return &recoveredFallbackRuntimeProcess{}, nil
+	}
+
+	request := worker.ExecuteRequest{
+		AssignmentID: "assignment-fallback",
+		RunID:        "run-fallback",
+		WorkerID:     "worker-02",
+		ProfileKey:   "reviewer",
+		Task:         "inspect project",
+	}
+	params := methods.ReplyParams{RunID: request.RunID, Session: methods.ReplySession{ID: "session-fallback"}}
+	_, err := executor.executeDelegated(context.Background(), request, workerExecutionSpec{
+		Kind:       workerExecutionDelegated,
+		Params:     params,
+		Parent:     params,
+		ProfileKey: request.ProfileKey,
+		Task:       request.Task,
+		MaxTurns:   4,
+	})
+	if err == nil || !strings.Contains(err.Error(), "recovered fallback instead of a final report") {
+		t.Fatalf("executeDelegated error = %v, want recovered fallback rejection", err)
+	}
+}
+
 func (p *reusableRuntimeProcess) Start(context.Context, methods.ReplyParams, func(events.EnvelopeV2)) error {
 	return nil
 }

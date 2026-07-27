@@ -158,6 +158,9 @@ func (e *lazyProcessExecutor) executeDelegated(ctx context.Context, request work
 	if status := capture.FinishStatus(); status != "" && status != "completed" {
 		return worker.ExecuteResult{}, capture.FailureError("worker assignment finished with status " + status)
 	}
+	if capture.RecoveredFallback() {
+		return worker.ExecuteResult{}, capture.FailureError("worker assignment returned a recovered fallback instead of a final report")
+	}
 	output := capture.FinalText()
 	if !worker.ReportUsable(output) {
 		return worker.ExecuteResult{}, capture.FailureError("worker assignment returned an empty final report")

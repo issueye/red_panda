@@ -33,9 +33,9 @@ func TestRecoveryAnswerForWorkerDoesNotDuplicateToolOutput(t *testing.T) {
 		RunID: "run-delegated",
 		Options: methods.ReplyOptions{
 			WorkerContext: &methods.WorkerExecutionContext{
-				WorkerID:     "worker-02",
-				AssignmentID: "assignment-042",
-				RunID:        "run-delegated",
+				WorkerID:      "worker-02",
+				AssignmentID:  "assignment-042",
+				RunID:         "run-delegated",
 				ProxyMessages: true,
 			},
 		},
@@ -195,6 +195,43 @@ type emptyAfterToolsProvider struct {
 	requests []ProviderRequest
 }
 
+type continueAfterEmptyProvider struct {
+	emptyResponses int
+}
+
+func (*continueAfterEmptyProvider) Name() string { return "continue-after-empty" }
+
+func (p *continueAfterEmptyProvider) Complete(_ context.Context, req ProviderRequest, emit func(ProviderChunk) error) error {
+	switch len(req.ToolHistory) {
+	case 0:
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:        "tool_plan_before_empty",
+			Name:      "workspace.list",
+			Risk:      tools.RiskLow,
+			Arguments: map[string]any{"path": ".", "max_depth": 1},
+		}}})
+	case 1:
+		if len(req.Tools) == 0 {
+			return emit(ProviderChunk{Final: true})
+		}
+		if p.emptyResponses == 0 {
+			p.emptyResponses++
+			return emit(ProviderChunk{Final: true})
+		}
+		return emit(ProviderChunk{ToolCalls: []tools.Call{{
+			ID:        "tool_continue_after_empty",
+			Name:      "workspace.list",
+			Risk:      tools.RiskLow,
+			Arguments: map[string]any{"path": ".", "max_depth": 1},
+		}}})
+	default:
+		if err := emit(ProviderChunk{Delta: "continued after empty provider response"}); err != nil {
+			return err
+		}
+		return emit(ProviderChunk{Final: true})
+	}
+}
+
 type toolCallOnlyFinalProvider struct{}
 
 func (*toolCallOnlyFinalProvider) Name() string { return "tool-call-only-final" }
@@ -284,6 +321,55 @@ func TestRuntimeRecoversWhenProviderReturnsEmptyAfterTools(t *testing.T) {
 	finish := runEvents[len(runEvents)-1]
 	if finish.Type != events.EventFinish || finish.Payload["status"] != "completed" {
 		t.Fatalf("finish event = %#v, want completed", finish)
+	}
+}
+
+func TestRuntimeContinuesAfterEmptyResponseFollowingTools(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	lines := make(chan []byte, 64)
+	go readJSONLines(t, reader, lines)
+
+	provider := &continueAfterEmptyProvider{}
+	rt := New(strings.NewReader(""), writer, io.Discard, "test")
+	rt.provider = provider
+
+	sendRequest(t, context.Background(), rt, "run_continue_empty", methods.RunExecute, methods.RunExecuteParams{
+		RunID: "run_continue_after_empty",
+		Session: methods.ReplySession{
+			ID:         "session_continue_after_empty",
+			WorkingDir: t.TempDir(),
+		},
+		Input: methods.ReplyInput{Text: "plan and inspect the workspace"},
+	})
+
+	waitForResponse(t, lines, "run_continue_empty")
+	runEvents := waitForEventsUntilFinish(t, lines)
+
+	var continuedText string
+	var continuedTool bool
+	for _, event := range runEvents {
+		switch event.Type {
+		case events.EventToolFinished:
+			if event.Payload["tool_call_id"] == "tool_continue_after_empty" {
+				continuedTool = true
+			}
+		case events.EventMessageDelta:
+			if delta, _ := event.Payload["delta"].(string); strings.Contains(delta, "continued after empty provider response") {
+				continuedText = delta
+			}
+		}
+	}
+	if !continuedTool {
+		t.Fatalf("expected runtime to continue with tools after the empty response, events=%#v", runEvents)
+	}
+	if continuedText == "" {
+		t.Fatalf("expected useful final response after continuation, events=%#v", runEvents)
+	}
+	if provider.emptyResponses != 1 {
+		t.Fatalf("empty responses = %d, want 1", provider.emptyResponses)
 	}
 }
 

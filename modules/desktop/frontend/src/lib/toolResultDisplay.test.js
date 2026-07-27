@@ -42,7 +42,8 @@ test('displayToolOutput recovers diagnostics from historical failure envelopes',
 
 test('isWorkerToolFallback only compacts public Assignment recovery messages', () => {
   const text = '根据工具执行结果整理如下：\n\n### Read file\nlarge output';
-  assert.equal(isWorkerToolFallback({ role: 'assistant', assignmentId: 'assignment_1', workerId: 'worker-01', text }), true);
+  assert.equal(isWorkerToolFallback({ role: 'assistant', assignmentId: 'assignment_1', workerId: 'worker-01', profileKey: 'reviewer', text }), true);
+  assert.equal(isWorkerToolFallback({ role: 'assistant', assignmentId: 'assignment_root', workerId: 'worker-03', profileKey: 'root', text }), false);
   assert.equal(isWorkerToolFallback({ role: 'assistant', workerId: 'worker-01', visibility: 'worker_private', text }), false);
   assert.equal(isWorkerToolFallback({ role: 'assistant', text }), false);
 });

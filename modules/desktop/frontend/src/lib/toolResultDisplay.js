@@ -41,6 +41,7 @@ export function buildToolOutputSummary(output) {
 export function isWorkerToolFallback(message) {
   if (!message || message.role === 'user' || message.visibility === 'worker_private') return false;
   if (!message.assignmentId && !message.workerId) return false;
+  if (String(message.profileKey || '').trim().toLowerCase() === 'root') return false;
   const text = String(message.text || '').trim();
   return text.startsWith('根据工具执行结果整理如下：')
     || text.includes('[完整内容见工具卡片，未删除]');

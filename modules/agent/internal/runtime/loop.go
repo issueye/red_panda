@@ -24,6 +24,10 @@ const (
 	loopEndCancelled loopEndReason = "cancelled"
 	loopEndFailed    loopEndReason = "failed"
 	loopEndBudget    loopEndReason = "budget_exhausted"
+	// Empty provider responses after tool execution are often transient. A
+	// small segment-wide cap lets the model resume the unfinished task without
+	// turning an empty-response provider into an unbounded retry loop.
+	maxEmptyContinuationAttempts = 2
 )
 
 // providerSegmentResult 表示一次 runProviderLoopSegment 的结果。
@@ -95,6 +99,8 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 // emitRun 或 Goal 多分段控制器负责。
 func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.ReplyParams, input string, history []provider.ToolExchange, messageID string, streamID string, streamSeq *uint64) providerSegmentResult {
 	maxTurns := effectiveProviderToolTurns(params.Options)
+	providerInput := input
+	emptyContinuationAttempts := 0
 	var rounds [][]provider.ToolExchange
 	if len(history) > 0 {
 		// 初始循环前工具（如有）视为一个回合。
@@ -113,12 +119,12 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		emittedText := false
 		flatHistory := flattenToolRounds(rounds)
 		definitions := agenttools.AvailableToolsForOptions(r.toolsForReply(ctx, params), params.Options)
-		request := newPromptComposer().compose(params, input, definitions, rounds)
+		request := newPromptComposer().compose(params, providerInput, definitions, rounds)
 		err := r.provider.Complete(ctx, request, func(chunk provider.ProviderChunk) error {
 			if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
 				return err
 			}
-			return r.consumeProviderChunk(ctx, params, chunk, messageID, streamID, streamSeq, &requestedCalls, &emittedText)
+			return r.consumeProviderChunk(ctx, params, chunk, messageID, streamID, streamSeq, &requestedCalls, &emittedText, len(flatHistory) > 0)
 		})
 		turnsUsed++
 		if err != nil {
@@ -137,8 +143,13 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		}
 		if len(requestedCalls) == 0 {
 			if !emittedText && len(flatHistory) > 0 {
+				if emptyContinuationAttempts < maxEmptyContinuationAttempts && turn+1 < maxTurns {
+					emptyContinuationAttempts++
+					providerInput = emptyProviderContinuationPrompt(input, emptyContinuationAttempts)
+					continue
+				}
 				// 不使用工具重试一次，迫使模型生成最终答案。
-				if r.retryFinalAnswer(ctx, params, input, rounds, messageID, streamID, streamSeq) {
+				if r.retryFinalAnswer(ctx, params, providerInput, rounds, messageID, streamID, streamSeq) {
 					return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 				}
 				fallback := recoveryAnswerForRun(params, flatHistory)
@@ -199,6 +210,12 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 	return providerSegmentResult{Reason: loopEndFailed, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 }
 
+func emptyProviderContinuationPrompt(input string, attempt int) string {
+	return input + fmt.Sprintf("\n\n[System] The previous provider response ended empty after tool execution (continuation attempt %d/%d). "+
+		"The task is not complete. Continue working from the tool history now. Use additional tools when needed, then return a complete final answer. Do not stop after planning or todo updates.",
+		attempt, maxEmptyContinuationAttempts)
+}
+
 // carrySummarizedHistory 压缩供下一 Goal 分段使用的工具交互记录。
 // 最近 K 次交互保留截断输出，仅按规则处理，不调用 LLM。
 func carrySummarizedHistory(history []provider.ToolExchange, k int, maxRunes int) []provider.ToolExchange {
@@ -236,6 +253,7 @@ func (r *Runtime) consumeProviderChunk(
 	streamSeq *uint64,
 	requestedCalls *[]tools.Call,
 	emittedText *bool,
+	deferEmptyFinal bool,
 ) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -255,6 +273,12 @@ func (r *Runtime) consumeProviderChunk(
 	}
 	// 空 Final 标记会关闭根消息流；直接在此关闭消息流。
 	if chunk.Delta == "" && chunk.Final {
+		// Do not close the stream for a provider response that contained neither
+		// text nor tool calls. The outer loop may issue a bounded continuation
+		// request and must keep the same assistant stream open for that response.
+		if !*emittedText && (deferEmptyFinal || len(*requestedCalls) > 0) {
+			return nil
+		}
 		err := r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
 			StreamID: streamID,
 			Kind:     events.StreamMessage,
