@@ -4166,11 +4166,33 @@ button.activity-summary-card:hover {
   max-width: min(760px, 100%);
   min-height: 24px;
   overflow: hidden;
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
 
 .tool-card.is-expanded {
   background: var(--color-surface-subtle);
   border: 1px solid var(--color-border);
+}
+
+/* Running tools stay compact but get a quiet live accent so long chains remain scannable. */
+.tool-card.is-live:not(.is-expanded) {
+  background: color-mix(in srgb, var(--color-info-bg) 55%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-brand-action);
+}
+
+.tool-card.is-failed:not(.is-expanded),
+.tool-card.is-attention:not(.is-expanded) {
+  background: color-mix(in srgb, var(--color-danger-bg) 70%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-danger-text);
+}
+
+.tool-card.is-attention:not(.is-expanded) {
+  background: color-mix(in srgb, var(--color-warning-bg) 75%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-warning-text);
+}
+
+.tool-card.is-stale:not(.is-expanded) {
+  box-shadow: inset 2px 0 0 var(--color-warning-text);
 }
 
 .tool-card-header {
@@ -4294,12 +4316,24 @@ button.activity-summary-card:hover {
   white-space: nowrap;
 }
 
-.tool-live {
+.tool-live.is-running {
   color: var(--color-brand-text);
+  font-weight: 600;
+}
+
+.tool-live.is-failed {
+  color: var(--color-danger-text);
+  font-weight: 600;
+}
+
+.tool-live.is-attention {
+  color: var(--color-warning-text);
+  font-weight: 600;
 }
 
 .tool-live.is-stale {
   color: var(--color-warning-text);
+  font-weight: 600;
 }
 
 .tool-card-chevron {

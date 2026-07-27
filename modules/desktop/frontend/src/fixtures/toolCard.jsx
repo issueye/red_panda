@@ -33,6 +33,15 @@ const tools = [
     status: 'failed',
     durationMs: 2400,
   },
+  {
+    // Running tools stay compact by default (one-line live row).
+    id: 'tool-running',
+    name: 'workspace.grep',
+    displayName: 'Grep workspace',
+    arguments: { pattern: 'ToolCallCard', path: 'modules/desktop' },
+    status: 'running',
+    startedAt: new Date(Date.now() - 4200).toISOString(),
+  },
 ];
 
 function ToolCardFixture() {

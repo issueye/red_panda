@@ -85,12 +85,23 @@ test('Completed tool calls stay compact until expanded', async ({ page }) => {
   await page.goto('/tool-card-fixture.html');
 
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
+  const runningTool = page.getByTestId('tool-card').filter({ hasText: 'Grep workspace' });
+  const failedTool = page.getByTestId('tool-card').filter({ hasText: 'Search workspace' });
+
   await expect(readTool).toHaveClass(/is-collapsed/);
   await expect(readTool.getByTestId('tool-card-body')).toHaveCount(0);
   await expect(readTool.getByTestId('tool-call-index')).toHaveText('54/70');
   await expect(page.getByTestId('tool-card').nth(1).getByTestId('tool-call-index')).toHaveText('55/70');
   await expect(page.getByTestId('tool-card').nth(2).getByTestId('tool-call-index')).toHaveText('56/70');
   expect((await readTool.boundingBox()).height).toBeLessThanOrEqual(30);
+
+  // Running tools stay one-line; failed tools auto-expand for diagnosis.
+  await expect(runningTool).toHaveClass(/is-collapsed/);
+  await expect(runningTool).toHaveClass(/is-live/);
+  await expect(runningTool.getByTestId('tool-status-label')).toContainText('进行中');
+  await expect(runningTool.getByTestId('tool-card-body')).toHaveCount(0);
+  await expect(failedTool).toHaveClass(/is-expanded/);
+  await expect(failedTool.getByTestId('tool-error')).toBeVisible();
 
   const cards = page.getByTestId('tool-card');
   const cardBoxes = await cards.evaluateAll((items) => items.map((item) => {
@@ -113,6 +124,10 @@ test('Completed tool calls stay compact until expanded', async ({ page }) => {
   await readTool.getByTestId('tool-card-toggle').click();
   await expect(readTool).toHaveClass(/is-expanded/);
   await expect(readTool.getByTestId('tool-card-body')).toBeVisible();
+
+  // Manual collapse is sticky even if status stays completed.
+  await readTool.getByTestId('tool-card-toggle').click();
+  await expect(readTool).toHaveClass(/is-collapsed/);
 
   await page.setViewportSize({ width: 390, height: 720 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
