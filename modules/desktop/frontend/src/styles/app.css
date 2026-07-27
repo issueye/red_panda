@@ -4396,7 +4396,7 @@ button.activity-summary-card:hover {
   flex: 1 1 auto;
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.55;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
