@@ -1,6 +1,27 @@
 import { classNames } from '../../lib/format.js';
 
-export function TabButton({ active, children, className, panelId, ...props }) {
+/**
+ * @param {{
+ *   active?: boolean,
+ *   badge?: number | string | null,
+ *   badgeTone?: 'default' | 'warning' | 'danger' | 'info',
+ *   children: import('react').ReactNode,
+ *   className?: string,
+ *   panelId?: string,
+ * }} props
+ */
+export function TabButton({
+  active,
+  badge = null,
+  badgeTone = 'default',
+  children,
+  className,
+  panelId,
+  ...props
+}) {
+  const badgeValue = badge == null || badge === '' ? null : badge;
+  const showBadge = badgeValue != null && Number(badgeValue) !== 0;
+
   return (
     <button
       aria-controls={panelId}
@@ -11,7 +32,15 @@ export function TabButton({ active, children, className, panelId, ...props }) {
       type="button"
       {...props}
     >
-      {children}
+      <span className="right-tab-label">{children}</span>
+      {showBadge ? (
+        <span
+          className={classNames('right-tab-badge', `is-${badgeTone}`)}
+          data-testid="right-tab-badge"
+        >
+          {Number(badgeValue) > 99 ? '99+' : badgeValue}
+        </span>
+      ) : null}
     </button>
   );
 }

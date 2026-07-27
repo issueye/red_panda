@@ -1,4 +1,17 @@
-import { Braces, CheckCircle2, ChevronDown, ChevronRight, Clock3, KeyRound, Loader2, Search, ShieldAlert, XCircle } from 'lucide-react';
+import {
+  Activity,
+  Braces,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  KeyRound,
+  Loader2,
+  Search,
+  ShieldAlert,
+  Wrench,
+  XCircle,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   displayRisk,
@@ -7,6 +20,7 @@ import {
   displayStatus,
 } from '../lib/displayLabels.js';
 import {
+  classifyRunEventKind,
   filterRunEvents,
   formatRunEventPayload,
   getRunEventFilterOptions,
@@ -14,7 +28,7 @@ import {
   groupRunEventsByKind,
 } from '../lib/activityEvents.js';
 import { compareToolCallOrder } from '../lib/conversationTimeline.js';
-import { formatSeq } from '../lib/format.js';
+import { classNames } from '../lib/format.js';
 import { StatusBadge } from './ui/badge.jsx';
 import { Button } from './ui/button.jsx';
 import { ErrorMessage, InlineEmpty } from './ui/feedback.jsx';
@@ -34,6 +48,19 @@ function compactTime(value) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function shortId(value) {
+  const text = String(value || '').trim();
+  if (!text) return '—';
+  if (text.length <= 12) return text;
+  return `${text.slice(0, 8)}…`;
+}
+
+function runTitle(run) {
+  const input = String(run?.input || '').trim();
+  if (input) return input.length > 96 ? `${input.slice(0, 96)}…` : input;
+  return shortId(run?.id);
+}
+
 function matchesQuery(run, query) {
   if (!query) return true;
   const haystack = [
@@ -50,6 +77,12 @@ function runStatusMatches(run, filter) {
   if (filter === 'all') return true;
   if (filter === 'active') return run.status === 'running' || run.status === 'waiting_permission';
   return run.status === filter;
+}
+
+function lastEventLabel(run) {
+  if (!run?.lastEventType) return '暂无事件';
+  const kind = classifyRunEventKind(run.lastEventType, {});
+  return displayEventKind(kind) || run.lastEventType;
 }
 
 export function RunActivityPanel({
@@ -71,16 +104,28 @@ export function RunActivityPanel({
   const activeRuns = safeRuns.filter((run) => run.status === 'running' || run.status === 'waiting_permission');
   const pendingPermissions = safePermissions.filter((item) => item.status === 'pending' || !item.status);
   const globalPendingCount = safeGlobalPending.length;
+  const sessionPendingCount = pendingPermissions.length;
   const latestRun = safeRuns[0];
+  const hasActive = activeRuns.length > 0;
+
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(() => (hasActive ? 'active' : 'all'));
   const [eventKindFilter, setEventKindFilter] = useState('all');
   const [eventScopeFilter, setEventScopeFilter] = useState('all');
   const [expandedPayloads, setExpandedPayloads] = useState({});
   const [expandedRunId, setExpandedRunId] = useState(currentRunId || '');
+  const [filterTouched, setFilterTouched] = useState(false);
+
+  // Prefer "进行中" while runs are active, unless the user already picked a filter.
+  useEffect(() => {
+    if (filterTouched) return;
+    setStatusFilter(hasActive ? 'active' : 'all');
+  }, [filterTouched, hasActive]);
+
   const filteredRuns = useMemo(() => (
     safeRuns.filter((run) => runStatusMatches(run, statusFilter) && matchesQuery(run, query))
   ), [query, safeRuns, statusFilter]);
+
   useEffect(() => {
     if (expandedRunId && !runEventsByRun?.[expandedRunId] && !runEventsLoading?.[expandedRunId]) {
       onLoadRunEvents?.(expandedRunId);
@@ -108,44 +153,66 @@ export function RunActivityPanel({
     }));
   }
 
+  function applySummaryFilter(next) {
+    setFilterTouched(true);
+    setStatusFilter(next);
+  }
+
   return (
     <section className="activity-panel-content" data-testid="activity-panel">
-      {/* <div className="activity-summary-grid">
-        <article className="activity-summary-card">
+      <div className="activity-summary-grid" data-testid="activity-summary">
+        <button
+          className={classNames('activity-summary-card', statusFilter === 'active' && 'is-active')}
+          data-testid="activity-summary-active"
+          onClick={() => applySummaryFilter(statusFilter === 'active' ? 'all' : 'active')}
+          type="button"
+        >
           <Activity size={15} />
           <div>
             <strong>{activeRuns.length}</strong>
             <span>运行中</span>
           </div>
-        </article>
-        <article className="activity-summary-card">
+        </button>
+        <div className="activity-summary-card" data-testid="activity-summary-tools">
           <Wrench size={15} />
           <div>
             <strong>{safeTools.length}</strong>
             <span>工具</span>
           </div>
-        </article>
-        <article className="activity-summary-card">
+        </div>
+        <button
+          className={classNames(
+            'activity-summary-card',
+            (globalPendingCount + sessionPendingCount) > 0 && 'is-urgent',
+          )}
+          data-testid="activity-summary-pending"
+          onClick={() => applySummaryFilter(statusFilter === 'waiting_permission' ? 'all' : 'waiting_permission')}
+          type="button"
+        >
           <KeyRound size={15} />
           <div>
-            <strong>{globalPendingCount}</strong>
-            <span>待处理</span>
+            <strong>{globalPendingCount + sessionPendingCount}</strong>
+            <span>待授权</span>
           </div>
-        </article>
-      </div> */}
+        </button>
+      </div>
 
       {globalPendingCount > 0 ? (
-        <div className="activity-section">
+        <div className="activity-section activity-section-pending">
           <div className="activity-section-title">
             <KeyRound size={14} />
             <span>全局待处理</span>
+            <em>{globalPendingCount}</em>
           </div>
           <div className="activity-list compact">
             {safeGlobalPending.slice(0, 6).map((item) => (
               <article className="activity-line urgent" key={item.id}>
                 <div>
                   <strong>{item.summary || item.toolName || '需要授权'}</strong>
-                  <span>{item.toolName || (item.risk ? `${displayRisk(item.risk)}风险` : '运行授权')} - {item.runId || '未知运行'}</span>
+                  <span>
+                    {item.toolName || (item.risk ? `${displayRisk(item.risk)}风险` : '运行授权')}
+                    {item.runId ? ` · ${shortId(item.runId)}` : ''}
+                  </span>
                 </div>
                 <div className="activity-actions">
                   <Button onClick={() => onResolvePermission?.(item.id, 'deny')} variant="ghost">拒绝</Button>
@@ -157,13 +224,13 @@ export function RunActivityPanel({
         </div>
       ) : null}
 
-      <div className="activity-section">
+      <div className="activity-section activity-section-runs">
         <div className="activity-filter-bar">
           <label className="activity-search">
             <Search size={14} />
             <input
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索运行"
+              placeholder="搜索任务内容"
               type="search"
               value={query}
             />
@@ -171,7 +238,10 @@ export function RunActivityPanel({
           <SelectMenu
             ariaLabel="运行状态筛选"
             className="activity-filter-select"
-            onChange={setStatusFilter}
+            onChange={(value) => {
+              setFilterTouched(true);
+              setStatusFilter(value);
+            }}
             options={[
               ['all', '全部'],
               ['active', '进行中'],
@@ -210,7 +280,11 @@ export function RunActivityPanel({
             });
             const eventGroups = groupRunEventsByKind(filteredEvents);
             return (
-              <article className={run.id === currentRunId ? 'activity-run active' : 'activity-run'} data-testid="activity-run" key={run.id}>
+              <article
+                className={run.id === currentRunId ? 'activity-run active' : 'activity-run'}
+                data-testid="activity-run"
+                key={run.id}
+              >
                 <button
                   className="activity-run-toggle"
                   data-testid="activity-run-toggle"
@@ -227,37 +301,59 @@ export function RunActivityPanel({
                     icon={statusIcon(run.status)}
                     status={run.status || 'unknown'}
                   />
-                  <span>事件 {formatSeq(run.lastRunSeq || 0)}</span>
+                  <span title={run.id}>{lastEventLabel(run)}</span>
                 </div>
-                <strong>{run.input || run.id}</strong>
+                <strong title={run.input || run.id}>{runTitle(run)}</strong>
                 <div className="activity-row-meta">
-                  <span>{run.messageCount || 0} 条消息</span>
-                  <span>{runTools.length || run.toolCount || 0} 个工具</span>
-                  <span>{runPermissions.length} 条授权</span>
+                  <span>{run.messageCount || 0} 消息</span>
+                  <span>{runTools.length || run.toolCount || 0} 工具</span>
+                  <span>{runPermissions.length} 授权</span>
                   <span>{compactTime(run.updatedAt || run.startedAt)}</span>
                 </div>
                 <ErrorMessage className="activity-error">{run.error}</ErrorMessage>
                 {expanded ? (
                   <div className="activity-run-detail">
                     <dl>
-                      <div><dt>运行</dt><dd>{run.id}</dd></div>
-                      <div><dt>最近事件</dt><dd>{run.lastEventType || '未记录'}</dd></div>
-                      <div><dt>运行时</dt><dd>{displayRuntimeMode(run.runtimeMode || 'single_core')}</dd></div>
-                      <div><dt>开始</dt><dd>{compactTime(run.startedAt)}</dd></div>
+                      <div>
+                        <dt>运行</dt>
+                        <dd title={run.id}>{shortId(run.id)}</dd>
+                      </div>
+                      <div>
+                        <dt>最近</dt>
+                        <dd>{lastEventLabel(run)}</dd>
+                      </div>
+                      <div>
+                        <dt>运行时</dt>
+                        <dd>{displayRuntimeMode(run.runtimeMode || 'single_core')}</dd>
+                      </div>
+                      <div>
+                        <dt>开始</dt>
+                        <dd>{compactTime(run.startedAt)}</dd>
+                      </div>
                     </dl>
                     <div className="activity-detail-group">
                       <strong>工具</strong>
-                      {runTools.length === 0 ? <span>本次运行没有工具调用。</span> : runTools.map((tool, index) => (
+                      {runTools.length === 0 ? (
+                        <span>本次运行没有工具调用。</span>
+                      ) : runTools.map((tool, index) => (
                         <p key={tool.id}>
                           {index + 1}/{runTools.length}{' '}
-                          {tool.displayName || tool.name} - {displayStatus(tool.status || 'running')} - 事件 {formatSeq(tool.runSeq || 0)}
+                          {tool.displayName || tool.name}
+                          {' · '}
+                          {displayStatus(tool.status || 'running')}
                         </p>
                       ))}
                     </div>
                     <div className="activity-detail-group">
                       <strong>授权</strong>
-                      {runPermissions.length === 0 ? <span>本次运行没有授权记录。</span> : runPermissions.map((item) => (
-                        <p key={item.id}>{item.summary || item.toolName || item.id} - {displayStatus(item.status || 'pending')}</p>
+                      {runPermissions.length === 0 ? (
+                        <span>本次运行没有授权记录。</span>
+                      ) : runPermissions.map((item) => (
+                        <p key={item.id}>
+                          {item.summary || item.toolName || shortId(item.id)}
+                          {' · '}
+                          {displayStatus(item.status || 'pending')}
+                        </p>
                       ))}
                     </div>
                     <div className="activity-detail-group" data-testid="activity-event-timeline">
@@ -287,14 +383,16 @@ export function RunActivityPanel({
                           value={eventScopeFilter}
                         />
                       </div>
-                      {eventsLoading ? <span>正在加载事件...</span> : null}
+                      {eventsLoading ? <span>正在加载事件…</span> : null}
                       <ErrorMessage className="activity-error">{eventsError}</ErrorMessage>
                       {!eventsLoading && !eventsError && runEvents.length === 0 ? <span>本次运行暂无事件。</span> : null}
                       {!eventsLoading && !eventsError && runEvents.length > 0 && filteredEvents.length === 0 ? <span>没有符合当前筛选条件的事件。</span> : null}
                       {eventGroups.map((group) => (
                         <div className="activity-event-group" data-testid="activity-event-group" key={group.kind}>
                           <div className="activity-event-group-head">
-                            <span className={`activity-event-kind activity-event-kind-${group.kind}`}>{displayEventKind(group.kind)}</span>
+                            <span className={`activity-event-kind activity-event-kind-${group.kind}`}>
+                              {displayEventKind(group.kind)}
+                            </span>
                             <em>{group.count}</em>
                           </div>
                           {group.events.slice(0, 16).map((event) => {
@@ -305,7 +403,7 @@ export function RunActivityPanel({
                             return (
                               <div className="activity-event-row" key={eventKey}>
                                 <div className="activity-event-meta">
-                                  <span>{meta.sequence || `事件 ${formatSeq(event.runSeq)}`}</span>
+                                  <span>{meta.sequence || displayEventKind(meta.kind)}</span>
                                   <span>{meta.scope}</span>
                                   {payload ? (
                                     <button
@@ -313,7 +411,7 @@ export function RunActivityPanel({
                                       className="activity-event-payload-toggle"
                                       data-testid="activity-event-payload-toggle"
                                       onClick={() => togglePayload(eventKey)}
-                                      title="载荷"
+                                      title="查看诊断载荷"
                                       type="button"
                                     >
                                       <Braces size={11} />
@@ -321,7 +419,7 @@ export function RunActivityPanel({
                                   ) : null}
                                 </div>
                                 <p>
-                                  <strong>{meta.title}</strong>
+                                  <strong>{displayEventKind(meta.kind) || meta.title}</strong>
                                   <span>{meta.summary}</span>
                                 </p>
                                 {payloadOpen ? <pre data-testid="activity-event-payload">{payload}</pre> : null}
@@ -339,10 +437,10 @@ export function RunActivityPanel({
         </div>
       </div>
 
-      <div className="activity-section">
+      <div className="activity-section activity-section-permissions">
         <div className="activity-section-title">
           <ShieldAlert size={14} />
-          <span>授权</span>
+          <span>本会话授权</span>
         </div>
         <div className="activity-list compact">
           {safePermissions.length === 0 ? (

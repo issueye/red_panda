@@ -233,6 +233,21 @@ export function App() {
     () => assignmentOrder.map((id) => assignmentsById[id]).filter(Boolean),
     [assignmentOrder, assignmentsById],
   );
+  const activeWorkerCount = useMemo(
+    () => assignments.filter((item) => {
+      const status = item?.status || '';
+      return status === 'queued'
+        || status === 'running'
+        || status === 'cancelling'
+        || status === 'waiting_permission'
+        || status === 'paused';
+    }).length,
+    [assignments],
+  );
+  const pendingPermissionBadge = useMemo(() => {
+    const sessionPending = permissions.filter((item) => item.status === 'pending' || !item.status).length;
+    return sessionPending + (globalPendingPermissions?.length || 0);
+  }, [globalPendingPermissions, permissions]);
   const displayedConversationTabs = useMemo(() => conversationTabs.map((tab) => {
     if (tab.kind !== 'worker') return tab;
     const assignment = assignmentsById[tab.assignmentId];
@@ -723,6 +738,8 @@ export function App() {
           {rightPanelTabs.map((tab) => (
             <TabButton
               active={rightPanelTab === tab.id}
+              badge={tab.id === 'workers' ? activeWorkerCount : tab.id === 'activity' ? pendingPermissionBadge : null}
+              badgeTone={tab.id === 'activity' ? 'warning' : 'info'}
               data-right-panel-tab={tab.id}
               data-testid={tab.testId ? `${tab.testId}-rail` : undefined}
               key={tab.id}
@@ -809,6 +826,8 @@ export function App() {
             {rightPanelTabs.map((tab) => (
               <TabButton
                 active={rightPanelTab === tab.id}
+                badge={tab.id === 'workers' ? activeWorkerCount : tab.id === 'activity' ? pendingPermissionBadge : null}
+                badgeTone={tab.id === 'activity' ? 'warning' : 'info'}
                 data-right-panel-tab={tab.id}
                 data-testid={tab.testId || undefined}
                 key={tab.id}
