@@ -161,13 +161,13 @@ export function AgentsTab({
                     <Button disabled={agentSaving} onClick={() => setAgentDraft(null)} variant="ghost">取消</Button>
                     <Button
                       disabled={
-                        agentSaving
-                        || !agentDraft.name.trim()
+                        !agentDraft.name.trim()
                         || (agentDraft.isNew && !agentDraft.key.trim())
                       }
+                      loading={agentSaving}
                       onClick={saveAgent}
                     >
-                      {agentSaving ? '保存中' : agentDraft.isNew ? '创建 Profile' : '保存'}
+                      {agentDraft.isNew ? '创建 Profile' : '保存'}
                     </Button>
                   </div>
                 </>

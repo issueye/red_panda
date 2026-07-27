@@ -130,7 +130,10 @@ export function ChatComposer({
 
   const hasAttachments = attachments.length > 0;
   // Allow send when there's text OR at least one attachment (docs/51 §8.1).
+  // While attachments upload, keep the send control visible with loading so the
+  // user sees progress (running switches this control to cancel instead).
   const canSend = (value.trim().length > 0 || hasAttachments) && !running && !uploading;
+  const sendLoading = Boolean(uploading);
   const attachmentsDisabled = running || uploading || !onAddFiles;
   const attachmentCountLabel = hasAttachments ? `${attachments.length}/${ATTACHMENT_MAX_PER_RUN}` : '';
   const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')
@@ -419,8 +422,9 @@ export function ChatComposer({
               <IconButton
                 className="composer-action composer-send"
                 data-testid="chat-composer-send"
-                disabled={!canSend}
-                label="发送"
+                disabled={!canSend && !sendLoading}
+                label={sendLoading ? '上传附件中' : '发送'}
+                loading={sendLoading}
                 type="submit"
                 variant="default"
               >

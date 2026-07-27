@@ -27,6 +27,7 @@ export function useSessionRunActions({
   request,
   setRightPanelTab,
   providerProfiles = [],
+  toast = null,
 }) {
   const handleLocalCommand = useCallback((sessionId, text, command) => {
     patchRuntime(sessionId, (runtime) => ({
@@ -47,18 +48,25 @@ export function useSessionRunActions({
     patchRuntime(sessionId, (runtime) => ({ ...runtime, uploadingAttachments: true }));
 
     const staged = [];
+    const failures = [];
     for (const file of files) {
-      if (staged.length >= ATTACHMENT_MAX_PER_RUN) break;
+      if (staged.length >= ATTACHMENT_MAX_PER_RUN) {
+        failures.push(`最多 ${ATTACHMENT_MAX_PER_RUN} 张图片，已忽略多余文件`);
+        break;
+      }
       const validationError = validateImageFile(file);
       if (validationError) {
         staged.push({ clientKey: `err_${Date.now()}_${Math.random()}`, error: validationError, alt: file?.name });
+        failures.push(file?.name ? `${file.name}：${validationError}` : validationError);
         continue;
       }
       try {
         const dto = await uploadAttachment(sessionId, file);
         staged.push(dto);
       } catch (error) {
-        staged.push({ clientKey: `err_${Date.now()}_${Math.random()}`, error: error.message, alt: file?.name });
+        const message = error.message || '上传失败';
+        staged.push({ clientKey: `err_${Date.now()}_${Math.random()}`, error: message, alt: file?.name });
+        failures.push(file?.name ? `${file.name}：${message}` : message);
       }
     }
 
@@ -67,7 +75,15 @@ export function useSessionRunActions({
       uploadingAttachments: false,
       draftAttachments: [...(runtime.draftAttachments || []), ...staged].slice(0, ATTACHMENT_MAX_PER_RUN),
     }));
-  }, [patchRuntime]);
+
+    if (failures.length === 1) {
+      toast?.error(failures[0], { title: '附件上传失败' });
+    } else if (failures.length > 1) {
+      toast?.error(failures.slice(0, 3).join('；'), {
+        title: `附件上传失败（${failures.length}）`,
+      });
+    }
+  }, [patchRuntime, toast]);
 
   const startRun = useCallback(async (sessionId, text, command, attachments = []) => {
     const displayText = command.displayText || text;
@@ -95,6 +111,7 @@ export function useSessionRunActions({
           ...appendMessages(runtime, createSystemMessage('gateway_error', `启动运行失败：${message}`)),
           running: false,
         }));
+        toast?.error(message, { title: '无法发送图片' });
         return;
       }
     }
@@ -167,8 +184,9 @@ export function useSessionRunActions({
         running: false,
         currentRunId: '',
       }));
+      toast?.error(friendly, { title: '发送失败' });
     }
-  }, [loadSkills, patchRuntime, providerProfiles, request, runSettings, setRightPanelTab, workspace]);
+  }, [loadSkills, patchRuntime, providerProfiles, request, runSettings, setRightPanelTab, toast, workspace]);
 
   const sendTask = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;

@@ -13,6 +13,7 @@ import { StatusBadge } from './ui/badge.jsx';
 import { Button, IconButton } from './ui/button.jsx';
 import { Dialog, useOptionalDialog } from './ui/dialog.jsx';
 import { EmptyState, ErrorMessage } from './ui/feedback.jsx';
+import { useOptionalToast } from './ui/toast.jsx';
 import { Field } from './ui/field.jsx';
 import { SelectMenu } from './ui/select.jsx';
 
@@ -33,6 +34,7 @@ export function SchedulesDialog({
   onOpenSession,
 }) {
   const dialog = useOptionalDialog();
+  const toast = useOptionalToast();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -200,8 +202,10 @@ export function SchedulesDialog({
         setSelectedId('');
         setRuns([]);
       }
+      toast?.success(`已删除定时任务「${item.name}」`);
     } catch (err) {
       setError(err?.message || '删除失败');
+      toast?.error(err?.message || '删除失败');
     } finally {
       setBusyId('');
     }

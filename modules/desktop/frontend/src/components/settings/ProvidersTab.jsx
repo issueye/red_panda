@@ -250,8 +250,12 @@ export function ProvidersTab({
                 >
                   <Trash2 size={15} />
                 </IconButton>
-                <Button disabled={profileSaving || !profileDraft.baseUrl || !models.some((item) => item.model.trim())} onClick={saveProviderProfile}>
-                  {profileSaving ? '保存中' : settings.providerProfileId ? '保存供应商' : '创建供应商'}
+                <Button
+                  disabled={!profileDraft.baseUrl || !models.some((item) => item.model.trim())}
+                  loading={profileSaving}
+                  onClick={saveProviderProfile}
+                >
+                  {settings.providerProfileId ? '保存供应商' : '创建供应商'}
                 </Button>
               </div>
             </div>

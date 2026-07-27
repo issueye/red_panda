@@ -12,6 +12,8 @@ import {
 import { emptyProfileDraft, profileDraftFrom } from '../lib/providerProfiles.js';
 import { Button, IconButton } from './ui/button.jsx';
 import { useDialog } from './ui/dialog.jsx';
+import { ErrorBoundary } from './ui/error-boundary.jsx';
+import { useOptionalToast } from './ui/toast.jsx';
 import { AgentsTab } from './settings/AgentsTab.jsx';
 import { LogsTab } from './settings/LogsTab.jsx';
 import { McpTab } from './settings/McpTab.jsx';
@@ -43,6 +45,7 @@ export function SettingsPanel({
   const skillItems = Array.isArray(skills.items) ? skills.items : [];
   const mcpDiscoveryByServer = mcp.discoveryById || {};
   const dialog = useDialog();
+  const toast = useOptionalToast();
   const panelRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previousActiveElementRef = useRef(null);
@@ -138,8 +141,10 @@ export function SettingsPanel({
         updateSetting('providerProfileId', created.id);
       }
       setProfileDraft((current) => ({ ...current, apiKey: '' }));
+      toast?.success('供应商配置已保存');
     } catch (error) {
       setProfileError(error.message);
+      toast?.error(error.message || '保存供应商失败');
     } finally {
       setProfileSaving(false);
     }
@@ -165,8 +170,10 @@ export function SettingsPanel({
       await providers.remove(settings.providerProfileId);
       updateSetting('providerProfileId', '');
       setProfileDraft(emptyProfileDraft);
+      toast?.success(`已删除供应商「${profileName}」`);
     } catch (error) {
       setProfileError(error.message);
+      toast?.error(error.message || '删除供应商失败');
     } finally {
       setProfileSaving(false);
     }
@@ -197,8 +204,10 @@ export function SettingsPanel({
         path: detail?.path || skillDraft.path || `.codex/skills/${name}/SKILL.md`,
         isNew: false,
       });
+      toast?.success(skillDraft.isNew ? '技能已创建' : '技能已更新');
     } catch (error) {
       setSkillError(error.message);
+      toast?.error(error.message || '保存技能失败');
     } finally {
       setSkillSaving(false);
     }
@@ -246,8 +255,10 @@ export function SettingsPanel({
       if (skillDraft?.name === skill.name) {
         setSkillDraft(null);
       }
+      toast?.success(`已删除技能「${skill.name}」`);
     } catch (error) {
       setSkillError(error.message);
+      toast?.error(error.message || '删除技能失败');
     } finally {
       setSkillSaving(false);
     }
@@ -273,8 +284,10 @@ export function SettingsPanel({
           })
         : await mcp.create(mcpDraft);
       setMcpDraft({ ...saved });
+      toast?.success(mcpDraft.id ? 'MCP 配置已更新' : 'MCP 配置已创建');
     } catch (error) {
       setMcpError(error.message);
+      toast?.error(error.message || '保存 MCP 失败');
     } finally {
       setMcpSaving(false);
     }
@@ -297,8 +310,10 @@ export function SettingsPanel({
       if (mcpDraft?.id === server.id) {
         setMcpDraft(null);
       }
+      toast?.success(`已删除 MCP「${server.name || server.id}」`);
     } catch (error) {
       setMcpError(error.message);
+      toast?.error(error.message || '删除 MCP 失败');
     } finally {
       setMcpSaving(false);
     }
@@ -358,8 +373,10 @@ export function SettingsPanel({
         });
         setAgentDraft(agentDraftFrom(updated));
       }
+      toast?.success(agentDraft.isNew ? 'Profile 已创建' : 'Profile 已保存');
     } catch (error) {
       setAgentError(error.message);
+      toast?.error(error.message || '保存 Profile 失败');
     } finally {
       setAgentSaving(false);
     }
@@ -398,8 +415,10 @@ export function SettingsPanel({
       if (agentDraft?.id === agent.id) {
         setAgentDraft(null);
       }
+      toast?.success(`已删除 Profile「${agentDisplayName(agent)}」`);
     } catch (error) {
       setAgentError(error.message);
+      toast?.error(error.message || '删除 Profile 失败');
     } finally {
       setAgentSaving(false);
     }
@@ -654,7 +673,13 @@ export function SettingsPanel({
             id="settings-tab-panel"
             role="tabpanel"
           >
-            {activeContent}
+            <ErrorBoundary
+              key={activeTab}
+              resetKey={activeTab}
+              title={`${activeTabLabel}页暂时无法显示`}
+            >
+              {activeContent}
+            </ErrorBoundary>
           </div>
         </div>
 

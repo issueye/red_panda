@@ -1,32 +1,67 @@
 import { forwardRef } from 'react';
+import { Loader2 } from 'lucide-react';
 import { classNames } from '../../lib/format.js';
 
-export const Button = forwardRef(function Button({ className, children, icon, variant = 'default', ...props }, ref) {
-  let childComp;
+export const Button = forwardRef(function Button({
+  className,
+  children,
+  icon,
+  variant = 'default',
+  loading = false,
+  disabled = false,
+  type = 'button',
+  ...props
+}, ref) {
+  const isDisabled = disabled || loading;
+  let childComp = null;
   if (children) {
     childComp = <span>{children}</span>;
-  } else {
-    childComp = null;
-   }
+  }
+
   return (
-    <button className={classNames('button', `button-${variant}`, className)} ref={ref} type="button" {...props}>
-      {icon ? <span className="button-icon">{icon}</span> : null}
+    <button
+      className={classNames('button', `button-${variant}`, loading && 'is-loading', className)}
+      disabled={isDisabled}
+      ref={ref}
+      type={type}
+      {...props}
+      aria-busy={loading || undefined}
+    >
+      {loading ? (
+        <span className="button-icon button-spinner" aria-hidden="true">
+          <Loader2 className="button-spin" size={15} />
+        </span>
+      ) : icon ? (
+        <span className="button-icon">{icon}</span>
+      ) : null}
       {childComp}
     </button>
   );
 });
 
-export const IconButton = forwardRef(function IconButton({ label, className, children, variant = 'ghost', ...props }, ref) {
+export const IconButton = forwardRef(function IconButton({
+  label,
+  className,
+  children,
+  variant = 'ghost',
+  loading = false,
+  disabled = false,
+  type = 'button',
+  ...props
+}, ref) {
+  const isDisabled = disabled || loading;
   return (
     <button
+      aria-busy={loading || undefined}
       aria-label={label}
-      className={classNames('icon-button', `button-${variant}`, className)}
+      className={classNames('icon-button', `button-${variant}`, loading && 'is-loading', className)}
+      disabled={isDisabled}
       ref={ref}
       title={label}
-      type="button"
+      type={type}
       {...props}
     >
-      {children}
+      {loading ? <Loader2 aria-hidden="true" className="button-spin" size={15} /> : children}
     </button>
   );
 });

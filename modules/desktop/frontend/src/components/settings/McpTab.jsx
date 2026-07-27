@@ -139,10 +139,11 @@ export function McpTab({
                   <div className="settings-editor-actions">
                     <Button disabled={mcpSaving} onClick={() => setMcpDraft(null)} variant="ghost">取消</Button>
                     <Button
-                      disabled={mcpSaving || !mcpDraft.name.trim() || !mcpDraft.command.trim()}
+                      disabled={!mcpDraft.name.trim() || !mcpDraft.command.trim()}
+                      loading={mcpSaving}
                       onClick={saveMcpServer}
                     >
-                      {mcpSaving ? '保存中' : mcpDraft.id ? '保存服务器' : '创建服务器'}
+                      {mcpDraft.id ? '保存服务器' : '创建服务器'}
                     </Button>
                   </div>
                   {mcpDraft.id ? (

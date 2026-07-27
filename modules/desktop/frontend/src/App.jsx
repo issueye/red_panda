@@ -11,6 +11,7 @@ import { WorkerPanel } from './components/WorkerPanel.jsx';
 import { TopBar } from './components/TopBar.jsx';
 import { IconButton } from './components/ui/button.jsx';
 import { useDialog } from './components/ui/dialog.jsx';
+import { useToast } from './components/ui/toast.jsx';
 import { TabButton } from './components/ui/tabs.jsx';
 import { WorkspacePanel } from './components/WorkspacePanel.jsx';
 import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
@@ -73,6 +74,7 @@ const initialMessages = [
 
 export function App() {
   const dialog = useDialog();
+  const toast = useToast();
   const [sessionRuntimes, setSessionRuntimes] = useState(() => ({}));
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState('sessions');
@@ -412,6 +414,11 @@ export function App() {
   gatewayRequestRef.current = request;
 
   useEffect(() => {
+    if (!lastError) return;
+    toast.error(lastError, { id: 'gateway-last-error', title: '连接错误' });
+  }, [lastError, toast]);
+
+  useEffect(() => {
     if (status !== 'connected') return;
     const sessionId = currentSessionId;
     request('worker.list', currentRunId ? { run_id: currentRunId } : {}).then((result) => {
@@ -458,6 +465,7 @@ export function App() {
     refreshSessions,
   } = useSessionActions({
     dialog,
+    toast,
     sessions,
     setSessions,
     currentSessionId,
@@ -481,6 +489,7 @@ export function App() {
     setRightPanelTab,
     contextTokenBudget,
     compacting,
+    providerProfiles,
   });
   upsertSessionRef.current = upsertSession;
   selectSessionRef.current = selectSession;
@@ -819,7 +828,6 @@ export function App() {
           </div>
         </aside>
       </main>
-      {lastError ? <div className="toast" role="alert">{lastError}</div> : null}
       <StatusBar
         runSeq={runSeq}
         runtimeStatus={

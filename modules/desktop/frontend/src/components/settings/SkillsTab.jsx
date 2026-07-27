@@ -113,15 +113,15 @@ export function SkillsTab({
                     <Button onClick={() => setSkillDraft(null)} variant="ghost">取消</Button>
                     <Button
                       disabled={
-                        skillSaving
-                        || !skillDraft.name.trim()
+                        !skillDraft.name.trim()
                         || !skillDraft.description.trim()
                         || !skillDraft.instructions.trim()
                         || !workspaceRoot
                       }
+                      loading={skillSaving}
                       onClick={saveSkill}
                     >
-                      {skillSaving ? '保存中' : '保存技能'}
+                      保存技能
                     </Button>
                   </div>
                 </>
