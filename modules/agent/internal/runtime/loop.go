@@ -163,6 +163,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 					"delta":         fallback,
 					"provider_name": r.provider.Name(),
 					"recovered":     true,
+					"recovery_kind": "fallback",
 				})
 				(*streamSeq)++
 			}
@@ -197,6 +198,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 			"delta":         fallback,
 			"provider_name": r.provider.Name(),
 			"recovered":     true,
+			"recovery_kind": "fallback",
 			"max_turns":     maxTurns,
 		})
 		(*streamSeq)++
@@ -350,6 +352,7 @@ func (r *Runtime) retryFinalAnswer(
 		"delta":         text,
 		"provider_name": r.provider.Name(),
 		"recovered":     true,
+		"recovery_kind": "final_answer_retry",
 	})
 	(*streamSeq)++
 	return err == nil

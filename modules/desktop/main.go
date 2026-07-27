@@ -31,10 +31,10 @@ func main() {
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "red_panda",
-		Width:            1280,
-		Height:           820,
-		MinWidth:         980,
-		MinHeight:        640,
+		Width:            1400,
+		Height:           900,
+		MinWidth:         1400,
+		MinHeight:        900,
 		BackgroundColour: application.NewRGB(247, 248, 251),
 		URL:              "/",
 		// Custom global header (TopBar) replaces the native title bar.

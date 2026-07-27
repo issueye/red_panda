@@ -78,7 +78,12 @@ func (c *Capture) observe(typ events.EventType, stream *events.StreamRef, payloa
 			return
 		}
 		c.messageDeltas++
-		if recovered, _ := payload["recovered"].(bool); recovered {
+		// A successful text-only final-answer retry is still a usable report.
+		// Only deterministic/legacy recovery placeholders are fallbacks. Treat an
+		// unknown kind conservatively as a fallback for compatibility with events
+		// emitted before recovery_kind was introduced.
+		if recovered, _ := payload["recovered"].(bool); recovered &&
+			payloadString(payload, "recovery_kind", "fallback") != "final_answer_retry" {
 			c.recoveredFallback = true
 		}
 		c.message.WriteString(delta)

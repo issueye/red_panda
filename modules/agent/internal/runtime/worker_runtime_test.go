@@ -577,6 +577,8 @@ type reusableRuntimeProcess struct {
 
 type recoveredFallbackRuntimeProcess struct{}
 
+type recoveredFinalAnswerRuntimeProcess struct{}
+
 func (*recoveredFallbackRuntimeProcess) Start(_ context.Context, _ methods.ReplyParams, emit func(events.EnvelopeV2)) error {
 	emit(events.EnvelopeV2{
 		Type:   events.EventMessageDelta,
@@ -592,6 +594,23 @@ func (*recoveredFallbackRuntimeProcess) Start(_ context.Context, _ methods.Reply
 
 func (*recoveredFallbackRuntimeProcess) Cancel(context.Context, string, string) error { return nil }
 func (*recoveredFallbackRuntimeProcess) Close(context.Context) error                  { return nil }
+
+func (*recoveredFinalAnswerRuntimeProcess) Start(_ context.Context, _ methods.ReplyParams, emit func(events.EnvelopeV2)) error {
+	emit(events.EnvelopeV2{
+		Type:   events.EventMessageDelta,
+		Stream: &events.StreamRef{Kind: events.StreamMessage, Final: true},
+		Payload: map[string]any{
+			"delta":         "Implemented the change and all focused tests passed.",
+			"recovered":     true,
+			"recovery_kind": "final_answer_retry",
+		},
+	})
+	emit(events.EnvelopeV2{Type: events.EventFinish, Payload: map[string]any{"status": "completed"}})
+	return nil
+}
+
+func (*recoveredFinalAnswerRuntimeProcess) Cancel(context.Context, string, string) error { return nil }
+func (*recoveredFinalAnswerRuntimeProcess) Close(context.Context) error                  { return nil }
 
 func TestDelegatedWorkerRejectsRecoveredFallbackAsFinalReport(t *testing.T) {
 	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
@@ -621,6 +640,40 @@ func TestDelegatedWorkerRejectsRecoveredFallbackAsFinalReport(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "recovered fallback instead of a final report") {
 		t.Fatalf("executeDelegated error = %v, want recovered fallback rejection", err)
+	}
+}
+
+func TestDelegatedWorkerAcceptsRecoveredFinalAnswerRetry(t *testing.T) {
+	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+
+	executor := newLazyProcessExecutor(rt, "worker-02")
+	t.Cleanup(func() { _ = executor.Close(context.Background()) })
+	executor.newProcess = func(context.Context, methods.ReplyParams, string, func(context.Context, string, any) (json.RawMessage, error)) (worker.Process, error) {
+		return &recoveredFinalAnswerRuntimeProcess{}, nil
+	}
+
+	request := worker.ExecuteRequest{
+		AssignmentID: "assignment-final-retry",
+		RunID:        "run-final-retry",
+		WorkerID:     "worker-02",
+		ProfileKey:   "reviewer",
+		Task:         "inspect project",
+	}
+	params := methods.ReplyParams{RunID: request.RunID, Session: methods.ReplySession{ID: "session-final-retry"}}
+	result, err := executor.executeDelegated(context.Background(), request, workerExecutionSpec{
+		Kind:       workerExecutionDelegated,
+		Params:     params,
+		Parent:     params,
+		ProfileKey: request.ProfileKey,
+		Task:       request.Task,
+		MaxTurns:   4,
+	})
+	if err != nil {
+		t.Fatalf("executeDelegated error = %v, want recovered final answer accepted", err)
+	}
+	if result.Output != "Implemented the change and all focused tests passed." {
+		t.Fatalf("output = %q, want recovered final answer", result.Output)
 	}
 }
 
