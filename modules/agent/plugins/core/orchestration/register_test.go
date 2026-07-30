@@ -12,7 +12,7 @@ import (
 // TestRegisterCount verifies exactly 11 tools are registered.
 func TestRegisterCount(t *testing.T) {
 	reg := registry.NewRegistry()
-	names := Register(reg, nil)
+	names := Register(reg, nil, Dependencies{})
 	if len(names) != 11 {
 		t.Fatalf("expected 11 registered tools, got %d: %v", len(names), names)
 	}
@@ -26,7 +26,7 @@ func TestRegisterNames(t *testing.T) {
 		"worker.pool_status", "worker.send", "worker.receive",
 	}
 	reg := registry.NewRegistry()
-	got := Register(reg, nil)
+	got := Register(reg, nil, Dependencies{})
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tool names mismatch:\n got: %v\nwant: %v", got, want)
 	}
@@ -35,7 +35,7 @@ func TestRegisterNames(t *testing.T) {
 // TestRegisterSourceOrder verifies registration order is preserved.
 func TestRegisterSourceOrder(t *testing.T) {
 	reg := registry.NewRegistry()
-	Register(reg, nil)
+	Register(reg, nil, Dependencies{})
 	names := reg.Names()
 	want := []string{
 		"skill.list", "skill.create", "skill.update", "skill.delete", "skill.run",
@@ -56,22 +56,22 @@ type expectedEntry struct {
 }
 
 var expectedEntries = map[string]expectedEntry{
-	"skill.list":          {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
-	"skill.create":        {risk: ptools.RiskHigh, timeoutClass: registry.GatewayToolTimeout, opsOnly: true, source: "builtin:orchestration"},
-	"skill.update":        {risk: ptools.RiskHigh, timeoutClass: registry.GatewayToolTimeout, opsOnly: true, source: "builtin:orchestration"},
-	"skill.delete":        {risk: ptools.RiskHigh, timeoutClass: registry.GatewayToolTimeout, opsOnly: true, source: "builtin:orchestration"},
-	"skill.run":           {risk: ptools.RiskHigh, timeoutClass: registry.SelfManagedToolTimeout, opsOnly: false, source: "builtin:orchestration"},
-	"worker.delegate":     {risk: ptools.RiskMedium, timeoutClass: registry.SelfManagedToolTimeout, opsOnly: false, source: "builtin:orchestration"},
-	"worker.list":         {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
-	"worker.cancel":       {risk: ptools.RiskMedium, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
-	"worker.pool_status":  {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: true, source: "builtin:orchestration"},
-	"worker.send":         {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: true, source: "builtin:orchestration"},
-	"worker.receive":      {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: true, source: "builtin:orchestration"},
+	"skill.list":         {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
+	"skill.create":       {risk: ptools.RiskHigh, timeoutClass: registry.GatewayToolTimeout, opsOnly: true, source: "builtin:orchestration"},
+	"skill.update":       {risk: ptools.RiskHigh, timeoutClass: registry.GatewayToolTimeout, opsOnly: true, source: "builtin:orchestration"},
+	"skill.delete":       {risk: ptools.RiskHigh, timeoutClass: registry.GatewayToolTimeout, opsOnly: true, source: "builtin:orchestration"},
+	"skill.run":          {risk: ptools.RiskHigh, timeoutClass: registry.SelfManagedToolTimeout, opsOnly: false, source: "builtin:orchestration"},
+	"worker.delegate":    {risk: ptools.RiskMedium, timeoutClass: registry.SelfManagedToolTimeout, opsOnly: false, source: "builtin:orchestration"},
+	"worker.list":        {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
+	"worker.cancel":      {risk: ptools.RiskMedium, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
+	"worker.pool_status": {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: true, source: "builtin:orchestration"},
+	"worker.send":        {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: true, source: "builtin:orchestration"},
+	"worker.receive":     {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: true, source: "builtin:orchestration"},
 }
 
 func TestRegisterEntryMetadata(t *testing.T) {
 	reg := registry.NewRegistry()
-	Register(reg, nil)
+	Register(reg, nil, Dependencies{})
 
 	for name, want := range expectedEntries {
 		entry, ok := reg.Lookup(name)
@@ -101,7 +101,7 @@ func TestRegisterEntryMetadata(t *testing.T) {
 // TestStableToolRegistryProvidesDefinitionAndTimeout).
 func TestDefinitionSchemaConsistency(t *testing.T) {
 	reg := registry.NewRegistry()
-	Register(reg, nil)
+	Register(reg, nil, Dependencies{})
 	for _, def := range reg.Definitions() {
 		if def.DisplayName == "" {
 			t.Errorf("%s has empty DisplayName", def.Name)
@@ -121,23 +121,23 @@ func TestDefinitionSchemaConsistency(t *testing.T) {
 // TestOpsOnlyMatchesPolicy verifies opsOnly flags match policy.go:15-26.
 func TestOpsOnlyMatchesPolicy(t *testing.T) {
 	reg := registry.NewRegistry()
-	Register(reg, nil)
+	Register(reg, nil, Dependencies{})
 
 	// From policy.go: skill.create, skill.update, skill.delete,
 	// worker.pool_status, worker.send, worker.receive are opsOnly.
 	// skill.list, skill.run, worker.delegate, worker.list, worker.cancel are NOT.
 	opsOnlyWant := map[string]bool{
-		"skill.list":          false,
-		"skill.create":        true,
-		"skill.update":        true,
-		"skill.delete":        true,
-		"skill.run":           false,
-		"worker.delegate":     false,
-		"worker.list":         false,
-		"worker.cancel":       false,
-		"worker.pool_status":  true,
-		"worker.send":         true,
-		"worker.receive":      true,
+		"skill.list":         false,
+		"skill.create":       true,
+		"skill.update":       true,
+		"skill.delete":       true,
+		"skill.run":          false,
+		"worker.delegate":    false,
+		"worker.list":        false,
+		"worker.cancel":      false,
+		"worker.pool_status": true,
+		"worker.send":        true,
+		"worker.receive":     true,
 	}
 	for name, want := range opsOnlyWant {
 		entry, ok := reg.Lookup(name)
@@ -150,38 +150,6 @@ func TestOpsOnlyMatchesPolicy(t *testing.T) {
 		// Also verify internal.IsOpsOnlyTool matches.
 		if internal.IsOpsOnlyTool(name) != want {
 			t.Errorf("internal.IsOpsOnlyTool(%q) = %v, want %v", name, internal.IsOpsOnlyTool(name), want)
-		}
-	}
-}
-
-// TestHandlerPlaceholders verifies skill.run and all worker.* handlers
-// currently return "not yet migrated" placeholder errors (Phase 2 partial).
-func TestHandlerPlaceholders(t *testing.T) {
-	// skill.run should be placeholder.
-	result, err := internal.HandlerSkillRun(nil, nil, nil)
-	if err == nil {
-		t.Error("skill.run handler should return error (not yet migrated), got nil")
-	}
-	if result != nil {
-		t.Error("skill.run handler should return nil Result on error")
-	}
-
-	// All worker handlers should be placeholders.
-	workerHandlers := []internal.HandlerFunc{
-		internal.HandlerWorkerDelegate,
-		internal.HandlerWorkerList,
-		internal.HandlerWorkerCancel,
-		internal.HandlerWorkerPoolStatus,
-		internal.HandlerWorkerSend,
-		internal.HandlerWorkerReceive,
-	}
-	for _, h := range workerHandlers {
-		result, err := h(nil, nil, nil)
-		if err == nil {
-			t.Errorf("worker handler should return error (not yet migrated), got nil; result=%v", result)
-		}
-		if result != nil {
-			t.Errorf("worker handler should return nil Result on error")
 		}
 	}
 }
@@ -213,7 +181,7 @@ func TestImplementedSkillHandlers(t *testing.T) {
 // schemas in agent/internal/tools/defs_orchestration.go.
 func TestDefinitionsMatchOldDefs(t *testing.T) {
 	reg := registry.NewRegistry()
-	Register(reg, nil)
+	Register(reg, nil, Dependencies{})
 	defs := reg.Definitions()
 
 	if len(defs) != 11 {
@@ -239,27 +207,27 @@ func TestDefinitionsMatchOldDefs(t *testing.T) {
 		"skill.create": {
 			displayName: "Create skill", risk: ptools.RiskHigh,
 			required: []string{"name", "description", "instructions"},
-			props: map[string]struct{}{"name": {}, "description": {}, "instructions": {}},
+			props:    map[string]struct{}{"name": {}, "description": {}, "instructions": {}},
 		},
 		"skill.update": {
 			displayName: "Update skill", risk: ptools.RiskHigh,
 			required: []string{"name", "description", "instructions"},
-			props: map[string]struct{}{"name": {}, "description": {}, "instructions": {}},
+			props:    map[string]struct{}{"name": {}, "description": {}, "instructions": {}},
 		},
 		"skill.delete": {
 			displayName: "Delete skill", risk: ptools.RiskHigh,
 			required: []string{"name"},
-			props: map[string]struct{}{"name": {}},
+			props:    map[string]struct{}{"name": {}},
 		},
 		"skill.run": {
 			displayName: "Run skill", risk: ptools.RiskHigh,
 			required: []string{"name", "task"},
-			props: map[string]struct{}{"name": {}, "task": {}},
+			props:    map[string]struct{}{"name": {}, "task": {}},
 		},
 		"worker.delegate": {
 			displayName: "Delegate work", risk: ptools.RiskMedium,
 			required: []string{"task"},
-			props: map[string]struct{}{"task": {}, "profile_key": {}, "max_turns": {}},
+			props:    map[string]struct{}{"task": {}, "profile_key": {}, "max_turns": {}},
 		},
 		"worker.list": {
 			displayName: "List workers", risk: ptools.RiskLow,
@@ -268,7 +236,7 @@ func TestDefinitionsMatchOldDefs(t *testing.T) {
 		"worker.cancel": {
 			displayName: "Cancel assignment", risk: ptools.RiskMedium,
 			required: []string{"assignment_id"},
-			props: map[string]struct{}{"assignment_id": {}, "reason": {}},
+			props:    map[string]struct{}{"assignment_id": {}, "reason": {}},
 		},
 		"worker.pool_status": {
 			displayName: "Worker pool status", risk: ptools.RiskLow,
@@ -277,7 +245,7 @@ func TestDefinitionsMatchOldDefs(t *testing.T) {
 		"worker.send": {
 			displayName: "Send Worker message", risk: ptools.RiskLow,
 			required: []string{"to_worker_id", "kind", "payload"},
-			props: map[string]struct{}{"to_worker_id": {}, "to_assignment_id": {}, "kind": {}, "payload": {}},
+			props:    map[string]struct{}{"to_worker_id": {}, "to_assignment_id": {}, "kind": {}, "payload": {}},
 		},
 		"worker.receive": {
 			displayName: "Receive Worker message", risk: ptools.RiskLow,

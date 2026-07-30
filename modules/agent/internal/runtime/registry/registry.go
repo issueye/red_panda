@@ -15,9 +15,9 @@ import (
 type TimeoutClass uint8
 
 const (
-	LocalToolTimeout TimeoutClass = iota // 30s
-	GatewayToolTimeout                   // 30s
-	SelfManagedToolTimeout               // 0 (无限)
+	LocalToolTimeout       TimeoutClass = iota // 30s
+	GatewayToolTimeout                         // 30s
+	SelfManagedToolTimeout                     // 0 (无限)
 )
 
 // Duration 返回 TimeoutClass 对应的超时时长，0 表示无限。
@@ -37,6 +37,7 @@ type HandlerFunc func(ctx context.Context, toolCtx *ToolContext, args map[string
 
 // ToolContext 工具执行上下文（依赖注入）
 type ToolContext struct {
+	ToolCallID   string
 	RunID        string
 	SessionID    string
 	AssignmentID string

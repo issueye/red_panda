@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"redpanda/agent/internal/skill"
@@ -64,19 +63,10 @@ func skillHandlerDelete(_ context.Context, toolCtx *ToolContext, args map[string
 	return &Result{Output: output}, nil
 }
 
-func skillHandlerRun(_ context.Context, _ *ToolContext, _ map[string]any) (*Result, error) {
-	// skill.run requires the Runtime (executeDelegatedAssignment,
-	// delegatedWorkerReply, loadManagedSkillLocal) which lives in
-	// agent/internal/runtime. Return a placeholder so the plugin compiles;
-	// the real handler is wired through the Runtime.
-	return nil, fmt.Errorf("not yet migrated")
-}
-
 // Handler exports.
 var (
-	HandlerSkillList HandlerFunc = skillHandlerList
+	HandlerSkillList   HandlerFunc = skillHandlerList
 	HandlerSkillCreate HandlerFunc = skillHandlerCreate
 	HandlerSkillUpdate HandlerFunc = skillHandlerUpdate
 	HandlerSkillDelete HandlerFunc = skillHandlerDelete
-	HandlerSkillRun  HandlerFunc = skillHandlerRun
 )

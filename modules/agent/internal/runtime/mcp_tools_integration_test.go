@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agentmcp "redpanda/agent/internal/mcp"
+	"redpanda/agent/internal/runtime/registry"
 	agenttools "redpanda/agent/internal/tools"
 	protomcp "redpanda/protocol/mcp"
 	"redpanda/protocol/methods"
@@ -72,7 +73,7 @@ func TestMCPDiscoveryCacheAcrossRuns(t *testing.T) {
 	config := helperMCPConfig(t, "success", cleanup)
 	rt := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "test")
 	params1 := methods.ReplyParams{
-		RunID: "run_cache_1",
+		RunID:   "run_cache_1",
 		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
 	}
 	defs1 := rt.mcp.PrepareToolsForRun(context.Background(), params1)
@@ -84,7 +85,7 @@ func TestMCPDiscoveryCacheAcrossRuns(t *testing.T) {
 	}
 	// Second run on same Manager should hit discovery cache and keep the same process.
 	params2 := methods.ReplyParams{
-		RunID: "run_cache_2",
+		RunID:   "run_cache_2",
 		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
 	}
 	defs2 := rt.mcp.PrepareToolsForRun(context.Background(), params2)
@@ -326,14 +327,13 @@ func TestDispatchMCPTool(t *testing.T) {
 			"path": "x.go",
 		},
 	}
-	// MCP bridge test: verify executeMCPTool dispatches to the MCP manager
-	// (the new Registry-based path for MCP tools is not yet wired — Phase 3).
-	out, err := rt.executeMCPTool(context.Background(), agenttools.ToolRunContext{RunID: params.RunID}, call)
+	// MCP bridge test: verify the Registry fallback dispatches to the MCP manager.
+	result, err := rt.executeMCPToolRegistry(context.Background(), call, &registry.ToolContext{RunID: params.RunID})
 	if err != nil {
-		t.Fatalf("executeMCPTool: %v", err)
+		t.Fatalf("executeMCPToolRegistry: %v", err)
 	}
-	if !strings.Contains(out, "path=x.go") {
-		t.Fatalf("output missing path: %s", out)
+	if result.Status != tools.CallStatusCompleted || !strings.Contains(result.Output, "path=x.go") {
+		t.Fatalf("unexpected registry MCP result: %#v", result)
 	}
 	rt.mcp.CloseAll()
 	waitForFile(t, cleanup)

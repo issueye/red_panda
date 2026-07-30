@@ -20,11 +20,27 @@ type toolSpec struct {
 	timeoutClass registry.TimeoutClass
 	opsOnly      bool
 	handler      orchestration.HandlerFunc
+	hostExecutor HostExecutor
+}
+
+type HostExecutor func(context.Context, *registry.ToolContext, ptools.Call) (string, error)
+
+// Dependencies are host capabilities required by orchestration tools. The
+// plugin owns tool registration; Runtime only supplies implementations that
+// need access to the Worker pool or run lifecycle.
+type Dependencies struct {
+	SkillRun         HostExecutor
+	WorkerDelegate   HostExecutor
+	WorkerList       HostExecutor
+	WorkerCancel     HostExecutor
+	WorkerPoolStatus HostExecutor
+	WorkerSend       HostExecutor
+	WorkerReceive    HostExecutor
 }
 
 // Register registers the 11 skill.* and worker.* tools into reg.
 // Order of registration is preserved; returned names reflect that order.
-func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
+func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies) []string {
 	specs := []toolSpec{
 		{
 			def: ptools.Definition{
@@ -116,7 +132,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			timeoutClass: registry.SelfManagedToolTimeout,
 			opsOnly:      false,
-			handler:      orchestration.HandlerSkillRun,
+			hostExecutor: deps.SkillRun,
 		},
 		{
 			def: ptools.Definition{
@@ -136,7 +152,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			timeoutClass: registry.SelfManagedToolTimeout,
 			opsOnly:      false,
-			handler:      orchestration.HandlerWorkerDelegate,
+			hostExecutor: deps.WorkerDelegate,
 		},
 		{
 			def: ptools.Definition{
@@ -154,7 +170,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			timeoutClass: registry.LocalToolTimeout,
 			opsOnly:      false,
-			handler:      orchestration.HandlerWorkerList,
+			hostExecutor: deps.WorkerList,
 		},
 		{
 			def: ptools.Definition{
@@ -173,7 +189,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			timeoutClass: registry.LocalToolTimeout,
 			opsOnly:      false,
-			handler:      orchestration.HandlerWorkerCancel,
+			hostExecutor: deps.WorkerCancel,
 		},
 		{
 			def: ptools.Definition{
@@ -188,7 +204,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			timeoutClass: registry.LocalToolTimeout,
 			opsOnly:      true,
-			handler:      orchestration.HandlerWorkerPoolStatus,
+			hostExecutor: deps.WorkerPoolStatus,
 		},
 		{
 			def: ptools.Definition{
@@ -209,7 +225,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			timeoutClass: registry.LocalToolTimeout,
 			opsOnly:      true,
-			handler:      orchestration.HandlerWorkerSend,
+			hostExecutor: deps.WorkerSend,
 		},
 		{
 			def: ptools.Definition{
@@ -224,34 +240,42 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			timeoutClass: registry.LocalToolTimeout,
 			opsOnly:      true,
-			handler:      orchestration.HandlerWorkerReceive,
+			hostExecutor: deps.WorkerReceive,
 		},
 	}
 
 	names := make([]string, 0, len(specs))
 	for _, s := range specs {
-		// Wrap: convert internal.HandlerFunc → registry.HandlerFunc.
-		inner := s.handler
-		h := func(ctx context.Context, toolCtx *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
-			ictx := &orchestration.ToolContext{
-				RunID:        toolCtx.RunID,
-				SessionID:    toolCtx.SessionID,
-				AssignmentID: toolCtx.AssignmentID,
-				WorkerID:     toolCtx.WorkerID,
-				WorkingDir:   toolCtx.WorkingDir,
-				Reply:        toolCtx.Reply,
+		var h registry.HandlerFunc
+		if s.hostExecutor != nil {
+			execute := s.hostExecutor
+			name := s.def.Name
+			h = func(ctx context.Context, toolCtx *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
+				output, err := execute(ctx, toolCtx, ptools.Call{ID: toolCtx.ToolCallID, Name: name, Arguments: args})
+				result := &ptools.Result{Name: name, Status: ptools.CallStatusCompleted, Output: output}
+				if err != nil {
+					result.Status = ptools.CallStatusFailed
+					result.Error = err.Error()
+				}
+				return result, err
 			}
-			ires, err := inner(ctx, ictx, args)
-			if err != nil {
-				return &ptools.Result{
-					Status: ptools.CallStatusFailed,
-					Error:  err.Error(),
-				}, nil
+		} else {
+			inner := s.handler
+			h = func(ctx context.Context, toolCtx *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
+				if inner == nil {
+					return nil, fmt.Errorf("host capability for %s is unavailable", s.def.Name)
+				}
+				ictx := &orchestration.ToolContext{
+					RunID: toolCtx.RunID, SessionID: toolCtx.SessionID,
+					AssignmentID: toolCtx.AssignmentID, WorkerID: toolCtx.WorkerID,
+					WorkingDir: toolCtx.WorkingDir, Reply: toolCtx.Reply,
+				}
+				ires, err := inner(ctx, ictx, args)
+				if err != nil {
+					return &ptools.Result{Status: ptools.CallStatusFailed, Error: err.Error()}, nil
+				}
+				return &ptools.Result{Status: ptools.CallStatusCompleted, Output: ires.Output}, nil
 			}
-			return &ptools.Result{
-				Status: ptools.CallStatusCompleted,
-				Output: ires.Output,
-			}, nil
 		}
 
 		entry := registry.ToolEntry{
@@ -265,8 +289,6 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 		names = append(names, s.def.Name)
 	}
 
-	_ = bus  // reserved for future hook-based registration
-	_ = fmt.Sprintf
-
+	_ = bus // reserved for future hook-based registration
 	return names
 }

@@ -64,6 +64,7 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, c
 
 	assignment := assignmentFromContext(ctx)
 	tc := &registry.ToolContext{
+		ToolCallID:   call.ID,
 		RunID:        params.RunID,
 		SessionID:    params.Session.ID,
 		WorkingDir:   params.Session.WorkingDir,
@@ -80,17 +81,16 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, c
 	// Registry dispatch (v0.3.0)
 	result, err := r.registry.Execute(ctx, call.Name, tc, args)
 	if result == nil {
-		// MCP fallback: MCP tools aren't in Registry but may still be requested.
 		if agenttools.IsMCPToolName(call.Name) {
-			mcpResult, mcpErr := r.executeMCPToolRegistry(ctx, call, tc, args)
-			return mcpResult, mcpErr.Error(), false
+			result, err = r.executeMCPToolRegistry(ctx, call, tc)
+		} else {
+			return tools.Result{
+				ToolCallID: call.ID,
+				Name:       call.Name,
+				Status:     tools.CallStatusFailed,
+				Error:      fmt.Sprintf("unknown tool %s", call.Name),
+			}, "", false
 		}
-		return tools.Result{
-			ToolCallID: call.ID,
-			Name:       call.Name,
-			Status:     tools.CallStatusFailed,
-			Error:      fmt.Sprintf("unknown tool %s", call.Name),
-		}, "", false
 	}
 
 	// Wrap result into legacy tools.Result format
@@ -156,15 +156,9 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, c
 
 // executeMCPToolRegistry executes an MCP tool call through the MCP manager.
 // Returns a tools.Result for use in the tool history.
-func (r *Runtime) executeMCPToolRegistry(ctx context.Context, call tools.Call, tc *registry.ToolContext, args map[string]any) (tools.Result, error) {
-	// MCP tools are dispatched via the MCP manager. For now, return a placeholder
-	// since the MCP integration path hasn't been fully migrated.
-	return tools.Result{
-		ToolCallID: call.ID,
-		Name:       call.Name,
-		Status:     tools.CallStatusFailed,
-		Error:      "MCP tool not yet wired via registry",
-	}, nil
+func (r *Runtime) executeMCPToolRegistry(ctx context.Context, call tools.Call, tc *registry.ToolContext) (*tools.Result, error) {
+	output, err := r.executeMCPTool(ctx, runtimeToolRunContext(tc), call)
+	return runtimeToolResult(call.Name, output, err), err
 }
 
 // todoStatusCounts tallies TODO items by status for the todo.statusUpdated event.

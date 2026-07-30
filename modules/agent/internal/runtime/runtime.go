@@ -15,9 +15,9 @@ import (
 
 	agentmcp "redpanda/agent/internal/mcp"
 	"redpanda/agent/internal/provider"
-	"redpanda/agent/internal/worker"
 	"redpanda/agent/internal/runtime/hooks"
 	"redpanda/agent/internal/runtime/registry"
+	"redpanda/agent/internal/worker"
 	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
@@ -101,7 +101,7 @@ func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version str
 	// Plugin system (v0.3.0)
 	rt.bus = hooks.NewBus()
 	rt.registry = registry.NewRegistry()
-	initCorePlugins(rt.registry, rt.bus)
+	initCorePlugins(rt, rt.registry, rt.bus)
 	rt.dispatcher = initRPCDispatcher(rt)
 	workerPool, err := worker.NewPool(worker.Config{Size: workerPoolSizeFromEnv()}, func(workerID worker.WorkerID) (worker.Executor, error) {
 		return newLazyProcessExecutor(rt, workerID), nil

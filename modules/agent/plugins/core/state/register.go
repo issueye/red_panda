@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 
 	"redpanda/agent/internal/runtime/hooks"
 	"redpanda/agent/internal/runtime/registry"
@@ -9,7 +10,22 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
+type StateExecutor func(context.Context, *registry.ToolContext, string, map[string]any) (*ptools.Result, error)
+
+type Dependencies struct {
+	Todo   StateExecutor
+	Memory StateExecutor
+}
+
+func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies) []string {
+	stateHandler := func(execute StateExecutor, name string) registry.HandlerFunc {
+		return func(ctx context.Context, tc *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
+			if execute == nil {
+				return nil, fmt.Errorf("state executor for %s is unavailable", name)
+			}
+			return execute(ctx, tc, name, args)
+		}
+	}
 	names := []string{
 		"todo.write", "todo.list",
 		"memory.list", "memory.create", "memory.update", "memory.delete",
@@ -47,9 +63,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 					"required": []string{"todos"},
 				},
 			},
-			Handler: func(ctx context.Context, tc *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
-				return internal.HandlerTodoWrite(ctx, tc, args)
-			},
+			Handler:      stateHandler(deps.Todo, "todo.write"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
 			Source:       "plugin:state",
@@ -68,9 +82,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 					},
 				},
 			},
-			Handler: func(ctx context.Context, tc *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
-				return internal.HandlerTodoList(ctx, tc, args)
-			},
+			Handler:      stateHandler(deps.Todo, "todo.list"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
 			Source:       "plugin:state",
@@ -90,9 +102,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 					},
 				},
 			},
-			Handler: func(ctx context.Context, tc *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
-				return internal.HandlerMemoryList(ctx, tc, args)
-			},
+			Handler:      stateHandler(deps.Memory, "memory.list"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
 			Source:       "plugin:state",
@@ -115,9 +125,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 					"required": []string{"scope", "content"},
 				},
 			},
-			Handler: func(ctx context.Context, tc *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
-				return internal.HandlerMemoryCreate(ctx, tc, args)
-			},
+			Handler:      stateHandler(deps.Memory, "memory.create"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
 			Source:       "plugin:state",
@@ -141,9 +149,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 					"required": []string{"id"},
 				},
 			},
-			Handler: func(ctx context.Context, tc *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
-				return internal.HandlerMemoryUpdate(ctx, tc, args)
-			},
+			Handler:      stateHandler(deps.Memory, "memory.update"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
 			Source:       "plugin:state",
@@ -162,9 +168,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 					"required": []string{"id"},
 				},
 			},
-			Handler: func(ctx context.Context, tc *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
-				return internal.HandlerMemoryDelete(ctx, tc, args)
-			},
+			Handler:      stateHandler(deps.Memory, "memory.delete"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
 			Source:       "plugin:state",
