@@ -1,0 +1,14 @@
+{
+  "id": "tasks",
+  "version": "1.0.0",
+  "description": "Scheduled-task MCP schema catalog. The executable is supplied by the host environment.",
+  "type": "mcp",
+  "entry": {
+    "command_env": "RED_PANDA_TASKS_MCP_COMMAND"
+  },
+  "capabilities": {
+    "tools": ["create", "delete", "get_results", "list", "pause", "update"]
+  },
+  "default_enabled": false,
+  "risk_default": "high"
+}

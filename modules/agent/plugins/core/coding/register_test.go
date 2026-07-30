@@ -37,8 +37,8 @@ func TestRegisterEntriesHaveCorrectSource(t *testing.T) {
 		if !ok {
 			t.Fatalf("tool %q not found", name)
 		}
-		if e.Source != "plugin:coding" {
-			t.Fatalf("%s source = %q, want %q", name, e.Source, "plugin:coding")
+		if e.Source != "builtin:coding" {
+			t.Fatalf("%s source = %q, want %q", name, e.Source, "builtin:coding")
 		}
 		if e.OpsOnly {
 			t.Fatalf("%s opsOnly = true, want false", name)

@@ -14,7 +14,6 @@ import (
 
 	"redpanda/agent/internal/provider"
 	"redpanda/agent/internal/skill"
-	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
@@ -155,38 +154,18 @@ func TestManagedSkillCreateRejectsEscapingSymlinkWithoutOutsideWrites(t *testing
 	}
 }
 
-func TestToolRunnerRegistersManagedSkillToolsAsHighRisk(t *testing.T) {
-	runner := agenttools.ToolRunner{}
-	for index, name := range []string{"skill.create", "skill.update", "skill.delete", "skill.run"} {
-		arguments := map[string]any{
-			"name":         "review",
-			"description":  "Review changes.",
-			"instructions": "Inspect the diff.",
-		}
-		if name == "skill.run" {
-			arguments = map[string]any{"name": "review", "task": "inspect the diff"}
-		}
-		if name == "skill.delete" {
-			arguments = map[string]any{"name": "review"}
-		}
-		invocation, err := runner.InvocationFromCall("run_skill", index, tools.Call{
-			Name:      name,
-			Arguments: arguments,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if invocation.Call.ID == "" || invocation.Call.Risk != tools.RiskHigh || invocation.Call.DisplayName == "" {
-			t.Fatalf("unexpected %s invocation: %#v", name, invocation.Call)
+func TestRegistryRegistersManagedSkillToolRisk(t *testing.T) {
+	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	for _, name := range []string{"skill.create", "skill.update", "skill.delete", "skill.run"} {
+		entry, ok := rt.registry.Lookup(name)
+		if !ok || entry.Definition.Risk != tools.RiskHigh || entry.Definition.DisplayName == "" {
+			t.Fatalf("unexpected %s entry: %#v, %v", name, entry, ok)
 		}
 	}
-
-	listInvocation, err := runner.InvocationFromCall("run_skill_list", 0, tools.Call{Name: "skill.list"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if listInvocation.Call.Risk != tools.RiskLow {
-		t.Fatalf("skill.list risk = %s, want low", listInvocation.Call.Risk)
+	entry, ok := rt.registry.Lookup("skill.list")
+	if !ok || entry.Definition.Risk != tools.RiskLow {
+		t.Fatalf("skill.list entry = %#v, %v", entry, ok)
 	}
 }
 

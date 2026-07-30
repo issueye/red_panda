@@ -3,9 +3,11 @@
 | 字段 | 值 |
 | --- | --- |
 | 目标版本 | `0.3.0` |
-| 状态 | Active |
+| 状态 | Superseded（第一轮注册化迁移已落地；剩余工作见 `docs/55-plugin-system-completion-plan.md`） |
 | 基础设计 | `docs/53-plugin-system-refactor-design.md` |
 | 日期 | 2026-07-29 |
+
+> 本文保留为第一轮 Registry、Dispatcher 和 P1 核心工具迁移记录。当前剩余工作、执行顺序和完成定义以 `docs/55-plugin-system-completion-plan.md` 为准。
 
 ## 1. 开发原则
 

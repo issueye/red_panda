@@ -12,9 +12,7 @@ func (r *Runtime) registerRun(runID string, cancel context.CancelFunc) bool {
 
 func (r *Runtime) unregisterRun(runID string) {
 	r.runStates.Remove(runID)
-	if r.mcp != nil {
-		r.mcp.ClearBindings(runID)
-	}
+	r.clearRunRegistry(runID)
 }
 
 func (r *Runtime) cancelRun(runID string) bool {

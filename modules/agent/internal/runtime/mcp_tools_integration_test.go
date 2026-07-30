@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,12 @@ import (
 func TestMCPCanonicalName(t *testing.T) {
 	if got := agentmcp.CanonicalName("filesystem", "read.file"); got != "mcp__filesystem__read_file" {
 		t.Fatalf("canonical = %q", got)
+	}
+	if got := agentmcp.CanonicalName(" Local Files ", "read/file"); got != "mcp__Local_Files__read_file" {
+		t.Fatalf("sanitized canonical = %q", got)
+	}
+	if got := agentmcp.CanonicalName("fake", "..."); got != "" {
+		t.Fatalf("punctuation-only tool canonical = %q", got)
 	}
 }
 
@@ -103,6 +110,8 @@ func TestPrepareMCPToolsAndCall(t *testing.T) {
 	cleanup := filepath.Join(t.TempDir(), "cleanup")
 	config := helperMCPConfig(t, "success", cleanup)
 	config.Timeouts.CallMS = 1000
+	duplicate := config
+	duplicate.RiskOverrides = map[string]string{"read_file": "low"}
 	rt := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "test")
 	params := methods.ReplyParams{
 		RunID: "run_mcp_1",
@@ -111,21 +120,29 @@ func TestPrepareMCPToolsAndCall(t *testing.T) {
 			WorkingDir: "",
 		},
 		Options: methods.ReplyOptions{
-			MCPServers: []protomcp.MCPServerConfig{config},
+			MCPServers: []protomcp.MCPServerConfig{config, duplicate},
 		},
 	}
-	defs := rt.mcp.PrepareToolsForRun(context.Background(), params)
+	runRegistry := rt.prepareRegistryForRun(context.Background(), params)
+	defs := runRegistry.ListBySource("mcp:")
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 tool def, got %#v", defs)
 	}
-	if defs[0].Name != "mcp__fake__read_file" {
-		t.Fatalf("unexpected tool name %q", defs[0].Name)
+	entry, ok := runRegistry.Lookup(defs[0])
+	if !ok || entry.Definition.Name != "mcp__fake__read_file" {
+		t.Fatalf("unexpected tool entry %#v", entry)
 	}
-	if defs[0].Risk != tools.RiskHigh {
-		t.Fatalf("expected high risk, got %s", defs[0].Risk)
+	if entry.Definition.Risk != tools.RiskHigh {
+		t.Fatalf("expected high risk, got %s", entry.Definition.Risk)
+	}
+	if entry.Source != "mcp:fake" || entry.TimeoutClass != registry.SelfManagedToolTimeout {
+		t.Fatalf("MCP registry metadata = %#v", entry)
+	}
+	if _, exists := rt.registry.Lookup("mcp__fake__read_file"); exists {
+		t.Fatal("MCP tool polluted global registry")
 	}
 
-	merged := rt.toolsForReply(context.Background(), params)
+	merged := runRegistry.Definitions()
 	found := false
 	for _, d := range merged {
 		if d.Name == "mcp__fake__read_file" {
@@ -168,7 +185,44 @@ func TestPrepareMCPToolsAndCall(t *testing.T) {
 	}
 	rt.mcp.CloseAll()
 	waitForFile(t, cleanup)
-	rt.mcp.ClearBindings(params.RunID)
+	rt.clearRunRegistry(params.RunID)
+	if rt.existingRunRegistry(params.RunID) != nil {
+		t.Fatal("run registry was not cleared")
+	}
+	if _, exists := rt.mcp.Binding(params.RunID, "mcp__fake__read_file"); exists {
+		t.Fatal("MCP binding was not cleared")
+	}
+}
+
+func TestRunRegistryJSToolOverridesMCPAndRestores(t *testing.T) {
+	cleanup := filepath.Join(t.TempDir(), "cleanup")
+	config := helperMCPConfig(t, "success", cleanup)
+	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
+	rt.registry.MustRegister(registry.ToolEntry{
+		Definition: tools.Definition{Name: "mcp__fake__read_file", DisplayName: "JS override", Risk: tools.RiskLow},
+		Source:     "js:test",
+		Handler: func(context.Context, *registry.ToolContext, map[string]any) (*tools.Result, error) {
+			return &tools.Result{Status: tools.CallStatusCompleted, Output: "js"}, nil
+		},
+	})
+	params := methods.ReplyParams{
+		RunID:   "run_mcp_js_override",
+		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
+	}
+	runRegistry := rt.prepareRegistryForRun(context.Background(), params)
+	entry, ok := runRegistry.Lookup("mcp__fake__read_file")
+	if !ok || entry.Source != "js:test" || entry.Overridden != "mcp:fake" {
+		t.Fatalf("JS override entry = %#v", entry)
+	}
+	if removed := runRegistry.ClearSource("js:test"); removed != 1 {
+		t.Fatalf("removed JS layers = %d", removed)
+	}
+	entry, ok = runRegistry.Lookup("mcp__fake__read_file")
+	if !ok || entry.Source != "mcp:fake" {
+		t.Fatalf("restored MCP entry = %#v", entry)
+	}
+	rt.mcp.CloseAll()
+	waitForFile(t, cleanup)
 }
 
 func TestMCPCallSendsCancelledNotification(t *testing.T) {
@@ -291,22 +345,26 @@ func TestMCPCallIsError(t *testing.T) {
 	waitForFile(t, cleanup)
 }
 
-func TestInvocationFromCallAcceptsMCPExtraDefs(t *testing.T) {
-	runner := agenttools.ToolRunner{}
-	inv, err := runner.InvocationFromCall("run_x", 0, tools.Call{Name: "mcp__fake__read_file"}, tools.Definition{
-		Name: "mcp__fake__read_file",
-		Risk: tools.RiskLow,
+func TestResolveToolCallUsesRegistryMCPMetadata(t *testing.T) {
+	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	rt.registry.MustRegister(registry.ToolEntry{
+		Definition: tools.Definition{Name: "mcp__fake__read_file", DisplayName: "Read file", Risk: tools.RiskLow},
+		Source:     "mcp:fake",
+		Handler: func(context.Context, *registry.ToolContext, map[string]any) (*tools.Result, error) {
+			return &tools.Result{Status: tools.CallStatusCompleted}, nil
+		},
 	})
-	if err != nil {
+	call := tools.Call{Name: "mcp__fake__read_file"}
+	if err := rt.resolveToolCall("", &call); err != nil {
 		t.Fatal(err)
 	}
-	if inv.Call.Risk != tools.RiskLow {
-		t.Fatalf("risk not applied: %#v", inv.Call)
+	if call.Risk != tools.RiskLow || call.DisplayName != "Read file" {
+		t.Fatalf("metadata not applied: %#v", call)
 	}
 }
 
 type ToolRunContext = agenttools.ToolRunContext
-type ToolInvocation = agenttools.ToolInvocation
 
 func TestDispatchMCPTool(t *testing.T) {
 	cleanup := filepath.Join(t.TempDir(), "cleanup")
@@ -318,7 +376,7 @@ func TestDispatchMCPTool(t *testing.T) {
 		Session: methods.ReplySession{ID: "sess_1", WorkingDir: ""},
 		Options: methods.ReplyOptions{MCPServers: []protomcp.MCPServerConfig{config}},
 	}
-	_ = rt.mcp.PrepareToolsForRun(context.Background(), params)
+	_ = rt.prepareRegistryForRun(context.Background(), params)
 	call := tools.Call{
 		ID:   "tc1",
 		Name: "mcp__fake__read_file",
@@ -327,12 +385,12 @@ func TestDispatchMCPTool(t *testing.T) {
 			"path": "x.go",
 		},
 	}
-	// MCP bridge test: verify the Registry fallback dispatches to the MCP manager.
-	result, err := rt.executeMCPToolRegistry(context.Background(), call, &registry.ToolContext{RunID: params.RunID})
-	if err != nil {
-		t.Fatalf("executeMCPToolRegistry: %v", err)
+	if err := rt.resolveToolCall(params.RunID, &call); err != nil {
+		t.Fatal(err)
 	}
-	if result.Status != tools.CallStatusCompleted || !strings.Contains(result.Output, "path=x.go") {
+	params.Options.ToolPolicy = "allow_all"
+	result, _, ok := rt.executeTool(context.Background(), params, call)
+	if !ok || result.Status != tools.CallStatusCompleted || !strings.Contains(result.Output, "path=x.go") {
 		t.Fatalf("unexpected registry MCP result: %#v", result)
 	}
 	rt.mcp.CloseAll()

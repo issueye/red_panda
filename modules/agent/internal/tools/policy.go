@@ -10,49 +10,6 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-// opsOnlyTools 会注册给桌面端、命令行和调试用途，但默认不暴露给提供方工具架构（检查项 O1/O3；docs/41 W1-2）。
-// 可通过 RED_PANDA_DEBUG_TOOLS=1、ReplyOptions.DebugTools 或显式 tool_allowlist 项启用。
-var opsOnlyTools = map[string]struct{}{
-	"skill.create":       {},
-	"skill.update":       {},
-	"skill.delete":       {},
-	"worker.pool_status": {},
-	"worker.pool_resize": {},
-	"worker.pool_reset":  {},
-	// Worker mailbox messaging is advanced orchestration; default Goal/chat paths
-	// use worker.delegate + shared context.* instead (docs/41 W1-2).
-	"worker.send":    {},
-	"worker.receive": {},
-}
-
-func isOpsOnlyTool(name string) bool {
-	_, ok := opsOnlyTools[strings.TrimSpace(name)]
-	return ok
-}
-
-func debugToolsEnabled(options methods.ReplyOptions) bool {
-	if options.DebugTools {
-		return true
-	}
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_DEBUG_TOOLS"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-func opsToolExposed(options methods.ReplyOptions, name string) bool {
-	if !isOpsOnlyTool(name) {
-		return true
-	}
-	if debugToolsEnabled(options) {
-		return true
-	}
-	// 显式允许单个运维工具，无需开放全部调试工具。
-	return ContainsString(options.ToolAllowlist, name)
-}
-
 type ToolDecisionAction string
 
 const (
@@ -66,7 +23,7 @@ type ToolDecision struct {
 	Reason string
 }
 
-func EvaluateToolPolicy(options methods.ReplyOptions, call ptools.Call) ToolDecision {
+func EvaluateToolPolicy(options methods.ReplyOptions, call ptools.Call, opsOnly bool) ToolDecision {
 	if ContainsString(options.ToolDenylist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is denied by tool_denylist"}
 	}
@@ -74,10 +31,7 @@ func EvaluateToolPolicy(options methods.ReplyOptions, call ptools.Call) ToolDeci
 	if len(allowlist) > 0 && !ContainsString(allowlist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "tool is not in tool_allowlist"}
 	}
-	// opsToolExposed 可将客户端显式允许列表视为运维工具的启用信号。
-	eff := options
-	eff.ToolAllowlist = allowlist
-	if !opsToolExposed(eff, call.Name) {
+	if opsOnly && !debugToolsEnabled(options) && !ContainsString(allowlist, call.Name) {
 		return ToolDecision{Action: ToolDecisionDeny, Reason: "ops tool is not enabled (set debug_tools or RED_PANDA_DEBUG_TOOLS)"}
 	}
 
@@ -95,6 +49,18 @@ func EvaluateToolPolicy(options methods.ReplyOptions, call ptools.Call) ToolDeci
 			Action: ToolDecisionDeny,
 			Reason: fmt.Sprintf("unknown tool_policy %q", options.ToolPolicy),
 		}
+	}
+}
+
+func debugToolsEnabled(options methods.ReplyOptions) bool {
+	if options.DebugTools {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_DEBUG_TOOLS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -131,27 +97,4 @@ func ContainsString(items []string, value string) bool {
 // a pass-through of the client-supplied ToolAllowlist.
 func effectiveToolAllowlist(options methods.ReplyOptions) []string {
 	return options.ToolAllowlist
-}
-
-func AvailableToolsForOptions(definitions []ptools.Definition, options methods.ReplyOptions) []ptools.Definition {
-	allowlist := effectiveToolAllowlist(options)
-	// 复制选项，让 opsToolExposed 和拒绝列表检查仍能看到原始值，
-	// 同时允许列表校验使用实际生效的列表。
-	eff := options
-	eff.ToolAllowlist = allowlist
-
-	filtered := make([]ptools.Definition, 0, len(definitions))
-	for _, definition := range definitions {
-		if ContainsString(options.ToolDenylist, definition.Name) {
-			continue
-		}
-		if len(allowlist) > 0 && !ContainsString(allowlist, definition.Name) {
-			continue
-		}
-		if !opsToolExposed(eff, definition.Name) {
-			continue
-		}
-		filtered = append(filtered, definition)
-	}
-	return filtered
 }

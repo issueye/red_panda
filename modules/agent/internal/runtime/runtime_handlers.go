@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"redpanda/agent/internal/provider"
+	"redpanda/agent/internal/runtime/hooks"
 	"redpanda/agent/internal/skill"
 	"redpanda/agent/internal/worker"
 	"redpanda/protocol/events"
@@ -170,6 +171,48 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 	messageID := "msg_" + params.RunID
 	streamID := "stream_" + params.RunID + "_message"
 	streamSeq := uint64(1)
+	hookCtx := runtimeHookContext(ctx, params)
+	hookCtx.MessageID = messageID
+	runEnd := map[string]any{
+		"run_id":        params.RunID,
+		"session_id":    params.Session.ID,
+		"message_id":    messageID,
+		"status":        "failed",
+		"provider_name": r.provider.Name(),
+	}
+	defer func() {
+		endCtx := ctx
+		if ctx.Err() != nil {
+			endCtx = context.WithoutCancel(ctx)
+		}
+		finalHookCtx := runtimeHookContext(endCtx, params)
+		finalHookCtx.MessageID = messageID
+		r.bus.Emit(finalHookCtx, hooks.HookRunEnd, runEnd)
+	}()
+
+	startOutcome := r.bus.Emit(hookCtx, hooks.HookRunStart, map[string]any{
+		"run_id":        params.RunID,
+		"session_id":    params.Session.ID,
+		"message_id":    messageID,
+		"input":         params.Input.Text,
+		"provider_name": r.provider.Name(),
+	})
+	if input, ok := startOutcome.Event["input"].(string); ok {
+		params.Input.Text = input
+	}
+	if startOutcome.Blocked || startOutcome.Cancelled {
+		status := "denied"
+		if startOutcome.Cancelled {
+			status = "cancelled"
+		}
+		runEnd["status"] = status
+		runEnd["reason"] = hookOutcomeReason(startOutcome, "run blocked by hook")
+		_ = r.emitEvent(context.WithoutCancel(ctx), params, events.EventFinish, nil, map[string]any{
+			"status": status,
+			"reason": runEnd["reason"],
+		})
+		return
+	}
 
 	// 每次会话均从磁盘重新加载技能，使新建技能无需重启会话或 Runtime 即可使用。
 	params.Options.SkillsContext = skill.BuildContext(params.Session.WorkingDir)
@@ -191,9 +234,11 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		})
 		if !ok {
 			if ctx.Err() != nil {
+				runEnd["status"] = "cancelled"
 				r.emitCancelled(params)
 				return
 			}
+			runEnd["reason"] = "permission request was not resolved"
 			_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
 				"message": "permission request was not resolved",
 				"status":  "failed",
@@ -201,6 +246,8 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 			return
 		}
 		if decision.Decision != permission.DecisionApprove {
+			runEnd["status"] = "denied"
+			runEnd["reason"] = "permission denied"
 			_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
 				"message":       "permission denied",
 				"permission_id": decision.PermissionID,
@@ -231,6 +278,9 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 	r.clearRunSnapshots(params.RunID)
 
 	status := finishStatusFromLoopEnd(seg.Reason)
+	runEnd["status"] = status
+	runEnd["loop_end_reason"] = string(seg.Reason)
+	runEnd["tool_turns"] = seg.ToolTurns
 	if status != "completed" {
 		if status == "cancelled" {
 			r.emitCancelled(params)
@@ -244,10 +294,7 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 	}
 
 	if ctx.Err() != nil {
-		r.emitCancelled(params)
-		return
-	}
-	if ctx.Err() != nil {
+		runEnd["status"] = "cancelled"
 		r.emitCancelled(params)
 		return
 	}

@@ -26,6 +26,7 @@ type Set struct {
 }
 
 func NewSet(services service.Set, hub *eventhub.Hub) Set {
+	webSocket := WebSocketController{Services: services, Hub: hub, Dispatcher: newGatewayWSDispatcher()}
 	return Set{
 		Health:         HealthController{Services: services},
 		App:            AppController{Services: services},
@@ -43,9 +44,6 @@ func NewSet(services service.Set, hub *eventhub.Hub) Set {
 		WorkerProfiles: WorkerProfileController{Services: services},
 		Schedule:       ScheduleController{Services: services},
 		Attachments:    AttachmentController{Services: services},
-		WebSocket: WebSocketController{
-			Services: services,
-			Hub:      hub,
-		},
+		WebSocket:      webSocket,
 	}
 }

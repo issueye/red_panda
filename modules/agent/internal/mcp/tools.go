@@ -30,6 +30,7 @@ func (m *Manager) PrepareToolsForRun(ctx context.Context, params methods.ReplyPa
 	workspace := params.Session.WorkingDir
 	bindings := make(map[string]ToolBinding)
 	defs := make([]tools.Definition, 0)
+	seenServers := make(map[string]struct{})
 	for _, server := range servers {
 		if !server.Enabled {
 			continue
@@ -37,6 +38,15 @@ func (m *Manager) PrepareToolsForRun(ctx context.Context, params methods.ReplyPa
 		if strings.TrimSpace(server.Command) == "" || strings.TrimSpace(server.Name) == "" {
 			continue
 		}
+		serverID := ServerID(server.Name)
+		if serverID == "" {
+			continue
+		}
+		if _, exists := seenServers[serverID]; exists {
+			fmt.Fprintf(m.log, "mcp skip duplicate server id %s (first configuration wins)\n", serverID)
+			continue
+		}
+		seenServers[serverID] = struct{}{}
 		if m.isDisabled(server.Name) {
 			fmt.Fprintf(m.log, "mcp skip %s: disabled by crash budget\n", server.Name)
 			continue
@@ -107,20 +117,6 @@ func (m *Manager) Binding(runID, canonical string) (ToolBinding, bool) {
 	}
 	b, ok := byRun[canonical]
 	return b, ok
-}
-
-func (m *Manager) DefinitionsForRun(runID string) []tools.Definition {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	byRun := m.bindings[runID]
-	if len(byRun) == 0 {
-		return nil
-	}
-	out := make([]tools.Definition, 0, len(byRun))
-	for _, b := range byRun {
-		out = append(out, b.Def)
-	}
-	return out
 }
 
 func (m *Manager) ExecuteTool(ctx context.Context, runID string, workingDir string, call tools.Call) (string, error) {
@@ -212,12 +208,17 @@ func (m *Manager) CallTool(
 
 // CanonicalName 构建 mcp__server__tool 名称（设计文档 19，第 8.1 节）。
 func CanonicalName(serverName, rawTool string) string {
-	server := strings.TrimSpace(serverName)
-	raw := strings.TrimSpace(rawTool)
-	if server == "" || raw == "" {
+	server := ServerID(serverName)
+	tool := sanitizeMCPToken(strings.TrimSpace(rawTool))
+	if server == "" || tool == "" {
 		return ""
 	}
-	return "mcp__" + server + "__" + sanitizeMCPToken(raw)
+	return "mcp__" + server + "__" + tool
+}
+
+// ServerID returns the stable identifier used in MCP tool names and registry sources.
+func ServerID(serverName string) string {
+	return sanitizeMCPToken(strings.TrimSpace(serverName))
 }
 
 func sanitizeMCPToken(value string) string {

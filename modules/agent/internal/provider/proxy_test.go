@@ -12,7 +12,7 @@ func TestValidateProxyAcceptsSupportedSchemes(t *testing.T) {
 		"https://proxy.example",
 		"socks5://127.0.0.1:1080",
 		"socks5h://127.0.0.1:1080",
-		"127.0.0.1:7890", // 默认补 http://
+		"127.0.0.1:7890",        // 默认补 http://
 		"http：//127.0.0.1：7890", // 全角标点归一化
 	} {
 		if err := ValidateProxy(raw); err != nil {
@@ -24,8 +24,8 @@ func TestValidateProxyAcceptsSupportedSchemes(t *testing.T) {
 func TestValidateProxyRejectsBadInput(t *testing.T) {
 	for _, raw := range []string{
 		"ftp://example",
-		"http://",       // 缺 host
-		"://broken",     // 解析失败
+		"http://",   // 缺 host
+		"://broken", // 解析失败
 	} {
 		if err := ValidateProxy(raw); err == nil {
 			t.Fatalf("ValidateProxy(%q) expected error", raw)
@@ -67,13 +67,13 @@ func TestApplyProxyInvalidReturnsError(t *testing.T) {
 }
 
 // Resolve 路径必须把代理注入 HTTP 客户端的 transport,且无效代理触发回退。
-func TestProviderFromOptionsAppliesProxyAndFallsBackOnInvalid(t *testing.T) {
+func TestProviderRegistryAppliesProxyAndFallsBackOnInvalid(t *testing.T) {
 	stream := true
-	resolved, ok := providerFromOptions(RequestOptions{
-		ProviderName:     "openai_compatible",
-		ProviderBaseURL:  "https://example.test",
+	resolved, ok := Resolve(RequestOptions{
+		ProviderName:      "openai_compatible",
+		ProviderBaseURL:   "https://example.test",
 		ProviderHTTPProxy: "http://127.0.0.1:7890",
-		Stream:           &stream,
+		Stream:            &stream,
 	}, true)
 	if !ok {
 		t.Fatal("expected provider to resolve")
@@ -92,12 +92,12 @@ func TestProviderFromOptionsAppliesProxyAndFallsBackOnInvalid(t *testing.T) {
 		t.Fatalf("expected proxy applied to provider transport, got %#v", applied)
 	}
 
-	// 无效代理应让 providerFromOptions 回退到 (nil, false),上层会落到 echo。
-	if _, ok := providerFromOptions(RequestOptions{
-		ProviderName:     "openai_compatible",
-		ProviderBaseURL:  "https://example.test",
+	// 无效代理应让 Resolve 回退到 (nil, false),上层会落到 echo。
+	if _, ok := Resolve(RequestOptions{
+		ProviderName:      "openai_compatible",
+		ProviderBaseURL:   "https://example.test",
 		ProviderHTTPProxy: "ftp://nope",
-		Stream:           &stream,
+		Stream:            &stream,
 	}, true); ok {
 		t.Fatal("expected invalid proxy to fail provider resolution")
 	}

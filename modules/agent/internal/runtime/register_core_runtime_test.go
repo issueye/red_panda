@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -104,5 +105,41 @@ func TestRuntimeRegistryOverridesWorkerPlaceholders(t *testing.T) {
 	}
 	if strings.Contains(result.Output, "not yet migrated") {
 		t.Fatalf("placeholder result leaked: %q", result.Output)
+	}
+}
+
+func TestRuntimeRegistryPreservesCoreToolSnapshot(t *testing.T) {
+	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	want := []string{
+		"workspace.read_file", "workspace.list", "workspace.stats", "workspace.grep", "workspace.find_files", "workspace.read_files",
+		"workspace.write_file", "workspace.edit_file", "workspace.diff_file", "workspace.apply_patch",
+		"git.status", "git.diff", "git.log", "git.show", "shell.exec",
+		"skill.list", "skill.create", "skill.update", "skill.delete", "skill.run",
+		"worker.delegate", "worker.list", "worker.cancel", "worker.pool_status", "worker.send", "worker.receive",
+		"todo.write", "todo.list", "memory.list", "memory.create", "memory.update", "memory.delete",
+		"web.search", "web.fetch",
+	}
+	if got := rt.registry.Names(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("core tool order changed:\n got: %v\nwant: %v", got, want)
+	}
+	for _, name := range want {
+		entry, ok := rt.registry.Lookup(name)
+		if !ok || entry.Definition.DisplayName == "" || entry.Definition.Description == "" || entry.Definition.Risk == "" || entry.Definition.Parameters == nil || entry.Handler == nil {
+			t.Fatalf("incomplete registry entry %s: %#v, %v", name, entry, ok)
+		}
+	}
+	checks := map[string]registry.TimeoutClass{
+		"workspace.read_file": registry.LocalToolTimeout,
+		"memory.create":       registry.GatewayToolTimeout,
+		"todo.write":          registry.GatewayToolTimeout,
+		"shell.exec":          registry.SelfManagedToolTimeout,
+		"web.search":          registry.SelfManagedToolTimeout,
+	}
+	for name, wantTimeout := range checks {
+		entry, _ := rt.registry.Lookup(name)
+		if entry.TimeoutClass != wantTimeout {
+			t.Fatalf("%s timeout = %v, want %v", name, entry.TimeoutClass, wantTimeout)
+		}
 	}
 }

@@ -1,10 +1,14 @@
 package hooks
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
+
+	"redpanda/protocol/pluginmeta"
 )
 
 // HookName 钩子事件名
@@ -35,6 +39,7 @@ const (
 
 // HookContext 钩子执行上下文
 type HookContext struct {
+	Context   context.Context
 	RunID     string
 	SessionID string
 	MessageID string
@@ -53,11 +58,27 @@ type HookResult struct {
 	Transform map[string]any
 }
 
+// HookDiagnostic records a recovered handler failure without failing the chain.
+type HookDiagnostic struct {
+	Source string
+	Order  HookOrder
+	Panic  string
+}
+
+// HookOutcome is the fully materialized result of a hook chain.
+type HookOutcome struct {
+	Event       map[string]any
+	Blocked     bool
+	Cancelled   bool
+	Reason      string
+	Diagnostics []HookDiagnostic
+}
+
 // HookHandler 钩子处理器
 type HookHandler struct {
 	Order   HookOrder
 	Handler func(ctx *HookContext, event map[string]any) *HookResult
-	Source  string // "builtin" | "plugin:xxx"
+	Source  string // "builtin:<domain>" | "js:<plugin-id>" | "mcp:<server-id>"
 }
 
 // ExtensionBus 扩展总线
@@ -74,7 +95,16 @@ func NewBus() *ExtensionBus {
 }
 
 // Register 按 order 升序插入 handler。多个同 Order 的 handler 按注册顺序排列。
-func (b *ExtensionBus) Register(name HookName, order HookOrder, source string, handler func(ctx *HookContext, event map[string]any) *HookResult) {
+func (b *ExtensionBus) Register(name HookName, order HookOrder, source string, handler func(ctx *HookContext, event map[string]any) *HookResult) error {
+	if err := pluginmeta.ValidateHookName(string(name)); err != nil {
+		return err
+	}
+	if err := pluginmeta.ValidateSource(source); err != nil {
+		return err
+	}
+	if handler == nil {
+		return fmt.Errorf("hook %q has no handler", name)
+	}
 	h := &HookHandler{
 		Order:   order,
 		Handler: handler,
@@ -90,6 +120,14 @@ func (b *ExtensionBus) Register(name HookName, order HookOrder, source string, h
 	newList[idx] = h
 	copy(newList[idx+1:], list[idx:])
 	b.hooks[name] = newList
+	return nil
+}
+
+// MustRegister registers a compile-time built-in hook and panics on invalid metadata.
+func (b *ExtensionBus) MustRegister(name HookName, order HookOrder, source string, handler func(ctx *HookContext, event map[string]any) *HookResult) {
+	if err := b.Register(name, order, source, handler); err != nil {
+		panic(err)
+	}
 }
 
 // sortInsertIdx 返回 order 应插入的位置（稳定插入：相等时放到末尾以保持注册顺序）
@@ -102,52 +140,64 @@ func sortInsertIdx(list []*HookHandler, order HookOrder) int {
 	return len(list)
 }
 
-// Emit 触发钩子，链式执行 handler。
-// 复制 event 作为当前载荷，依次调用 handler，合并 Transform。
-// 任一 handler 返回 {Block: true} 则短路后续链。
-// 某 handler panic → defer recover → 记录日志 → 继续下一 handler。
-// 无 handler → 返回 nil。
-func (b *ExtensionBus) Emit(ctx *HookContext, name HookName, event map[string]any) *HookResult {
+// Emit 触发钩子并返回聚合后的最终载荷。Block、Cancel 或 context 取消会
+// 停止后续 handler；单个 handler panic 会被记录并隔离。
+func (b *ExtensionBus) Emit(ctx *HookContext, name HookName, event map[string]any) HookOutcome {
 	b.mu.RLock()
-	handlers := b.hooks[name]
+	handlers := append([]*HookHandler(nil), b.hooks[name]...)
 	b.mu.RUnlock()
 
-	if len(handlers) == 0 {
-		return nil
+	if ctx == nil {
+		ctx = &HookContext{}
 	}
-
-	payLoad := deepCopyMap(event)
-	var lastResult *HookResult
+	if ctx.Context == nil {
+		ctx.Context = context.Background()
+	}
+	outcome := HookOutcome{Event: deepCopyMap(event)}
 
 	for _, h := range handlers {
-		// 用独立函数 + defer recover 包裹每个 handler 调用
-		call := func() *HookResult {
-			return h.Handler(ctx, payLoad)
+		if err := ctx.Context.Err(); err != nil {
+			outcome.Cancelled = true
+			outcome.Reason = err.Error()
+			break
 		}
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.New(os.Stderr, "", 0).Print(fmt.Sprintf("hook panic recovered: name=%s source=%s order=%d: %v\n",
-						name, h.Source, h.Order, r))
-				}
-			}()
-			res := call()
-			if res == nil {
-				return
-			}
-			lastResult = res
-			if res.Block {
-				return
-			}
-			if res.Transform != nil {
-				payLoad = deepMergeMap(deepCopyMap(payLoad), res.Transform)
-			}
-		}()
-		if lastResult != nil && lastResult.Block {
-			return lastResult
+
+		res, diagnostic := invokeHandler(h, ctx, deepCopyMap(outcome.Event))
+		if diagnostic != nil {
+			outcome.Diagnostics = append(outcome.Diagnostics, *diagnostic)
+			log.New(os.Stderr, "", 0).Printf("hook panic recovered: name=%s source=%s order=%d: %s\n",
+				name, h.Source, h.Order, diagnostic.Panic)
+			continue
+		}
+		if res == nil {
+			continue
+		}
+		if res.Transform != nil {
+			outcome.Event = deepMergeMap(outcome.Event, res.Transform)
+		}
+		if res.Reason != "" {
+			outcome.Reason = res.Reason
+		}
+		if res.Block {
+			outcome.Blocked = true
+			break
+		}
+		if res.Cancel {
+			outcome.Cancelled = true
+			break
 		}
 	}
-	return lastResult
+	return outcome
+}
+
+func invokeHandler(h *HookHandler, ctx *HookContext, event map[string]any) (result *HookResult, diagnostic *HookDiagnostic) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = nil
+			diagnostic = &HookDiagnostic{Source: h.Source, Order: h.Order, Panic: fmt.Sprint(recovered)}
+		}
+	}()
+	return h.Handler(ctx, event), nil
 }
 
 // Clear 清空某钩子的所有 handler
@@ -157,16 +207,42 @@ func (b *ExtensionBus) Clear(name HookName) {
 	b.hooks[name] = nil
 }
 
+// ClearSource removes handlers from every hook whose Source has prefix.
+func (b *ExtensionBus) ClearSource(prefix string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	removed := 0
+	for name, handlers := range b.hooks {
+		kept := handlers[:0]
+		for _, handler := range handlers {
+			if strings.HasPrefix(handler.Source, prefix) {
+				removed++
+				continue
+			}
+			kept = append(kept, handler)
+		}
+		if len(kept) == 0 {
+			delete(b.hooks, name)
+		} else {
+			b.hooks[name] = kept
+		}
+	}
+	return removed
+}
+
 // List 读取某钩子的 handler 列表（返回副本，防止外部修改）
-func (b *ExtensionBus) List(name HookName) []*HookHandler {
+func (b *ExtensionBus) List(name HookName) []HookHandler {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	src := b.hooks[name]
 	if src == nil {
 		return nil
 	}
-	result := make([]*HookHandler, len(src))
-	copy(result, src)
+	result := make([]HookHandler, len(src))
+	for i, handler := range src {
+		result[i] = *handler
+	}
 	return result
 }
 
@@ -227,6 +303,3 @@ func deepMergeMap(target, src map[string]any) map[string]any {
 	}
 	return target
 }
-
-// Ensure fmt is used.
-var _ = fmt.Sprintf

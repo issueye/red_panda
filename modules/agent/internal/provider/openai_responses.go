@@ -57,6 +57,7 @@ func (p OpenAIResponsesProvider) completeAttempt(ctx context.Context, req Reques
 	if p.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
 	}
+	applySafeHeaders(httpReq, req.Options.Headers)
 	resp, err := p.Client.Do(httpReq)
 	if err != nil {
 		return err

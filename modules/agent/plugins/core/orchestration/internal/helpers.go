@@ -1,7 +1,5 @@
 package internal
 
-import "strings"
-
 // maxToolOutputBytes copied from agent/internal/tools/helpers.go.
 const maxToolOutputBytes = 64 * 1024
 
@@ -65,21 +63,4 @@ func clampInt(value int, min int, max int) int {
 		return max
 	}
 	return value
-}
-
-// ---------- opsOnlyTool lookup copied from agent/internal/tools/policy.go ----------
-
-// opsOnlyTools from policy.go:15-26. skill.* and worker.* subset (no pool_resize/pool_reset).
-var opsOnlyTools = map[string]struct{}{
-	"skill.create":       {},
-	"skill.update":       {},
-	"skill.delete":       {},
-	"worker.pool_status": {},
-	"worker.send":        {},
-	"worker.receive":     {},
-}
-
-func IsOpsOnlyTool(name string) bool {
-	_, ok := opsOnlyTools[strings.TrimSpace(name)]
-	return ok
 }

@@ -24,7 +24,8 @@
 | [51-image-multimodal-design.md](51-image-multimodal-design.md) | **Image / multimodal attachments** (Implemented: upload, image_ref, vision, fork/GC) |
 | [52-image-multimodal-development-plan.md](52-image-multimodal-development-plan.md) | **Image / multimodal implementation plan** (Slice A–D delivered) |
 | [53-plugin-system-refactor-design.md](53-plugin-system-refactor-design.md) | **v0.3.0 Plugin Architecture** (Breaking: registry/hook/plugin refactoring; P1–P4 plugin model) |
-| [54-plugin-system-development-plan.md](54-plugin-system-development-plan.md) | **v0.3.0 Plugin Development Plan** (Phase 1–4, 4 Phases, T1–T12, parallel execution) |
+| [54-plugin-system-development-plan.md](54-plugin-system-development-plan.md) | **Historical v0.3.0 Plugin Migration Plan** (first Registry/Dispatcher/P1 migration wave; superseded by doc 55) |
+| [55-plugin-system-completion-plan.md](55-plugin-system-completion-plan.md) | **Active v0.3.0 Plugin Completion Plan** (converge dual paths, wire hooks, MCP/Gateway registries, JS extensions, trust, and resources) |
 | [plans/2026-07-19-convergence-wave.md](plans/2026-07-19-convergence-wave.md) | **Convergence wave** (doc/UI sync, Session service decomposition, large-file splits) |
 | [02-functional-design.md](02-functional-design.md) | Product/architecture goals |
 | [03-gateway-mvc-design.md](03-gateway-mvc-design.md) | Gateway layering |

@@ -2,17 +2,20 @@ package registry
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	"redpanda/protocol/methods"
 	ptools "redpanda/protocol/tools"
 )
 
 func mkEntry(name, src string, tc TimeoutClass, risk ptools.Risk) ToolEntry {
 	return ToolEntry{
 		Definition: ptools.Definition{
-			Name:   name,
-			Risk:   risk,
+			Name:       name,
+			Risk:       risk,
 			Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		Handler:      func(_ context.Context, _ *ToolContext, args map[string]any) (*ptools.Result, error) { return nil, nil },
@@ -46,7 +49,10 @@ func TestRegistryOverride(t *testing.T) {
 	name := "workspace.read"
 
 	reg.Register(mkEntry(name, "builtin:workspace", LocalToolTimeout, ptools.RiskLow))
-	prev := reg.Register(mkEntry(name, "js:greeter", LocalToolTimeout, ptools.RiskMedium))
+	prev, err := reg.Register(mkEntry(name, "js:greeter", LocalToolTimeout, ptools.RiskMedium))
+	if err != nil {
+		t.Fatalf("register override: %v", err)
+	}
 
 	if prev == nil {
 		t.Fatal("expected previous entry on override")
@@ -57,9 +63,8 @@ func TestRegistryOverride(t *testing.T) {
 	if prev.Source != "builtin:workspace" {
 		t.Fatalf("prev Source = %q, want builtin:workspace", prev.Source)
 	}
-	// Prev's Overriden must be cleared after being overridden.
-	if prev.Overriden != "" {
-		t.Errorf("prev.Overriden = %q, want empty", prev.Overriden)
+	if prev.Overridden != "" {
+		t.Errorf("prev.Overridden = %q, want empty", prev.Overridden)
 	}
 
 	entry, ok := reg.Lookup(name)
@@ -69,8 +74,65 @@ func TestRegistryOverride(t *testing.T) {
 	if entry.Source != "js:greeter" {
 		t.Fatalf("current Source = %q, want js:greeter", entry.Source)
 	}
-	if entry.Overriden != "builtin:workspace" {
-		t.Fatalf("current Overriden = %q, want builtin:workspace", entry.Overriden)
+	if entry.Overridden != "builtin:workspace" {
+		t.Fatalf("current Overridden = %q, want builtin:workspace", entry.Overridden)
+	}
+}
+
+func TestRegistryRejectsInvalidEntry(t *testing.T) {
+	reg := NewRegistry()
+	if _, err := reg.Register(mkEntry("bad name", "builtin:core", LocalToolTimeout, ptools.RiskLow)); err == nil {
+		t.Fatal("expected invalid tool name error")
+	}
+	if _, err := reg.Register(mkEntry("valid.name", "plugin:legacy", LocalToolTimeout, ptools.RiskLow)); err == nil {
+		t.Fatal("expected invalid source error")
+	}
+	entry := mkEntry("valid.name", "builtin:core", LocalToolTimeout, ptools.RiskLow)
+	entry.Handler = nil
+	if _, err := reg.Register(entry); err == nil {
+		t.Fatal("expected nil handler error")
+	}
+}
+
+func TestRegistryClearSourceRestoresOverrideStack(t *testing.T) {
+	reg := NewRegistry()
+	name := "workspace.read"
+	reg.Register(mkEntry(name, "builtin:workspace", LocalToolTimeout, ptools.RiskLow))
+	reg.Register(mkEntry(name, "js:first", LocalToolTimeout, ptools.RiskMedium))
+	reg.Register(mkEntry(name, "js:second", LocalToolTimeout, ptools.RiskHigh))
+
+	if removed := reg.ClearSource("js:second"); removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	entry, ok := reg.Lookup(name)
+	if !ok || entry.Source != "js:first" || entry.Overridden != "builtin:workspace" {
+		t.Fatalf("after first unload = %#v, %v", entry, ok)
+	}
+
+	if removed := reg.ClearSource("js:"); removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	entry, ok = reg.Lookup(name)
+	if !ok || entry.Source != "builtin:workspace" || entry.Overridden != "" {
+		t.Fatalf("after all JS unload = %#v, %v", entry, ok)
+	}
+	if names := reg.Names(); len(names) != 1 || names[0] != name {
+		t.Fatalf("order changed after restore: %v", names)
+	}
+}
+
+func TestRegistryReregisterSourceReplacesLayer(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(mkEntry("tool", "builtin:core", LocalToolTimeout, ptools.RiskLow))
+	reg.Register(mkEntry("tool", "js:plugin", LocalToolTimeout, ptools.RiskMedium))
+	reg.Register(mkEntry("tool", "js:plugin", SelfManagedToolTimeout, ptools.RiskHigh))
+
+	if removed := reg.ClearSource("js:plugin"); removed != 1 {
+		t.Fatalf("removed duplicate source layers = %d, want 1", removed)
+	}
+	entry, ok := reg.Lookup("tool")
+	if !ok || entry.Source != "builtin:core" {
+		t.Fatalf("expected builtin restore, got %#v, %v", entry, ok)
 	}
 }
 
@@ -106,7 +168,7 @@ func TestRegistryClear(t *testing.T) {
 	reg.Register(mkEntry("js.hello", "js:greeter", LocalToolTimeout, ptools.RiskLow))
 	reg.Register(mkEntry("mcp.fetch", "mcp:fetch", LocalToolTimeout, ptools.RiskLow))
 
-	reg.Clear("js:")
+	reg.ClearSource("js:")
 
 	if _, ok := reg.Lookup("builtin.read"); !ok {
 		t.Fatal("builtin.read should still exist")
@@ -130,7 +192,9 @@ func TestRegistryRemove(t *testing.T) {
 	reg.Register(mkEntry("b", "builtin:core", LocalToolTimeout, ptools.RiskLow))
 	reg.Register(mkEntry("c", "builtin:core", LocalToolTimeout, ptools.RiskLow))
 
-	reg.Remove("b")
+	if !reg.Remove("b", "builtin:core") {
+		t.Fatal("expected b removal")
+	}
 	if _, ok := reg.Lookup("b"); ok {
 		t.Fatal("b should have been removed")
 	}
@@ -146,7 +210,9 @@ func TestRegistryRemove(t *testing.T) {
 	}
 
 	// Removing non-existent name should be a no-op.
-	reg.Remove("nonexistent")
+	if reg.Remove("nonexistent", "builtin:core") {
+		t.Fatal("nonexistent removal should report false")
+	}
 }
 
 func TestRegistryTimeoutDuration(t *testing.T) {
@@ -162,5 +228,86 @@ func TestRegistryTimeoutDuration(t *testing.T) {
 		if got := tt.c.Duration(); got != tt.want {
 			t.Errorf("%v.Duration() = %v, want %v", tt.c, got, tt.want)
 		}
+	}
+}
+
+func TestRegistryConcurrentRegisterLookupAndClearSource(t *testing.T) {
+	reg := NewRegistry()
+	for i := 0; i < 10; i++ {
+		reg.MustRegister(mkEntry(fmt.Sprintf("tool.%d", i), "builtin:core", LocalToolTimeout, ptools.RiskLow))
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(3)
+		go func(i int) {
+			defer wg.Done()
+			_, _ = reg.Register(mkEntry(fmt.Sprintf("tool.%d", i%10), fmt.Sprintf("js:worker-%d", i), LocalToolTimeout, ptools.RiskLow))
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			_, _ = reg.Lookup(fmt.Sprintf("tool.%d", i%10))
+		}(i)
+		go func() {
+			defer wg.Done()
+			reg.ClearSource("js:")
+		}()
+	}
+	wg.Wait()
+	reg.ClearSource("js:")
+
+	for i := 0; i < 10; i++ {
+		entry, ok := reg.Lookup(fmt.Sprintf("tool.%d", i))
+		if !ok || entry.Source != "builtin:core" {
+			t.Fatalf("builtin layer not restored for tool.%d: %#v, %v", i, entry, ok)
+		}
+	}
+}
+
+func TestRegistryFilterDefinitionsUsesEntryOpsOnly(t *testing.T) {
+	t.Setenv("RED_PANDA_DEBUG_TOOLS", "")
+	reg := NewRegistry()
+	regular := mkEntry("workspace.read", "builtin:workspace", LocalToolTimeout, ptools.RiskLow)
+	ops := mkEntry("skill.create", "builtin:orchestration", GatewayToolTimeout, ptools.RiskHigh)
+	ops.OpsOnly = true
+	reg.MustRegister(regular)
+	reg.MustRegister(ops)
+	definitions := reg.Definitions()
+
+	filtered := reg.FilterDefinitions(definitions, methods.ReplyOptions{})
+	if len(filtered) != 1 || filtered[0].Name != "workspace.read" {
+		t.Fatalf("default definitions = %#v", filtered)
+	}
+	filtered = reg.FilterDefinitions(definitions, methods.ReplyOptions{ToolAllowlist: []string{"workspace.read", "skill.create"}})
+	if len(filtered) != 2 {
+		t.Fatalf("allowlisted definitions = %#v", filtered)
+	}
+	filtered = reg.FilterDefinitions(definitions, methods.ReplyOptions{DebugTools: true, ToolDenylist: []string{"workspace.read"}})
+	if len(filtered) != 1 || filtered[0].Name != "skill.create" {
+		t.Fatalf("debug/deny definitions = %#v", filtered)
+	}
+}
+
+func TestRunScopedRegistrySnapshotsGlobalAndRestoresOverride(t *testing.T) {
+	global := NewRegistry()
+	global.MustRegister(mkEntry("test.tool", "builtin:test", LocalToolTimeout, ptools.RiskLow))
+
+	scoped := NewRunScopedRegistry(global)
+	global.MustRegister(mkEntry("test.later", "builtin:test", LocalToolTimeout, ptools.RiskLow))
+	if _, ok := scoped.Lookup("test.later"); ok {
+		t.Fatal("run snapshot changed after global registration")
+	}
+
+	scoped.MustRegister(mkEntry("test.tool", "mcp:test", SelfManagedToolTimeout, ptools.RiskHigh))
+	entry, ok := scoped.Lookup("test.tool")
+	if !ok || entry.Source != "mcp:test" || entry.Overridden != "builtin:test" {
+		t.Fatalf("scoped override = %#v", entry)
+	}
+	if removed := scoped.ClearSource("mcp:test"); removed != 1 {
+		t.Fatalf("removed = %d", removed)
+	}
+	entry, ok = scoped.Lookup("test.tool")
+	if !ok || entry.Source != "builtin:test" {
+		t.Fatalf("restored entry = %#v", entry)
 	}
 }

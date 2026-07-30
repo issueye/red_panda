@@ -29,7 +29,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			TimeoutClass: registry.LocalToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:coding",
+			Source:       "builtin:coding",
 		},
 		{
 			Definition: ptools.Definition{
@@ -55,7 +55,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			TimeoutClass: registry.LocalToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:coding",
+			Source:       "builtin:coding",
 		},
 		{
 			Definition: ptools.Definition{
@@ -79,7 +79,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			TimeoutClass: registry.LocalToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:coding",
+			Source:       "builtin:coding",
 		},
 		{
 			Definition: ptools.Definition{
@@ -103,7 +103,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			TimeoutClass: registry.LocalToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:coding",
+			Source:       "builtin:coding",
 		},
 		{
 			Definition: ptools.Definition{
@@ -126,12 +126,12 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 			},
 			TimeoutClass: registry.SelfManagedToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:coding",
+			Source:       "builtin:coding",
 		},
 	}
 
 	for _, e := range entries {
-		reg.Register(e)
+		reg.MustRegister(e)
 	}
 
 	return names

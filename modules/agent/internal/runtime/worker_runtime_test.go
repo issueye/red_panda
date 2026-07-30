@@ -137,7 +137,9 @@ func TestDelegatedWorkerReplyHidesDelegateAndLegacyRunTools(t *testing.T) {
 		}},
 	}}
 	child := delegatedWorkerReply(parent, "inspect runtime", "reviewer", 0)
-	definitions := agenttools.AvailableToolsForOptions((agenttools.ToolRunner{}).AvailableTools(), child.Options)
+	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	definitions := rt.registry.FilterDefinitions(rt.registry.Definitions(), child.Options)
 	communication := map[string]bool{}
 	for _, definition := range definitions {
 		if definition.Name == "worker.delegate" {

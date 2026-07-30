@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -67,36 +66,6 @@ func (r *Runtime) handleMCPCall(ctx context.Context, req jsonrpc.Request) error 
 		return writeErr
 	}
 	return r.writeResponse(resp)
-}
-
-func (r *Runtime) toolsForReply(ctx context.Context, params methods.ReplyParams) []tools.Definition {
-	base := r.registry.Definitions()
-	if r.mcp == nil || len(params.Options.MCPServers) == 0 {
-		return base
-	}
-	// Surface any servers that the crash budget has auto-disabled (docs/19 §7.7).
-	// Diagnostics only — provider tool list is governed by DefinitionsForRun below.
-	if disabled := r.mcp.DisabledServers(); len(disabled) > 0 {
-		fmt.Fprintf(r.log, "mcp disabled servers (crash budget): %s\n", strings.Join(disabled, ", "))
-	}
-	if len(r.mcp.DefinitionsForRun(params.RunID)) == 0 {
-		_ = r.mcp.PrepareToolsForRun(ctx, params)
-	}
-	mcpDefs := r.mcp.DefinitionsForRun(params.RunID)
-	if len(mcpDefs) == 0 {
-		return base
-	}
-	out := make([]tools.Definition, 0, len(base)+len(mcpDefs))
-	out = append(out, base...)
-	out = append(out, mcpDefs...)
-	return out
-}
-
-func (r *Runtime) mcpDefinitionsForRun(runID string) []tools.Definition {
-	if r.mcp == nil {
-		return nil
-	}
-	return r.mcp.DefinitionsForRun(runID)
 }
 
 func (r *Runtime) executeMCPTool(ctx context.Context, runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {

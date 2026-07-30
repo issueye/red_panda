@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 
+	"redpanda/agent/internal/jsext"
 	agentmcp "redpanda/agent/internal/mcp"
 	"redpanda/agent/internal/provider"
 	"redpanda/agent/internal/runtime/hooks"
@@ -63,18 +65,26 @@ type Runtime struct {
 	nextGatewayID   uint64
 	permissions     map[string]chan permission.ResolveParams
 	provider        provider.Provider
+	providers       *provider.Registry
 	workerPool      *worker.Pool
 	mcp             *agentmcp.Manager
+	jsHost          *jsext.Host
+	jsPlugins       []*jsext.Plugin
+	jsDiagnostics   []jsext.Diagnostic
 
 	// Plugin system (v0.3.0 — docs/53)
-	registry   *registry.Registry
-	bus        *hooks.ExtensionBus
-	dispatcher *registry.Dispatcher
+	registry             *registry.Registry
+	bus                  *hooks.ExtensionBus
+	dispatcher           *registry.Dispatcher
+	runRegistryMu        sync.RWMutex
+	runRegistryPrepareMu sync.Mutex
+	runRegistries        map[string]*registry.RunScopedRegistry
 }
 
 // Dependencies contains the replaceable collaborators used by Runtime.
 type Dependencies struct {
-	Provider provider.Provider
+	Provider         provider.Provider
+	ProviderRegistry *provider.Registry
 }
 
 func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
@@ -84,9 +94,13 @@ func New(in io.Reader, out io.Writer, log io.Writer, version string) *Runtime {
 // NewWithDependencies constructs a Runtime with explicitly supplied collaborators.
 // Missing dependencies retain the same environment-backed defaults used by New.
 func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version string, deps Dependencies) *Runtime {
+	providerRegistry := deps.ProviderRegistry
+	if providerRegistry == nil {
+		providerRegistry = provider.DefaultRegistry()
+	}
 	modelProvider := deps.Provider
 	if modelProvider == nil {
-		modelProvider = provider.NewFromEnv(log)
+		modelProvider = provider.NewFromEnvWithRegistry(providerRegistry, log)
 	}
 	rt := &Runtime{
 		in:             in,
@@ -97,11 +111,15 @@ func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version str
 		permissions:    map[string]chan permission.ResolveParams{},
 		mcp:            agentmcp.NewManager(version, log),
 		provider:       modelProvider,
+		providers:      providerRegistry,
+		runRegistries:  map[string]*registry.RunScopedRegistry{},
 	}
 	// Plugin system (v0.3.0)
 	rt.bus = hooks.NewBus()
 	rt.registry = registry.NewRegistry()
 	initCorePlugins(rt, rt.registry, rt.bus)
+	rt.jsHost = jsext.NewHost(rt.registry, rt.bus, log)
+	rt.loadGlobalJSPlugins(context.Background())
 	rt.dispatcher = initRPCDispatcher(rt)
 	workerPool, err := worker.NewPool(worker.Config{Size: workerPoolSizeFromEnv()}, func(workerID worker.WorkerID) (worker.Executor, error) {
 		return newLazyProcessExecutor(rt, workerID), nil
@@ -111,6 +129,22 @@ func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version str
 	}
 	rt.workerPool = workerPool
 	return rt
+}
+
+func (r *Runtime) loadGlobalJSPlugins(ctx context.Context) {
+	home := os.Getenv("RED_PANDA_HOME")
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			r.jsDiagnostics = append(r.jsDiagnostics, jsext.Diagnostic{Error: "resolve user home: " + err.Error()})
+			return
+		}
+		home = filepath.Join(userHome, ".redpanda")
+	}
+	r.jsPlugins, r.jsDiagnostics = r.jsHost.DiscoverAndLoad(ctx, filepath.Join(home, "plugins"))
+	for _, diagnostic := range r.jsDiagnostics {
+		fmt.Fprintf(r.log, "javascript plugin load failed: path=%s error=%s\n", diagnostic.Path, diagnostic.Error)
+	}
 }
 
 func (r *Runtime) Serve(ctx context.Context) error {

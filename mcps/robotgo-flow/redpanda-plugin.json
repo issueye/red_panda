@@ -1,0 +1,14 @@
+{
+  "id": "robotgo-flow",
+  "version": "0.1.0",
+  "description": "Inspect and execute robotgo-flow desktop automation workflows.",
+  "type": "mcp",
+  "entry": {
+    "command": "../../bin/mcp-robotgo-flow.exe"
+  },
+  "capabilities": {
+    "tools": ["inspect_workflow", "list_workflows", "run_workflow", "version"]
+  },
+  "default_enabled": false,
+  "risk_default": "high"
+}

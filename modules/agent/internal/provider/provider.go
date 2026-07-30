@@ -23,9 +23,9 @@ type Message struct {
 // Part is one multimodal content part (OpenAI-compatible / Anthropic / Responses).
 // Exactly one of Text / ImageURL / Source is typically set depending on Type.
 type Part struct {
-	Type     string      `json:"type"` // text | image_url | image | input_text | input_image
-	Text     string      `json:"text,omitempty"`
-	ImageURL *ImageURL   `json:"image_url,omitempty"` // OpenAI chat / Responses data URL
+	Type     string       `json:"type"` // text | image_url | image | input_text | input_image
+	Text     string       `json:"text,omitempty"`
+	ImageURL *ImageURL    `json:"image_url,omitempty"` // OpenAI chat / Responses data URL
 	Source   *ImageSource `json:"source,omitempty"`    // Anthropic base64 source
 }
 
@@ -64,6 +64,15 @@ type RequestOptions struct {
 	Model             string
 	ReasoningEffort   string
 	LogLLMRequests    bool
+	// Headers contains only host-approved, non-sensitive request headers.
+	Headers  map[string]string
+	registry *Registry
+}
+
+// WithRegistry binds per-request provider resolution to a Runtime-owned registry.
+func WithRegistry(options RequestOptions, registry *Registry) RequestOptions {
+	options.registry = registry
+	return options
 }
 
 type Request struct {

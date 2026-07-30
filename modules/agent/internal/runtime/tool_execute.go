@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"redpanda/agent/internal/runtime/hooks"
 	"redpanda/agent/internal/runtime/registry"
 	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/events"
@@ -16,27 +17,50 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, c
 	// Normalize legacy aliases before policy, events, and dispatch.
 	call.Name = agenttools.CanonicalToolName(call.Name)
 
-	decision := agenttools.EvaluateToolPolicy(params.Options, call)
-	_ = r.emitEvent(ctx, params, events.EventToolStarted, nil, map[string]any{
-		"tool_call_id":  call.ID,
-		"tool_name":     call.Name,
-		"display_name":  call.DisplayName,
-		"risk":          string(call.Risk),
-		"arguments":     call.Arguments,
-		"status":        string(tools.CallStatusRunning),
-		"policy":        string(decision.Action),
-		"policy_reason": decision.Reason,
+	runRegistry := r.registryForRun(params.RunID)
+	entry, registered := runRegistry.Lookup(call.Name)
+	hookCtx := runtimeHookContext(ctx, params)
+	callOutcome := r.bus.Emit(hookCtx, hooks.HookToolCall, map[string]any{
+		"tool_call_id": call.ID,
+		"tool_name":    call.Name,
+		"display_name": call.DisplayName,
+		"risk":         string(call.Risk),
+		"arguments":    call.Arguments,
 	})
+	if callOutcome.Blocked || callOutcome.Cancelled {
+		return r.denyToolCall(ctx, params, call, hookOutcomeReason(callOutcome, "tool call blocked"))
+	}
+	if transformed, exists := callOutcome.Event["arguments"]; exists {
+		arguments, ok := transformed.(map[string]any)
+		if !ok && transformed != nil {
+			return r.denyToolCall(ctx, params, call, "tool.call hook produced invalid arguments")
+		}
+		call.Arguments = arguments
+	}
+
+	opsOnly := registered && entry.OpsOnly
+	decision := agenttools.EvaluateToolPolicy(params.Options, call, opsOnly)
+	permissionOutcome := r.bus.Emit(hookCtx, hooks.HookPermissionCheck, map[string]any{
+		"tool_call_id": call.ID,
+		"tool_name":    call.Name,
+		"display_name": call.DisplayName,
+		"risk":         string(call.Risk),
+		"arguments":    call.Arguments,
+		"action":       string(decision.Action),
+		"reason":       decision.Reason,
+	})
+	if permissionOutcome.Blocked || permissionOutcome.Cancelled {
+		r.emitToolStarted(ctx, params, call, decision)
+		return r.denyToolCall(ctx, params, call, hookOutcomeReason(permissionOutcome, "permission check blocked tool"))
+	}
+	decision = toolDecisionFromHook(permissionOutcome, decision)
+	r.emitToolStarted(ctx, params, call, decision)
 
 	if decision.Action == agenttools.ToolDecisionDeny {
-		result := tools.Result{
-			ToolCallID: call.ID,
-			Name:       call.Name,
-			Status:     tools.CallStatusDenied,
-			Error:      decision.Reason,
-		}
-		_ = r.emitEvent(ctx, params, events.EventToolFailed, nil, toolResultPayload(result))
-		return result, "", false
+		return r.denyToolCall(ctx, params, call, decision.Reason)
+	}
+	if decision.Action != agenttools.ToolDecisionAllow && decision.Action != agenttools.ToolDecisionRequirePermission {
+		return r.denyToolCall(ctx, params, call, fmt.Sprintf("invalid permission action %q", decision.Action))
 	}
 
 	if decision.Action == agenttools.ToolDecisionRequirePermission {
@@ -79,18 +103,14 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, c
 	}
 
 	// Registry dispatch (v0.3.0)
-	result, err := r.registry.Execute(ctx, call.Name, tc, args)
+	result, err := runRegistry.Execute(ctx, call.Name, tc, args)
 	if result == nil {
-		if agenttools.IsMCPToolName(call.Name) {
-			result, err = r.executeMCPToolRegistry(ctx, call, tc)
-		} else {
-			return tools.Result{
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Status:     tools.CallStatusFailed,
-				Error:      fmt.Sprintf("unknown tool %s", call.Name),
-			}, "", false
-		}
+		return tools.Result{
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Status:     tools.CallStatusFailed,
+			Error:      fmt.Sprintf("unknown tool %s", call.Name),
+		}, "", false
 	}
 
 	// Wrap result into legacy tools.Result format
@@ -103,12 +123,17 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, c
 		Error:      result.Error,
 		DurationMS: result.DurationMS,
 	}
+	if err != nil {
+		toolResult.Status = tools.CallStatusFailed
+		if toolResult.Error == "" {
+			toolResult.Error = err.Error()
+		}
+	}
+	toolResult = toolResultFromHook(r.bus.Emit(hookCtx, hooks.HookToolResult, toolResultPayload(toolResult)), toolResult)
 
 	output := ""
-	if toolResult.Status == tools.CallStatusFailed && err != nil {
-		output = result.Output
-	} else if result.Output != "" {
-		output = result.Output
+	if toolResult.Output != "" {
+		output = toolResult.Output
 	}
 
 	eventCtx := ctx
@@ -132,7 +157,7 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, c
 		})
 	}
 
-	if toolResult.Status == tools.CallStatusFailed {
+	if toolResult.Status != tools.CallStatusCompleted {
 		_ = r.emitEvent(eventCtx, params, events.EventToolFailed, nil, toolResultPayload(toolResult))
 		return toolResult, output, false
 	}
@@ -154,11 +179,110 @@ func (r *Runtime) executeTool(ctx context.Context, params methods.ReplyParams, c
 	return toolResult, output, true
 }
 
-// executeMCPToolRegistry executes an MCP tool call through the MCP manager.
-// Returns a tools.Result for use in the tool history.
-func (r *Runtime) executeMCPToolRegistry(ctx context.Context, call tools.Call, tc *registry.ToolContext) (*tools.Result, error) {
-	output, err := r.executeMCPTool(ctx, runtimeToolRunContext(tc), call)
-	return runtimeToolResult(call.Name, output, err), err
+func (r *Runtime) emitToolStarted(ctx context.Context, params methods.ReplyParams, call tools.Call, decision agenttools.ToolDecision) {
+	_ = r.emitEvent(ctx, params, events.EventToolStarted, nil, map[string]any{
+		"tool_call_id":  call.ID,
+		"tool_name":     call.Name,
+		"display_name":  call.DisplayName,
+		"risk":          string(call.Risk),
+		"arguments":     call.Arguments,
+		"status":        string(tools.CallStatusRunning),
+		"policy":        string(decision.Action),
+		"policy_reason": decision.Reason,
+	})
+}
+
+func runtimeHookContext(ctx context.Context, params methods.ReplyParams) *hooks.HookContext {
+	return &hooks.HookContext{
+		Context:   ctx,
+		RunID:     params.RunID,
+		SessionID: params.Session.ID,
+		CWD:       params.Session.WorkingDir,
+	}
+}
+
+func hookOutcomeReason(outcome hooks.HookOutcome, fallback string) string {
+	if outcome.Reason != "" {
+		return outcome.Reason
+	}
+	return fallback
+}
+
+func toolDecisionFromHook(outcome hooks.HookOutcome, fallback agenttools.ToolDecision) agenttools.ToolDecision {
+	decision := fallback
+	if action, ok := outcome.Event["action"].(string); ok {
+		decision.Action = agenttools.ToolDecisionAction(action)
+	}
+	if reason, ok := outcome.Event["reason"].(string); ok {
+		decision.Reason = reason
+	}
+	return decision
+}
+
+func toolResultFromHook(outcome hooks.HookOutcome, fallback tools.Result) tools.Result {
+	if outcome.Blocked || outcome.Cancelled {
+		fallback.Status = tools.CallStatusFailed
+		fallback.Error = hookOutcomeReason(outcome, "tool result blocked")
+		return fallback
+	}
+	result := fallback
+	if status, ok := outcome.Event["status"].(string); ok {
+		result.Status = tools.CallStatus(status)
+	}
+	if output, ok := outcome.Event["output"].(string); ok {
+		result.Output = output
+	}
+	if message, ok := outcome.Event["error"].(string); ok {
+		result.Error = message
+	}
+	if exitCode, ok := hookInt(outcome.Event["exit_code"]); ok {
+		result.ExitCode = exitCode
+	}
+	if durationMS, ok := hookInt64(outcome.Event["duration_ms"]); ok {
+		result.DurationMS = durationMS
+	}
+	switch result.Status {
+	case tools.CallStatusCompleted, tools.CallStatusFailed, tools.CallStatusDenied:
+	default:
+		result.Status = tools.CallStatusFailed
+		result.Error = "tool.result hook produced invalid status"
+	}
+	return result
+}
+
+func hookInt(value any) (int, bool) {
+	switch number := value.(type) {
+	case int:
+		return number, true
+	case float64:
+		return int(number), true
+	default:
+		return 0, false
+	}
+}
+
+func hookInt64(value any) (int64, bool) {
+	switch number := value.(type) {
+	case int64:
+		return number, true
+	case int:
+		return int64(number), true
+	case float64:
+		return int64(number), true
+	default:
+		return 0, false
+	}
+}
+
+func (r *Runtime) denyToolCall(ctx context.Context, params methods.ReplyParams, call tools.Call, reason string) (tools.Result, string, bool) {
+	result := tools.Result{
+		ToolCallID: call.ID,
+		Name:       call.Name,
+		Status:     tools.CallStatusDenied,
+		Error:      reason,
+	}
+	_ = r.emitEvent(ctx, params, events.EventToolFailed, nil, toolResultPayload(result))
+	return result, "", false
 }
 
 // todoStatusCounts tallies TODO items by status for the todo.statusUpdated event.

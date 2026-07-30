@@ -13,7 +13,7 @@ import (
 func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {
-		reg.Register(t)
+		reg.MustRegister(t)
 		names = append(names, t.Definition.Name)
 	}
 	return names

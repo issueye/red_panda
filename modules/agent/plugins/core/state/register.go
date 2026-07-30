@@ -66,7 +66,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			Handler:      stateHandler(deps.Todo, "todo.write"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:state",
+			Source:       "builtin:state",
 		},
 		{
 			Definition: ptools.Definition{
@@ -85,7 +85,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			Handler:      stateHandler(deps.Todo, "todo.list"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:state",
+			Source:       "builtin:state",
 		},
 		{
 			Definition: ptools.Definition{
@@ -105,7 +105,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			Handler:      stateHandler(deps.Memory, "memory.list"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:state",
+			Source:       "builtin:state",
 		},
 		{
 			Definition: ptools.Definition{
@@ -128,7 +128,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			Handler:      stateHandler(deps.Memory, "memory.create"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:state",
+			Source:       "builtin:state",
 		},
 		{
 			Definition: ptools.Definition{
@@ -152,7 +152,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			Handler:      stateHandler(deps.Memory, "memory.update"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:state",
+			Source:       "builtin:state",
 		},
 		{
 			Definition: ptools.Definition{
@@ -171,7 +171,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			Handler:      stateHandler(deps.Memory, "memory.delete"),
 			TimeoutClass: registry.GatewayToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:state",
+			Source:       "builtin:state",
 		},
 		{
 			Definition: ptools.Definition{
@@ -193,7 +193,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			},
 			TimeoutClass: registry.SelfManagedToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:state",
+			Source:       "builtin:state",
 		},
 		{
 			Definition: ptools.Definition{
@@ -215,12 +215,12 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			},
 			TimeoutClass: registry.SelfManagedToolTimeout,
 			OpsOnly:      false,
-			Source:       "plugin:state",
+			Source:       "builtin:state",
 		},
 	}
 
 	for _, e := range entries {
-		reg.Register(e)
+		reg.MustRegister(e)
 	}
 
 	return names

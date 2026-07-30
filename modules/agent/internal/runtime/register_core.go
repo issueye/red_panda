@@ -1,7 +1,6 @@
 package runtime
 
 // register_core.go — P1 core plugin registration for the ToolRegistry.
-// Replaces the ToolRunner executors and dispatch switch (docs/53 §7.1).
 //
 // All 4 P1 plugin domains are registered here at Runtime construction time.
 // Plugin handlers use the registry.HandlerFunc signature defined in
@@ -39,6 +38,25 @@ func initCorePlugins(rt *Runtime, reg *registry.Registry, bus *hooks.ExtensionBu
 	state.Register(reg, bus, state.Dependencies{
 		Todo:   rt.executeTodoRegistryTool,
 		Memory: rt.executeMemoryRegistryTool,
+	})
+	registerSystemHooks(bus)
+}
+
+func registerSystemHooks(bus *hooks.ExtensionBus) {
+	bus.MustRegister(hooks.HookPermissionCheck, hooks.HookOrderSystem, "builtin:permission", func(_ *hooks.HookContext, event map[string]any) *hooks.HookResult {
+		action, _ := event["action"].(string)
+		switch agenttools.ToolDecisionAction(action) {
+		case agenttools.ToolDecisionAllow, agenttools.ToolDecisionRequirePermission:
+			return nil
+		case agenttools.ToolDecisionDeny:
+			reason, _ := event["reason"].(string)
+			if reason == "" {
+				reason = "tool permission denied"
+			}
+			return &hooks.HookResult{Block: true, Reason: reason}
+		default:
+			return &hooks.HookResult{Block: true, Reason: fmt.Sprintf("invalid permission action %q", action)}
+		}
 	})
 }
 

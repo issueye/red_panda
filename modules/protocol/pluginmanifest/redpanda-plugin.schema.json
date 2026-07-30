@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redpanda.local/schemas/redpanda-plugin.schema.json",
+  "title": "red_panda plugin manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "type", "entry", "capabilities", "default_enabled"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" },
+    "description": { "type": "string" },
+    "type": { "enum": ["mcp", "js"] },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "command_env": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "script": { "type": "string", "minLength": 1 }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "hooks": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "commands": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "default_enabled": { "type": "boolean" },
+    "risk_default": { "enum": ["low", "medium", "high"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "mcp" } } },
+      "then": {
+        "properties": {
+          "entry": {
+            "oneOf": [
+              { "required": ["command"], "not": { "anyOf": [{ "required": ["command_env"] }, { "required": ["script"] }] } },
+              { "required": ["command_env"], "not": { "anyOf": [{ "required": ["command"] }, { "required": ["script"] }] } }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "js" } } },
+      "then": {
+        "properties": {
+          "entry": {
+            "required": ["script"],
+            "not": { "anyOf": [{ "required": ["command"] }, { "required": ["command_env"] }, { "required": ["args"] }] }
+          }
+        }
+      }
+    }
+  ]
+}

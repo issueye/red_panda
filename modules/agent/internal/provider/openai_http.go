@@ -85,6 +85,7 @@ func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req Provide
 	if config.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+config.APIKey)
 	}
+	applySafeHeaders(httpReq, req.Options.Headers)
 	resp, err := config.Client.Do(httpReq)
 	if err != nil {
 		return err

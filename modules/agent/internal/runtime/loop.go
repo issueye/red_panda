@@ -99,6 +99,7 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 // emitRun 或 Goal 多分段控制器负责。
 func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.ReplyParams, input string, history []provider.ToolExchange, messageID string, streamID string, streamSeq *uint64) providerSegmentResult {
 	maxTurns := effectiveProviderToolTurns(params.Options)
+	runRegistry := r.prepareRegistryForRun(ctx, params)
 	providerInput := input
 	emptyContinuationAttempts := 0
 	var rounds [][]provider.ToolExchange
@@ -118,9 +119,10 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		var requestedCalls []tools.Call
 		emittedText := false
 		flatHistory := flattenToolRounds(rounds)
-		definitions := agenttools.AvailableToolsForOptions(r.toolsForReply(ctx, params), params.Options)
+		definitions := runRegistry.FilterDefinitions(runRegistry.Definitions(), params.Options)
 		request := newPromptComposer().compose(params, providerInput, definitions, rounds)
-		err := r.provider.Complete(ctx, request, func(chunk provider.ProviderChunk) error {
+		request.Options = provider.WithRegistry(request.Options, r.providers)
+		err := r.completeProvider(ctx, params, request, func(chunk provider.ProviderChunk) error {
 			if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
 				return err
 			}
@@ -328,7 +330,8 @@ func (r *Runtime) retryFinalAnswer(
 	var answer strings.Builder
 	returnedToolCalls := false
 	request := newPromptComposer().compose(params, recoveryPrompt, nil, rounds)
-	err := r.provider.Complete(ctx, request, func(chunk provider.ProviderChunk) error {
+	request.Options = provider.WithRegistry(request.Options, r.providers)
+	err := r.completeProvider(ctx, params, request, func(chunk provider.ProviderChunk) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

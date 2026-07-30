@@ -285,7 +285,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			OpsOnly:      s.opsOnly,
 			Source:       source,
 		}
-		reg.Register(entry)
+		reg.MustRegister(entry)
 		names = append(names, s.def.Name)
 	}
 

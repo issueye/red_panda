@@ -59,22 +59,21 @@ func TestExplicitEnvironmentDisablePropagatesToProfileProvider(t *testing.T) {
 	}
 }
 
-func TestResolveIsPublicAliasOfProviderFromOptions(t *testing.T) {
+func TestResolveUsesDefaultProviderRegistry(t *testing.T) {
 	disable := false
 	options := RequestOptions{
 		ProviderName: "openai_compatible", ProviderBaseURL: "https://example.test/v1",
 		ProviderAPIKey: "k", Model: "m", Stream: &disable,
 	}
 	a, okA := Resolve(options, true)
-	b, okB := providerFromOptions(options, true)
-	if !okA || !okB {
-		t.Fatalf("ok A=%v B=%v", okA, okB)
+	if !okA {
+		t.Fatal("expected provider resolution")
 	}
-	ca, cb := configForProvider(t, a), configForProvider(t, b)
-	if ca.BaseURL != cb.BaseURL || ca.APIKey != cb.APIKey || ca.Model != cb.Model || ca.Stream != cb.Stream {
-		t.Fatalf("Resolve and providerFromOptions diverged: %#v vs %#v", ca, cb)
+	config := configForProvider(t, a)
+	if config.BaseURL != "https://example.test/v1" || config.APIKey != "k" || config.Model != "m" || config.Stream {
+		t.Fatalf("resolved config = %#v", config)
 	}
-	if a.Name() != "openai_compatible" || b.Name() != a.Name() {
-		t.Fatalf("names A=%q B=%q", a.Name(), b.Name())
+	if a.Name() != "openai_compatible" {
+		t.Fatalf("name = %q", a.Name())
 	}
 }

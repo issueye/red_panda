@@ -1,0 +1,15 @@
+{
+  "id": "sequential-thinking",
+  "version": "1.0.0",
+  "description": "Structured sequential reasoning MCP server.",
+  "type": "mcp",
+  "entry": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+  },
+  "capabilities": {
+    "tools": ["sequentialthinking"]
+  },
+  "default_enabled": false,
+  "risk_default": "low"
+}

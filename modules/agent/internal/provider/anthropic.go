@@ -66,6 +66,7 @@ func (p AnthropicProvider) completeAttempt(ctx context.Context, req Request, emi
 	if p.APIKey != "" {
 		httpReq.Header.Set("x-api-key", p.APIKey)
 	}
+	applySafeHeaders(httpReq, req.Options.Headers)
 	resp, err := p.Client.Do(httpReq)
 	if err != nil {
 		return err

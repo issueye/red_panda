@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"redpanda/agent/internal/runtime/hooks"
@@ -30,16 +32,16 @@ func TestAllToolDefinitionsMatchOriginalSchema(t *testing.T) {
 		DisplayName string
 		Risk        string
 	}{
-		"workspace.read_file":    {DisplayName: "Read file", Risk: "low"},
-		"workspace.list":         {DisplayName: "List files", Risk: "low"},
-		"workspace.stats":        {DisplayName: "Workspace stats", Risk: "low"},
-		"workspace.grep":         {DisplayName: "Search files", Risk: "low"},
-		"workspace.find_files":   {DisplayName: "Find files", Risk: "low"},
-		"workspace.read_files":   {DisplayName: "Read files", Risk: "low"},
-		"workspace.write_file":   {DisplayName: "Write file", Risk: "high"},
-		"workspace.edit_file":    {DisplayName: "Edit file", Risk: "high"},
-		"workspace.diff_file":    {DisplayName: "Preview diff", Risk: "low"},
-		"workspace.apply_patch":  {DisplayName: "Apply patch", Risk: "high"},
+		"workspace.read_file":   {DisplayName: "Read file", Risk: "low"},
+		"workspace.list":        {DisplayName: "List files", Risk: "low"},
+		"workspace.stats":       {DisplayName: "Workspace stats", Risk: "low"},
+		"workspace.grep":        {DisplayName: "Search files", Risk: "low"},
+		"workspace.find_files":  {DisplayName: "Find files", Risk: "low"},
+		"workspace.read_files":  {DisplayName: "Read files", Risk: "low"},
+		"workspace.write_file":  {DisplayName: "Write file", Risk: "high"},
+		"workspace.edit_file":   {DisplayName: "Edit file", Risk: "high"},
+		"workspace.diff_file":   {DisplayName: "Preview diff", Risk: "low"},
+		"workspace.apply_patch": {DisplayName: "Apply patch", Risk: "high"},
 	}
 	for _, entry := range tools {
 		exp, ok := expected[entry.Definition.Name]
@@ -192,5 +194,78 @@ func TestFindFilesHandler(t *testing.T) {
 	}
 	if res.Output != "foo.txt" {
 		t.Errorf("unexpected output: %q", res.Output)
+	}
+}
+
+func TestEditDiffAndPatchHandlers(t *testing.T) {
+	dir := t.TempDir()
+	target := fmt.Sprintf("%s/note.txt", dir)
+	if err := os.WriteFile(target, []byte("alpha red panda\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolCtx := &registry.ToolContext{WorkingDir: dir}
+
+	diff, err := runDiffFileHandler(context.Background(), toolCtx, map[string]any{
+		"path": "note.txt", "old_text": "red panda", "new_text": "scarlet panda",
+	})
+	if err != nil || !strings.Contains(diff.Output, "-alpha red panda") || !strings.Contains(diff.Output, "+alpha scarlet panda") {
+		t.Fatalf("diff result = %#v, %v", diff, err)
+	}
+	if raw, _ := os.ReadFile(target); string(raw) != "alpha red panda\n" {
+		t.Fatalf("diff wrote file: %q", raw)
+	}
+
+	edited, err := runEditFileHandler(context.Background(), toolCtx, map[string]any{
+		"path": "note.txt", "old_text": "red panda", "new_text": "scarlet panda",
+	})
+	if err != nil || edited.Status != "completed" {
+		t.Fatalf("edit result = %#v, %v", edited, err)
+	}
+
+	patch := "--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n-alpha scarlet panda\n+beta\n"
+	patched, err := runApplyPatchHandler(context.Background(), toolCtx, map[string]any{"patch": patch})
+	if err != nil || patched.Status != "completed" {
+		t.Fatalf("patch result = %#v, %v", patched, err)
+	}
+	if raw, _ := os.ReadFile(target); string(raw) != "beta\n" {
+		t.Fatalf("patched content = %q", raw)
+	}
+}
+
+func TestMutationHandlersRejectEscapingPaths(t *testing.T) {
+	toolCtx := &registry.ToolContext{WorkingDir: t.TempDir()}
+	if _, err := runEditFileHandler(context.Background(), toolCtx, map[string]any{
+		"path": "../outside.txt", "old_text": "a", "new_text": "b",
+	}); err == nil {
+		t.Fatal("edit accepted escaping path")
+	}
+	patch := "--- a/../outside.txt\n+++ b/../outside.txt\n@@ -1 +1 @@\n-a\n+b\n"
+	if _, err := runApplyPatchHandler(context.Background(), toolCtx, map[string]any{"patch": patch}); err == nil {
+		t.Fatal("patch accepted escaping path")
+	}
+}
+
+func TestReadFilesAndGlobHandlers(t *testing.T) {
+	dir := t.TempDir()
+	for path, content := range map[string]string{
+		"a.txt": "alpha", "pkg/main_test.go": "package pkg", "root_test.go": "package root",
+		"node_modules/ignored_test.go": "ignored",
+	} {
+		full := fmt.Sprintf("%s/%s", dir, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	toolCtx := &registry.ToolContext{WorkingDir: dir}
+	read, err := runReadFilesHandler(context.Background(), toolCtx, map[string]any{"paths": []any{"a.txt", "root_test.go"}})
+	if err != nil || !strings.Contains(read.Output, "--- a.txt ---") || !strings.Contains(read.Output, "alpha") || !strings.Contains(read.Output, "--- root_test.go ---") {
+		t.Fatalf("read_files result = %#v, %v", read, err)
+	}
+	found, err := runFindFilesHandler(context.Background(), toolCtx, map[string]any{"pattern": "**/*_test.go", "path": "."})
+	if err != nil || !strings.Contains(found.Output, "pkg/main_test.go") || !strings.Contains(found.Output, "root_test.go") || strings.Contains(found.Output, "ignored_test.go") {
+		t.Fatalf("find_files result = %#v, %v", found, err)
 	}
 }

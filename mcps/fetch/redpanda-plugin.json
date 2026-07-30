@@ -1,0 +1,15 @@
+{
+  "id": "fetch",
+  "version": "1.0.0",
+  "description": "Fetch and extract web documents through the MCP fetch server.",
+  "type": "mcp",
+  "entry": {
+    "command": "uvx",
+    "args": ["mcp-server-fetch"]
+  },
+  "capabilities": {
+    "tools": ["fetch"]
+  },
+  "default_enabled": false,
+  "risk_default": "medium"
+}

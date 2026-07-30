@@ -118,7 +118,7 @@ func TestDefinitionSchemaConsistency(t *testing.T) {
 	}
 }
 
-// TestOpsOnlyMatchesPolicy verifies opsOnly flags match policy.go:15-26.
+// TestOpsOnlyMetadata verifies the plugin owns OpsOnly metadata.
 func TestOpsOnlyMatchesPolicy(t *testing.T) {
 	reg := registry.NewRegistry()
 	Register(reg, nil, Dependencies{})
@@ -146,10 +146,6 @@ func TestOpsOnlyMatchesPolicy(t *testing.T) {
 		}
 		if entry.OpsOnly != want {
 			t.Errorf("%s OpsOnly = %v, want %v", name, entry.OpsOnly, want)
-		}
-		// Also verify internal.IsOpsOnlyTool matches.
-		if internal.IsOpsOnlyTool(name) != want {
-			t.Errorf("internal.IsOpsOnlyTool(%q) = %v, want %v", name, internal.IsOpsOnlyTool(name), want)
 		}
 	}
 }

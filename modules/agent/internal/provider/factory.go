@@ -12,10 +12,14 @@ import (
 const providerResponseHeaderTimeout = 90 * time.Second
 
 func NewFromEnv(log io.Writer) Provider {
+	return NewFromEnvWithRegistry(DefaultRegistry(), log)
+}
+
+func NewFromEnvWithRegistry(registry *Registry, log io.Writer) Provider {
 	stream := providerStreamFromEnv()
-	provider := strings.ToLower(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER")))
+	providerName := normalizeProviderName(os.Getenv("RED_PANDA_PROVIDER"))
 	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_BASE_URL")), "/")
-	if provider != "" || baseURL != "" {
+	if providerName != "" || baseURL != "" {
 		model := strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_MODEL"))
 		apiKey := strings.TrimSpace(os.Getenv("RED_PANDA_PROVIDER_API_KEY"))
 		if model == "" {
@@ -25,14 +29,14 @@ func NewFromEnv(log io.Writer) Provider {
 			fmt.Fprintln(log, "provider base url is empty; falling back to echo provider")
 			return newEchoProvider(stream)
 		}
-		resolved, ok := Resolve(RequestOptions{
-			ProviderName: provider, ProviderBaseURL: baseURL,
+		resolved, err := registry.Resolve(RequestOptions{
+			ProviderName: providerName, ProviderBaseURL: baseURL,
 			ProviderAPIKey: apiKey, Model: model,
 		}, stream)
-		if ok {
+		if err == nil {
 			return resolved
 		}
-		fmt.Fprintf(log, "unsupported provider %q; falling back to echo provider\n", provider)
+		fmt.Fprintf(log, "provider %q unavailable: %v; falling back to echo provider\n", providerName, err)
 	}
 	return newEchoProvider(stream)
 }
@@ -41,45 +45,15 @@ func NewFromEnv(log io.Writer) Provider {
 // Environment defaults and per-run profile selection share this resolver
 // (docs/39 Wave 2). fallbackStream is used when options.Stream is nil.
 func Resolve(options RequestOptions, fallbackStream bool) (Provider, bool) {
-	return providerFromOptions(options, fallbackStream)
-}
-
-func providerFromOptions(options RequestOptions, fallbackStream bool) (Provider, bool) {
-	baseURL := strings.TrimRight(strings.TrimSpace(options.ProviderBaseURL), "/")
-	if baseURL == "" {
-		return nil, false
+	registry := options.registry
+	if registry == nil {
+		registry = DefaultRegistry()
 	}
-	provider := strings.ToLower(strings.TrimSpace(options.ProviderName))
-	if provider == "" {
-		provider = "openai_compatible"
-	}
-	model := strings.TrimSpace(options.Model)
-	if model == "" {
-		model = "default"
-	}
-	stream := fallbackStream
-	if options.Stream != nil {
-		stream = *options.Stream
-	}
-	config := providerConfig{
-		BaseURL: baseURL, APIKey: strings.TrimSpace(options.ProviderAPIKey), Model: model,
-		Stream: stream,
-	}
-	client, err := newProviderHTTPClient(options.ProviderHTTPProxy)
+	resolved, err := registry.Resolve(options, fallbackStream)
 	if err != nil {
 		return nil, false
 	}
-	config.Client = client
-	switch provider {
-	case "openai_compatible", "http_compatible":
-		return HTTPCompatibleProvider{providerConfig: config}, true
-	case "openai_responses":
-		return OpenAIResponsesProvider{providerConfig: config}, true
-	case "anthropic":
-		return AnthropicProvider{providerConfig: config}, true
-	default:
-		return nil, false
-	}
+	return resolved, true
 }
 
 // newProviderHTTPClient 构造 provider 出站 HTTP 客户端。

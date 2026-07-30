@@ -19,8 +19,9 @@ import (
 )
 
 type WebSocketController struct {
-	Services service.Set
-	Hub      *eventhub.Hub
+	Services   service.Set
+	Hub        *eventhub.Hub
+	Dispatcher *WSDispatcher
 }
 
 var upgrader = websocket.Upgrader{
@@ -35,6 +36,7 @@ type wsSession struct {
 	send          chan protows.Envelope
 	subscriptions map[string]func()
 	lastSentSeq   map[string]uint64
+	dispatcher    *WSDispatcher
 	mu            sync.Mutex
 }
 
@@ -52,6 +54,10 @@ func (w WebSocketController) Connect(c *gin.Context) {
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
+	dispatcher := w.Dispatcher
+	if dispatcher == nil {
+		dispatcher = newGatewayWSDispatcher()
+	}
 
 	session := &wsSession{
 		conn:          conn,
@@ -59,6 +65,7 @@ func (w WebSocketController) Connect(c *gin.Context) {
 		send:          make(chan protows.Envelope, 128),
 		subscriptions: map[string]func(){},
 		lastSentSeq:   map[string]uint64{},
+		dispatcher:    dispatcher,
 	}
 	defer session.close()
 
@@ -106,24 +113,7 @@ func (s *wsSession) handle(ctx context.Context, msg protows.Envelope) {
 }
 
 func (s *wsSession) handleRequest(ctx context.Context, msg protows.Envelope) {
-	switch msg.Method {
-	case protows.MethodAgentStatus:
-		s.enqueue(response(msg.ID, s.services.Run.RuntimeStatus()))
-	case protows.MethodRunStart:
-		s.handleRunStart(ctx, msg)
-	case protows.MethodRunSubscribe:
-		s.handleRunSubscribe(msg)
-	case protows.MethodRunResume:
-		s.handleRunResume(msg)
-	case protows.MethodRunCancel:
-		s.handleRunCancel(ctx, msg)
-	case protows.MethodWorkerList:
-		s.handleWorkerList(ctx, msg)
-	case protows.MethodAssignmentCancel:
-		s.handleAssignmentCancel(ctx, msg)
-	case protows.MethodPermissionResolve:
-		s.handlePermissionResolve(ctx, msg)
-	default:
+	if s.dispatcher == nil || !s.dispatcher.Dispatch(ctx, &WSRequestContext{session: s}, msg) {
 		s.enqueue(errorMessage(msg.ID, "method_not_implemented", "websocket method not implemented"))
 	}
 }

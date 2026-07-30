@@ -2,10 +2,11 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
-	agenttools "redpanda/agent/internal/tools"
 	"redpanda/agent/internal/provider"
+	agenttools "redpanda/agent/internal/tools"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
@@ -20,11 +21,10 @@ type toolBatchItem struct {
 
 // resolveToolCall checks whether a tool name is known (registry or MCP) and
 // normalises legacy aliases. It also back-fills DisplayName and Risk from the
-// tool definition when they are empty — this mirrors the behaviour of the old
-// ToolRunner.InvocationFromCall, which is relied on by permission-policy tests.
-func (r *Runtime) resolveToolCall(call *tools.Call) error {
+// registered definition when callers omit them.
+func (r *Runtime) resolveToolCall(runID string, call *tools.Call) error {
 	call.Name = agenttools.CanonicalToolName(call.Name)
-	entry, ok := r.registry.Lookup(call.Name)
+	entry, ok := r.registryForRun(runID).Lookup(call.Name)
 	if ok {
 		if call.DisplayName == "" {
 			call.DisplayName = entry.Definition.DisplayName
@@ -34,16 +34,7 @@ func (r *Runtime) resolveToolCall(call *tools.Call) error {
 		}
 		return nil
 	}
-	if agenttools.IsMCPToolName(call.Name) {
-		if call.DisplayName == "" {
-			call.DisplayName = call.Name
-		}
-		if call.Risk == "" {
-			call.Risk = tools.RiskHigh
-		}
-		return nil
-	}
-	return nil // executeTool handles unknown-tool case itself
+	return fmt.Errorf("unknown tool %s", call.Name)
 }
 
 // executeToolBatch 顺序执行普通工具，随后并行执行全部委派工具，
@@ -64,7 +55,7 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 
 	runOne := func(index int) {
 		call := items[index].call
-		if err := r.resolveToolCall(&call); err != nil {
+		if err := r.resolveToolCall(params.RunID, &call); err != nil {
 			failed := tools.Result{
 				ToolCallID: call.ID,
 				Name:       call.Name,
