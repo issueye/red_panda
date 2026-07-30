@@ -1,0 +1,272 @@
+package orchestration
+
+import (
+	"context"
+	"fmt"
+
+	"redpanda/agent/internal/runtime/hooks"
+	"redpanda/agent/internal/runtime/registry"
+	orchestration "redpanda/agent/plugins/core/orchestration/internal"
+	ptools "redpanda/protocol/tools"
+)
+
+// source prefix for orchestration tools.
+const source = "builtin:orchestration"
+
+// toolSpec holds the registration parameters without committing to a
+// specific Handler type; the Handler is assigned after wrapping.
+type toolSpec struct {
+	def          ptools.Definition
+	timeoutClass registry.TimeoutClass
+	opsOnly      bool
+	handler      orchestration.HandlerFunc
+}
+
+// Register registers the 11 skill.* and worker.* tools into reg.
+// Order of registration is preserved; returned names reflect that order.
+func Register(reg *registry.Registry, bus *hooks.ExtensionBus) []string {
+	specs := []toolSpec{
+		{
+			def: ptools.Definition{
+				Name:        "skill.list",
+				DisplayName: "List skills",
+				Description: "List managed workspace skills under .codex/skills with name and description only. The catalog is also injected at conversation start; call this to re-check after skill.create/update/delete in the same run.",
+				Risk:        ptools.RiskLow,
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+			timeoutClass: registry.LocalToolTimeout,
+			opsOnly:      false,
+			handler:      orchestration.HandlerSkillList,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "skill.create",
+				DisplayName: "Create skill",
+				Description: "Create a managed SKILL.md under .codex/skills in the active workspace.",
+				Risk:        ptools.RiskHigh,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name":         map[string]any{"type": "string", "description": "Lowercase skill name using letters, digits, and hyphens."},
+						"description":  map[string]any{"type": "string", "description": "Short description used to select the skill."},
+						"instructions": map[string]any{"type": "string", "description": "Complete Markdown instructions for the skill."},
+					},
+					"required": []string{"name", "description", "instructions"},
+				},
+			},
+			timeoutClass: registry.GatewayToolTimeout,
+			opsOnly:      true,
+			handler:      orchestration.HandlerSkillCreate,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "skill.update",
+				DisplayName: "Update skill",
+				Description: "Replace an existing managed SKILL.md under .codex/skills in the active workspace.",
+				Risk:        ptools.RiskHigh,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name":         map[string]any{"type": "string", "description": "Existing lowercase skill name."},
+						"description":  map[string]any{"type": "string", "description": "Replacement description used to select the skill."},
+						"instructions": map[string]any{"type": "string", "description": "Complete replacement Markdown instructions."},
+					},
+					"required": []string{"name", "description", "instructions"},
+				},
+			},
+			timeoutClass: registry.GatewayToolTimeout,
+			opsOnly:      true,
+			handler:      orchestration.HandlerSkillUpdate,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "skill.delete",
+				DisplayName: "Delete skill",
+				Description: "Delete a managed SKILL.md under .codex/skills in the active workspace.",
+				Risk:        ptools.RiskHigh,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string", "description": "Existing lowercase skill name."},
+					},
+					"required": []string{"name"},
+				},
+			},
+			timeoutClass: registry.GatewayToolTimeout,
+			opsOnly:      true,
+			handler:      orchestration.HandlerSkillDelete,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "skill.run",
+				DisplayName: "Run skill",
+				Description: "Run a managed workspace skill in an isolated Worker Assignment and return only its final result. Prefer names from the skills catalog injected for this conversation.",
+				Risk:        ptools.RiskHigh,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string", "description": "Existing managed skill name."},
+						"task": map[string]any{"type": "string", "description": "Task for the isolated skill Worker."},
+					},
+					"required": []string{"name", "task"},
+				},
+			},
+			timeoutClass: registry.SelfManagedToolTimeout,
+			opsOnly:      false,
+			handler:      orchestration.HandlerSkillRun,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "worker.delegate",
+				DisplayName: "Delegate work",
+				Description: "Delegate one focused task to an available Worker and return its assignment identity and final report. Delegated assignments cannot delegate again.",
+				Risk:        ptools.RiskMedium,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"task":        map[string]any{"type": "string", "description": "Focused task with scope and expected output."},
+						"profile_key": map[string]any{"type": "string", "description": "Optional Worker Profile key."},
+						"max_turns":   map[string]any{"type": "integer", "minimum": 1, "description": "Optional tool-turn budget."},
+					},
+					"required": []string{"task"},
+				},
+			},
+			timeoutClass: registry.SelfManagedToolTimeout,
+			opsOnly:      false,
+			handler:      orchestration.HandlerWorkerDelegate,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "worker.list",
+				DisplayName: "List workers",
+				Description: "List Worker slots and assignments for the current run.",
+				Risk:        ptools.RiskLow,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"worker_id":     map[string]any{"type": "string"},
+						"assignment_id": map[string]any{"type": "string"},
+					},
+				},
+			},
+			timeoutClass: registry.LocalToolTimeout,
+			opsOnly:      false,
+			handler:      orchestration.HandlerWorkerList,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "worker.cancel",
+				DisplayName: "Cancel assignment",
+				Description: "Cancel an assignment belonging to the current run.",
+				Risk:        ptools.RiskMedium,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"assignment_id": map[string]any{"type": "string"},
+						"reason":        map[string]any{"type": "string"},
+					},
+					"required": []string{"assignment_id"},
+				},
+			},
+			timeoutClass: registry.LocalToolTimeout,
+			opsOnly:      false,
+			handler:      orchestration.HandlerWorkerCancel,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "worker.pool_status",
+				DisplayName: "Worker pool status",
+				Description: "Inspect Worker capacity, health, and active Assignment counts.",
+				Risk:        ptools.RiskLow,
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+			timeoutClass: registry.LocalToolTimeout,
+			opsOnly:      true,
+			handler:      orchestration.HandlerWorkerPoolStatus,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "worker.send",
+				DisplayName: "Send Worker message",
+				Description: "Send a message to an active Worker Assignment in the current run.",
+				Risk:        ptools.RiskLow,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"to_worker_id":     map[string]any{"type": "string"},
+						"to_assignment_id": map[string]any{"type": "string"},
+						"kind":             map[string]any{"type": "string", "enum": []string{"request", "update", "result", "control"}},
+						"payload":          map[string]any{"description": "JSON-compatible message payload."},
+					},
+					"required": []string{"to_worker_id", "kind", "payload"},
+				},
+			},
+			timeoutClass: registry.LocalToolTimeout,
+			opsOnly:      true,
+			handler:      orchestration.HandlerWorkerSend,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "worker.receive",
+				DisplayName: "Receive Worker message",
+				Description: "Wait for the next message addressed to the current active Assignment.",
+				Risk:        ptools.RiskLow,
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+			timeoutClass: registry.LocalToolTimeout,
+			opsOnly:      true,
+			handler:      orchestration.HandlerWorkerReceive,
+		},
+	}
+
+	names := make([]string, 0, len(specs))
+	for _, s := range specs {
+		// Wrap: convert internal.HandlerFunc → registry.HandlerFunc.
+		inner := s.handler
+		h := func(ctx context.Context, toolCtx *registry.ToolContext, args map[string]any) (*ptools.Result, error) {
+			ictx := &orchestration.ToolContext{
+				RunID:        toolCtx.RunID,
+				SessionID:    toolCtx.SessionID,
+				AssignmentID: toolCtx.AssignmentID,
+				WorkerID:     toolCtx.WorkerID,
+				WorkingDir:   toolCtx.WorkingDir,
+				Reply:        toolCtx.Reply,
+			}
+			ires, err := inner(ctx, ictx, args)
+			if err != nil {
+				return &ptools.Result{
+					Status: ptools.CallStatusFailed,
+					Error:  err.Error(),
+				}, nil
+			}
+			return &ptools.Result{
+				Status: ptools.CallStatusCompleted,
+				Output: ires.Output,
+			}, nil
+		}
+
+		entry := registry.ToolEntry{
+			Definition:   s.def,
+			Handler:      h,
+			TimeoutClass: s.timeoutClass,
+			OpsOnly:      s.opsOnly,
+			Source:       source,
+		}
+		reg.Register(entry)
+		names = append(names, s.def.Name)
+	}
+
+	_ = bus  // reserved for future hook-based registration
+	_ = fmt.Sprintf
+
+	return names
+}

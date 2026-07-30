@@ -1,0 +1,255 @@
+/* ═══════════════════════════════════════════════════════════
+   Misc — Permissions, statusbar, toast, error boundary, buttons
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-spin,
+  .tool-card-chevron,
+  .tool-detail-chevron {
+    animation: none;
+    transition: none;
+  }
+}
+
+.permission-title,
+.permission-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.permission-title strong {
+  flex: 1;
+  min-width: 0;
+}
+
+.permission-card > p {
+  color: var(--color-text-strong);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.permission-context {
+  background: rgba(255, 255, 255, 0.55);
+  border: 0;
+  border-radius: var(--radius-compact);
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.permission-context div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 42px minmax(0, 1fr);
+}
+
+.permission-context dt,
+.permission-context dd {
+  font-size: 11px;
+  margin: 0;
+}
+
+.permission-context dt {
+  color: var(--color-text-muted);
+}
+
+.permission-context dd {
+  color: var(--color-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-arguments summary {
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.permission-arguments pre {
+  background: rgba(255, 255, 255, 0.7);
+  border: 0;
+  border-radius: var(--radius-compact);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 6px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+.permission-actions {
+  justify-content: flex-end;
+}
+
+.permission-state {
+  align-self: flex-end;
+  border-radius: var(--radius-pill);
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+}
+
+.permission-deny .permission-state {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+.statusbar {
+  align-items: center;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-soft);
+  display: flex;
+  font-size: 11px;
+  gap: 16px;
+  padding: 0 14px;
+}
+
+.toast-viewport {
+  bottom: 36px;
+  display: grid;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 24px));
+  pointer-events: none;
+  position: fixed;
+  right: 16px;
+  z-index: 120;
+}
+
+.toast {
+  align-items: flex-start;
+  background: var(--color-text);
+  border-radius: var(--radius-control);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  color: var(--color-surface);
+  display: grid;
+  font-size: 12px;
+  gap: 8px;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
+  max-width: 400px;
+  padding: 10px 8px 10px 12px;
+  pointer-events: auto;
+}
+
+.toast-success {
+  background: #065f46;
+}
+
+.toast-info {
+  background: #1f2937;
+}
+
+.toast-warning {
+  background: #92400e;
+}
+
+.toast-error {
+  background: #991b1b;
+}
+
+.toast-icon {
+  align-items: center;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.toast-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toast-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.toast-message {
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.toast-dismiss {
+  color: inherit;
+  height: 28px;
+  min-width: 28px;
+  opacity: 0.85;
+}
+
+.toast-dismiss:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  opacity: 1;
+}
+
+.ui-error-boundary {
+  align-items: flex-start;
+  background: var(--color-danger-bg);
+  border: 1px solid
+    color-mix(in srgb, var(--color-danger-text) 24%, transparent);
+  border-radius: 8px;
+  color: var(--color-danger-text);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  margin: 12px;
+  padding: 14px;
+}
+
+.ui-error-boundary-icon {
+  align-items: center;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.ui-error-boundary-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ui-error-boundary-body strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.ui-error-boundary-body span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.button-spin {
+  animation: tool-spin 0.9s linear infinite;
+}
+
+.button.is-loading,
+.icon-button.is-loading {
+  cursor: progress;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-spin {
+    animation: none;
+  }
+}
+

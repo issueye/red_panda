@@ -1,0 +1,219 @@
+/* ═══════════════════════════════════════════════════════════
+   TopBar — Brand, window controls, connection pill
+   ═══════════════════════════════════════════════════════════ */
+
+.topbar {
+  /* Custom caption bar — replaces native OS/Wails title bar. */
+  --wails-draggable: drag;
+  align-items: center;
+  background: var(--color-surface);
+  border-bottom: 0;
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  gap: 8px;
+  height: 48px;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 0 0 14px;
+  position: relative;
+  z-index: 40;
+}
+
+.topbar-drag {
+  --wails-draggable: drag;
+  min-width: 0;
+}
+
+.topbar-spacer {
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 12px;
+}
+
+.brand {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 4px 0 0;
+}
+
+.brand-mark-wrap {
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 26px;
+  width: 26px;
+}
+
+.brand-mark,
+.brand img {
+  flex: 0 0 auto;
+  height: 26px;
+  pointer-events: none;
+  width: 26px;
+}
+
+.brand.is-busy .brand-mark-wrap {
+  animation: panda-topbar-bob 0.9s ease-in-out infinite;
+  transform-origin: 50% 85%;
+}
+
+.brand.is-busy .brand-mark {
+  animation: panda-topbar-wiggle 1.2s ease-in-out infinite;
+}
+
+.brand strong {
+  background: linear-gradient(135deg, var(--color-brand) 0%, #e87a3a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.panel-header strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand span,
+.panel-header span,
+.session-item span {
+  color: var(--color-text-muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* Worker rows use nested action buttons; do not force every span to block. */
+.worker-item .worker-meta,
+.worker-assignment .worker-meta {
+  color: var(--color-text-muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.topbar-actions {
+  --wails-draggable: no-drag;
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  height: 100%;
+  padding-left: 6px;
+}
+
+.topbar-actions .icon-button,
+.topbar-actions .connection-pill {
+  --wails-draggable: no-drag;
+}
+
+.window-controls {
+  --wails-draggable: no-drag;
+  align-items: stretch;
+  display: flex;
+  height: 100%;
+  margin-left: 4px;
+}
+
+.window-control {
+  --wails-draggable: no-drag;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-strong);
+  cursor: pointer;
+  display: inline-flex;
+  height: 100%;
+  justify-content: center;
+  min-width: 46px;
+  padding: 0;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.window-control:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.window-control:active {
+  background: rgba(15, 23, 42, 0.1);
+}
+
+.window-control-close:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
+.window-control-close:active {
+  background: #c50f1f;
+  color: #ffffff;
+}
+
+.window-restore-icon {
+  border: 1.5px solid currentColor;
+  box-sizing: border-box;
+  display: inline-block;
+  height: 9px;
+  position: relative;
+  width: 9px;
+}
+
+.window-restore-icon::before {
+  border: 1.5px solid currentColor;
+  box-sizing: border-box;
+  content: "";
+  height: 9px;
+  left: 3px;
+  position: absolute;
+  top: -4px;
+  width: 9px;
+}
+
+.connection-pill {
+  align-items: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+}
+
+.state-connected {
+  background: var(--color-success-bg);
+  border-color: transparent;
+  color: var(--color-success-text);
+}
+
+.state-connected::before {
+  animation: status-pulse 2.4s ease-in-out infinite;
+  background: var(--color-success-text);
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 6px;
+  margin-right: 5px;
+  width: 6px;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.state-error,
+.state-disconnected {
+  background: var(--color-danger-bg);
+  border-color: transparent;
+  color: var(--color-danger-text);
+}
+

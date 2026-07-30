@@ -4,19 +4,46 @@ import (
 	"context"
 	"sync"
 
-	"redpanda/agent/internal/provider"
 	agenttools "redpanda/agent/internal/tools"
+	"redpanda/agent/internal/provider"
 	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
 
 type toolBatchItem struct {
-	index      int
-	call       tools.Call
-	invocation agenttools.ToolInvocation
-	result     tools.Result
-	ok         bool
+	index  int
+	call   tools.Call
+	result tools.Result
+	ok     bool
+}
+
+// resolveToolCall checks whether a tool name is known (registry or MCP) and
+// normalises legacy aliases. It also back-fills DisplayName and Risk from the
+// tool definition when they are empty — this mirrors the behaviour of the old
+// ToolRunner.InvocationFromCall, which is relied on by permission-policy tests.
+func (r *Runtime) resolveToolCall(call *tools.Call) error {
+	call.Name = agenttools.CanonicalToolName(call.Name)
+	entry, ok := r.registry.Lookup(call.Name)
+	if ok {
+		if call.DisplayName == "" {
+			call.DisplayName = entry.Definition.DisplayName
+		}
+		if call.Risk == "" {
+			call.Risk = entry.Definition.Risk
+		}
+		return nil
+	}
+	if agenttools.IsMCPToolName(call.Name) {
+		if call.DisplayName == "" {
+			call.DisplayName = call.Name
+		}
+		if call.Risk == "" {
+			call.Risk = tools.RiskHigh
+		}
+		return nil
+	}
+	return nil // executeTool handles unknown-tool case itself
 }
 
 // executeToolBatch 顺序执行普通工具，随后并行执行全部委派工具，
@@ -37,8 +64,7 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 
 	runOne := func(index int) {
 		call := items[index].call
-		invocation, err := r.tools.InvocationFromCall(params.RunID, index, call, r.mcpDefinitionsForRun(params.RunID)...)
-		if err != nil {
+		if err := r.resolveToolCall(&call); err != nil {
 			failed := tools.Result{
 				ToolCallID: call.ID,
 				Name:       call.Name,
@@ -50,8 +76,8 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 			items[index].ok = false
 			return
 		}
-		items[index].invocation = invocation
-		result, _, ok := r.executeTool(ctx, params, invocation)
+		items[index].call = call
+		result, _, ok := r.executeTool(ctx, params, call)
 		items[index].result = result
 		items[index].ok = ok
 	}
@@ -87,16 +113,10 @@ func (r *Runtime) executeToolBatch(ctx context.Context, params methods.ReplyPara
 func batchToHistory(items []toolBatchItem) []provider.ToolExchange {
 	history := make([]provider.ToolExchange, 0, len(items))
 	for _, item := range items {
-		call := item.call
-		if item.invocation.Call.ID != "" {
-			call = item.invocation.Call
-		}
-		// 跳过从未执行的槽位，例如并行启动前已取消的槽位。
 		if item.result.ToolCallID == "" && item.result.Name == "" && item.result.Error == "" && item.result.Status == "" {
 			if item.call.ID == "" && item.call.Name == "" {
 				continue
 			}
-			// 仍将已取消或未启动的调用记为失败，保持模型上下文连续。
 			if item.result.Status == "" {
 				item.result = tools.Result{
 					ToolCallID: item.call.ID,
@@ -106,7 +126,7 @@ func batchToHistory(items []toolBatchItem) []provider.ToolExchange {
 				}
 			}
 		}
-		history = append(history, provider.ToolExchange{Call: call, Result: item.result})
+		history = append(history, provider.ToolExchange{Call: item.call, Result: item.result})
 	}
 	return history
 }
