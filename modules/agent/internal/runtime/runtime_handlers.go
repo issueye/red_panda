@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"redpanda/agent/internal/provider"
@@ -226,27 +225,6 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 
 	providerInput := params.Input.Text
 	var toolHistory []provider.ToolExchange
-	if invocation, ok := r.tools.Parse(params.Input.Text, params.RunID); ok {
-		result, output, ok := r.executeTool(ctx, params, invocation)
-		if !ok {
-			if ctx.Err() != nil {
-				r.emitCancelled(params)
-				return
-			}
-			_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
-				"message":      result.Error,
-				"tool_call_id": result.ToolCallID,
-				"tool_name":    result.Name,
-				"status":       string(result.Status),
-			})
-			_ = r.emitEvent(ctx, params, events.EventFinish, nil, map[string]any{
-				"status": string(result.Status),
-			})
-			return
-		}
-		providerInput = fmt.Sprintf("User request:\n%s\n\nTool %s result:\n%s", params.Input.Text, result.Name, output)
-		toolHistory = append(toolHistory, provider.ToolExchange{Call: invocation.Call, Result: result})
-	}
 
 	seg := r.runProviderLoopSegment(ctx, params, providerInput, toolHistory, messageID, streamID, &streamSeq)
 	// 仅在根运行结束时清理快照，不能在分段中途清理。

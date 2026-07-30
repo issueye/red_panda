@@ -15,8 +15,9 @@ import (
 
 	agentmcp "redpanda/agent/internal/mcp"
 	"redpanda/agent/internal/provider"
-	agenttools "redpanda/agent/internal/tools"
 	"redpanda/agent/internal/worker"
+	"redpanda/agent/internal/runtime/hooks"
+	"redpanda/agent/internal/runtime/registry"
 	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/permission"
@@ -62,9 +63,13 @@ type Runtime struct {
 	nextGatewayID   uint64
 	permissions     map[string]chan permission.ResolveParams
 	provider        provider.Provider
-	tools           agenttools.ToolRunner
 	workerPool      *worker.Pool
 	mcp             *agentmcp.Manager
+
+	// Plugin system (v0.3.0 — docs/53)
+	registry   *registry.Registry
+	bus        *hooks.ExtensionBus
+	dispatcher *registry.Dispatcher
 }
 
 // Dependencies contains the replaceable collaborators used by Runtime.
@@ -92,18 +97,12 @@ func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version str
 		permissions:    map[string]chan permission.ResolveParams{},
 		mcp:            agentmcp.NewManager(version, log),
 		provider:       modelProvider,
-		tools:          agenttools.ToolRunner{},
 	}
-	rt.tools.MemoryExecutor = rt.executeMemoryTool
-	rt.tools.TodoExecutor = rt.todoExecutor
-	rt.tools.SkillExecutor = rt.executeSkillRun
-	rt.tools.WorkerDelegate = rt.executeWorkerDelegate
-	rt.tools.WorkerList = rt.executeWorkerList
-	rt.tools.WorkerCancel = rt.executeWorkerCancel
-	rt.tools.WorkerPoolStatus = rt.executeWorkerPoolStatus
-	rt.tools.WorkerSend = rt.executeWorkerSend
-	rt.tools.WorkerReceive = rt.executeWorkerReceive
-	rt.tools.MCPExecutor = rt.executeMCPTool
+	// Plugin system (v0.3.0)
+	rt.bus = hooks.NewBus()
+	rt.registry = registry.NewRegistry()
+	initCorePlugins(rt.registry, rt.bus)
+	rt.dispatcher = initRPCDispatcher(rt)
 	workerPool, err := worker.NewPool(worker.Config{Size: workerPoolSizeFromEnv()}, func(workerID worker.WorkerID) (worker.Executor, error) {
 		return newLazyProcessExecutor(rt, workerID), nil
 	})
@@ -153,49 +152,14 @@ func (r *Runtime) handleLine(ctx context.Context, line []byte) error {
 		return r.writeResponse(jsonrpc.NewError(req.ID, -32600, "invalid request"))
 	}
 
-	switch req.Method {
-	case methods.CoreInitialize:
-		return r.handleInitialize(req)
-	case methods.CorePing:
-		return r.handlePing(req)
-	case methods.CoreShutdown:
-		_ = r.Close(context.Background())
-		resp, err := jsonrpc.NewResult(req.ID, map[string]bool{"accepted": true})
-		if err != nil {
-			return err
-		}
-		return r.writeResponse(resp)
-	case methods.RunExecute:
-		return r.handleRunExecute(ctx, req)
-	case methods.MCPDiscover:
-		return r.handleMCPDiscover(ctx, req)
-	case methods.MCPCall:
-		return r.handleMCPCall(ctx, req)
-	case methods.AgentSkills:
-		return r.handleAgentSkills(req)
-	case methods.AgentSkillLoad:
-		return r.handleAgentSkillLoad(req)
-	case methods.AgentSkillCreate:
-		return r.handleAgentSkillCreate(req)
-	case methods.AgentSkillUpdate:
-		return r.handleAgentSkillUpdate(req)
-	case methods.AgentSkillDelete:
-		return r.handleAgentSkillDelete(req)
-	case methods.RunCancel:
-		return r.handleRunCancel(req)
-	case methods.RunPause:
-		return r.handleRunPause(req)
-	case methods.RunResume:
-		return r.handleRunResume(req)
-	case methods.WorkerList:
-		return r.handleWorkerList(req)
-	case methods.WorkerAssignmentCancel:
-		return r.handleWorkerAssignmentCancel(req)
-	case methods.WorkerPoolStatus:
-		return r.handleWorkerPoolStatus(req)
-	case methods.PermissionResolve:
-		return r.handlePermissionResolve(req)
-	default:
-		return r.writeResponse(jsonrpc.NewError(req.ID, -32601, "method not found"))
+	resp, err := r.dispatcher.Dispatch(ctx, req)
+	if err != nil {
+		return err
 	}
+	// Non-empty response means the handler produced a result (either success or
+	// the Dispatcher's method-not-found error response).
+	if resp.JSONRPC != "" {
+		return r.writeResponse(resp)
+	}
+	return nil
 }

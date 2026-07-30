@@ -1,0 +1,62 @@
+/* ═══════════════════════════════════════════════════════════
+   Base — Global reset, scrollbar, focus, body
+   ═══════════════════════════════════════════════════════════ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  /* Frameless window: allow edge resize from the document chrome. */
+  --wails-resize: all;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Quiet scrollbars for dense panels */
+* {
+  scrollbar-color: var(--color-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-pill);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button,
+input,
+textarea {
+  accent-color: var(--color-brand);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+

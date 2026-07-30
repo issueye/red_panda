@@ -1,0 +1,235 @@
+/* ═══════════════════════════════════════════════════════════
+   Dialogs — Modal dialog system, workspace picker
+   ═══════════════════════════════════════════════════════════ */
+
+
+/* Quiet modal dialogs */
+.ui-dialog-overlay {
+  align-items: center;
+  animation: dialog-overlay-in var(--duration-normal) var(--ease-out) both;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 100;
+}
+
+@keyframes dialog-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ui-dialog-backdrop {
+  animation: dialog-backdrop-in var(--duration-normal) var(--ease-out) both;
+  background: rgba(15, 23, 42, 0.28);
+  border: 0;
+  cursor: default;
+  inset: 0;
+  padding: 0;
+  position: absolute;
+}
+
+@keyframes dialog-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ui-dialog {
+  animation: dialog-scale-in var(--duration-slow) var(--ease-spring) both;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.16);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: min(80vh, 640px);
+  max-width: calc(100vw - 32px);
+  min-width: 0;
+  position: relative;
+  width: 420px;
+  z-index: 1;
+}
+
+@keyframes dialog-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ui-dialog-sm {
+  width: 360px;
+}
+
+.ui-dialog-md {
+  width: 460px;
+}
+
+.ui-dialog-lg {
+  width: 560px;
+}
+
+.ui-dialog-xl {
+  max-height: min(86vh, 760px);
+  width: min(860px, calc(100vw - 32px));
+}
+
+.ui-dialog-xl .ui-dialog-body {
+  padding: 0;
+}
+
+.ui-dialog-header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 14px 14px 12px;
+}
+
+.ui-dialog-heading {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ui-dialog-heading strong {
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ui-dialog-heading span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ui-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.ui-dialog-message {
+  color: var(--color-text-strong);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.ui-dialog-footer {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 14px;
+}
+
+.ui-dialog-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.ui-dialog-field > span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ui-dialog-field input {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  min-height: 34px;
+  outline: none;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.ui-dialog-field input:focus {
+  border-color: var(--color-brand-action);
+  box-shadow: var(--shadow-focus);
+}
+
+.ui-dialog-sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.workspace-picker {
+  display: grid;
+  gap: 14px;
+}
+
+.workspace-picker-recent {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-picker-list {
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.workspace-picker-item {
+  background: var(--color-surface-subtle);
+  border: 0;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 10px;
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.workspace-picker-item:hover,
+.workspace-picker-item.active {
+  background: var(--color-brand-soft);
+}
+
+.workspace-picker-item strong {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.workspace-picker-item span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-picker-path-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-overlay {
+  align-items: center;

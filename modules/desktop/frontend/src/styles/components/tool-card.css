@@ -1,0 +1,349 @@
+/* ═══════════════════════════════════════════════════════════
+   Tool Card — Tool call timeline entries
+   ═══════════════════════════════════════════════════════════ */
+
+/* Tool calls stay as quiet one-line timeline entries until expanded. */
+.tool-card {
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0;
+  max-width: min(760px, 100%);
+  min-height: 24px;
+  overflow: hidden;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.tool-card.is-expanded {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+}
+
+/* Running tools stay compact but get a quiet live accent so long chains remain scannable. */
+.tool-card.is-live:not(.is-expanded) {
+  animation: tool-live-pulse 2s ease-in-out infinite;
+  background: color-mix(in srgb, var(--color-info-bg) 55%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-info-text);
+}
+
+@keyframes tool-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
+.tool-card.is-failed:not(.is-expanded),
+.tool-card.is-attention:not(.is-expanded) {
+  background: color-mix(in srgb, var(--color-danger-bg) 70%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-danger-text);
+}
+
+.tool-card.is-attention:not(.is-expanded) {
+  background: color-mix(in srgb, var(--color-warning-bg) 75%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-warning-text);
+}
+
+.tool-card.is-stale:not(.is-expanded) {
+  box-shadow: inset 3px 0 0 var(--color-warning-text);
+}
+
+.tool-card.is-succeeded:not(.is-expanded) {
+  box-shadow: inset 3px 0 0 var(--color-success-text);
+}
+
+.tool-card-header {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 4px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  line-height: 1.4;
+  min-height: 24px;
+  padding: 1px 3px;
+  text-align: left;
+  width: 100%;
+}
+
+.tool-card-header:disabled {
+  cursor: default;
+}
+
+.tool-card-header:hover:not(:disabled) {
+  background: var(--color-surface-subtle);
+}
+
+.tool-status-dot {
+  align-items: center;
+  color: var(--color-text-soft);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 16px;
+  justify-content: center;
+  width: 16px;
+}
+
+.tool-status-dot.is-completed {
+  color: var(--color-success-text);
+}
+
+.tool-status-dot.is-failed,
+.tool-status-dot.is-denied {
+  color: var(--color-danger-text);
+}
+
+.tool-status-dot.is-running,
+.tool-status-dot.is-pending,
+.tool-status-dot.is-waiting_permission {
+  color: var(--color-brand-text);
+}
+
+.tool-card-content {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: fit-content(42%) minmax(0, 1fr) max-content;
+  min-width: 0;
+}
+
+.tool-card-title {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tool-call-index {
+  color: var(--color-text-soft);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  min-width: 1.75em;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
+.tool-card-title strong {
+  color: var(--color-text-muted);
+  flex: 0 1 auto;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-card-name {
+  color: var(--color-text-soft);
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-card-meta {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  justify-self: end;
+}
+
+.tool-duration,
+.tool-live {
+  color: var(--color-text-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.tool-live.is-running {
+  color: var(--color-brand-text);
+  font-weight: 600;
+}
+
+.tool-live.is-failed {
+  color: var(--color-danger-text);
+  font-weight: 600;
+}
+
+.tool-live.is-attention {
+  color: var(--color-warning-text);
+  font-weight: 600;
+}
+
+.tool-live.is-stale {
+  color: var(--color-warning-text);
+  font-weight: 600;
+}
+
+.tool-card-chevron {
+  color: var(--color-text-soft);
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.tool-card-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.tool-card-summary {
+  color: var(--color-text-soft);
+  display: block;
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-card-summary.is-empty {
+  color: var(--color-text-soft);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.tool-card-body {
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: 6px;
+  margin: 0 6px 6px 24px;
+  padding: 4px 0 0;
+}
+
+.tool-stale-note {
+  color: var(--color-warning-text);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 2px 4px;
+}
+
+@media (max-width: 520px) {
+  .tool-card-name {
+    display: none;
+  }
+}
+
+.tool-detail {
+  min-width: 0;
+}
+
+.tool-detail-bar {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.tool-detail-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 1;
+  font: inherit;
+  font-size: 11px;
+  gap: 4px;
+  line-height: 1.3;
+  min-height: 26px;
+  min-width: 0;
+  padding: 0 2px;
+  text-align: left;
+}
+
+.tool-detail-toggle span {
+  color: var(--color-text-strong);
+  font-weight: 600;
+}
+
+.tool-detail-toggle em {
+  color: var(--color-text-soft);
+  font-style: normal;
+}
+
+.tool-detail-chevron {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.tool-detail-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.tool-copy {
+  color: var(--color-text-soft);
+  height: 26px;
+  min-height: 26px;
+  min-width: 26px;
+  opacity: 0.75;
+  width: 26px;
+}
+
+.tool-copy:hover {
+  opacity: 1;
+}
+
+.tool-pre {
+  background: var(--color-surface-muted);
+  border: 0;
+  border-radius: 6px;
+  color: var(--color-text-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 2px 0 0;
+  max-height: 200px;
+  overflow: auto;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-detail.is-open .tool-pre {
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
+}
+
+.tool-error-line {
+  background: rgba(255, 255, 255, 0.35);
+  border: 1px solid var(--color-danger-border);
+  border-radius: 6px;
+  color: var(--color-danger-text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-spin {
+  animation: tool-spin 900ms linear infinite;
+}
+
+@keyframes tool-spin {

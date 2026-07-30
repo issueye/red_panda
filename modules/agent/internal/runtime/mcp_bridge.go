@@ -70,7 +70,7 @@ func (r *Runtime) handleMCPCall(ctx context.Context, req jsonrpc.Request) error 
 }
 
 func (r *Runtime) toolsForReply(ctx context.Context, params methods.ReplyParams) []tools.Definition {
-	base := r.tools.AvailableTools()
+	base := r.registry.Definitions()
 	if r.mcp == nil || len(params.Options.MCPServers) == 0 {
 		return base
 	}
