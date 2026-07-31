@@ -24,3 +24,11 @@ tmp/
 .task/
 .tools/*
 attachments/*
+modules/desktop/build/android/.gradle/9.2.1/gc.properties
+modules/desktop/build/android/.gradle/9.2.1/checksums/checksums.lock
+modules/desktop/build/android/.gradle/9.2.1/fileChanges/last-build.bin
+modules/desktop/build/android/.gradle/9.2.1/fileHashes/fileHashes.bin
+modules/desktop/build/android/.gradle/9.2.1/fileHashes/fileHashes.lock
+modules/desktop/build/android/.gradle/buildOutputCleanup/buildOutputCleanup.lock
+modules/desktop/build/android/.gradle/buildOutputCleanup/cache.properties
+modules/desktop/build/android/.gradle/vcs-1/gc.properties
