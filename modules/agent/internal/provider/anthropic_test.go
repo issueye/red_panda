@@ -33,7 +33,7 @@ func TestAnthropicProviderRequestAndNonStreamToolUse(t *testing.T) {
 	p := AnthropicProvider{providerConfig{BaseURL: server.URL, APIKey: "secret", Model: "claude-test", Client: server.Client()}}
 	var chunks []ProviderChunk
 	err := p.Complete(context.Background(), Request{
-		Messages:    []Message{{Role: "system", Content: "be direct"}, {Role: "user", Content: "inspect"}},
+		Messages:    []Message{{Role: "system", Content: "be direct", CacheControl: true}, {Role: "user", Content: "inspect"}},
 		Options:     RequestOptions{EnableThinking: true, ReasoningEffort: "xhigh"},
 		Tools:       []tools.Definition{{Name: "workspace.read_file", Description: "Read", Parameters: map[string]any{"type": "object"}}},
 		ToolHistory: []ToolExchange{{Call: tools.Call{ID: "call_1", Name: "workspace.list", Arguments: map[string]any{"path": "."}}, Result: tools.Result{Status: tools.CallStatusFailed, Error: "denied"}}},
@@ -41,7 +41,8 @@ func TestAnthropicProviderRequestAndNonStreamToolUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body["system"] != "be direct" || body["max_tokens"] != float64(defaultAnthropicMaxTokens) || body["tool_choice"].(map[string]any)["type"] != "auto" {
+	system := body["system"].([]any)
+	if system[0].(map[string]any)["text"] != "be direct" || system[0].(map[string]any)["cache_control"].(map[string]any)["type"] != "ephemeral" || body["max_tokens"] != float64(defaultAnthropicMaxTokens) || body["tool_choice"].(map[string]any)["type"] != "auto" {
 		t.Fatalf("body = %#v", body)
 	}
 	if body["output_config"].(map[string]any)["effort"] != "max" {
@@ -57,7 +58,7 @@ func TestAnthropicProviderRequestAndNonStreamToolUse(t *testing.T) {
 		t.Fatalf("history = %#v %#v", toolUse, toolResult)
 	}
 	definition := body["tools"].([]any)[0].(map[string]any)
-	if definition["name"] != "workspace__read_file" || definition["input_schema"] == nil {
+	if definition["name"] != "workspace__read_file" || definition["input_schema"] == nil || definition["cache_control"].(map[string]any)["type"] != "ephemeral" {
 		t.Fatalf("tool = %#v", definition)
 	}
 	want := []ProviderChunk{{ToolCalls: []tools.Call{{
@@ -99,6 +100,20 @@ func TestAnthropicProviderStreamingTextAndToolInput(t *testing.T) {
 			t.Fatalf("chunks = %#v", chunks)
 		}
 	})
+}
+
+func TestAnthropicStreamUsageIncludesCacheTokens(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":80,"cache_creation_input_tokens":20}}}`,
+		`data: {"type":"message_delta","usage":{"output_tokens":7}}`, "",
+	}, "\n\n")
+	var chunks []ProviderChunk
+	if err := completeAnthropicStream(strings.NewReader(stream), func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) != 3 || chunks[0].Usage == nil || chunks[0].Usage.CacheReadTokens != 80 || chunks[0].Usage.CacheWriteTokens != 20 || chunks[1].Usage.OutputTokens != 7 || !chunks[2].Final {
+		t.Fatalf("chunks = %#v", chunks)
+	}
 }
 
 func TestAnthropicProviderRetryBoundary(t *testing.T) {

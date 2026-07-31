@@ -140,6 +140,13 @@ type responsesOutputItem struct {
 
 func completeOpenAIResponsesResponse(raw []byte, emit func(ProviderChunk) error) error {
 	var response struct {
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			InputDetails struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"input_tokens_details"`
+		} `json:"usage"`
 		Output []responsesOutputItem `json:"output"`
 		Error  *struct {
 			Message string `json:"message"`
@@ -151,6 +158,7 @@ func completeOpenAIResponsesResponse(raw []byte, emit func(ProviderChunk) error)
 	if response.Error != nil {
 		return fmt.Errorf("provider error: %s", response.Error.Message)
 	}
+	usage := providerUsageOrNil(ProviderUsage{InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, CacheReadTokens: response.Usage.InputDetails.CachedTokens})
 	var calls []tools.Call
 	var text strings.Builder
 	var reasoning strings.Builder
@@ -178,10 +186,10 @@ func completeOpenAIResponsesResponse(raw []byte, emit func(ProviderChunk) error)
 		}
 	}
 	if len(calls) > 0 {
-		return emit(ProviderChunk{ToolCalls: calls})
+		return emit(ProviderChunk{ToolCalls: calls, Usage: usage})
 	}
 	if text.Len() > 0 {
-		if err := emit(ProviderChunk{Delta: text.String()}); err != nil {
+		if err := emit(ProviderChunk{Delta: text.String(), Usage: usage}); err != nil {
 			return err
 		}
 	}
@@ -215,6 +223,15 @@ func completeOpenAIResponsesStream(reader io.Reader, emit func(ProviderChunk) er
 			Error       *struct {
 				Message string `json:"message"`
 			} `json:"error"`
+			Response *struct {
+				Usage struct {
+					InputTokens  int `json:"input_tokens"`
+					OutputTokens int `json:"output_tokens"`
+					InputDetails struct {
+						CachedTokens int `json:"cached_tokens"`
+					} `json:"input_tokens_details"`
+				} `json:"usage"`
+			} `json:"response"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			return err
@@ -259,6 +276,15 @@ func completeOpenAIResponsesStream(reader io.Reader, emit func(ProviderChunk) er
 				}
 				if call.arguments.Len() == 0 {
 					call.arguments.WriteString(event.Item.Arguments)
+				}
+			}
+		case "response.completed":
+			if event.Response != nil {
+				u := event.Response.Usage
+				if usage := providerUsageOrNil(ProviderUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.InputDetails.CachedTokens}); usage != nil {
+					if err := emit(ProviderChunk{Usage: usage}); err != nil {
+						return err
+					}
 				}
 			}
 		case "error", "response.failed":

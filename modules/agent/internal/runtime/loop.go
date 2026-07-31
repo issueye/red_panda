@@ -278,6 +278,17 @@ func (r *Runtime) consumeProviderChunk(
 			return err
 		}
 	}
+	if chunk.Usage != nil {
+		if err := r.emitEvent(ctx, params, events.EventUsage, nil, map[string]any{
+			"provider_name":      r.provider.Name(),
+			"input_tokens":       chunk.Usage.InputTokens,
+			"output_tokens":      chunk.Usage.OutputTokens,
+			"cache_read_tokens":  chunk.Usage.CacheReadTokens,
+			"cache_write_tokens": chunk.Usage.CacheWriteTokens,
+		}); err != nil {
+			return err
+		}
+	}
 	if len(chunk.ToolCalls) > 0 {
 		*requestedCalls = append(*requestedCalls, chunk.ToolCalls...)
 		return nil

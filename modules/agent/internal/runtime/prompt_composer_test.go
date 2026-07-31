@@ -45,12 +45,11 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 		t.Fatalf("options = %#v, want %#v", request.Options, wantOptions)
 	}
 	wantContents := []string{
-		currentTimeContextMessage(fixed),
 		rootAgentOrchestrationPolicy,
 		rootAgentPostDelegationPolicy,
 		rootAgentTodoPolicy,
-		"specialist", "memory", "todo context", "skills",
-		"first\ndetail", "answer", "current",
+		"first\ndetail", "answer",
+		"specialist\n\nskills\n\nmemory\n\n[Runtime todo context]\ntodo context\n[/Runtime todo context]\n\ncurrent",
 	}
 	if len(request.Messages) != len(wantContents) {
 		t.Fatalf("messages = %#v", request.Messages)
@@ -61,7 +60,7 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 			t.Fatalf("messages[%d].Content = %q, want %q", i, got, want)
 		}
 	}
-	if got := []string{request.Messages[8].Role, request.Messages[9].Role, request.Messages[10].Role}; !reflect.DeepEqual(got, []string{"user", "assistant", "user"}) {
+	if got := []string{request.Messages[3].Role, request.Messages[4].Role, request.Messages[5].Role}; !reflect.DeepEqual(got, []string{"user", "assistant", "user"}) {
 		t.Fatalf("conversation roles = %#v", got)
 	}
 	if !reflect.DeepEqual(request.ToolRounds, rounds) || len(request.ToolHistory) != 1 {
@@ -73,7 +72,7 @@ func TestPromptComposerAddsFileChangeReportPolicyOnlyToRoot(t *testing.T) {
 	composer := promptComposer{now: time.Now}
 	definitions := []tools.Definition{{Name: "git.status"}, {Name: "workspace.write_file"}}
 	root := composer.compose(methods.ReplyParams{}, "edit", definitions, nil)
-	rootPolicy := provider.MessageText(root.Messages[1].Content)
+	rootPolicy := provider.MessageText(root.Messages[0].Content)
 	if !strings.Contains(rootPolicy, "变更文件") || !strings.Contains(rootPolicy, "Markdown link") {
 		t.Fatalf("root file report policy missing: %#v", root.Messages)
 	}
@@ -96,6 +95,23 @@ func TestFormatUTCOffset(t *testing.T) {
 		if got := formatUTCOffset(tt.seconds); got != tt.want {
 			t.Fatalf("formatUTCOffset(%d) = %q, want %q", tt.seconds, got, tt.want)
 		}
+	}
+}
+
+func TestPromptComposerOnlyInjectsTimeForTimeSensitiveRequests(t *testing.T) {
+	first := promptComposer{now: func() time.Time { return time.Date(2026, 7, 15, 9, 0, 0, 0, time.UTC) }}
+	second := promptComposer{now: func() time.Time { return time.Date(2026, 7, 15, 9, 0, 30, 0, time.UTC) }}
+	ordinaryA := first.compose(methods.ReplyParams{}, "fix the parser", nil, nil)
+	ordinaryB := second.compose(methods.ReplyParams{}, "fix the parser", nil, nil)
+	if !reflect.DeepEqual(ordinaryA.Messages, ordinaryB.Messages) {
+		t.Fatalf("ordinary request changed with wall clock: %#v != %#v", ordinaryA.Messages, ordinaryB.Messages)
+	}
+	if shouldInjectCurrentTime("update the database") {
+		t.Fatal("update/database must not be treated as the word date")
+	}
+	timeRequest := first.compose(methods.ReplyParams{}, "现在几点？", nil, nil)
+	if got := provider.MessageText(timeRequest.Messages[len(timeRequest.Messages)-1].Content); !strings.Contains(got, "2026-07-15 09:00:00") {
+		t.Fatalf("time context missing: %q", got)
 	}
 }
 

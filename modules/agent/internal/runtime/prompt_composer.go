@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"redpanda/agent/internal/provider"
 	"redpanda/protocol/methods"
@@ -23,15 +24,12 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 	messages := make([]provider.Message, 0, 8+len(params.Session.Conversation))
 	appendSystem := func(content string) {
 		if content = strings.TrimSpace(content); content != "" {
-			messages = append(messages, provider.Message{Role: "system", Content: content})
+			messages = append(messages, provider.Message{Role: "system", Content: content, CacheControl: true})
 		}
 	}
-	appendSystem(currentTimeContextMessage(c.now()))
 
 	if hasToolNamed(definitions, "worker.delegate") {
 		appendSystem(rootAgentOrchestrationPolicy)
-	}
-	if hasSuccessfulWorkerResult(history) {
 		appendSystem(rootAgentPostDelegationPolicy)
 	}
 	if hasToolNamed(definitions, "todo.write") {
@@ -42,18 +40,6 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 	}
 
 	options := params.Options
-	if options.SpecialistContext != nil {
-		appendSystem(options.SpecialistContext.Context)
-	}
-	if options.MemoryContext != nil {
-		appendSystem(options.MemoryContext.Context)
-	}
-	if options.TodoContext != nil {
-		appendSystem(options.TodoContext.Context)
-	}
-	if options.SkillsContext != nil {
-		appendSystem(options.SkillsContext.Context)
-	}
 
 	// Index ephemeral inline payloads by attachment_id / path so history
 	// image_ref blocks can rehydrate pixels when Gateway inlined them
@@ -72,7 +58,8 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 	}
 
 	// Current user turn: text input + current-run attachments as multimodal parts.
-	userContent := composeUserTurnContent(input, params.Input.Attachments)
+	runtimeContext := runtimeContextText(options, input, c.now())
+	userContent := composeUserTurnContent(runtimeContext+input, params.Input.Attachments)
 	messages = append(messages, provider.Message{Role: "user", Content: userContent})
 
 	reqAttachments := toRequestAttachments(params.Input.Attachments)
@@ -98,6 +85,52 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 		ToolRounds:  rounds,
 		Attachments: reqAttachments,
 	}
+}
+
+func runtimeContextText(options methods.ReplyOptions, input string, now time.Time) string {
+	var sections []string
+	appendSection := func(content string) {
+		if content = strings.TrimSpace(content); content != "" {
+			sections = append(sections, content)
+		}
+	}
+	if options.SpecialistContext != nil {
+		appendSection(options.SpecialistContext.Context)
+	}
+	if options.SkillsContext != nil {
+		appendSection(options.SkillsContext.Context)
+	}
+	if options.MemoryContext != nil {
+		appendSection(options.MemoryContext.Context)
+	}
+	if options.TodoContext != nil {
+		if todo := strings.TrimSpace(options.TodoContext.Context); todo != "" {
+			sections = append(sections, "[Runtime todo context]\n"+todo+"\n[/Runtime todo context]")
+		}
+	}
+	if shouldInjectCurrentTime(input) {
+		sections = append(sections, currentTimeContextMessage(now))
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return strings.Join(sections, "\n\n") + "\n\n"
+}
+
+func shouldInjectCurrentTime(input string) bool {
+	s := strings.ToLower(input)
+	for _, term := range []string{"当前时间", "现在几点", "今天几号", "日期", "时间", "时区", "what day"} {
+		if strings.Contains(s, term) {
+			return true
+		}
+	}
+	words := strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	for _, word := range words {
+		if word == "today" || word == "date" || word == "time" || word == "timezone" {
+			return true
+		}
+	}
+	return false
 }
 
 // conversationMessageContent maps a stored conversation message into a

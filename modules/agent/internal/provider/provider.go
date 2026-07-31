@@ -16,8 +16,9 @@ type Provider interface {
 // (docs/51 §6.6 / docs/52 Slice C). Adapters serialize Content appropriately;
 // pure-text paths keep Content as string so existing golden JSON stays valid.
 type Message struct {
-	Role    string
-	Content any // string | []Part
+	Role         string
+	Content      any  // string | []Part
+	CacheControl bool // provider may place an explicit prompt-cache breakpoint here
 }
 
 // Part is one multimodal content part (OpenAI-compatible / Anthropic / Responses).
@@ -108,6 +109,21 @@ type ProviderChunk struct {
 	ReasoningDelta string
 	Final          bool
 	ToolCalls      []tools.Call
+	Usage          *ProviderUsage
+}
+
+type ProviderUsage struct {
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+}
+
+func providerUsageOrNil(usage ProviderUsage) *ProviderUsage {
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 {
+		return nil
+	}
+	return &usage
 }
 
 // MessageText returns the plain-text view of a Message.Content value. Multimodal

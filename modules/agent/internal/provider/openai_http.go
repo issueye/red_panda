@@ -59,6 +59,9 @@ func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req Provide
 		"messages": openAICompatibleMessages(req),
 		"stream":   config.Stream,
 	}
+	if config.Stream {
+		body["stream_options"] = map[string]any{"include_usage": true}
+	}
 	if req.Options.EnableThinking {
 		body["enable_thinking"] = true
 		if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
@@ -158,6 +161,13 @@ func openAICompatibleChatCompletionsURL(raw string) string {
 
 func completeHTTPResponse(rawResp []byte, emit func(ProviderChunk) error) error {
 	var parsed struct {
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			PromptDetails    struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+		} `json:"usage"`
 		Choices []struct {
 			Message struct {
 				Content          string `json:"content"`
@@ -181,6 +191,7 @@ func completeHTTPResponse(rawResp []byte, emit func(ProviderChunk) error) error 
 		return fmt.Errorf("provider returned no choices")
 	}
 	message := parsed.Choices[0].Message
+	usage := providerUsageOrNil(ProviderUsage{InputTokens: parsed.Usage.PromptTokens, OutputTokens: parsed.Usage.CompletionTokens, CacheReadTokens: parsed.Usage.PromptDetails.CachedTokens})
 	reasoning := message.ReasoningContent
 	if reasoning == "" {
 		reasoning = message.Reasoning
@@ -203,9 +214,9 @@ func completeHTTPResponse(rawResp []byte, emit func(ProviderChunk) error) error 
 				Arguments: args,
 			})
 		}
-		return emit(ProviderChunk{ToolCalls: calls})
+		return emit(ProviderChunk{ToolCalls: calls, Usage: usage})
 	}
-	if err := emit(ProviderChunk{Delta: message.Content}); err != nil {
+	if err := emit(ProviderChunk{Delta: message.Content, Usage: usage}); err != nil {
 		return err
 	}
 	return emit(ProviderChunk{Final: true})

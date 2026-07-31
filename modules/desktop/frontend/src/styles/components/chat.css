@@ -503,7 +503,12 @@
   font-size: 12px;
   line-height: 1.6;
   margin-top: 6px;
+  max-height: min(42vh, 360px);
   max-width: 760px;
+  overflow-y: auto;
+  padding-right: 8px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .role-user .message-bubble {

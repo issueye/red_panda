@@ -179,6 +179,17 @@ func TestOpenAICompatibleChatCompletionsURL(t *testing.T) {
 	}
 }
 
+func TestOpenAIUsageIncludesCachedTokens(t *testing.T) {
+	var chunks []ProviderChunk
+	raw := []byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"prompt_tokens":120,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":96}}}`)
+	if err := completeHTTPResponse(raw, func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) < 1 || chunks[0].Usage == nil || chunks[0].Usage.CacheReadTokens != 96 || chunks[0].Usage.InputTokens != 120 {
+		t.Fatalf("usage = %#v", chunks)
+	}
+}
+
 func TestHTTPCompatibleProviderSendsNeutralRequest(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

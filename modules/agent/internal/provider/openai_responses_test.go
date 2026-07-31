@@ -95,6 +95,17 @@ func TestOpenAIResponsesProviderStreamingTextAndToolArguments(t *testing.T) {
 	})
 }
 
+func TestOpenAIResponsesStreamUsageIncludesCachedTokens(t *testing.T) {
+	stream := "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":200,\"output_tokens\":10,\"input_tokens_details\":{\"cached_tokens\":160}}}}\n\n"
+	var chunks []ProviderChunk
+	if err := completeOpenAIResponsesStream(strings.NewReader(stream), func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) != 2 || chunks[0].Usage == nil || chunks[0].Usage.CacheReadTokens != 160 || !chunks[1].Final {
+		t.Fatalf("chunks = %#v", chunks)
+	}
+}
+
 func TestOpenAIResponsesProviderRetryBoundary(t *testing.T) {
 	t.Run("before output", func(t *testing.T) {
 		attempts := 0

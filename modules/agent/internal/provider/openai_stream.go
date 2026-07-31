@@ -33,6 +33,13 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 			break
 		}
 		var chunk struct {
+			Usage struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				PromptDetails    struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
+			} `json:"usage"`
 			Choices []struct {
 				Delta struct {
 					Content          string `json:"content"`
@@ -51,6 +58,11 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return err
+		}
+		if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || chunk.Usage.PromptDetails.CachedTokens > 0 {
+			if err := emit(ProviderChunk{Usage: &ProviderUsage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, CacheReadTokens: chunk.Usage.PromptDetails.CachedTokens}}); err != nil {
+				return err
+			}
 		}
 		for _, choice := range chunk.Choices {
 			reasoning := choice.Delta.ReasoningContent

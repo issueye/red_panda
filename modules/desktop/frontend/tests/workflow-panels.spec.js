@@ -275,6 +275,28 @@ test('Conversation pauses following after manual scroll and can return to latest
   ))).toBeLessThan(2);
 });
 
+test('Expanded reasoning content scrolls independently when it is long', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+  const reasoning = page.getByTestId('reasoning-block');
+  await reasoning.locator('summary').click();
+  const content = reasoning.locator('.message-thinking-content');
+  await content.evaluate((element) => {
+    element.innerHTML = Array.from({ length: 80 }, (_, index) => `<p>Reasoning line ${index + 1}</p>`).join('');
+  });
+
+  const dimensions = await content.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    overflowY: getComputedStyle(element).overflowY,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(dimensions.overflowY).toBe('auto');
+  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
+
+  await content.hover();
+  await page.mouse.wheel(0, 240);
+  await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+});
+
 test('Collapsed task strip can be dragged, restored, and reset', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 

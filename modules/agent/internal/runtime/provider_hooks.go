@@ -60,8 +60,9 @@ func providerRequestHookEvent(providerName string, request provider.Request) map
 	messages := make([]any, 0, len(request.Messages))
 	for _, message := range request.Messages {
 		messages = append(messages, map[string]any{
-			"role":    message.Role,
-			"content": providerContentToHook(message.Content),
+			"role":          message.Role,
+			"content":       providerContentToHook(message.Content),
+			"cache_control": message.CacheControl,
 		})
 	}
 	definitions := make([]any, 0, len(request.Tools))
@@ -150,7 +151,8 @@ func providerMessagesFromHook(raw any) ([]provider.Message, error) {
 		if err != nil {
 			return nil, fmt.Errorf("messages[%d].content: %w", index, err)
 		}
-		result = append(result, provider.Message{Role: role, Content: content})
+		cacheControl, _ := item["cache_control"].(bool)
+		result = append(result, provider.Message{Role: role, Content: content, CacheControl: cacheControl})
 	}
 	return result, nil
 }

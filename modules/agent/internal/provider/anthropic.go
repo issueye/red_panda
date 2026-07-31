@@ -47,7 +47,7 @@ func (p AnthropicProvider) completeAttempt(ctx context.Context, req Request, emi
 			body["output_config"] = map[string]any{"effort": effort}
 		}
 	}
-	if system != "" {
+	if len(system) > 0 {
 		body["system"] = system
 	}
 	if len(req.Tools) > 0 {
@@ -100,14 +100,18 @@ func anthropicMessagesURL(raw string) string {
 	return base + "/v1/messages"
 }
 
-func anthropicMessages(req Request) (string, []map[string]any) {
-	var systems []string
+func anthropicMessages(req Request) ([]map[string]any, []map[string]any) {
+	var systems []map[string]any
 	messages := make([]map[string]any, 0, len(req.Messages)+len(req.ToolHistory)*2)
 	for _, message := range req.Messages {
 		if message.Role == "system" {
 			// System prompts stay plain text (Anthropic top-level "system" field).
 			if text := strings.TrimSpace(MessageText(message.Content)); text != "" {
-				systems = append(systems, text)
+				block := map[string]any{"type": "text", "text": text}
+				if message.CacheControl {
+					block["cache_candidate"] = true
+				}
+				systems = append(systems, block)
 			}
 			continue
 		}
@@ -124,13 +128,26 @@ func anthropicMessages(req Request) (string, []map[string]any) {
 			messages = append(messages, map[string]any{"role": "assistant", "content": uses}, map[string]any{"role": "user", "content": results})
 		}
 	}
-	return strings.Join(systems, "\n\n"), messages
+	for index := len(systems) - 1; index >= 0; index-- {
+		if _, ok := systems[index]["cache_candidate"]; ok {
+			delete(systems[index], "cache_candidate")
+			systems[index]["cache_control"] = map[string]any{"type": "ephemeral"}
+			break
+		}
+	}
+	for _, block := range systems {
+		delete(block, "cache_candidate")
+	}
+	return systems, messages
 }
 
 func anthropicTools(definitions []tools.Definition) []map[string]any {
 	items := make([]map[string]any, 0, len(definitions))
 	for _, definition := range definitions {
 		items = append(items, map[string]any{"name": publicToolName(definition.Name), "description": definition.Description, "input_schema": definition.Parameters})
+	}
+	if len(items) > 0 {
+		items[len(items)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
 	}
 	return items
 }
@@ -146,6 +163,12 @@ type anthropicContent struct {
 
 func completeAnthropicResponse(raw []byte, emit func(ProviderChunk) error) error {
 	var response struct {
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			CacheRead    int `json:"cache_read_input_tokens"`
+			CacheWrite   int `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
 		Content []anthropicContent `json:"content"`
 		Error   *struct {
 			Message string `json:"message"`
@@ -157,6 +180,7 @@ func completeAnthropicResponse(raw []byte, emit func(ProviderChunk) error) error
 	if response.Error != nil {
 		return fmt.Errorf("provider error: %s", response.Error.Message)
 	}
+	usage := providerUsageOrNil(ProviderUsage{InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, CacheReadTokens: response.Usage.CacheRead, CacheWriteTokens: response.Usage.CacheWrite})
 	var calls []tools.Call
 	var text strings.Builder
 	var reasoning strings.Builder
@@ -177,10 +201,10 @@ func completeAnthropicResponse(raw []byte, emit func(ProviderChunk) error) error
 		}
 	}
 	if len(calls) > 0 {
-		return emit(ProviderChunk{ToolCalls: calls})
+		return emit(ProviderChunk{ToolCalls: calls, Usage: usage})
 	}
 	if text.Len() > 0 {
-		if err := emit(ProviderChunk{Delta: text.String()}); err != nil {
+		if err := emit(ProviderChunk{Delta: text.String(), Usage: usage}); err != nil {
 			return err
 		}
 	}
@@ -219,11 +243,35 @@ func completeAnthropicStream(reader io.Reader, emit func(ProviderChunk) error) e
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
+			Message *struct {
+				Usage struct {
+					InputTokens int `json:"input_tokens"`
+					CacheRead   int `json:"cache_read_input_tokens"`
+					CacheWrite  int `json:"cache_creation_input_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+			Usage struct {
+				OutputTokens int `json:"output_tokens"`
+				CacheRead    int `json:"cache_read_input_tokens"`
+				CacheWrite   int `json:"cache_creation_input_tokens"`
+			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			return err
 		}
 		switch event.Type {
+		case "message_start":
+			if event.Message != nil && (event.Message.Usage.InputTokens > 0 || event.Message.Usage.CacheRead > 0 || event.Message.Usage.CacheWrite > 0) {
+				if err := emit(ProviderChunk{Usage: &ProviderUsage{InputTokens: event.Message.Usage.InputTokens, CacheReadTokens: event.Message.Usage.CacheRead, CacheWriteTokens: event.Message.Usage.CacheWrite}}); err != nil {
+					return err
+				}
+			}
+		case "message_delta":
+			if event.Usage.OutputTokens > 0 || event.Usage.CacheRead > 0 || event.Usage.CacheWrite > 0 {
+				if err := emit(ProviderChunk{Usage: &ProviderUsage{OutputTokens: event.Usage.OutputTokens, CacheReadTokens: event.Usage.CacheRead, CacheWriteTokens: event.Usage.CacheWrite}}); err != nil {
+					return err
+				}
+			}
 		case "content_block_start":
 			if event.ContentBlock.Type == "tool_use" {
 				calls[event.Index] = &anthropicStreamCall{index: event.Index, id: event.ContentBlock.ID, name: event.ContentBlock.Name}
