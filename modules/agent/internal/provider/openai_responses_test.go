@@ -75,13 +75,14 @@ func TestOpenAIResponsesSendsSupportedCacheIdentity(t *testing.T) {
 
 	p := OpenAIResponsesProvider{providerConfig{BaseURL: server.URL, APIKey: "secret", Model: "m", Client: server.Client()}}
 	err := p.Complete(context.Background(), Request{
-		Prompt:  PromptEnvelope{StablePrefix: []Message{{Role: "system", Content: "stable"}}, TurnTail: []Message{{Role: "user", Content: "hello"}}, CacheEpoch: "epoch-123"},
-		Options: RequestOptions{CacheMode: CacheModeExplicit, CacheKeySupported: true, CacheRetention: "24h"},
+		SessionID: "session-123",
+		Prompt:    PromptEnvelope{StablePrefix: []Message{{Role: "system", Content: "stable"}}, TurnTail: []Message{{Role: "user", Content: "hello"}}, CacheEpoch: "epoch-123"},
+		Options:   RequestOptions{CacheMode: CacheModeExplicit, CacheKeySupported: true, CacheRetention: "24h"},
 	}, func(ProviderChunk) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body["prompt_cache_key"] != "epoch-123" || body["prompt_cache_retention"] != "24h" {
+	if body["prompt_cache_key"] != ComputeScopedCacheKey("session-123", "epoch-123") || body["prompt_cache_retention"] != "24h" {
 		t.Fatalf("cache fields = %#v", body)
 	}
 }

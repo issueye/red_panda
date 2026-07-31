@@ -5,11 +5,12 @@ import (
 	"strings"
 )
 
+const providerUserAgent = "red_panda/2.0"
+
 var safeProviderHeaders = map[string]string{
 	"anthropic-beta":      "Anthropic-Beta",
 	"openai-organization": "OpenAI-Organization",
 	"openai-project":      "OpenAI-Project",
-	"user-agent":          "User-Agent",
 	"x-request-id":        "X-Request-ID",
 }
 
@@ -36,4 +37,5 @@ func applySafeHeaders(request *http.Request, headers map[string]string) {
 	for name, value := range SanitizeHeaders(headers) {
 		request.Header.Set(name, value)
 	}
+	request.Header.Set("User-Agent", providerUserAgent)
 }

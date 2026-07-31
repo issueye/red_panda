@@ -72,6 +72,11 @@ func migratePromptCacheMetadata(db *gorm.DB) error {
 			Update("cache_mode", gorm.Expr("CASE WHEN LOWER(provider) = ? THEN ? ELSE ? END", "anthropic", "explicit", "implicit")).Error; err != nil {
 			return err
 		}
+		if err := db.Exec(`UPDATE provider_profiles
+			SET cache_key_supported = 1
+			WHERE COALESCE(cache_key_configured, 0) = 0 AND LOWER(provider) = ?`, "openai_responses").Error; err != nil {
+			return err
+		}
 	}
 	if !db.Migrator().HasTable(&model.SessionCompaction{}) {
 		return nil

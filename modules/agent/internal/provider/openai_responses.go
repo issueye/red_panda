@@ -37,7 +37,7 @@ func (p OpenAIResponsesProvider) completeAttempt(ctx context.Context, req Reques
 	}
 	body := map[string]any{"model": model, "input": openAIResponsesInput(req), "stream": p.Stream}
 	if responseCacheKeyEnabled(req.Options) && strings.TrimSpace(req.Prompt.CacheEpoch) != "" {
-		body["prompt_cache_key"] = req.Prompt.CacheEpoch
+		body["prompt_cache_key"] = ComputeScopedCacheKey(req.SessionID, req.Prompt.CacheEpoch)
 		if retention := strings.TrimSpace(req.Options.CacheRetention); retention != "" {
 			body["prompt_cache_retention"] = retention
 		}
@@ -105,6 +105,7 @@ func openAIResponsesInput(req Request) []map[string]any {
 		items = append(items, map[string]any{"role": message.Role, "content": openAIResponsesContent(message.Content)})
 	}
 	for _, round := range toolRoundsForRequest(req) {
+		contents := toolRoundModelContents(round)
 		for _, exchange := range round {
 			arguments, _ := json.Marshal(exchange.Call.Arguments)
 			items = append(items, map[string]any{
@@ -112,10 +113,10 @@ func openAIResponsesInput(req Request) []map[string]any {
 				"name": publicToolName(exchange.Call.Name), "arguments": string(arguments),
 			})
 		}
-		for _, exchange := range round {
+		for index, exchange := range round {
 			items = append(items, map[string]any{
 				"type": "function_call_output", "call_id": exchange.Call.ID,
-				"output": toolExchangeContent(exchange.Result),
+				"output": contents[index],
 			})
 		}
 	}

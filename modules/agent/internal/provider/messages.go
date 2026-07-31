@@ -7,6 +7,8 @@ import (
 	"redpanda/protocol/tools"
 )
 
+const maxToolRoundModelBytes = 8 * 1024
+
 func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 	promptMessages := req.Prompt.FlattenMessages()
 	messages := make([]map[string]any, 0, len(promptMessages)+len(req.ToolHistory)*2)
@@ -20,6 +22,7 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 		if len(round) == 0 {
 			continue
 		}
+		contents := toolRoundModelContents(round)
 		toolCalls := make([]map[string]any, 0, len(round))
 		for _, exchange := range round {
 			arguments, _ := json.Marshal(exchange.Call.Arguments)
@@ -36,12 +39,12 @@ func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 			"role":       "assistant",
 			"tool_calls": toolCalls,
 		})
-		for _, exchange := range round {
+		for index, exchange := range round {
 			messages = append(messages, map[string]any{
 				"role":         "tool",
 				"tool_call_id": exchange.Call.ID,
 				"name":         publicToolName(exchange.Call.Name),
-				"content":      toolExchangeContent(exchange.Result),
+				"content":      contents[index],
 			})
 		}
 	}
@@ -67,6 +70,21 @@ func toolRoundsForRequest(req ProviderRequest) [][]ToolExchange {
 // 格式化归属 protocol/tools，避免 provider 依赖 agent/internal/tools（docs/39 Wave 2）。
 func toolExchangeContent(result tools.Result) string {
 	return tools.ModelFacingContent(result)
+}
+
+func toolRoundModelContents(round []ToolExchange) []string {
+	if len(round) == 0 {
+		return nil
+	}
+	perResult := maxToolRoundModelBytes / len(round)
+	if perResult < 512 {
+		perResult = 512
+	}
+	contents := make([]string, len(round))
+	for index, exchange := range round {
+		contents[index] = tools.ModelFacingContentWithLimit(exchange.Result, perResult)
+	}
+	return contents
 }
 
 func openAICompatibleTools(definitions []tools.Definition) []map[string]any {

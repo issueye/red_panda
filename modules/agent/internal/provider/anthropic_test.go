@@ -139,8 +139,15 @@ func TestAnthropicStreamUsageIncludesCacheTokens(t *testing.T) {
 	if err := completeAnthropicStream(strings.NewReader(stream), func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if len(chunks) != 3 || chunks[0].Usage == nil || chunks[0].Usage.CacheReadTokens != 80 || chunks[0].Usage.CacheWriteTokens != 20 || chunks[1].Usage.OutputTokens != 7 || !chunks[2].Final {
+	if len(chunks) != 3 || chunks[0].Usage == nil || chunks[0].Usage.InputTokens != 200 || chunks[0].Usage.CacheReadTokens != 80 || chunks[0].Usage.CacheWriteTokens != 20 || chunks[1].Usage.OutputTokens != 7 || !chunks[2].Final {
 		t.Fatalf("chunks = %#v", chunks)
+	}
+}
+
+func TestAnthropicProviderUsageUsesTotalInputTokens(t *testing.T) {
+	usage := anthropicProviderUsage(77, 8, 34944, 0)
+	if usage == nil || usage.InputTokens != 35021 || usage.CacheReadTokens != 34944 || usage.OutputTokens != 8 {
+		t.Fatalf("usage = %#v", usage)
 	}
 }
 

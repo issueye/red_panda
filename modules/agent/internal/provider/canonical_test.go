@@ -62,6 +62,22 @@ func TestComputeCacheEpochOnlyTracksCacheableInputs(t *testing.T) {
 	}
 }
 
+func TestComputeScopedCacheKeyIsStablePerSession(t *testing.T) {
+	first := ComputeScopedCacheKey("session-a", "epoch-1")
+	if first == "" || first != ComputeScopedCacheKey("session-a", "epoch-1") {
+		t.Fatalf("scoped key is not stable: %q", first)
+	}
+	if first == ComputeScopedCacheKey("session-b", "epoch-1") {
+		t.Fatal("different sessions shared a cache key")
+	}
+	if first == ComputeScopedCacheKey("session-a", "epoch-2") {
+		t.Fatal("different epochs shared a cache key")
+	}
+	if got := ComputeScopedCacheKey("", "epoch-1"); got != "epoch-1" {
+		t.Fatalf("empty session fallback = %q", got)
+	}
+}
+
 func TestPromptEnvelopeFlattenMessagesReturnsProtocolOrder(t *testing.T) {
 	prompt := PromptEnvelope{
 		StablePrefix:  []Message{{Role: "system", Content: "stable"}},

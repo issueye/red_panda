@@ -99,6 +99,22 @@ func TestNormalizeCacheModeAndProfileDefaults(t *testing.T) {
 	if got := effectiveProfileCacheMode("anthropic", ""); got != "explicit" {
 		t.Fatalf("effectiveProfileCacheMode(anthropic) = %q", got)
 	}
+	if !defaultCacheKeySupported("openai_responses") {
+		t.Fatal("OpenAI Responses should enable cache keys by default")
+	}
+	if defaultCacheKeySupported("openai_compatible") || defaultCacheKeySupported("anthropic") {
+		t.Fatal("cache keys should remain opt-in outside OpenAI Responses")
+	}
+	disabled := false
+	if cacheKeySupportedValue("openai_responses", &disabled) {
+		t.Fatal("an explicit false must override the OpenAI Responses default")
+	}
+	if !effectiveProfileCacheKeySupported("openai_responses", false, false) {
+		t.Fatal("an unconfigured legacy Responses profile should receive the default")
+	}
+	if effectiveProfileCacheKeySupported("openai_responses", false, true) {
+		t.Fatal("an explicitly disabled Responses profile should remain disabled")
+	}
 }
 
 func TestProviderProfileDTOIncludesCacheCapabilities(t *testing.T) {

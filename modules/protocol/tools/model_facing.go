@@ -16,14 +16,14 @@ const ResultSchemaV1 = "red_panda.tool_result.v1"
 const maxResultForModel = 16 * 1024
 
 type modelFacingEnvelope struct {
-	Schema string             `json:"schema"`
-	Tool   string             `json:"tool"`
-	Status string             `json:"status"`
-	OK     bool               `json:"ok"`
-	Text   string             `json:"text,omitempty"`
-	Data   any                `json:"data,omitempty"`
-	Error  string             `json:"error,omitempty"`
-	Meta   modelFacingMeta    `json:"meta"`
+	Schema string          `json:"schema"`
+	Tool   string          `json:"tool"`
+	Status string          `json:"status"`
+	OK     bool            `json:"ok"`
+	Text   string          `json:"text,omitempty"`
+	Data   any             `json:"data,omitempty"`
+	Error  string          `json:"error,omitempty"`
+	Meta   modelFacingMeta `json:"meta"`
 }
 
 type modelFacingMeta struct {
@@ -37,6 +37,15 @@ type modelFacingMeta struct {
 // ModelFacingContent returns the standardized, size-limited tool result view for
 // the next provider turn. Full Result.Output remains for UI and event streams.
 func ModelFacingContent(result Result) string {
+	return ModelFacingContentWithLimit(result, maxResultForModel)
+}
+
+// ModelFacingContentWithLimit returns the same stable envelope while applying
+// a caller-provided total byte budget. Full Result.Output remains unchanged.
+func ModelFacingContentWithLimit(result Result, maxBytes int) string {
+	if maxBytes <= 0 || maxBytes > maxResultForModel {
+		maxBytes = maxResultForModel
+	}
 	env, ok := parseModelFacingEnvelope(result.Output)
 	if !ok {
 		raw := strings.TrimSpace(result.Output)
@@ -50,7 +59,6 @@ func ModelFacingContent(result Result) string {
 			OK:     result.Status == CallStatusCompleted,
 			Text:   raw,
 			Error:  strings.TrimSpace(result.Error),
-			Data:   map[string]any{"content": raw},
 			Meta: modelFacingMeta{
 				DurationMS: result.DurationMS,
 				Note:       "legacy output wrapped for model",
@@ -68,30 +76,37 @@ func ModelFacingContent(result Result) string {
 
 	original := len(text)
 	truncated := env.Meta.Truncated
-	if original > maxResultForModel {
-		text = trimToBytes(text, maxResultForModel)
-		truncated = true
-	}
 	env.Text = text
-	env.Meta.Truncated = truncated
 	if original > 0 {
 		env.Meta.OriginalBytes = original
 	}
-	if truncated {
-		if env.Meta.Note == "" {
-			env.Meta.Note = fmt.Sprintf("payload truncated for transport; original_bytes=%d", original)
+
+	if len(mustMarshalModelFacing(env)) > maxBytes && env.Data != nil {
+		env.Data = nil
+		truncated = true
+	}
+	if truncated && env.Meta.Note == "" {
+		env.Meta.Note = fmt.Sprintf("payload truncated for model context; original_bytes=%d", original)
+	}
+	env.Meta.Truncated = truncated
+
+	for {
+		raw := mustMarshalModelFacing(env)
+		if len(raw) <= maxBytes || env.Text == "" {
+			return raw
 		}
-		if env.Data != nil {
-			env.Data = map[string]any{
-				"omitted":        true,
-				"reason":         "size_limit_for_model_context",
-				"original_bytes": original,
-				"full_output_in": "tool_finished.event / UI tool card",
-				"preview":        text,
-			}
+		overflow := len(raw) - maxBytes
+		nextBytes := len(env.Text) - overflow - 1
+		if nextBytes <= 0 {
+			env.Text = ""
+		} else {
+			env.Text = trimToBytes(env.Text, nextBytes)
+		}
+		env.Meta.Truncated = true
+		if env.Meta.Note == "" {
+			env.Meta.Note = fmt.Sprintf("payload truncated for model context; original_bytes=%d", original)
 		}
 	}
-	return mustMarshalModelFacing(env)
 }
 
 func parseModelFacingEnvelope(raw string) (modelFacingEnvelope, bool) {
@@ -198,15 +213,16 @@ func trimToBytes(value string, max int) string {
 	if max <= 0 || len(value) <= max {
 		return value
 	}
-	if max < 4 {
+	const ellipsis = "…"
+	if max <= len(ellipsis) {
 		return value[:max]
 	}
-	cut := max - 1
+	cut := max - len(ellipsis)
 	for cut > 0 && !utf8.RuneStart(value[cut]) {
 		cut--
 	}
 	if cut <= 0 {
-		cut = max
+		return value[:max]
 	}
-	return value[:cut] + "…"
+	return value[:cut] + ellipsis
 }

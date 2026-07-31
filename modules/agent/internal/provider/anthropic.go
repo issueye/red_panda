@@ -121,11 +121,12 @@ func anthropicMessages(req Request) ([]map[string]any, []map[string]any) {
 		messages = append(messages, map[string]any{"role": message.Role, "content": anthropicMessageContent(message.Content)})
 	}
 	for _, round := range toolRoundsForRequest(req) {
+		contents := toolRoundModelContents(round)
 		uses := make([]map[string]any, 0, len(round))
 		results := make([]map[string]any, 0, len(round))
-		for _, exchange := range round {
+		for index, exchange := range round {
 			uses = append(uses, map[string]any{"type": "tool_use", "id": exchange.Call.ID, "name": publicToolName(exchange.Call.Name), "input": exchange.Call.Arguments})
-			results = append(results, map[string]any{"type": "tool_result", "tool_use_id": exchange.Call.ID, "content": toolExchangeContent(exchange.Result), "is_error": exchange.Result.Status != tools.CallStatusCompleted})
+			results = append(results, map[string]any{"type": "tool_result", "tool_use_id": exchange.Call.ID, "content": contents[index], "is_error": exchange.Result.Status != tools.CallStatusCompleted})
 		}
 		if len(uses) > 0 {
 			messages = append(messages, map[string]any{"role": "assistant", "content": uses}, map[string]any{"role": "user", "content": results})
@@ -177,7 +178,7 @@ func completeAnthropicResponse(raw []byte, emit func(ProviderChunk) error) error
 	if response.Error != nil {
 		return fmt.Errorf("provider error: %s", response.Error.Message)
 	}
-	usage := providerUsageOrNil(ProviderUsage{InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, CacheReadTokens: response.Usage.CacheRead, CacheWriteTokens: response.Usage.CacheWrite})
+	usage := anthropicProviderUsage(response.Usage.InputTokens, response.Usage.OutputTokens, response.Usage.CacheRead, response.Usage.CacheWrite)
 	var calls []tools.Call
 	var text strings.Builder
 	var reasoning strings.Builder
@@ -206,6 +207,15 @@ func completeAnthropicResponse(raw []byte, emit func(ProviderChunk) error) error
 		}
 	}
 	return emit(ProviderChunk{Final: true})
+}
+
+func anthropicProviderUsage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int) *ProviderUsage {
+	return providerUsageOrNil(ProviderUsage{
+		InputTokens:      inputTokens + cacheReadTokens + cacheWriteTokens,
+		OutputTokens:     outputTokens,
+		CacheReadTokens:  cacheReadTokens,
+		CacheWriteTokens: cacheWriteTokens,
+	})
 }
 
 type anthropicStreamCall struct {
@@ -259,13 +269,13 @@ func completeAnthropicStream(reader io.Reader, emit func(ProviderChunk) error) e
 		switch event.Type {
 		case "message_start":
 			if event.Message != nil && (event.Message.Usage.InputTokens > 0 || event.Message.Usage.CacheRead > 0 || event.Message.Usage.CacheWrite > 0) {
-				if err := emit(ProviderChunk{Usage: &ProviderUsage{InputTokens: event.Message.Usage.InputTokens, CacheReadTokens: event.Message.Usage.CacheRead, CacheWriteTokens: event.Message.Usage.CacheWrite}}); err != nil {
+				if err := emit(ProviderChunk{Usage: anthropicProviderUsage(event.Message.Usage.InputTokens, 0, event.Message.Usage.CacheRead, event.Message.Usage.CacheWrite)}); err != nil {
 					return err
 				}
 			}
 		case "message_delta":
 			if event.Usage.OutputTokens > 0 || event.Usage.CacheRead > 0 || event.Usage.CacheWrite > 0 {
-				if err := emit(ProviderChunk{Usage: &ProviderUsage{OutputTokens: event.Usage.OutputTokens, CacheReadTokens: event.Usage.CacheRead, CacheWriteTokens: event.Usage.CacheWrite}}); err != nil {
+				if err := emit(ProviderChunk{Usage: anthropicProviderUsage(0, event.Usage.OutputTokens, event.Usage.CacheRead, event.Usage.CacheWrite)}); err != nil {
 					return err
 				}
 			}

@@ -254,14 +254,15 @@ type ProviderProfile struct {
 	// HTTPProxy is an optional outbound HTTP(S)/SOCKS5 proxy used for this
 	// profile's provider requests (e.g. http://127.0.0.1:7890). Empty falls
 	// back to the environment proxy (HTTP_PROXY / HTTPS_PROXY).
-	HTTPProxy         string
-	CacheMode         string
-	CacheKeySupported bool
-	CacheRetention    string
-	MinCacheTokens    int
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	DeletedAt         *time.Time
+	HTTPProxy          string
+	CacheMode          string
+	CacheKeySupported  bool
+	CacheKeyConfigured bool
+	CacheRetention     string
+	MinCacheTokens     int
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
 }
 
 type ProviderModel struct {

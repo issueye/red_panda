@@ -32,9 +32,23 @@ func TestOpenAICompatibleMessagesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `[{"content":"policy","role":"system"},{"content":"first question","role":"user"},{"content":"first answer","role":"assistant"},{"content":"current question","role":"user"},{"role":"assistant","tool_calls":[{"function":{"arguments":"{\"path\":\"README.md\"}","name":"workspace__read_file"},"id":"call_1","type":"function"},{"function":{"arguments":"{\"status\":\"continue\"}","name":"goal__assess"},"id":"call_2","type":"function"}]},{"content":"{\"schema\":\"red_panda.tool_result.v1\",\"tool\":\"workspace.read_file\",\"status\":\"completed\",\"ok\":true,\"text\":\"project readme\",\"data\":{\"content\":\"project readme\"},\"meta\":{\"original_bytes\":14,\"note\":\"legacy output wrapped for model\"}}","name":"workspace__read_file","role":"tool","tool_call_id":"call_1"},{"content":"{\"schema\":\"red_panda.tool_result.v1\",\"tool\":\"goal.assess\",\"status\":\"failed\",\"ok\":false,\"text\":\"not ready\",\"data\":{\"content\":\"not ready\"},\"error\":\"not ready\",\"meta\":{\"original_bytes\":9,\"note\":\"legacy output wrapped for model\"}}","name":"goal__assess","role":"tool","tool_call_id":"call_2"}]`
+	want := `[{"content":"policy","role":"system"},{"content":"first question","role":"user"},{"content":"first answer","role":"assistant"},{"content":"current question","role":"user"},{"role":"assistant","tool_calls":[{"function":{"arguments":"{\"path\":\"README.md\"}","name":"workspace__read_file"},"id":"call_1","type":"function"},{"function":{"arguments":"{\"status\":\"continue\"}","name":"goal__assess"},"id":"call_2","type":"function"}]},{"content":"{\"schema\":\"red_panda.tool_result.v1\",\"tool\":\"workspace.read_file\",\"status\":\"completed\",\"ok\":true,\"text\":\"project readme\",\"meta\":{\"original_bytes\":14,\"note\":\"legacy output wrapped for model\"}}","name":"workspace__read_file","role":"tool","tool_call_id":"call_1"},{"content":"{\"schema\":\"red_panda.tool_result.v1\",\"tool\":\"goal.assess\",\"status\":\"failed\",\"ok\":false,\"text\":\"not ready\",\"error\":\"not ready\",\"meta\":{\"original_bytes\":9,\"note\":\"legacy output wrapped for model\"}}","name":"goal__assess","role":"tool","tool_call_id":"call_2"}]`
 	if string(got) != want {
 		t.Fatalf("serialized messages changed\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestToolRoundModelContentsSharesRoundBudget(t *testing.T) {
+	round := []ToolExchange{
+		{Result: tools.Result{Name: "workspace.read_file", Status: tools.CallStatusCompleted, Output: strings.Repeat("a", maxToolRoundModelBytes)}},
+		{Result: tools.Result{Name: "workspace.read_file", Status: tools.CallStatusCompleted, Output: strings.Repeat("b", maxToolRoundModelBytes)}},
+	}
+	contents := toolRoundModelContents(round)
+	if len(contents) != len(round) {
+		t.Fatalf("contents = %d, want %d", len(contents), len(round))
+	}
+	if got := len(contents[0]) + len(contents[1]); got > maxToolRoundModelBytes {
+		t.Fatalf("tool round model content = %d bytes, want <= %d", got, maxToolRoundModelBytes)
 	}
 }
 

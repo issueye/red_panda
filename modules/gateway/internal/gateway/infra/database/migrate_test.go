@@ -74,7 +74,7 @@ func TestMigrateDefaultsExistingProviderProfilesToStreaming(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.Table("provider_profiles").Create(&legacyProviderProfile{
-		ID: "provider_legacy", Name: "legacy", Provider: "openai_compatible", BaseURL: "https://example.test", Active: true,
+		ID: "provider_legacy", Name: "legacy", Provider: "openai_responses", BaseURL: "https://example.test", Active: true,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,10 @@ func TestMigrateDefaultsExistingProviderProfilesToStreaming(t *testing.T) {
 		t.Fatal("existing provider profile should default to streaming")
 	}
 	if profile.CacheMode != "implicit" {
-		t.Fatalf("existing compatible profile cache_mode = %q, want implicit", profile.CacheMode)
+		t.Fatalf("existing Responses profile cache_mode = %q, want implicit", profile.CacheMode)
+	}
+	if !profile.CacheKeySupported || profile.CacheKeyConfigured {
+		t.Fatalf("existing Responses profile cache key defaults = supported:%v configured:%v", profile.CacheKeySupported, profile.CacheKeyConfigured)
 	}
 	// http_proxy 列在 Migrate 中为老库补建,默认空串(回退到环境代理)。
 	if profile.HTTPProxy != "" {

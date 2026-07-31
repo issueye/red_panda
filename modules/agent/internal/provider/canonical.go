@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"sort"
+	"strings"
 
 	"redpanda/protocol/tools"
 )
@@ -58,6 +59,21 @@ func ComputeCacheEpoch(providerName, model string, definitions []tools.Definitio
 		raw = []byte("prompt-cache-epoch:unsupported-value")
 	}
 	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// ComputeScopedCacheKey isolates provider cache routing per conversation while
+// retaining the same key across continued runs in that session.
+func ComputeScopedCacheKey(sessionID, cacheEpoch string) string {
+	epoch := strings.TrimSpace(cacheEpoch)
+	if epoch == "" {
+		return ""
+	}
+	scope := strings.TrimSpace(sessionID)
+	if scope == "" {
+		return epoch
+	}
+	sum := sha256.Sum256([]byte(scope + "\x00" + epoch))
 	return hex.EncodeToString(sum[:])
 }
 

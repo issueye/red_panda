@@ -143,21 +143,22 @@ func (s ProviderProfileService) Create(input ProviderProfileCreate) (ProviderPro
 		return ProviderProfileDTO{}, fmt.Errorf("min_cache_tokens must be >= 0")
 	}
 	row, err := s.repos.Providers.Create(model.ProviderProfile{
-		Name:              strings.TrimSpace(input.Name),
-		Provider:          profile,
-		BaseURL:           strings.TrimRight(baseURL, "/"),
-		Model:             defaultModel,
-		MaxTokens:         maxTokens,
-		Models:            models,
-		APIKeySecret:      input.APIKey,
-		IsDefault:         input.IsDefault,
-		Stream:            stream,
-		SupportsVision:    supportsVision,
-		HTTPProxy:         proxy,
-		CacheMode:         cacheMode,
-		CacheKeySupported: boolValue(input.CacheKeySupported),
-		CacheRetention:    strings.TrimSpace(input.CacheRetention),
-		MinCacheTokens:    input.MinCacheTokens,
+		Name:               strings.TrimSpace(input.Name),
+		Provider:           profile,
+		BaseURL:            strings.TrimRight(baseURL, "/"),
+		Model:              defaultModel,
+		MaxTokens:          maxTokens,
+		Models:             models,
+		APIKeySecret:       input.APIKey,
+		IsDefault:          input.IsDefault,
+		Stream:             stream,
+		SupportsVision:     supportsVision,
+		HTTPProxy:          proxy,
+		CacheMode:          cacheMode,
+		CacheKeySupported:  cacheKeySupportedValue(profile, input.CacheKeySupported),
+		CacheKeyConfigured: input.CacheKeySupported != nil,
+		CacheRetention:     strings.TrimSpace(input.CacheRetention),
+		MinCacheTokens:     input.MinCacheTokens,
 	})
 	if err != nil {
 		return ProviderProfileDTO{}, err
@@ -171,32 +172,35 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 		return ProviderProfileDTO{}, err
 	}
 	next := model.ProviderProfile{
-		ID:                id,
-		Name:              current.Name,
-		Provider:          current.Provider,
-		BaseURL:           current.BaseURL,
-		Model:             current.Model,
-		MaxTokens:         current.MaxTokens,
-		Models:            current.Models,
-		APIKeySecret:      current.APIKeySecret,
-		IsDefault:         current.IsDefault,
-		Stream:            current.Stream,
-		Active:            current.Active,
-		SupportsVision:    current.SupportsVision,
-		HTTPProxy:         current.HTTPProxy,
-		CacheMode:         current.CacheMode,
-		CacheKeySupported: current.CacheKeySupported,
-		CacheRetention:    current.CacheRetention,
-		MinCacheTokens:    current.MinCacheTokens,
+		ID:                 id,
+		Name:               current.Name,
+		Provider:           current.Provider,
+		BaseURL:            current.BaseURL,
+		Model:              current.Model,
+		MaxTokens:          current.MaxTokens,
+		Models:             current.Models,
+		APIKeySecret:       current.APIKeySecret,
+		IsDefault:          current.IsDefault,
+		Stream:             current.Stream,
+		Active:             current.Active,
+		SupportsVision:     current.SupportsVision,
+		HTTPProxy:          current.HTTPProxy,
+		CacheMode:          current.CacheMode,
+		CacheKeySupported:  current.CacheKeySupported,
+		CacheKeyConfigured: current.CacheKeyConfigured,
+		CacheRetention:     current.CacheRetention,
+		MinCacheTokens:     current.MinCacheTokens,
 	}
 	if input.Name != nil {
 		next.Name = strings.TrimSpace(*input.Name)
 	}
+	providerChanged := false
 	if input.Provider != nil {
 		profile, err := normalizeProvider(*input.Provider)
 		if err != nil {
 			return ProviderProfileDTO{}, err
 		}
+		providerChanged = !strings.EqualFold(current.Provider, profile)
 		next.Provider = profile
 	}
 	if input.BaseURL != nil {
@@ -263,6 +267,10 @@ func (s ProviderProfileService) Update(id string, input ProviderProfileUpdate) (
 	}
 	if input.CacheKeySupported != nil {
 		next.CacheKeySupported = *input.CacheKeySupported
+		next.CacheKeyConfigured = true
+	} else if providerChanged {
+		next.CacheKeySupported = defaultCacheKeySupported(next.Provider)
+		next.CacheKeyConfigured = false
 	}
 	if input.CacheRetention != nil {
 		next.CacheRetention = strings.TrimSpace(*input.CacheRetention)
@@ -452,8 +460,22 @@ func effectiveProfileCacheMode(providerName, mode string) string {
 	return normalized
 }
 
-func boolValue(value *bool) bool {
-	return value != nil && *value
+func defaultCacheKeySupported(providerName string) bool {
+	return strings.EqualFold(strings.TrimSpace(providerName), "openai_responses")
+}
+
+func cacheKeySupportedValue(providerName string, value *bool) bool {
+	if value != nil {
+		return *value
+	}
+	return defaultCacheKeySupported(providerName)
+}
+
+func effectiveProfileCacheKeySupported(providerName string, supported, configured bool) bool {
+	if configured {
+		return supported
+	}
+	return defaultCacheKeySupported(providerName)
 }
 
 // normalizeProviderHTTPProxy trims and validates an optional HTTP(S)/SOCKS5
@@ -519,7 +541,7 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		SupportsVision:    row.SupportsVision,
 		HTTPProxy:         row.HTTPProxy,
 		CacheMode:         effectiveProfileCacheMode(row.Provider, row.CacheMode),
-		CacheKeySupported: row.CacheKeySupported,
+		CacheKeySupported: effectiveProfileCacheKeySupported(row.Provider, row.CacheKeySupported, row.CacheKeyConfigured),
 		CacheRetention:    row.CacheRetention,
 		MinCacheTokens:    row.MinCacheTokens,
 		CreatedAt:         row.CreatedAt,

@@ -21,11 +21,11 @@ func TestSanitizeHeadersAllowsOnlySafeNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Header.Set("Authorization", "Bearer host-secret")
-	applySafeHeaders(request, map[string]string{"Authorization": "Bearer attacker", "User-Agent": "redpanda-test"})
+	applySafeHeaders(request, map[string]string{"Authorization": "Bearer attacker", "User-Agent": "attacker-agent"})
 	if got := request.Header.Get("Authorization"); got != "Bearer host-secret" {
 		t.Fatalf("authorization = %q", got)
 	}
-	if got := request.Header.Get("User-Agent"); got != "redpanda-test" {
+	if got := request.Header.Get("User-Agent"); got != providerUserAgent {
 		t.Fatalf("user-agent = %q", got)
 	}
 }
