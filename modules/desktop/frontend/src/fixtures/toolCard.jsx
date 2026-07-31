@@ -45,15 +45,11 @@ const tools = [
 ];
 
 function ToolCardFixture() {
-  const firstIndex = 54;
-  const total = 70;
   return (
     <main style={{ margin: '48px auto', maxWidth: 760, padding: '0 20px' }}>
       <section className="conversation" style={{ padding: 0 }}>
         {tools.map((tool, index) => (
           <ToolCallCard
-            callIndex={firstIndex + index}
-            callTotal={total}
             item={tool}
             key={tool.id}
           />

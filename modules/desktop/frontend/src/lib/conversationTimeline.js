@@ -47,21 +47,6 @@ export function compareToolCallOrder(left, right) {
   return String(left?.id || '').localeCompare(String(right?.id || ''));
 }
 
-/**
- * Map tool id → 1-based call index for display (e.g. 1/12).
- * @param {Array<Record<string, unknown>>} tools
- * @returns {Map<string, number>}
- */
-export function buildToolCallIndexMap(tools = []) {
-  const sorted = [...tools].sort(compareToolCallOrder);
-  const map = new Map();
-  sorted.forEach((tool, index) => {
-    if (tool?.id == null || tool.id === '') return;
-    map.set(String(tool.id), index + 1);
-  });
-  return map;
-}
-
 export function buildConversationTimeline(messages = [], tools = [], permissions = []) {
   const items = [];
   messages.forEach((item) => items.push(timelineItem('message', item, items.length)));

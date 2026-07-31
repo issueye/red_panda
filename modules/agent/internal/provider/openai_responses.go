@@ -36,8 +36,12 @@ func (p OpenAIResponsesProvider) completeAttempt(ctx context.Context, req Reques
 		model = p.Model
 	}
 	body := map[string]any{"model": model, "input": openAIResponsesInput(req), "stream": p.Stream}
-	if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
-		body["reasoning"] = map[string]any{"effort": effort}
+	if req.Options.EnableThinking {
+		reasoning := map[string]any{"summary": "auto"}
+		if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
+			reasoning["effort"] = effort
+		}
+		body["reasoning"] = reasoning
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = openAIResponsesTools(req.Tools)
@@ -149,6 +153,7 @@ func completeOpenAIResponsesResponse(raw []byte, emit func(ProviderChunk) error)
 	}
 	var calls []tools.Call
 	var text strings.Builder
+	var reasoning strings.Builder
 	for _, item := range response.Output {
 		switch item.Type {
 		case "message":
@@ -159,6 +164,17 @@ func completeOpenAIResponsesResponse(raw []byte, emit func(ProviderChunk) error)
 			}
 		case "function_call":
 			calls = append(calls, responseToolCall(item.CallID, item.Name, item.Arguments))
+		case "reasoning":
+			for _, content := range item.Content {
+				if content.Type == "summary_text" {
+					reasoning.WriteString(content.Text)
+				}
+			}
+		}
+	}
+	if reasoning.Len() > 0 {
+		if err := emit(ProviderChunk{ReasoningDelta: reasoning.String()}); err != nil {
+			return err
 		}
 	}
 	if len(calls) > 0 {
@@ -207,6 +223,12 @@ func completeOpenAIResponsesStream(reader io.Reader, emit func(ProviderChunk) er
 		case "response.output_text.delta":
 			if event.Delta != "" {
 				if err := emit(ProviderChunk{Delta: event.Delta}); err != nil {
+					return err
+				}
+			}
+		case "response.reasoning_summary_text.delta":
+			if event.Delta != "" {
+				if err := emit(ProviderChunk{ReasoningDelta: event.Delta}); err != nil {
 					return err
 				}
 			}

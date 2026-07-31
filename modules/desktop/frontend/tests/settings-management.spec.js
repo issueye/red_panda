@@ -68,6 +68,29 @@ test('provider profiles can configure multiple models and reasoning defaults', a
   await expect(editor.getByRole('button', { name: '默认模型', exact: true })).toBeVisible();
 });
 
+test('provider profile fetches models from configured OpenAI-compatible endpoint', async ({ page }) => {
+  let requestBody;
+  await page.route('**/api/v1/provider-profiles/models', async (route) => {
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data: { models: ['gpt-4.1-mini', 'gpt-5'] } }),
+    });
+  });
+  await page.getByLabel('基础 URL').fill('https://api.example.test/v1');
+  await page.getByLabel('API 密钥').fill('sk-test');
+  await page.getByRole('button', { name: '获取模型' }).click();
+
+  const editor = page.getByTestId('provider-model-editor');
+  await expect(editor.getByTestId('provider-model-row')).toHaveCount(2);
+  await expect(editor.getByLabel('模型 1 ID')).toHaveValue('gpt-4.1-mini');
+  await expect(editor.getByLabel('模型 2 ID')).toHaveValue('gpt-5');
+  expect(requestBody).toMatchObject({
+    base_url: 'https://api.example.test/v1',
+    api_key: 'sk-test',
+  });
+});
+
 test('settings modal closes when clicking the backdrop', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: '设置' });
   await expect(dialog).toBeVisible();

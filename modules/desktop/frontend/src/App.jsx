@@ -699,6 +699,10 @@ export function App() {
             ...current,
             reasoningEffort,
           }))}
+          onEnableThinkingChange={(enableThinking) => setRunSettings((current) => ({
+            ...current,
+            enableThinking,
+          }))}
           onResolvePermission={resolvePermission}
           onSend={sendTask}
           onSelectConversationTab={(tabId) => patchCurrentRuntime((rt) => ({
@@ -712,6 +716,7 @@ export function App() {
           permissions={pendingPermissions}
           providerProfileId={runSettings.providerProfileId}
           model={runSettings.model}
+          enableThinking={runSettings.enableThinking}
           reasoningEffort={runSettings.reasoningEffort}
           providerProfiles={providerProfiles}
           running={running}

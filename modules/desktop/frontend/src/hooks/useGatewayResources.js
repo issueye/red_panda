@@ -122,6 +122,19 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     ));
   }, [setRunSettings]);
 
+  const listProviderModels = useCallback(async (input) => {
+    const data = await apiJson('/api/v1/provider-profiles/models', {
+      method: 'POST',
+      body: JSON.stringify({
+        profile_id: input.profileId || '',
+        base_url: input.baseUrl?.trim() || '',
+        api_key: input.apiKey?.trim() || '',
+        http_proxy: input.httpProxy?.trim() || '',
+      }),
+    });
+    return Array.isArray(data?.models) ? data.models : [];
+  }, []);
+
   const loadWorkerProfiles = useCallback(async () => {
     setWorkerProfilesLoading(true);
     setWorkerProfilesError('');
@@ -356,6 +369,7 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     create: createProviderProfile,
     update: updateProviderProfile,
     remove: deleteProviderProfile,
+    listModels: listProviderModels,
   }), [
     providerProfiles,
     providerProfilesLoading,
@@ -364,6 +378,7 @@ export function useGatewayResources({ getWorkspaceRoot, setRunSettings }) {
     createProviderProfile,
     updateProviderProfile,
     deleteProviderProfile,
+    listProviderModels,
   ]);
 
   const workers = useMemo(() => ({

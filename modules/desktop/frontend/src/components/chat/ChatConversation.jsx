@@ -1,8 +1,7 @@
-import { ArrowDown, Bot, UserRound } from 'lucide-react';
+import { ArrowDown, Bot, BrainCircuit, ChevronRight, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildConversationTimeline,
-  buildToolCallIndexMap,
 } from '../../lib/conversationTimeline.js';
 import { classNames, formatSeq } from '../../lib/format.js';
 import { isWorkerToolFallback } from '../../lib/toolResultDisplay.js';
@@ -13,6 +12,7 @@ import {
 } from '../../lib/messageContent.js';
 import { PermissionCard } from '../PermissionCard.jsx';
 import { ToolCallCard } from '../ToolCallCard.jsx';
+import { ToolExecutionGroup } from '../ToolExecutionGroup.jsx';
 import { Button } from '../ui/button.jsx';
 import { EmptyState } from '../ui/feedback.jsx';
 import { Markdown } from '../ui/Markdown.jsx';
@@ -34,12 +34,55 @@ function displayMessageAgent(message) {
 }
 
 /** Render assistant message body and convert embedded tool markup into cards. */
-function AssistantMessageBody({
-  message,
-  workspaceRoot = '',
-  toolIndexById,
-  toolTotal = 0,
-}) {
+function groupInlineSegments(segments, message) {
+  const grouped = [];
+  let tools = [];
+  function flushTools() {
+    if (tools.length === 1) grouped.push({ type: 'tool', item: tools[0] });
+    if (tools.length > 1) grouped.push({ type: 'tool_group', items: tools });
+    tools = [];
+  }
+  let toolIndex = 0;
+  segments.forEach((segment, index) => {
+    if (segment.type === 'tool_call') {
+      tools.push(toolItemFromMessageSegment(segment, message, toolIndex));
+      toolIndex += 1;
+      return;
+    }
+    flushTools();
+    grouped.push({ ...segment, key: `text:${index}` });
+  });
+  flushTools();
+  return grouped;
+}
+
+function groupTimelineTools(timeline) {
+  const grouped = [];
+  let tools = [];
+  function flushTools() {
+    if (tools.length === 1) grouped.push(tools[0]);
+    if (tools.length > 1) {
+      grouped.push({
+        type: 'tool_group',
+        key: `tool-group:${tools[0].key}`,
+        values: tools.map((item) => item.value),
+      });
+    }
+    tools = [];
+  }
+  timeline.forEach((item) => {
+    if (item.type === 'tool') {
+      tools.push(item);
+      return;
+    }
+    flushTools();
+    grouped.push(item);
+  });
+  flushTools();
+  return grouped;
+}
+
+function AssistantMessageBody({ message, workspaceRoot = '' }) {
   const text = message.text || '';
   if (isWorkerToolFallback(message)) {
     return (
@@ -60,22 +103,19 @@ function AssistantMessageBody({
     return <Markdown className="message-markdown" workspaceRoot={workspaceRoot}>{text}</Markdown>;
   }
 
-  const inlineToolTotal = segments.filter((segment) => segment.type === 'tool_call').length;
-  let toolIndex = 0;
+  const groupedSegments = groupInlineSegments(segments, message);
   return (
     <div className="message-rich-body" data-testid="message-rich-body">
-      {segments.map((segment, index) => {
-        if (segment.type === 'tool_call') {
-          const item = toolItemFromMessageSegment(segment, message, toolIndex);
-          toolIndex += 1;
-          const mappedIndex = toolIndexById?.get(String(item.id));
-          const callIndex = mappedIndex || toolIndex;
-          const callTotal = mappedIndex ? toolTotal : inlineToolTotal;
+      {groupedSegments.map((segment, index) => {
+        if (segment.type === 'tool_group') {
           return (
-            <div className="message-inline-tool" key={`${item.id}:${index}`}>
-              <ToolCallCard callIndex={callIndex} callTotal={callTotal} item={item} />
+            <div className="message-inline-tool" key={`tool-group:${segment.items[0]?.id || index}`}>
+              <ToolExecutionGroup items={segment.items} />
             </div>
           );
+        }
+        if (segment.type === 'tool') {
+          return <ToolCallCard item={segment.item} key={segment.item.id || index} />;
         }
         if (!String(segment.text || '').trim()) {
           return null;
@@ -102,11 +142,9 @@ export function ChatConversation({
   const viewportRef = useRef(null);
   const [followingLatest, setFollowingLatest] = useState(true);
   const timeline = useMemo(
-    () => buildConversationTimeline(messages, tools, permissions),
+    () => groupTimelineTools(buildConversationTimeline(messages, tools, permissions)),
     [messages, permissions, tools],
   );
-  const toolIndexById = useMemo(() => buildToolCallIndexMap(tools), [tools]);
-  const toolTotal = tools.length;
 
   useEffect(() => {
     if (!followingLatest) return undefined;
@@ -145,23 +183,42 @@ export function ChatConversation({
         ) : null}
 
         {timeline.map((item) => {
+          if (item.type === 'tool_group') {
+            return <ToolExecutionGroup items={item.values} key={item.key} />;
+          }
           if (item.type === 'tool') {
-            const tool = item.value;
-            const callIndex = toolIndexById.get(String(tool.id));
-            return (
-              <ToolCallCard
-                callIndex={callIndex}
-                callTotal={toolTotal}
-                item={tool}
-                key={item.key}
-              />
-            );
+            return <ToolCallCard item={item.value} key={item.key} />;
           }
           if (item.type === 'permission') {
             return <PermissionCard item={item.value} key={item.key} onResolve={onResolvePermission} />;
           }
           const message = item.value;
           const isUser = message.role === 'user';
+          const isReasoning = message.role === 'reasoning';
+          if (isReasoning) {
+            return (
+              <article
+                className="message-row role-reasoning"
+                data-testid="reasoning-row"
+                data-timeline-type="message"
+                key={item.key}
+              >
+                <div className="message-avatar" aria-hidden="true">
+                  <BrainCircuit size={14} />
+                </div>
+                <details className="message-thinking" data-testid="reasoning-block">
+                  <summary>
+                    <ChevronRight aria-hidden="true" className="message-thinking-chevron" size={13} />
+                    <strong>思考过程</strong>
+                    {message.runSeq ? <span>{formatSeq(message.runSeq)}</span> : null}
+                  </summary>
+                  <Markdown className="message-thinking-content" workspaceRoot={workspaceRoot}>
+                    {message.text}
+                  </Markdown>
+                </details>
+              </article>
+            );
+          }
           const avatar = (
             <div className="message-avatar" aria-hidden="true">
               {isUser ? <UserRound size={14} /> : <Bot size={14} />}
@@ -182,8 +239,6 @@ export function ChatConversation({
               ) : (
                 <AssistantMessageBody
                   message={message}
-                  toolIndexById={toolIndexById}
-                  toolTotal={toolTotal}
                   workspaceRoot={workspaceRoot}
                 />
               )}

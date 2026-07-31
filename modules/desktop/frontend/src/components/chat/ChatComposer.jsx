@@ -1,4 +1,4 @@
-import { ImagePlus, Send, Square, Terminal } from 'lucide-react';
+import { BrainCircuit, ImagePlus, Send, Square, Terminal } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { listCommands } from '../../lib/commands.js';
 import { ATTACHMENT_MAX_PER_RUN } from '../../lib/attachments.js';
@@ -103,8 +103,10 @@ export function ChatComposer({
   providerProfiles = [],
   providerProfileId = '',
   model = '',
+  enableThinking = false,
   reasoningEffort = '',
   onProviderProfileChange,
+  onEnableThinkingChange,
   onReasoningEffortChange,
   tokenUsed = 0,
   tokenMax = 0,
@@ -387,6 +389,19 @@ export function ChatComposer({
               providerProfiles={providerProfiles}
               reasoningEffort={reasoningEffort}
             />
+            <button
+              aria-checked={enableThinking}
+              className={classNames('composer-thinking-toggle', enableThinking && 'is-active')}
+              data-testid="composer-thinking-toggle"
+              disabled={running}
+              onClick={() => onEnableThinkingChange?.(!enableThinking)}
+              role="switch"
+              title={enableThinking ? '关闭思考' : '启用思考'}
+              type="button"
+            >
+              <BrainCircuit aria-hidden="true" size={14} />
+              <span>启用思考</span>
+            </button>
             <span className="composer-hint">
               {paletteOpen
                 ? '指令模式 · ↑↓ 选择 · Tab 填入'

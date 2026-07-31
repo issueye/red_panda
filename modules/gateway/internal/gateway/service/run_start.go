@@ -77,11 +77,11 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 		return runAdmission{}, err
 	}
 	return runAdmission{
-		runID:            runID,
-		session:          session,
-		inputText:        inputText,
-		runtimeMode:      runtimeMode,
-		attachments:      resolvedAttachments,
+		runID:       runID,
+		session:     session,
+		inputText:   inputText,
+		runtimeMode: runtimeMode,
+		attachments: resolvedAttachments,
 	}, nil
 }
 
@@ -119,6 +119,7 @@ func (r RunService) prepareRun(admission runAdmission, payload protows.RunStartP
 		Options: methods.RunExecuteOptions{
 			ProviderProfileID:   stringOption(payload.Options, "provider_profile_id"),
 			Model:               stringOption(payload.Options, "model"),
+			EnableThinking:      boolOption(payload.Options, "enable_thinking"),
 			ReasoningEffort:     stringOption(payload.Options, "reasoning_effort"),
 			PermissionMode:      stringOption(payload.Options, "permission_mode"),
 			ToolPolicy:          stringOption(payload.Options, "tool_policy"),

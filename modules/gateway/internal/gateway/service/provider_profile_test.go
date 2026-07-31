@@ -1,10 +1,37 @@
 package service
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"redpanda/gateway/internal/gateway/model"
 )
+
+func TestProviderProfileServiceListModelsUsesOpenAICompatibleEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("request path = %q; want /v1/models", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-z"},{"id":"model-a"},{"id":"model-z"},{"id":" "}]}`))
+	}))
+	defer server.Close()
+
+	models, err := (ProviderProfileService{}).ListModels(context.Background(), ProviderModelListInput{
+		BaseURL: server.URL + "/v1", APIKey: "sk-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0] != "model-a" || models[1] != "model-z" {
+		t.Fatalf("models = %#v; want sorted unique model IDs", models)
+	}
+}
 
 func TestNormalizeProvider(t *testing.T) {
 	tests := map[string]string{

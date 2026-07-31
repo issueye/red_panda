@@ -29,8 +29,10 @@ export function ChatPanel({
   providerProfiles = [],
   providerProfileId = '',
   model = '',
+  enableThinking = false,
   reasoningEffort = '',
   onProviderProfileChange,
+  onEnableThinkingChange,
   onReasoningEffortChange,
   conversationTabs = [],
   activeConversationTab = 'main',
@@ -138,6 +140,7 @@ export function ChatPanel({
         onAttachmentsChange={onAttachmentsChange}
         onAddFiles={onAddFiles}
         onProviderProfileChange={onProviderProfileChange}
+        onEnableThinkingChange={onEnableThinkingChange}
         onReasoningEffortChange={onReasoningEffortChange}
         onResolvePermission={onResolvePermission}
         onSend={onSend}
@@ -146,6 +149,7 @@ export function ChatPanel({
         permissions={scoped.permissions}
         providerProfileId={providerProfileId}
         model={model}
+        enableThinking={enableThinking}
         reasoningEffort={reasoningEffort}
         providerProfiles={providerProfiles}
         readOnlyHint={scoped.readOnlyHint}

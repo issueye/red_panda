@@ -6,7 +6,7 @@ import {
   providerTypeOptions,
   reasoningEffortOptions,
 } from '../../lib/providerProfiles.js';
-import { Check, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, ListRestart, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/button.jsx';
 import { ErrorMessage } from '../ui/feedback.jsx';
 import { Field } from '../ui/field.jsx';
@@ -27,6 +27,7 @@ export function ProvidersTab({
   providerProfilesError,
   profileDraft,
   profileSaving,
+  profileModelsLoading,
   profileError,
   providerProfileOptions,
   selectedProfile,
@@ -35,10 +36,14 @@ export function ProvidersTab({
   updateProfileDraft,
   setProfileDraft,
   saveProviderProfile,
+  loadProviderModels,
   deleteSelectedProfile,
   onRefreshProviderProfiles,
 }) {
   const models = Array.isArray(profileDraft.models) ? profileDraft.models : [];
+  const canUseSavedAPIKey = selectedProfile?.apiKeySet
+    && profileDraft.baseUrl?.trim() === selectedProfile.baseUrl?.trim()
+    && profileDraft.httpProxy?.trim() === (selectedProfile.httpProxy || '').trim();
 
   function updateModel(index, key, value) {
     const previous = models[index];
@@ -132,16 +137,27 @@ export function ProvidersTab({
                     <strong>模型</strong>
                     <span>配置可选模型、上下文窗口和默认思考等级</span>
                   </div>
-                  <Button
-                    icon={<Plus size={14} />}
-                    onClick={() => updateProfileDraft('models', [
-                      ...models,
-                      { model: '', label: '', maxTokens: '', reasoningEffort: '' },
-                    ])}
-                    variant="ghost"
-                  >
-                    添加模型
-                  </Button>
+                  <div className="settings-model-actions">
+                    <Button
+                      disabled={!profileDraft.baseUrl?.trim() || (!profileDraft.apiKey?.trim() && !canUseSavedAPIKey)}
+                      icon={<ListRestart size={14} />}
+                      loading={profileModelsLoading}
+                      onClick={loadProviderModels}
+                      variant="ghost"
+                    >
+                      获取模型
+                    </Button>
+                    <Button
+                      icon={<Plus size={14} />}
+                      onClick={() => updateProfileDraft('models', [
+                        ...models,
+                        { model: '', label: '', maxTokens: '', reasoningEffort: '' },
+                      ])}
+                      variant="ghost"
+                    >
+                      添加模型
+                    </Button>
+                  </div>
                 </div>
                 <div className="settings-model-list">
                   {models.map((item, index) => (
@@ -192,6 +208,7 @@ export function ProvidersTab({
               </div>
               <Field className="settings-row settings-form-span" label="基础 URL">
                 <input
+                  aria-label="基础 URL"
                   onChange={(event) => updateProfileDraft('baseUrl', event.target.value)}
                   placeholder={profileDraft.provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com'}
                   type="text"
@@ -200,6 +217,7 @@ export function ProvidersTab({
               </Field>
               <Field className="settings-row settings-form-span" label="API 密钥">
                 <input
+                  aria-label="API 密钥"
                   onChange={(event) => updateProfileDraft('apiKey', event.target.value)}
                   placeholder={selectedProfile?.apiKeySet ? selectedProfile.apiKeyMasked || '已保存密钥' : '可选'}
                   type="password"
@@ -208,6 +226,7 @@ export function ProvidersTab({
               </Field>
               <Field className="settings-row settings-form-span" label="网络代理">
                 <input
+                  aria-label="网络代理"
                   onChange={(event) => updateProfileDraft('httpProxy', event.target.value)}
                   placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080（可选,留空使用环境代理）"
                   type="text"

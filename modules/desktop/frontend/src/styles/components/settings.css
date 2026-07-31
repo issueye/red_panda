@@ -232,6 +232,14 @@
   gap: 2px;
 }
 
+.settings-model-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
 .settings-model-editor-header strong {
   color: var(--color-text-strong);
   font-size: 12px;

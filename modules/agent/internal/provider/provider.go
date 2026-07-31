@@ -62,6 +62,7 @@ type RequestOptions struct {
 	ProviderHTTPProxy string
 	Stream            *bool
 	Model             string
+	EnableThinking    bool
 	ReasoningEffort   string
 	LogLLMRequests    bool
 	// Headers contains only host-approved, non-sensitive request headers.
@@ -103,9 +104,10 @@ type ToolExchange struct {
 }
 
 type ProviderChunk struct {
-	Delta     string
-	Final     bool
-	ToolCalls []tools.Call
+	Delta          string
+	ReasoningDelta string
+	Final          bool
+	ToolCalls      []tools.Call
 }
 
 // MessageText returns the plain-text view of a Message.Content value. Multimodal

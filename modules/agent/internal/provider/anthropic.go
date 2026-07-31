@@ -38,11 +38,14 @@ func (p AnthropicProvider) completeAttempt(ctx context.Context, req Request, emi
 	}
 	system, messages := anthropicMessages(req)
 	body := map[string]any{"model": model, "max_tokens": defaultAnthropicMaxTokens, "messages": messages, "stream": p.Stream}
-	if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
-		if effort == "xhigh" {
-			effort = "max"
+	if req.Options.EnableThinking {
+		body["thinking"] = map[string]any{"type": "adaptive"}
+		if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
+			if effort == "xhigh" {
+				effort = "max"
+			}
+			body["output_config"] = map[string]any{"effort": effort}
 		}
-		body["output_config"] = map[string]any{"effort": effort}
 	}
 	if system != "" {
 		body["system"] = system
@@ -133,11 +136,12 @@ func anthropicTools(definitions []tools.Definition) []map[string]any {
 }
 
 type anthropicContent struct {
-	Type  string         `json:"type"`
-	Text  string         `json:"text"`
-	ID    string         `json:"id"`
-	Name  string         `json:"name"`
-	Input map[string]any `json:"input"`
+	Type     string         `json:"type"`
+	Text     string         `json:"text"`
+	Thinking string         `json:"thinking"`
+	ID       string         `json:"id"`
+	Name     string         `json:"name"`
+	Input    map[string]any `json:"input"`
 }
 
 func completeAnthropicResponse(raw []byte, emit func(ProviderChunk) error) error {
@@ -155,12 +159,21 @@ func completeAnthropicResponse(raw []byte, emit func(ProviderChunk) error) error
 	}
 	var calls []tools.Call
 	var text strings.Builder
+	var reasoning strings.Builder
 	for _, block := range response.Content {
 		if block.Type == "text" {
 			text.WriteString(block.Text)
 		}
 		if block.Type == "tool_use" {
 			calls = append(calls, tools.Call{ID: block.ID, Name: internalToolName(block.Name), Arguments: block.Input})
+		}
+		if block.Type == "thinking" {
+			reasoning.WriteString(block.Thinking)
+		}
+	}
+	if reasoning.Len() > 0 {
+		if err := emit(ProviderChunk{ReasoningDelta: reasoning.String()}); err != nil {
+			return err
 		}
 	}
 	if len(calls) > 0 {
@@ -200,6 +213,7 @@ func completeAnthropicStream(reader io.Reader, emit func(ProviderChunk) error) e
 			Delta        struct {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
+				Thinking    string `json:"thinking"`
 				PartialJSON string `json:"partial_json"`
 			} `json:"delta"`
 			Error *struct {
@@ -215,6 +229,11 @@ func completeAnthropicStream(reader io.Reader, emit func(ProviderChunk) error) e
 				calls[event.Index] = &anthropicStreamCall{index: event.Index, id: event.ContentBlock.ID, name: event.ContentBlock.Name}
 			}
 		case "content_block_delta":
+			if event.Delta.Type == "thinking_delta" && event.Delta.Thinking != "" {
+				if err := emit(ProviderChunk{ReasoningDelta: event.Delta.Thinking}); err != nil {
+					return err
+				}
+			}
 			if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 				if err := emit(ProviderChunk{Delta: event.Delta.Text}); err != nil {
 					return err

@@ -13,32 +13,39 @@ type ProviderProfileController struct {
 }
 
 type providerProfileCreateRequest struct {
-	Name      string                       `json:"name"`
-	Provider  string                       `json:"provider"`
-	BaseURL   string                       `json:"base_url"`
-	Model     string                       `json:"model"`
-	MaxTokens int                          `json:"max_tokens"`
-	Models    []service.ProviderModelInput `json:"models"`
-	APIKey    string                       `json:"api_key"`
-	IsDefault bool                         `json:"is_default"`
-	Stream    *bool                        `json:"stream"`
-	SupportsVision *bool                   `json:"supports_vision"`
-	HTTPProxy string                       `json:"http_proxy"`
+	Name           string                       `json:"name"`
+	Provider       string                       `json:"provider"`
+	BaseURL        string                       `json:"base_url"`
+	Model          string                       `json:"model"`
+	MaxTokens      int                          `json:"max_tokens"`
+	Models         []service.ProviderModelInput `json:"models"`
+	APIKey         string                       `json:"api_key"`
+	IsDefault      bool                         `json:"is_default"`
+	Stream         *bool                        `json:"stream"`
+	SupportsVision *bool                        `json:"supports_vision"`
+	HTTPProxy      string                       `json:"http_proxy"`
 }
 
 type providerProfileUpdateRequest struct {
-	Name      *string                       `json:"name"`
-	Provider  *string                       `json:"provider"`
-	BaseURL   *string                       `json:"base_url"`
-	Model     *string                       `json:"model"`
-	MaxTokens *int                          `json:"max_tokens"`
-	Models    *[]service.ProviderModelInput `json:"models"`
-	APIKey    *string                       `json:"api_key"`
-	IsDefault *bool                         `json:"is_default"`
-	Stream    *bool                         `json:"stream"`
-	Active    *bool                         `json:"active"`
-	SupportsVision *bool                   `json:"supports_vision"`
-	HTTPProxy      *string                 `json:"http_proxy"`
+	Name           *string                       `json:"name"`
+	Provider       *string                       `json:"provider"`
+	BaseURL        *string                       `json:"base_url"`
+	Model          *string                       `json:"model"`
+	MaxTokens      *int                          `json:"max_tokens"`
+	Models         *[]service.ProviderModelInput `json:"models"`
+	APIKey         *string                       `json:"api_key"`
+	IsDefault      *bool                         `json:"is_default"`
+	Stream         *bool                         `json:"stream"`
+	Active         *bool                         `json:"active"`
+	SupportsVision *bool                         `json:"supports_vision"`
+	HTTPProxy      *string                       `json:"http_proxy"`
+}
+
+type providerModelListRequest struct {
+	ProfileID string `json:"profile_id"`
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	HTTPProxy string `json:"http_proxy"`
 }
 
 func (p ProviderProfileController) List(c *gin.Context) {
@@ -50,6 +57,22 @@ func (p ProviderProfileController) List(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, items))
 }
 
+func (p ProviderProfileController) ListModels(c *gin.Context) {
+	var req providerModelListRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_payload", "message": "invalid model list payload"}})
+		return
+	}
+	items, err := p.Services.Provider.ListModels(c.Request.Context(), service.ProviderModelListInput{
+		ProfileID: req.ProfileID, BaseURL: req.BaseURL, APIKey: req.APIKey, HTTPProxy: req.HTTPProxy,
+	})
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": gin.H{"code": "provider_model_list_failed", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, envelope(c, gin.H{"models": items}))
+}
+
 func (p ProviderProfileController) Create(c *gin.Context) {
 	var req providerProfileCreateRequest
 	if err := c.BindJSON(&req); err != nil {
@@ -57,15 +80,15 @@ func (p ProviderProfileController) Create(c *gin.Context) {
 		return
 	}
 	item, err := p.Services.Provider.Create(service.ProviderProfileCreate{
-		Name:      req.Name,
-		Provider:  req.Provider,
-		BaseURL:   req.BaseURL,
-		Model:     req.Model,
-		MaxTokens: req.MaxTokens,
-		Models:    req.Models,
-		APIKey:    req.APIKey,
-		IsDefault: req.IsDefault,
-		Stream:    req.Stream,
+		Name:           req.Name,
+		Provider:       req.Provider,
+		BaseURL:        req.BaseURL,
+		Model:          req.Model,
+		MaxTokens:      req.MaxTokens,
+		Models:         req.Models,
+		APIKey:         req.APIKey,
+		IsDefault:      req.IsDefault,
+		Stream:         req.Stream,
 		SupportsVision: req.SupportsVision,
 		HTTPProxy:      req.HTTPProxy,
 	})
@@ -92,16 +115,16 @@ func (p ProviderProfileController) Update(c *gin.Context) {
 		return
 	}
 	item, err := p.Services.Provider.Update(c.Param("id"), service.ProviderProfileUpdate{
-		Name:      req.Name,
-		Provider:  req.Provider,
-		BaseURL:   req.BaseURL,
-		Model:     req.Model,
-		MaxTokens: req.MaxTokens,
-		Models:    req.Models,
-		APIKey:    req.APIKey,
-		IsDefault: req.IsDefault,
-		Stream:    req.Stream,
-		Active:    req.Active,
+		Name:           req.Name,
+		Provider:       req.Provider,
+		BaseURL:        req.BaseURL,
+		Model:          req.Model,
+		MaxTokens:      req.MaxTokens,
+		Models:         req.Models,
+		APIKey:         req.APIKey,
+		IsDefault:      req.IsDefault,
+		Stream:         req.Stream,
+		Active:         req.Active,
 		SupportsVision: req.SupportsVision,
 		HTTPProxy:      req.HTTPProxy,
 	})

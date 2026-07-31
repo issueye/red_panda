@@ -1692,6 +1692,51 @@ textarea:focus-visible {
   width: 100%;
 }
 
+.message-thinking {
+  border-left: 2px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+  min-width: 0;
+  padding: 3px 0 3px 10px;
+  width: 100%;
+}
+
+.message-thinking summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  min-height: 24px;
+  user-select: none;
+}
+
+.message-thinking summary strong {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.message-thinking summary span {
+  color: var(--color-text-soft);
+  font-size: 10px;
+}
+
+.message-thinking-chevron {
+  flex: 0 0 auto;
+  transition: transform 140ms ease;
+}
+
+.message-thinking[open] .message-thinking-chevron {
+  transform: rotate(90deg);
+}
+
+.message-thinking-content {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 6px;
+  max-width: 760px;
+}
+
 .role-user .message-bubble {
   background: var(--color-surface-muted);
   border: 0;
@@ -2581,6 +2626,50 @@ textarea:focus-visible {
 
 .composer-model-menu-effort {
   color: var(--color-text-soft);
+}
+
+.composer-thinking-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--color-text-soft);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  gap: 5px;
+  height: 28px;
+  padding: 0 7px;
+}
+
+.composer-thinking-toggle:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text-strong);
+}
+
+.composer-thinking-toggle.is-active {
+  background: var(--color-brand-soft);
+  border-color: var(--color-brand-hover);
+  color: var(--color-brand-text);
+}
+
+.composer-thinking-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 560px) {
+  .composer-thinking-toggle span {
+    display: none;
+  }
+
+  .composer-thinking-toggle {
+    justify-content: center;
+    padding: 0;
+    width: 28px;
+  }
 }
 
 .composer-model-panel,
@@ -4197,6 +4286,87 @@ button.activity-summary-card:hover {
 }
 
 /* Tool calls stay as quiet one-line timeline entries until expanded. */
+.tool-execution-group {
+  align-self: stretch;
+  border-bottom: 1px solid transparent;
+  border-top: 1px solid var(--color-border);
+  max-width: min(760px, 100%);
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.tool-execution-group.is-expanded {
+  border-bottom-color: var(--color-border);
+  padding-bottom: 6px;
+}
+
+.tool-execution-group-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 6px;
+  grid-template-columns: 16px minmax(0, 1fr) max-content 16px;
+  min-height: 30px;
+  padding: 2px 3px;
+  text-align: left;
+  width: 100%;
+}
+
+.tool-execution-group-toggle:hover {
+  background: var(--color-surface-subtle);
+}
+
+.tool-execution-group-title {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-execution-group-status {
+  align-items: center;
+  color: var(--color-text-soft);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.tool-execution-group-status.is-running { color: var(--color-brand-text); }
+.tool-execution-group-status.is-failed { color: var(--color-danger-text); }
+.tool-execution-group-status.is-attention { color: var(--color-warning-text); }
+.tool-execution-group-status.is-completed { color: var(--color-success-text); }
+
+.tool-execution-group-chevron {
+  color: var(--color-text-soft);
+  transition: transform 120ms ease;
+}
+
+.tool-execution-group-chevron.is-open { transform: rotate(90deg); }
+
+.tool-execution-group-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 0 0 18px;
+}
+
+@media (max-width: 520px) {
+  .tool-execution-group-toggle {
+    grid-template-columns: 16px minmax(0, 1fr) 16px;
+  }
+
+  .tool-execution-group-status { display: none; }
+  .tool-execution-group-body { padding-left: 8px; }
+}
+
 .tool-card {
   align-self: stretch;
   background: transparent;
@@ -4303,20 +4473,6 @@ button.activity-summary-card:hover {
   gap: 5px;
   min-width: 0;
   overflow: hidden;
-}
-
-.tool-call-index {
-  color: var(--color-text-soft);
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  line-height: 1.35;
-  min-width: 1.75em;
-  opacity: 0.9;
-  white-space: nowrap;
 }
 
 .tool-card-title strong {

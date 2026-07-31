@@ -3,13 +3,17 @@ import { expect, test } from '@playwright/test';
 test('Restored workflow panels render permissions tools and Worker assignments', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 
-  // Main tab only shows root-facing rows (user + root assistant + root tool/permission).
+  // Main tab only shows root-facing rows (user + reasoning + root assistant + root tool/permission).
   await expect(page.getByTestId('message-row')).toHaveCount(2);
   await expect(page.getByText('Restore previous session state')).toBeVisible();
   await expect(page.getByText('Restored messages, tools, permissions, and Worker assignments.')).toBeVisible();
   await expect(page.getByText('助手', { exact: true })).toBeVisible();
 
-  await expect(page.getByTestId('tool-card')).toHaveCount(1);
+  const rootToolGroup = page.getByTestId('tool-execution-group');
+  await expect(rootToolGroup).toHaveCount(1);
+  await expect(page.getByTestId('tool-card')).toHaveCount(0);
+  await rootToolGroup.getByTestId('tool-execution-group-toggle').click();
+  await expect(rootToolGroup.getByTestId('tool-card')).toHaveCount(2);
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
   await expect(readTool).toHaveClass(/tool-completed/);
   await readTool.getByTestId('tool-card-toggle').click();
@@ -22,6 +26,7 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   ))).toEqual([
     'message',
     'tool',
+    'message',
     'message',
     'permission',
     'permission',
@@ -68,6 +73,7 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   const failedTool = page.getByTestId('tool-card').filter({ hasText: 'shell.exec' });
   await expect(failedTool).toContainText('Shell command');
   await expect(failedTool).toHaveClass(/tool-failed/);
+  await failedTool.getByTestId('tool-card-toggle').click();
   await expect(failedTool.getByTestId('tool-error')).toHaveText('exit status 1');
   await expect(failedTool.getByTestId('tool-output')).toHaveText('go: cannot find main module; see go help modules');
   // Worker conversation is read-only: no decision buttons, even if cards are shown.
@@ -81,7 +87,7 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await expect(page.getByTestId('chat-tab-main')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Completed tool calls stay compact until expanded', async ({ page }) => {
+test('All tool calls stay compact until the user expands them', async ({ page }) => {
   await page.goto('/tool-card-fixture.html');
 
   const readTool = page.getByTestId('tool-card').filter({ hasText: 'Read file' });
@@ -90,16 +96,18 @@ test('Completed tool calls stay compact until expanded', async ({ page }) => {
 
   await expect(readTool).toHaveClass(/is-collapsed/);
   await expect(readTool.getByTestId('tool-card-body')).toHaveCount(0);
-  await expect(readTool.getByTestId('tool-call-index')).toHaveText('54/70');
-  await expect(page.getByTestId('tool-card').nth(1).getByTestId('tool-call-index')).toHaveText('55/70');
-  await expect(page.getByTestId('tool-card').nth(2).getByTestId('tool-call-index')).toHaveText('56/70');
+  await expect(page.getByTestId('tool-call-index')).toHaveCount(0);
   expect((await readTool.boundingBox()).height).toBeLessThanOrEqual(30);
 
-  // Running tools stay one-line; failed tools auto-expand for diagnosis.
+  // Running and failed tools also stay one-line until the user asks for details.
   await expect(runningTool).toHaveClass(/is-collapsed/);
   await expect(runningTool).toHaveClass(/is-live/);
   await expect(runningTool.getByTestId('tool-status-label')).toContainText('进行中');
   await expect(runningTool.getByTestId('tool-card-body')).toHaveCount(0);
+  await expect(failedTool).toHaveClass(/is-collapsed/);
+  await expect(failedTool.getByTestId('tool-card-body')).toHaveCount(0);
+
+  await failedTool.getByTestId('tool-card-toggle').click();
   await expect(failedTool).toHaveClass(/is-expanded/);
   await expect(failedTool.getByTestId('tool-error')).toBeVisible();
 
@@ -136,8 +144,35 @@ test('Completed tool calls stay compact until expanded', async ({ page }) => {
   ))).toBe(true);
 });
 
+test('Consecutive tools render as a collapsed execution group', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+  const group = page.getByTestId('tool-execution-group');
+  await expect(group).toHaveCount(1);
+  await expect(group.getByTestId('tool-execution-group-toggle')).toHaveAttribute('aria-expanded', 'false');
+  await expect(group).toContainText('执行了 2 个工具');
+  await expect(group.getByTestId('tool-execution-group-body')).toHaveCount(0);
+  await expect(group.getByTestId('tool-card')).toHaveCount(0);
+
+  await group.getByTestId('tool-execution-group-toggle').click();
+  await expect(group.getByTestId('tool-execution-group-body')).toBeVisible();
+  await expect(group.getByTestId('tool-card')).toHaveCount(2);
+  await expect(group.getByTestId('tool-call-index')).toHaveCount(0);
+  await expect(group.getByTestId('tool-card').nth(0)).toContainText('Read file');
+  await expect(group.getByTestId('tool-card').nth(1)).toContainText('Workspace stats');
+});
+
 test('Composer switches provider models and reasoning effort', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
+
+  const thinking = page.getByTestId('composer-thinking-toggle');
+  await expect(thinking).toHaveAttribute('aria-checked', 'false');
+  await thinking.click();
+  await expect(thinking).toHaveAttribute('aria-checked', 'true');
+
+  const reasoning = page.getByTestId('reasoning-block');
+  await expect(reasoning).not.toHaveAttribute('open', '');
+  await reasoning.locator('summary').click();
+  await expect(reasoning).toContainText('First inspect the restored run state');
 
   const modelMenu = page.getByTestId('composer-model-menu');
   await expect(modelMenu).toContainText('Fast');

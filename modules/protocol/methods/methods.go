@@ -53,16 +53,17 @@ type RunExecuteParams struct {
 }
 
 type RunExecuteOptions struct {
-	ProviderProfileID   string                        `json:"provider_profile_id,omitempty"`
-	ProviderName        string                        `json:"provider_name,omitempty"`
-	ProviderBaseURL     string                        `json:"provider_base_url,omitempty"`
-	ProviderAPIKey      string                        `json:"provider_api_key,omitempty"`
+	ProviderProfileID string `json:"provider_profile_id,omitempty"`
+	ProviderName      string `json:"provider_name,omitempty"`
+	ProviderBaseURL   string `json:"provider_base_url,omitempty"`
+	ProviderAPIKey    string `json:"provider_api_key,omitempty"`
 	// ProviderHTTPProxy is an optional outbound HTTP(S)/SOCKS5 proxy applied to
 	// this profile's provider requests (distinct from WebHTTPProxy which only
 	// governs web.search/web.fetch). Empty means use environment proxy.
 	ProviderHTTPProxy   string                        `json:"provider_http_proxy,omitempty"`
 	ProviderStream      *bool                         `json:"provider_stream,omitempty"`
 	Model               string                        `json:"model,omitempty"`
+	EnableThinking      bool                          `json:"enable_thinking,omitempty"`
 	ReasoningEffort     string                        `json:"reasoning_effort,omitempty"`
 	PermissionMode      string                        `json:"permission_mode,omitempty"`
 	ToolPolicy          string                        `json:"tool_policy,omitempty"`
@@ -305,15 +306,16 @@ type InputAttachment struct {
 }
 
 type ReplyOptions struct {
-	ProviderProfileID string         `json:"provider_profile_id,omitempty"`
-	ProviderName      string         `json:"provider_name,omitempty"`
-	ProviderBaseURL   string         `json:"provider_base_url,omitempty"`
-	ProviderAPIKey    string         `json:"provider_api_key,omitempty"`
+	ProviderProfileID string `json:"provider_profile_id,omitempty"`
+	ProviderName      string `json:"provider_name,omitempty"`
+	ProviderBaseURL   string `json:"provider_base_url,omitempty"`
+	ProviderAPIKey    string `json:"provider_api_key,omitempty"`
 	// ProviderHTTPProxy mirrors RunExecuteOptions.ProviderHTTPProxy: an optional
 	// HTTP(S)/SOCKS5 proxy for provider requests. Distinct from WebHTTPProxy.
 	ProviderHTTPProxy string         `json:"provider_http_proxy,omitempty"`
 	ProviderStream    *bool          `json:"provider_stream,omitempty"`
 	Model             string         `json:"model,omitempty"`
+	EnableThinking    bool           `json:"enable_thinking,omitempty"`
 	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
 	PermissionMode    string         `json:"permission_mode,omitempty"`
 	ToolPolicy        string         `json:"tool_policy,omitempty"`

@@ -34,7 +34,7 @@ func TestOpenAIResponsesProviderRequestAndNonStreamToolCall(t *testing.T) {
 	var chunks []ProviderChunk
 	err := p.Complete(context.Background(), Request{
 		Messages:    []Message{{Role: "system", Content: "be direct"}, {Role: "user", Content: "inspect"}},
-		Options:     RequestOptions{Model: "gpt-test", ReasoningEffort: "high"},
+		Options:     RequestOptions{Model: "gpt-test", EnableThinking: true, ReasoningEffort: "high"},
 		Tools:       []tools.Definition{{Name: "workspace.read_file", Description: "Read", Parameters: map[string]any{"type": "object"}}},
 		ToolHistory: []ToolExchange{{Call: tools.Call{ID: "call_1", Name: "workspace.list", Arguments: map[string]any{"path": "."}}, Result: tools.Result{Status: tools.CallStatusCompleted, Output: "README.md"}}},
 	}, func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil })

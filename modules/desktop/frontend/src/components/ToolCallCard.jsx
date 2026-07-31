@@ -6,7 +6,7 @@ import {
   ShieldAlert,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { displayStatus } from '../lib/displayLabels.js';
 import { classNames } from '../lib/format.js';
 import { buildToolOutputSummary, displayToolOutput } from '../lib/toolResultDisplay.js';
@@ -152,20 +152,10 @@ function ToolDetail({ title, text, open, onToggle, testId }) {
 }
 
 /**
- * Default open policy for multi-tool timelines:
- * - completed / running: one-line summary (expand on demand)
- * - failed / waiting_permission: auto-expand so the user can act or diagnose
- * Manual toggle always wins after the user clicks.
- */
-function defaultCardOpen({ isFailed, needsAttention }) {
-  return Boolean(isFailed || needsAttention);
-}
-
-/**
  * Compact but readable tool-call card for the conversation timeline.
- * @param {{ item: Record<string, unknown>, callIndex?: number, callTotal?: number }} props
+ * @param {{ item: Record<string, unknown> }} props
  */
-export function ToolCallCard({ item, callIndex, callTotal }) {
+export function ToolCallCard({ item }) {
   const status = item.status || 'running';
   const isRunning = status === 'running' || status === 'pending';
   const isFailed = status === 'failed' || status === 'denied';
@@ -190,43 +180,10 @@ export function ToolCallCard({ item, callIndex, callTotal }) {
   const title = item.displayName || item.name || '工具';
   const toolName = item.name && item.name !== title ? item.name : '';
   const hasBody = Boolean(argsText || errorText || outputText);
-  const index = Number(callIndex ?? item.callIndex);
-  const total = Number(callTotal ?? item.callTotal);
-  const hasIndex = Number.isFinite(index) && index > 0;
-  const hasTotal = Number.isFinite(total) && total > 0;
-  const indexLabel = hasIndex
-    ? (hasTotal ? `${index}/${total}` : `#${index}`)
-    : '';
-  const indexTitle = hasIndex
-    ? (hasTotal ? `第 ${index} 次工具调用，共 ${total} 次` : `第 ${index} 次工具调用`)
-    : '';
-
-  const [cardOpen, setCardOpen] = useState(() => defaultCardOpen({ isFailed, needsAttention }));
+  const [cardOpen, setCardOpen] = useState(false);
   const [argsOpen, setArgsOpen] = useState(false);
-  const [outputOpen, setOutputOpen] = useState(() => defaultCardOpen({ isFailed, needsAttention }));
-  const [userToggled, setUserToggled] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const prevStatusRef = useRef(status);
-
-  // Auto open/close only when status changes and the user has not taken over.
-  useEffect(() => {
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = status;
-    if (userToggled && prev === status) return;
-
-    if (isFailed || needsAttention) {
-      setCardOpen(true);
-      setOutputOpen(true);
-      return;
-    }
-
-    // Running and completed stay compact by default so long multi-tool runs
-    // do not thrash scroll height with streaming output.
-    if (!userToggled) {
-      setCardOpen(false);
-      setOutputOpen(false);
-    }
-  }, [isFailed, needsAttention, status, userToggled]);
 
   // Live elapsed timer so stuck "进行中" tools are visible instead of a silent hang.
   useEffect(() => {
@@ -253,7 +210,6 @@ export function ToolCallCard({ item, callIndex, callTotal }) {
 
   function toggleCard() {
     if (!hasBody) return;
-    setUserToggled(true);
     setCardOpen((current) => {
       const next = !current;
       if (next && (isFailed || errorText || isRunning)) {
@@ -291,15 +247,6 @@ export function ToolCallCard({ item, callIndex, callTotal }) {
 
         <span className="tool-card-content">
           <span className="tool-card-title">
-            {indexLabel ? (
-              <span
-                className="tool-call-index"
-                data-testid="tool-call-index"
-                title={indexTitle}
-              >
-                {indexLabel}
-              </span>
-            ) : null}
             <strong>{title}</strong>
             {toolName ? <code className="tool-card-name">{toolName}</code> : null}
           </span>

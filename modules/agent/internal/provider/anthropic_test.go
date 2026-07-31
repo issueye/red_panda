@@ -34,7 +34,7 @@ func TestAnthropicProviderRequestAndNonStreamToolUse(t *testing.T) {
 	var chunks []ProviderChunk
 	err := p.Complete(context.Background(), Request{
 		Messages:    []Message{{Role: "system", Content: "be direct"}, {Role: "user", Content: "inspect"}},
-		Options:     RequestOptions{ReasoningEffort: "xhigh"},
+		Options:     RequestOptions{EnableThinking: true, ReasoningEffort: "xhigh"},
 		Tools:       []tools.Definition{{Name: "workspace.read_file", Description: "Read", Parameters: map[string]any{"type": "object"}}},
 		ToolHistory: []ToolExchange{{Call: tools.Call{ID: "call_1", Name: "workspace.list", Arguments: map[string]any{"path": "."}}, Result: tools.Result{Status: tools.CallStatusFailed, Error: "denied"}}},
 	}, func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil })

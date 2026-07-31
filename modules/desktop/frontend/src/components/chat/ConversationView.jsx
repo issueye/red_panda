@@ -27,8 +27,10 @@ export function ConversationView({
   providerProfiles = [],
   providerProfileId = '',
   model = '',
+  enableThinking = false,
   reasoningEffort = '',
   onProviderProfileChange,
+  onEnableThinkingChange,
   onReasoningEffortChange,
   readOnlyHint = '',
   todos = [],
@@ -77,10 +79,12 @@ export function ConversationView({
             onAttachmentsChange={onAttachmentsChange}
             onAddFiles={onAddFiles}
             onProviderProfileChange={onProviderProfileChange}
+            onEnableThinkingChange={onEnableThinkingChange}
             onReasoningEffortChange={onReasoningEffortChange}
             onSend={onSend}
             providerProfileId={providerProfileId}
             model={model}
+            enableThinking={enableThinking}
             reasoningEffort={reasoningEffort}
             providerProfiles={providerProfiles}
             running={running}

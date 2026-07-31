@@ -14,12 +14,19 @@ const messages = [
     text: 'Restore previous session state',
   },
   {
+    id: 'message_reasoning_restore',
+    role: 'reasoning',
+    agent: 'assistant',
+    runSeq: 4,
+    text: 'First inspect the restored run state, then verify the tool results.',
+  },
+  {
     // Root-facing assistant reply (main conversation). No worker/profile markers
     // so isMainConversationItem keeps it public and the UI labels it as 助手.
     id: 'message_assistant_restore',
     role: 'assistant',
     agent: 'assistant',
-    runSeq: 4,
+    runSeq: 5,
     text: 'Restored messages, tools, permissions, and Worker assignments.',
   },
   {
@@ -58,6 +65,17 @@ const tools = [
     status: 'completed',
     output: 'README.md loaded',
     runSeq: 2,
+  },
+  {
+    id: 'tool_root_stats',
+    runId: 'run_restore',
+    name: 'workspace.stats',
+    displayName: 'Workspace stats',
+    risk: 'low',
+    arguments: { path: '.' },
+    status: 'completed',
+    output: '39 files',
+    runSeq: 3,
   },
   {
     // Worker-scoped tool: appears on the planner Worker tab only.
@@ -147,7 +165,7 @@ function WorkflowFixture() {
   ]);
   const [activeConversationTab, setActiveConversationTab] = useState('main');
   const [providerSelection, setProviderSelection] = useState({
-    providerProfileId: 'provider_fixture', model: 'model-fast', reasoningEffort: '',
+    providerProfileId: 'provider_fixture', model: 'model-fast', enableThinking: false, reasoningEffort: '',
   });
 
   function openAssignment(assignment) {
@@ -202,13 +220,17 @@ function WorkflowFixture() {
             draft=""
             messages={messages}
             model={providerSelection.model}
+            enableThinking={providerSelection.enableThinking}
             onCloseConversationTab={closeConversationTab}
             onResolvePermission={resolvePermission}
-            onProviderProfileChange={(providerProfileId, model) => setProviderSelection({
-              providerProfileId, model, reasoningEffort: '',
-            })}
+            onProviderProfileChange={(providerProfileId, model) => setProviderSelection((current) => ({
+              ...current, providerProfileId, model, reasoningEffort: '',
+            }))}
             onReasoningEffortChange={(reasoningEffort) => setProviderSelection((current) => ({
               ...current, reasoningEffort,
+            }))}
+            onEnableThinkingChange={(enableThinking) => setProviderSelection((current) => ({
+              ...current, enableThinking,
             }))}
             onSelectConversationTab={setActiveConversationTab}
             permissions={permissionItems}

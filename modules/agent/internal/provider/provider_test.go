@@ -43,6 +43,7 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 	var auth string
 	var model string
 	var stream bool
+	var enableThinking bool
 	var reasoningEffort string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
@@ -52,6 +53,7 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 		}
 		model, _ = body["model"].(string)
 		stream, _ = body["stream"].(bool)
+		enableThinking, _ = body["enable_thinking"].(bool)
 		reasoningEffort, _ = body["reasoning_effort"].(string)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"profile ok\"}}]}\n\ndata: [DONE]\n\n")
@@ -61,13 +63,13 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 	var chunks []ProviderChunk
 	err := (EchoProvider{}).Complete(context.Background(), ProviderRequest{
 		RunID: "run_profile", Input: "hello", Messages: []Message{{Role: "user", Content: "hello"}},
-		Options: RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: server.URL, ProviderAPIKey: "sk-profile", Model: "profile-model", ReasoningEffort: "low"},
+		Options: RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: server.URL, ProviderAPIKey: "sk-profile", Model: "profile-model", EnableThinking: true, ReasoningEffort: "low"},
 	}, func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if auth != "Bearer sk-profile" || model != "profile-model" || !stream || reasoningEffort != "low" {
-		t.Fatalf("override mismatch auth=%q model=%q stream=%v effort=%q", auth, model, stream, reasoningEffort)
+	if auth != "Bearer sk-profile" || model != "profile-model" || !stream || !enableThinking || reasoningEffort != "low" {
+		t.Fatalf("override mismatch auth=%q model=%q stream=%v thinking=%v effort=%q", auth, model, stream, enableThinking, reasoningEffort)
 	}
 	if len(chunks) != 2 || chunks[0].Delta != "profile ok" || !chunks[1].Final {
 		t.Fatalf("chunks = %#v", chunks)
@@ -200,6 +202,9 @@ func TestHTTPCompatibleProviderSendsNeutralRequest(t *testing.T) {
 	if body["model"] != "selected" || body["tool_choice"] != "auto" || body["stream"] != false {
 		t.Fatalf("unexpected request body: %#v", body)
 	}
+	if _, exists := body["enable_thinking"]; exists {
+		t.Fatalf("disabled thinking must not add enable_thinking: %#v", body)
+	}
 	messages, ok := body["messages"].([]any)
 	if !ok || len(messages) != 2 {
 		t.Fatalf("messages = %#v", body["messages"])
@@ -257,5 +262,32 @@ func TestStreamAndNonStreamSingleToolCallNormalizeIdentically(t *testing.T) {
 	})
 	if !reflect.DeepEqual(a, b) {
 		t.Fatalf("normalized calls differ\nnon-stream: %s\nstream: %s", fmt.Sprint(a), fmt.Sprint(b))
+	}
+}
+
+func TestStreamAndNonStreamReasoningNormalizeIdentically(t *testing.T) {
+	nonStream := `{"choices":[{"message":{"reasoning_content":"inspect first","content":"done"}}]}`
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"reasoning_content":"inspect first"}}]}`,
+		`data: {"choices":[{"delta":{"content":"done"}}]}`,
+		`data: [DONE]`, "",
+	}, "\n\n")
+
+	collect := func(complete func(func(ProviderChunk) error) error) []ProviderChunk {
+		var chunks []ProviderChunk
+		if err := complete(func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil }); err != nil {
+			t.Fatal(err)
+		}
+		return chunks
+	}
+	a := collect(func(emit func(ProviderChunk) error) error { return completeHTTPResponse([]byte(nonStream), emit) })
+	b := collect(func(emit func(ProviderChunk) error) error {
+		return (HTTPCompatibleProvider{}).completeStream(strings.NewReader(stream), emit)
+	})
+	if !reflect.DeepEqual(a, b) {
+		t.Fatalf("normalized reasoning differs\nnon-stream: %s\nstream: %s", fmt.Sprint(a), fmt.Sprint(b))
+	}
+	if len(a) != 3 || a[0].ReasoningDelta != "inspect first" || a[1].Delta != "done" || !a[2].Final {
+		t.Fatalf("chunks = %#v", a)
 	}
 }

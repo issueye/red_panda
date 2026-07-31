@@ -52,6 +52,7 @@ export function SettingsPanel({
   const [activeTab, setActiveTab] = useState('providers');
   const [profileDraft, setProfileDraft] = useState(emptyProfileDraft);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [profileModelsLoading, setProfileModelsLoading] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [agentDraft, setAgentDraft] = useState(null);
   const [agentSaving, setAgentSaving] = useState(false);
@@ -147,6 +148,40 @@ export function SettingsPanel({
       toast?.error(error.message || '保存供应商失败');
     } finally {
       setProfileSaving(false);
+    }
+  }
+
+  async function loadProviderModels() {
+    setProfileModelsLoading(true);
+    setProfileError('');
+    try {
+      const modelIDs = await providers.listModels({
+        profileId: settings.providerProfileId,
+        baseUrl: profileDraft.baseUrl,
+        apiKey: profileDraft.apiKey,
+        httpProxy: profileDraft.httpProxy,
+      });
+      const configured = new Map(
+        (profileDraft.models || []).filter((item) => item.model?.trim()).map((item) => [item.model.trim(), item]),
+      );
+      const models = modelIDs.map((model) => configured.get(model) || {
+        model, label: '', maxTokens: '', reasoningEffort: '',
+      });
+      if (models.length === 0) {
+        setProfileError('接口未返回可用模型。');
+        return;
+      }
+      setProfileDraft((current) => ({
+        ...current,
+        models,
+        model: models.some((item) => item.model === current.model) ? current.model : models[0].model,
+      }));
+      toast?.success(`已获取 ${models.length} 个模型`);
+    } catch (error) {
+      setProfileError(error.message);
+      toast?.error(error.message || '获取模型失败');
+    } finally {
+      setProfileModelsLoading(false);
     }
   }
 
@@ -517,11 +552,13 @@ export function SettingsPanel({
       profileDraft={profileDraft}
       profileError={profileError}
       profileSaving={profileSaving}
+      profileModelsLoading={profileModelsLoading}
       providerProfileOptions={providerProfileOptions}
       providerProfiles={providerProfiles}
       providerProfilesError={providers.error || ''}
       providerProfilesLoading={providers.loading || false}
       saveProviderProfile={saveProviderProfile}
+      loadProviderModels={loadProviderModels}
       selectedProfile={selectedProfile}
       setProfileDraft={setProfileDraft}
       settings={settings}

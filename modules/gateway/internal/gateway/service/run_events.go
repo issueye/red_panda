@@ -39,7 +39,7 @@ func (r RunService) HandleRuntimeEvent(event events.EnvelopeV2) {
 		NewScheduleService(r.repos, r.hub, nil).OnRunTerminal(event.RunID, status, errText)
 	}
 	_ = r.repos.RunEvents.Save(event)
-	if (event.Type == events.EventMessageDelta || event.Type == events.EventReasoningDelta) && payloadString(event.Payload, "visibility") != "worker_private" {
+	if event.Type == events.EventMessageDelta && payloadString(event.Payload, "visibility") != "worker_private" {
 		if delta, ok := event.Payload["delta"].(string); ok && delta != "" {
 			metadata, _ := json.Marshal(map[string]any{
 				"assignment_id": event.AssignmentID,

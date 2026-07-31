@@ -59,8 +59,11 @@ func (p HTTPCompatibleProvider) completeAttempt(ctx context.Context, req Provide
 		"messages": openAICompatibleMessages(req),
 		"stream":   config.Stream,
 	}
-	if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
-		body["reasoning_effort"] = effort
+	if req.Options.EnableThinking {
+		body["enable_thinking"] = true
+		if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
+			body["reasoning_effort"] = effort
+		}
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = openAICompatibleTools(req.Tools)
@@ -157,8 +160,10 @@ func completeHTTPResponse(rawResp []byte, emit func(ProviderChunk) error) error 
 	var parsed struct {
 		Choices []struct {
 			Message struct {
-				Content   string `json:"content"`
-				ToolCalls []struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
+				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
 					Function struct {
@@ -176,6 +181,15 @@ func completeHTTPResponse(rawResp []byte, emit func(ProviderChunk) error) error 
 		return fmt.Errorf("provider returned no choices")
 	}
 	message := parsed.Choices[0].Message
+	reasoning := message.ReasoningContent
+	if reasoning == "" {
+		reasoning = message.Reasoning
+	}
+	if reasoning != "" {
+		if err := emit(ProviderChunk{ReasoningDelta: reasoning}); err != nil {
+			return err
+		}
+	}
 	if len(message.ToolCalls) > 0 {
 		calls := make([]tools.Call, 0, len(message.ToolCalls))
 		for _, toolCall := range message.ToolCalls {

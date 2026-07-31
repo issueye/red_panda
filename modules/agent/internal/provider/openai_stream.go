@@ -35,8 +35,10 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content   string `json:"content"`
-					ToolCalls []struct {
+					Content          string `json:"content"`
+					ReasoningContent string `json:"reasoning_content"`
+					Reasoning        string `json:"reasoning"`
+					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Function struct {
@@ -51,6 +53,15 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 			return err
 		}
 		for _, choice := range chunk.Choices {
+			reasoning := choice.Delta.ReasoningContent
+			if reasoning == "" {
+				reasoning = choice.Delta.Reasoning
+			}
+			if reasoning != "" {
+				if err := emit(ProviderChunk{ReasoningDelta: reasoning}); err != nil {
+					return err
+				}
+			}
 			if choice.Delta.Content != "" {
 				emittedContent = true
 				if err := emit(ProviderChunk{Delta: choice.Delta.Content}); err != nil {

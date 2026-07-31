@@ -262,6 +262,22 @@ func (r *Runtime) consumeProviderChunk(
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if chunk.ReasoningDelta != "" {
+		err := r.emitEvent(ctx, params, events.EventReasoningDelta, &events.StreamRef{
+			StreamID: streamID + ":reasoning",
+			Kind:     events.StreamReasoning,
+			Seq:      *streamSeq,
+			Final:    false,
+		}, map[string]any{
+			"message_id":    messageID,
+			"delta":         chunk.ReasoningDelta,
+			"provider_name": r.provider.Name(),
+		})
+		(*streamSeq)++
+		if err != nil {
+			return err
+		}
+	}
 	if len(chunk.ToolCalls) > 0 {
 		*requestedCalls = append(*requestedCalls, chunk.ToolCalls...)
 		return nil

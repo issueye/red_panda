@@ -5,6 +5,7 @@ export const defaultRunSettings = {
   permissionMode: 'strict',
   providerProfileId: '',
   model: '',
+  enableThinking: false,
   reasoningEffort: '',
   toolAllowlist: '',
   toolDenylist: '',
@@ -38,6 +39,7 @@ export function normalizeStoredRunSettings(settings) {
   // Clamp worker pool size to valid range (0 = use default, 1-8 otherwise)
   current.workerPoolSize = clampWorkerPoolSize(current.workerPoolSize);
   current.enterToSend = current.enterToSend !== false;
+  current.enableThinking = current.enableThinking === true;
   return current;
 }
 
@@ -82,6 +84,7 @@ export function buildRunStartOptions(settings, workspace, text, overrides = {}) 
     permission_mode: current.permissionMode,
     provider_profile_id: current.providerProfileId,
     model: String(current.model || '').trim(),
+    enable_thinking: Boolean(current.enableThinking),
     reasoning_effort: String(current.reasoningEffort || '').trim(),
     tool_allowlist: splitOptionList(current.toolAllowlist),
     tool_denylist: splitOptionList(current.toolDenylist),

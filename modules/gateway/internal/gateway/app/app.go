@@ -174,6 +174,7 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/permissions/pending", controllers.Permission.Pending)
 	api.GET("/permissions/:id", controllers.Permission.Get)
 	api.GET("/provider-profiles", controllers.Provider.List)
+	api.POST("/provider-profiles/models", controllers.Provider.ListModels)
 	api.POST("/provider-profiles", controllers.Provider.Create)
 	api.GET("/provider-profiles/:id", controllers.Provider.Get)
 	api.PUT("/provider-profiles/:id", controllers.Provider.Update)

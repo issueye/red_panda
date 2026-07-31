@@ -30,8 +30,9 @@ export function reconcileAssignmentsWithRuns(assignments = [], runs = []) {
 
 export function appendWorkerText(items, event, text) {
   const previous = items[items.length - 1];
-  const canAppend = event.type === 'message_delta'
-    && previous?.role === 'assistant'
+  const role = event.type === 'reasoning_delta' ? 'reasoning' : 'assistant';
+  const canAppend = (event.type === 'message_delta' || event.type === 'reasoning_delta')
+    && previous?.role === role
     && previous.runId === event.run_id
     && previous.assignmentId === event.assignment_id
     && previous.workerId === event.worker?.id
@@ -47,7 +48,7 @@ export function appendWorkerText(items, event, text) {
   }
   return [...items, {
     id: event.event_id || `evt_${Date.now()}`,
-    role: 'assistant',
+    role,
     runId: event.run_id || '',
     assignmentId: event.assignment_id || '',
     workerId: event.worker?.id || '',

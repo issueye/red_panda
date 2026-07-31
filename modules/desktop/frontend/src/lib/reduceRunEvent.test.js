@@ -166,3 +166,16 @@ test('appendWorkerText merges consecutive deltas for one assignment', () => {
   assert.equal(second.length, 1);
   assert.equal(second[0].text, 'Hello\n\n## Report');
 });
+
+test('reasoning deltas stay separate from the final assistant answer', () => {
+  const base = createEmptySessionRuntime();
+  const first = reduceRunEvent(base, event('reasoning_delta', 1, { delta: 'Inspect files. ' })).runtime;
+  const second = reduceRunEvent(first, event('reasoning_delta', 2, { delta: 'Check tests.' })).runtime;
+  const answer = reduceRunEvent(second, event('message_delta', 3, { delta: 'Done.' })).runtime;
+
+  assert.equal(answer.messages.length, 2);
+  assert.equal(answer.messages[0].role, 'reasoning');
+  assert.equal(answer.messages[0].text, 'Inspect files. Check tests.');
+  assert.equal(answer.messages[1].role, 'assistant');
+  assert.equal(answer.messages[1].text, 'Done.');
+});

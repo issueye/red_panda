@@ -1,10 +1,18 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
+
+	xproxy "golang.org/x/net/proxy"
 
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
@@ -15,22 +23,22 @@ type ProviderProfileService struct {
 }
 
 type ProviderProfileDTO struct {
-	ID           string             `json:"id"`
-	Name         string             `json:"name"`
-	Provider     string             `json:"provider"`
-	BaseURL      string             `json:"base_url"`
-	Model        string             `json:"model"`
-	MaxTokens    int                `json:"max_tokens"`
-	Models       []ProviderModelDTO `json:"models"`
-	APIKeySet    bool               `json:"api_key_set"`
-	APIKeyMasked string             `json:"api_key_masked,omitempty"`
-	IsDefault    bool               `json:"is_default"`
-	Stream       bool               `json:"stream"`
-	Active       bool               `json:"active"`
-	SupportsVision bool             `json:"supports_vision"`
-	HTTPProxy    string             `json:"http_proxy,omitempty"`
-	CreatedAt    time.Time          `json:"created_at"`
-	UpdatedAt    time.Time          `json:"updated_at"`
+	ID             string             `json:"id"`
+	Name           string             `json:"name"`
+	Provider       string             `json:"provider"`
+	BaseURL        string             `json:"base_url"`
+	Model          string             `json:"model"`
+	MaxTokens      int                `json:"max_tokens"`
+	Models         []ProviderModelDTO `json:"models"`
+	APIKeySet      bool               `json:"api_key_set"`
+	APIKeyMasked   string             `json:"api_key_masked,omitempty"`
+	IsDefault      bool               `json:"is_default"`
+	Stream         bool               `json:"stream"`
+	Active         bool               `json:"active"`
+	SupportsVision bool               `json:"supports_vision"`
+	HTTPProxy      string             `json:"http_proxy,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
 type ProviderModelDTO struct {
@@ -47,31 +55,38 @@ type ProviderModelInput struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
-type ProviderProfileCreate struct {
-	Name      string
-	Provider  string
+type ProviderModelListInput struct {
+	ProfileID string
 	BaseURL   string
-	Model     string
-	MaxTokens int
-	Models    []ProviderModelInput
 	APIKey    string
-	IsDefault bool
-	Stream    *bool
-	SupportsVision *bool
 	HTTPProxy string
 }
 
+type ProviderProfileCreate struct {
+	Name           string
+	Provider       string
+	BaseURL        string
+	Model          string
+	MaxTokens      int
+	Models         []ProviderModelInput
+	APIKey         string
+	IsDefault      bool
+	Stream         *bool
+	SupportsVision *bool
+	HTTPProxy      string
+}
+
 type ProviderProfileUpdate struct {
-	Name      *string
-	Provider  *string
-	BaseURL   *string
-	Model     *string
-	MaxTokens *int
-	Models    *[]ProviderModelInput
-	APIKey    *string
-	IsDefault *bool
-	Stream    *bool
-	Active    *bool
+	Name           *string
+	Provider       *string
+	BaseURL        *string
+	Model          *string
+	MaxTokens      *int
+	Models         *[]ProviderModelInput
+	APIKey         *string
+	IsDefault      *bool
+	Stream         *bool
+	Active         *bool
 	SupportsVision *bool
 	HTTPProxy      *string
 }
@@ -240,6 +255,111 @@ func (s ProviderProfileService) Delete(id string) error {
 	return s.repos.Providers.Delete(id)
 }
 
+func (s ProviderProfileService) ListModels(ctx context.Context, input ProviderModelListInput) ([]string, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	apiKey := strings.TrimSpace(input.APIKey)
+	proxyURL := input.HTTPProxy
+	if input.ProfileID != "" && apiKey == "" {
+		profile, err := s.repos.Providers.Get(input.ProfileID)
+		if err != nil {
+			return nil, fmt.Errorf("load provider profile: %w", err)
+		}
+		if baseURL != strings.TrimRight(strings.TrimSpace(profile.BaseURL), "/") ||
+			strings.TrimSpace(proxyURL) != strings.TrimSpace(profile.HTTPProxy) {
+			return nil, fmt.Errorf("api_key is required after changing base_url or http_proxy")
+		}
+		apiKey = strings.TrimSpace(profile.APIKeySecret)
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("base_url is required")
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, fmt.Errorf("base_url must be a valid http(s) URL")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("api_key is required")
+	}
+	client, err := providerModelHTTPClient(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, baseURL+"/models", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create model list request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request model list: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read model list: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("model list returned HTTP %d", resp.StatusCode)
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode model list: %w", err)
+	}
+	seen := make(map[string]struct{}, len(payload.Data))
+	models := make([]string, 0, len(payload.Data))
+	for _, item := range payload.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		models = append(models, id)
+	}
+	sort.Strings(models)
+	return models, nil
+}
+
+func providerModelHTTPClient(rawProxy string) (*http.Client, error) {
+	proxyURL, err := normalizeProviderHTTPProxy(rawProxy)
+	if err != nil {
+		return nil, err
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if proxyURL == "" {
+		return &http.Client{Transport: transport}, nil
+	}
+	parsed, _ := url.Parse(proxyURL)
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		transport.Proxy = http.ProxyURL(parsed)
+	case "socks5", "socks5h":
+		var auth *xproxy.Auth
+		if parsed.User != nil {
+			password, _ := parsed.User.Password()
+			auth = &xproxy.Auth{User: parsed.User.Username(), Password: password}
+		}
+		dialer, err := xproxy.SOCKS5("tcp", parsed.Host, auth, &net.Dialer{Timeout: 15 * time.Second})
+		if err != nil {
+			return nil, fmt.Errorf("configure socks5 proxy: %w", err)
+		}
+		transport.Proxy = nil
+		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dialer.Dial(network, address)
+		}
+	}
+	return &http.Client{Transport: transport}, nil
+}
+
 func normalizeProvider(value string) (string, error) {
 	provider := strings.ToLower(strings.TrimSpace(value))
 	if provider == "" {
@@ -303,22 +423,22 @@ func providerProfileDTO(row model.ProviderProfile) ProviderProfileDTO {
 		})
 	}
 	return ProviderProfileDTO{
-		ID:           row.ID,
-		Name:         row.Name,
-		Provider:     row.Provider,
-		BaseURL:      row.BaseURL,
-		Model:        row.Model,
-		MaxTokens:    row.MaxTokens,
-		Models:       modelItems,
-		APIKeySet:    row.APIKeySecret != "",
-		APIKeyMasked: maskSecret(row.APIKeySecret),
-		IsDefault:    row.IsDefault,
-		Stream:       row.Stream,
-		Active:       row.Active,
+		ID:             row.ID,
+		Name:           row.Name,
+		Provider:       row.Provider,
+		BaseURL:        row.BaseURL,
+		Model:          row.Model,
+		MaxTokens:      row.MaxTokens,
+		Models:         modelItems,
+		APIKeySet:      row.APIKeySecret != "",
+		APIKeyMasked:   maskSecret(row.APIKeySecret),
+		IsDefault:      row.IsDefault,
+		Stream:         row.Stream,
+		Active:         row.Active,
 		SupportsVision: row.SupportsVision,
-		HTTPProxy:    row.HTTPProxy,
-		CreatedAt:    row.CreatedAt,
-		UpdatedAt:    row.UpdatedAt,
+		HTTPProxy:      row.HTTPProxy,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
 	}
 }
 

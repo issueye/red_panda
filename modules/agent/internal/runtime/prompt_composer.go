@@ -83,14 +83,15 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 		Input:     input,
 		Messages:  messages,
 		Options: provider.RequestOptions{
-			ProviderName:     options.ProviderName,
-			ProviderBaseURL:  options.ProviderBaseURL,
-			ProviderAPIKey:   options.ProviderAPIKey,
+			ProviderName:      options.ProviderName,
+			ProviderBaseURL:   options.ProviderBaseURL,
+			ProviderAPIKey:    options.ProviderAPIKey,
 			ProviderHTTPProxy: options.ProviderHTTPProxy,
-			Stream:           options.ProviderStream,
-			Model:            options.Model,
-			ReasoningEffort:  options.ReasoningEffort,
-			LogLLMRequests:   options.LogLLMRequests,
+			Stream:            options.ProviderStream,
+			Model:             options.Model,
+			EnableThinking:    options.EnableThinking,
+			ReasoningEffort:   options.ReasoningEffort,
+			LogLLMRequests:    options.LogLLMRequests,
 		},
 		Tools:       definitions,
 		ToolHistory: history,
@@ -299,4 +300,3 @@ func formatUTCOffset(offsetSec int) string {
 	}
 	return fmt.Sprintf("%s%02d:%02d", sign, offsetSec/3600, (offsetSec%3600)/60)
 }
-
