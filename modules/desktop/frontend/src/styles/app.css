@@ -3699,6 +3699,49 @@ button.activity-summary-card:hover {
   font-size: 11px;
 }
 
+.activity-detail-title-row strong {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.activity-cache-metrics {
+  border-bottom: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
+  padding: 8px 0;
+}
+
+.activity-cache-metrics-grid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.activity-cache-metrics-grid > div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.activity-cache-metrics-grid strong {
+  color: var(--color-text-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-cache-metrics-grid span {
+  color: var(--color-text-soft);
+  font-size: 10px;
+}
+
+.activity-cache-metrics > p {
+  color: var(--color-warning-text);
+  font-size: 10px;
+  margin: 0;
+}
+
 .activity-detail-group strong {
   color: var(--color-text-strong);
   font-size: 12px;
@@ -3799,6 +3842,11 @@ button.activity-summary-card:hover {
 .activity-event-kind-tool {
   background: var(--color-info-bg) !important;
   color: var(--color-info-text) !important;
+}
+
+.activity-event-kind-cache {
+  background: var(--color-success-bg) !important;
+  color: var(--color-success-text) !important;
 }
 
 .activity-event-kind-permission {

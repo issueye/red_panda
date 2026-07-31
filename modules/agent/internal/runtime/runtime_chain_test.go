@@ -2,10 +2,13 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -16,7 +19,8 @@ import (
 )
 
 type chainedToolProvider struct {
-	requests []provider.ProviderRequest
+	requests     []provider.ProviderRequest
+	promptHashes [][32]byte
 }
 
 func TestRecoveryAnswerForWorkerDoesNotDuplicateToolOutput(t *testing.T) {
@@ -57,6 +61,8 @@ func (*chainedToolProvider) Name() string {
 func (p *chainedToolProvider) Complete(_ context.Context, req provider.ProviderRequest, emit func(provider.ProviderChunk) error) error {
 	req.ToolHistory = append([]provider.ToolExchange(nil), req.ToolHistory...)
 	p.requests = append(p.requests, req)
+	raw, _ := json.Marshal(req.Prompt.FlattenMessages())
+	p.promptHashes = append(p.promptHashes, sha256.Sum256(raw))
 
 	switch len(req.ToolHistory) {
 	case 0:
@@ -134,6 +140,24 @@ func TestRuntimeProviderExecutesChainedToolCalls(t *testing.T) {
 
 	if len(provider.requests) != 3 {
 		t.Fatalf("provider request count = %d, want 3", len(provider.requests))
+	}
+	if len(provider.promptHashes) != 3 || provider.promptHashes[0] != provider.promptHashes[1] || provider.promptHashes[1] != provider.promptHashes[2] {
+		t.Fatalf("prompt prefix hashes changed across tool turns: %x", provider.promptHashes)
+	}
+	for index := 1; index < len(provider.requests); index++ {
+		previous := provider.requests[index-1]
+		current := provider.requests[index]
+		if previous.Prompt.CacheEpoch != current.Prompt.CacheEpoch {
+			t.Fatalf("cache epoch changed on request %d: %q != %q", index+1, previous.Prompt.CacheEpoch, current.Prompt.CacheEpoch)
+		}
+		if len(current.ToolHistory) < len(previous.ToolHistory) {
+			t.Fatalf("tool history shrank on request %d: %#v", index+1, current.ToolHistory)
+		}
+		for historyIndex := range previous.ToolHistory {
+			if !reflect.DeepEqual(current.ToolHistory[historyIndex], previous.ToolHistory[historyIndex]) {
+				t.Fatalf("tool history was rewritten on request %d: %#v", index+1, current.ToolHistory)
+			}
+		}
 	}
 	for index, wantHistory := range []int{0, 1, 2} {
 		if got := len(provider.requests[index].ToolHistory); got != wantHistory {

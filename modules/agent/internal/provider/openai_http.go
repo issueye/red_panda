@@ -162,6 +162,7 @@ func openAICompatibleChatCompletionsURL(raw string) string {
 func completeHTTPResponse(rawResp []byte, emit func(ProviderChunk) error) error {
 	var parsed struct {
 		Usage struct {
+			CachedTokens     int `json:"cached_tokens"`
 			PromptTokens     int `json:"prompt_tokens"`
 			CompletionTokens int `json:"completion_tokens"`
 			PromptDetails    struct {
@@ -191,7 +192,11 @@ func completeHTTPResponse(rawResp []byte, emit func(ProviderChunk) error) error 
 		return fmt.Errorf("provider returned no choices")
 	}
 	message := parsed.Choices[0].Message
-	usage := providerUsageOrNil(ProviderUsage{InputTokens: parsed.Usage.PromptTokens, OutputTokens: parsed.Usage.CompletionTokens, CacheReadTokens: parsed.Usage.PromptDetails.CachedTokens})
+	cachedTokens := parsed.Usage.PromptDetails.CachedTokens
+	if parsed.Usage.CachedTokens > cachedTokens {
+		cachedTokens = parsed.Usage.CachedTokens
+	}
+	usage := providerUsageOrNil(ProviderUsage{InputTokens: parsed.Usage.PromptTokens, OutputTokens: parsed.Usage.CompletionTokens, CacheReadTokens: cachedTokens})
 	reasoning := message.ReasoningContent
 	if reasoning == "" {
 		reasoning = message.Reasoning

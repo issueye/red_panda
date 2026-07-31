@@ -88,12 +88,58 @@ func TestMigrateDefaultsExistingProviderProfilesToStreaming(t *testing.T) {
 	if !profile.Stream {
 		t.Fatal("existing provider profile should default to streaming")
 	}
+	if profile.CacheMode != "implicit" {
+		t.Fatalf("existing compatible profile cache_mode = %q, want implicit", profile.CacheMode)
+	}
 	// http_proxy 列在 Migrate 中为老库补建,默认空串(回退到环境代理)。
 	if profile.HTTPProxy != "" {
 		t.Fatalf("existing provider profile http_proxy should default to empty, got %q", profile.HTTPProxy)
 	}
 	if !db.Migrator().HasColumn(&model.ProviderProfile{}, "http_proxy") {
 		t.Fatal("provider_profiles.http_proxy column was not created")
+	}
+}
+
+func TestMigrateBackfillsPromptCacheMetadata(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&model.ProviderProfile{}, &model.SessionCompaction{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ProviderProfile{
+		ID: "provider_anthropic", Name: "legacy anthropic", Provider: "anthropic", Active: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.SessionCompaction{
+		ID: "compaction_legacy", SourceSessionID: "session_legacy", TargetSessionID: "session_legacy",
+		Status: "applied", SourceStartSeq: 1, SourceEndSeq: 20, SummaryJSON: `{"summary":"stable"}`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var profile model.ProviderProfile
+	if err := db.First(&profile, "id = ?", "provider_anthropic").Error; err != nil {
+		t.Fatal(err)
+	}
+	if profile.CacheMode != "explicit" {
+		t.Fatalf("anthropic cache_mode = %q, want explicit", profile.CacheMode)
+	}
+	var compaction model.SessionCompaction
+	if err := db.First(&compaction, "id = ?", "compaction_legacy").Error; err != nil {
+		t.Fatal(err)
+	}
+	if compaction.SummaryDigest == "" || compaction.PromptSchemaVersion == "" || compaction.CacheEpoch == "" {
+		t.Fatalf("cache metadata was not backfilled: %#v", compaction)
 	}
 }
 

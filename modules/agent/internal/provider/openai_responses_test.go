@@ -33,7 +33,7 @@ func TestOpenAIResponsesProviderRequestAndNonStreamToolCall(t *testing.T) {
 	p := OpenAIResponsesProvider{providerConfig{BaseURL: server.URL, APIKey: "secret", Model: "fallback", Client: server.Client()}}
 	var chunks []ProviderChunk
 	err := p.Complete(context.Background(), Request{
-		Messages:    []Message{{Role: "system", Content: "be direct"}, {Role: "user", Content: "inspect"}},
+		Prompt:      PromptEnvelope{StablePrefix: []Message{{Role: "system", Content: "be direct"}}, TurnTail: []Message{{Role: "user", Content: "inspect"}}},
 		Options:     RequestOptions{Model: "gpt-test", EnableThinking: true, ReasoningEffort: "high"},
 		Tools:       []tools.Definition{{Name: "workspace.read_file", Description: "Read", Parameters: map[string]any{"type": "object"}}},
 		ToolHistory: []ToolExchange{{Call: tools.Call{ID: "call_1", Name: "workspace.list", Arguments: map[string]any{"path": "."}}, Result: tools.Result{Status: tools.CallStatusCompleted, Output: "README.md"}}},
@@ -60,6 +60,29 @@ func TestOpenAIResponsesProviderRequestAndNonStreamToolCall(t *testing.T) {
 	}}}}
 	if !reflect.DeepEqual(chunks, want) {
 		t.Fatalf("chunks = %#v", chunks)
+	}
+}
+
+func TestOpenAIResponsesSendsSupportedCacheIdentity(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.WriteString(w, `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)
+	}))
+	defer server.Close()
+
+	p := OpenAIResponsesProvider{providerConfig{BaseURL: server.URL, APIKey: "secret", Model: "m", Client: server.Client()}}
+	err := p.Complete(context.Background(), Request{
+		Prompt:  PromptEnvelope{StablePrefix: []Message{{Role: "system", Content: "stable"}}, TurnTail: []Message{{Role: "user", Content: "hello"}}, CacheEpoch: "epoch-123"},
+		Options: RequestOptions{CacheMode: CacheModeExplicit, CacheKeySupported: true, CacheRetention: "24h"},
+	}, func(ProviderChunk) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body["prompt_cache_key"] != "epoch-123" || body["prompt_cache_retention"] != "24h" {
+		t.Fatalf("cache fields = %#v", body)
 	}
 }
 

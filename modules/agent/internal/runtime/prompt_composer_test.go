@@ -37,6 +37,7 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 	}}}
 
 	request := composer.compose(params, "current", definitions, rounds)
+	messages := request.Prompt.FlattenMessages()
 	if request.RunID != "run_1" || request.SessionID != "session_1" || request.Input != "current" {
 		t.Fatalf("identity/input changed: %#v", request)
 	}
@@ -48,20 +49,24 @@ func TestPromptComposerPreservesPolicyAndContextOrder(t *testing.T) {
 		rootAgentOrchestrationPolicy,
 		rootAgentPostDelegationPolicy,
 		rootAgentTodoPolicy,
+		"specialist", "skills",
 		"first\ndetail", "answer",
-		"specialist\n\nskills\n\nmemory\n\n[Runtime todo context]\ntodo context\n[/Runtime todo context]\n\ncurrent",
+		"memory\n\n[Runtime todo context]\ntodo context\n[/Runtime todo context]\n\ncurrent",
 	}
-	if len(request.Messages) != len(wantContents) {
-		t.Fatalf("messages = %#v", request.Messages)
+	if len(messages) != len(wantContents) {
+		t.Fatalf("messages = %#v", messages)
 	}
 	for i, want := range wantContents {
-		got := provider.MessageText(request.Messages[i].Content)
+		got := provider.MessageText(messages[i].Content)
 		if got != want {
 			t.Fatalf("messages[%d].Content = %q, want %q", i, got, want)
 		}
 	}
-	if got := []string{request.Messages[3].Role, request.Messages[4].Role, request.Messages[5].Role}; !reflect.DeepEqual(got, []string{"user", "assistant", "user"}) {
+	if got := []string{messages[5].Role, messages[6].Role, messages[7].Role}; !reflect.DeepEqual(got, []string{"user", "assistant", "user"}) {
 		t.Fatalf("conversation roles = %#v", got)
+	}
+	if len(request.Prompt.StablePrefix) != 3 || len(request.Prompt.SessionPrefix) != 2 || len(request.Prompt.History) != 2 || len(request.Prompt.TurnTail) != 1 {
+		t.Fatalf("prompt segments = %#v", request.Prompt)
 	}
 	if !reflect.DeepEqual(request.ToolRounds, rounds) || len(request.ToolHistory) != 1 {
 		t.Fatalf("tool history changed: %#v", request)
@@ -72,17 +77,18 @@ func TestPromptComposerAddsFileChangeReportPolicyOnlyToRoot(t *testing.T) {
 	composer := promptComposer{now: time.Now}
 	definitions := []tools.Definition{{Name: "git.status"}, {Name: "workspace.write_file"}}
 	root := composer.compose(methods.ReplyParams{}, "edit", definitions, nil)
-	rootPolicy := provider.MessageText(root.Messages[0].Content)
+	rootMessages := root.Prompt.FlattenMessages()
+	rootPolicy := provider.MessageText(rootMessages[0].Content)
 	if !strings.Contains(rootPolicy, "变更文件") || !strings.Contains(rootPolicy, "Markdown link") {
-		t.Fatalf("root file report policy missing: %#v", root.Messages)
+		t.Fatalf("root file report policy missing: %#v", rootMessages)
 	}
 
 	specialist := composer.compose(methods.ReplyParams{Options: methods.ReplyOptions{
 		SpecialistContext: &methods.SpecialistContext{Context: "specialist"},
 	}}, "edit", definitions, nil)
-	for _, message := range specialist.Messages {
+	for _, message := range specialist.Prompt.FlattenMessages() {
 		if strings.Contains(provider.MessageText(message.Content), "变更文件") {
-			t.Fatalf("specialist received root report policy: %#v", specialist.Messages)
+			t.Fatalf("specialist received root report policy: %#v", specialist.Prompt.FlattenMessages())
 		}
 	}
 }
@@ -103,15 +109,72 @@ func TestPromptComposerOnlyInjectsTimeForTimeSensitiveRequests(t *testing.T) {
 	second := promptComposer{now: func() time.Time { return time.Date(2026, 7, 15, 9, 0, 30, 0, time.UTC) }}
 	ordinaryA := first.compose(methods.ReplyParams{}, "fix the parser", nil, nil)
 	ordinaryB := second.compose(methods.ReplyParams{}, "fix the parser", nil, nil)
-	if !reflect.DeepEqual(ordinaryA.Messages, ordinaryB.Messages) {
-		t.Fatalf("ordinary request changed with wall clock: %#v != %#v", ordinaryA.Messages, ordinaryB.Messages)
+	if !reflect.DeepEqual(ordinaryA.Prompt, ordinaryB.Prompt) {
+		t.Fatalf("ordinary request changed with wall clock: %#v != %#v", ordinaryA.Prompt, ordinaryB.Prompt)
 	}
 	if shouldInjectCurrentTime("update the database") {
 		t.Fatal("update/database must not be treated as the word date")
 	}
 	timeRequest := first.compose(methods.ReplyParams{}, "现在几点？", nil, nil)
-	if got := provider.MessageText(timeRequest.Messages[len(timeRequest.Messages)-1].Content); !strings.Contains(got, "2026-07-15 09:00:00") {
+	timeMessages := timeRequest.Prompt.FlattenMessages()
+	if got := provider.MessageText(timeMessages[len(timeMessages)-1].Content); !strings.Contains(got, "2026-07-15 09:00:00") {
 		t.Fatalf("time context missing: %q", got)
+	}
+}
+
+func TestPromptComposerKeepsCacheableSegmentsStableAcrossDynamicTurns(t *testing.T) {
+	composer := promptComposer{now: func() time.Time { return time.Date(2026, 7, 15, 9, 0, 0, 0, time.UTC) }}
+	base := methods.ReplyParams{Options: methods.ReplyOptions{
+		ProviderName:      "openai_compatible",
+		Model:             "model-a",
+		SpecialistContext: &methods.SpecialistContext{Context: "specialist-v1"},
+		SkillsContext:     &methods.SkillsContext{Context: "skills-v1"},
+		MemoryContext:     &methods.MemoryContext{Context: "memory-a"},
+		TodoContext:       &methods.TodoContext{Context: "todo-a"},
+	}}
+	definitions := []tools.Definition{{Name: "todo.write"}, {Name: "worker.delegate"}}
+	first := composer.compose(base, "first question", definitions, nil)
+
+	changed := base
+	changed.Options.MemoryContext = &methods.MemoryContext{Context: "memory-b"}
+	changed.Options.TodoContext = &methods.TodoContext{Context: "todo-b"}
+	second := composer.compose(changed, "second question", definitions, nil)
+
+	if !reflect.DeepEqual(first.Prompt.StablePrefix, second.Prompt.StablePrefix) {
+		t.Fatalf("stable prefix changed: %#v != %#v", first.Prompt.StablePrefix, second.Prompt.StablePrefix)
+	}
+	if !reflect.DeepEqual(first.Prompt.SessionPrefix, second.Prompt.SessionPrefix) {
+		t.Fatalf("session prefix changed: %#v != %#v", first.Prompt.SessionPrefix, second.Prompt.SessionPrefix)
+	}
+	if first.Prompt.CacheEpoch != second.Prompt.CacheEpoch {
+		t.Fatalf("dynamic turn changed cache epoch: %q != %q", first.Prompt.CacheEpoch, second.Prompt.CacheEpoch)
+	}
+	if reflect.DeepEqual(first.Prompt.TurnTail, second.Prompt.TurnTail) {
+		t.Fatalf("turn tail did not capture dynamic context: %#v", first.Prompt.TurnTail)
+	}
+}
+
+func TestPromptComposerPromotesCompactionSummaryToSessionPrefix(t *testing.T) {
+	params := methods.ReplyParams{
+		Options: methods.ReplyOptions{ProviderName: "openai_compatible", Model: "m"},
+		Session: methods.ReplySession{Conversation: []methods.Message{
+			{Role: "system", Content: []methods.ContentBlock{{Type: "text", Text: "summary-v1"}}},
+			{Role: "user", Content: []methods.ContentBlock{{Type: "text", Text: "recent question"}}},
+			{Role: "assistant", Content: []methods.ContentBlock{{Type: "text", Text: "recent answer"}}},
+		}},
+	}
+	first := newPromptComposer().compose(params, "current", nil, nil)
+	if len(first.Prompt.SessionPrefix) != 1 || provider.MessageText(first.Prompt.SessionPrefix[0].Content) != "summary-v1" {
+		t.Fatalf("session prefix = %#v", first.Prompt.SessionPrefix)
+	}
+	if len(first.Prompt.History) != 2 {
+		t.Fatalf("history = %#v", first.Prompt.History)
+	}
+
+	params.Session.Conversation[0].Content[0].Text = "summary-v2"
+	second := newPromptComposer().compose(params, "current", nil, nil)
+	if first.Prompt.CacheEpoch == second.Prompt.CacheEpoch {
+		t.Fatal("compaction summary change did not invalidate cache epoch")
 	}
 }
 
@@ -137,11 +200,12 @@ func TestPromptComposerMultimodalAttachments(t *testing.T) {
 		},
 	}
 	request := composer.compose(params, "what color?", nil, nil)
+	messages := request.Prompt.FlattenMessages()
 	if len(request.Attachments) != 1 || request.Attachments[0].ID != "att_new" {
 		t.Fatalf("Attachments = %#v", request.Attachments)
 	}
 	// Last message is the current user turn with multimodal parts.
-	last := request.Messages[len(request.Messages)-1]
+	last := messages[len(messages)-1]
 	parts, ok := last.Content.([]provider.Part)
 	if !ok || len(parts) != 2 {
 		t.Fatalf("current user content = %#v", last.Content)
@@ -155,12 +219,12 @@ func TestPromptComposerMultimodalAttachments(t *testing.T) {
 	// History image_ref without inline bytes becomes a text placeholder.
 	var historyUser provider.Message
 	foundHistory := false
-	for _, m := range request.Messages {
+	for _, m := range messages {
 		if m.Role != "user" {
 			continue
 		}
 		// Skip the trailing current-turn message.
-		if &m == &request.Messages[len(request.Messages)-1] || m.Content == nil {
+		if m.Content == nil {
 			// fall through to identity by text placeholder presence
 		}
 		parts, ok := m.Content.([]provider.Part)
@@ -181,7 +245,7 @@ func TestPromptComposerMultimodalAttachments(t *testing.T) {
 		}
 	}
 	if !foundHistory {
-		t.Fatalf("history user with image placeholder not found: %#v", request.Messages)
+		t.Fatalf("history user with image placeholder not found: %#v", messages)
 	}
 	hParts, ok := historyUser.Content.([]provider.Part)
 	if !ok {

@@ -43,20 +43,23 @@ type SessionLineage struct {
 }
 
 type SessionCompaction struct {
-	ID               string `gorm:"primaryKey"`
-	SourceSessionID  string `gorm:"index;uniqueIndex:idx_compactions_one_applied,where:status = 'applied'"`
-	TargetSessionID  string `gorm:"index;uniqueIndex:idx_compactions_one_applied,where:status = 'applied'"`
-	Status           string `gorm:"index"`
-	SourceStartSeq   uint64
-	SourceEndSeq     uint64
-	SummaryMessageID string
-	SummaryJSON      string
-	SummaryMethod    string
-	KeepTailMessages int
-	KeepTailTurns    int
-	Error            string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                  string `gorm:"primaryKey"`
+	SourceSessionID     string `gorm:"index;uniqueIndex:idx_compactions_one_applied,where:status = 'applied'"`
+	TargetSessionID     string `gorm:"index;uniqueIndex:idx_compactions_one_applied,where:status = 'applied'"`
+	Status              string `gorm:"index"`
+	SourceStartSeq      uint64
+	SourceEndSeq        uint64
+	SummaryMessageID    string
+	SummaryJSON         string
+	SummaryMethod       string
+	SummaryDigest       string
+	PromptSchemaVersion string
+	CacheEpoch          string
+	KeepTailMessages    int
+	KeepTailTurns       int
+	Error               string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type MemoryRecord struct {
@@ -251,10 +254,14 @@ type ProviderProfile struct {
 	// HTTPProxy is an optional outbound HTTP(S)/SOCKS5 proxy used for this
 	// profile's provider requests (e.g. http://127.0.0.1:7890). Empty falls
 	// back to the environment proxy (HTTP_PROXY / HTTPS_PROXY).
-	HTTPProxy   string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
+	HTTPProxy         string
+	CacheMode         string
+	CacheKeySupported bool
+	CacheRetention    string
+	MinCacheTokens    int
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
 }
 
 type ProviderModel struct {
@@ -283,10 +290,10 @@ type Attachment struct {
 	Height       int
 	OriginalName string
 	// CreatedBy: user | system | tool
-	CreatedBy  string
-	CreatedAt  time.Time
-	LastRefAt  time.Time
-	DeletedAt  *time.Time `gorm:"index"`
+	CreatedBy string
+	CreatedAt time.Time
+	LastRefAt time.Time
+	DeletedAt *time.Time `gorm:"index"`
 }
 
 type MCPTimeouts struct {

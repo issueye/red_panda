@@ -7,6 +7,7 @@ import (
 
 	"redpanda/agent/internal/provider"
 	"redpanda/agent/internal/runtime/hooks"
+	"redpanda/protocol/events"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
@@ -30,10 +31,15 @@ func (r *Runtime) completeProvider(ctx context.Context, params methods.ReplyPara
 	}
 
 	var textBytes, toolCalls, chunks int
+	var usage provider.ProviderUsage
 	err := r.provider.Complete(ctx, request, func(chunk provider.ProviderChunk) error {
 		chunks++
 		textBytes += len(chunk.Delta)
 		toolCalls += len(chunk.ToolCalls)
+		if chunk.Usage != nil {
+			usage = mergeProviderUsage(usage, *chunk.Usage)
+			chunk.Usage = nil
+		}
 		return emit(chunk)
 	})
 
@@ -49,6 +55,14 @@ func (r *Runtime) completeProvider(ctx context.Context, params methods.ReplyPara
 		"tool_call_count": toolCalls,
 		"success":         err == nil,
 	}
+	if usage != (provider.ProviderUsage{}) {
+		diagnostic := r.diagnoseCacheCall(request, usage, err == nil)
+		usagePayload := cacheUsagePayload(r.provider.Name(), request, usage, diagnostic)
+		_ = r.emitEvent(afterCtx, params, events.EventUsage, nil, usagePayload)
+		for key, value := range usagePayload {
+			event[key] = value
+		}
+	}
 	if err != nil {
 		event["error"] = err.Error()
 	}
@@ -56,14 +70,60 @@ func (r *Runtime) completeProvider(ctx context.Context, params methods.ReplyPara
 	return err
 }
 
+func mergeProviderUsage(current, next provider.ProviderUsage) provider.ProviderUsage {
+	if next.InputTokens > current.InputTokens {
+		current.InputTokens = next.InputTokens
+	}
+	if next.OutputTokens > current.OutputTokens {
+		current.OutputTokens = next.OutputTokens
+	}
+	if next.CacheReadTokens > current.CacheReadTokens {
+		current.CacheReadTokens = next.CacheReadTokens
+	}
+	if next.CacheWriteTokens > current.CacheWriteTokens {
+		current.CacheWriteTokens = next.CacheWriteTokens
+	}
+	return current
+}
+
+func cacheUsagePayload(providerName string, request provider.Request, usage provider.ProviderUsage, diagnostic cacheCallDiagnostic) map[string]any {
+	payload := map[string]any{
+		"provider_name":      providerName,
+		"model":              request.Options.Model,
+		"input_tokens":       usage.InputTokens,
+		"output_tokens":      usage.OutputTokens,
+		"cache_read_tokens":  usage.CacheReadTokens,
+		"cache_write_tokens": usage.CacheWriteTokens,
+		"cache_hit":          diagnostic.cacheHit,
+		"cache_hit_ratio":    diagnostic.hitRatio,
+		"cache_mode":         diagnostic.cacheMode,
+		"cache_active":       diagnostic.cacheActive,
+		"cache_epoch":        request.Prompt.CacheEpoch,
+		"prefix_hash":        diagnostic.prefixHash,
+	}
+	if diagnostic.missReason != "" {
+		payload["cache_miss_reason"] = diagnostic.missReason
+	}
+	return payload
+}
+
 func providerRequestHookEvent(providerName string, request provider.Request) map[string]any {
-	messages := make([]any, 0, len(request.Messages))
-	for _, message := range request.Messages {
-		messages = append(messages, map[string]any{
-			"role":          message.Role,
-			"content":       providerContentToHook(message.Content),
-			"cache_control": message.CacheControl,
-		})
+	promptSegment := func(source []provider.Message) []any {
+		messages := make([]any, 0, len(source))
+		for _, message := range source {
+			messages = append(messages, map[string]any{
+				"role":    message.Role,
+				"content": providerContentToHook(message.Content),
+			})
+		}
+		return messages
+	}
+	prompt := map[string]any{
+		"stable_prefix":  promptSegment(request.Prompt.StablePrefix),
+		"session_prefix": promptSegment(request.Prompt.SessionPrefix),
+		"history":        promptSegment(request.Prompt.History),
+		"turn_tail":      promptSegment(request.Prompt.TurnTail),
+		"cache_epoch":    request.Prompt.CacheEpoch,
 	}
 	definitions := make([]any, 0, len(request.Tools))
 	for _, definition := range request.Tools {
@@ -82,9 +142,15 @@ func providerRequestHookEvent(providerName string, request provider.Request) map
 	return map[string]any{
 		"provider_name": providerName,
 		"model":         request.Options.Model,
-		"messages":      messages,
+		"prompt":        prompt,
 		"tools":         definitions,
 		"headers":       headers,
+		"cache_policy": map[string]any{
+			"mode":                effectiveDiagnosticCacheMode(request.Options, providerName),
+			"cache_key_supported": request.Options.CacheKeySupported,
+			"retention":           request.Options.CacheRetention,
+			"min_cache_tokens":    request.Options.MinCacheTokens,
+		},
 	}
 }
 
@@ -108,12 +174,12 @@ func providerContentToHook(content any) any {
 }
 
 func applyProviderRequestHookEvent(request *provider.Request, event map[string]any) error {
-	if raw, exists := event["messages"]; exists {
-		messages, err := providerMessagesFromHook(raw)
+	if raw, exists := event["prompt"]; exists {
+		prompt, err := providerPromptFromHook(raw)
 		if err != nil {
 			return err
 		}
-		request.Messages = messages
+		request.Prompt = prompt
 	}
 	if raw, exists := event["tools"]; exists {
 		definitions, err := providerToolsFromHook(raw)
@@ -129,7 +195,46 @@ func applyProviderRequestHookEvent(request *provider.Request, event map[string]a
 		}
 		request.Options.Headers = provider.SanitizeHeaders(headers)
 	}
+	request.Tools = provider.CanonicalToolDefinitions(request.Tools)
+	request.Prompt.CacheEpoch = provider.ComputeCacheEpoch(request.Options.ProviderName, request.Options.Model, request.Tools, request.Prompt)
 	return nil
+}
+
+func providerPromptFromHook(raw any) (provider.PromptEnvelope, error) {
+	item, ok := raw.(map[string]any)
+	if !ok {
+		return provider.PromptEnvelope{}, fmt.Errorf("prompt must be an object")
+	}
+	readSegment := func(name string) ([]provider.Message, error) {
+		rawSegment, exists := item[name]
+		if !exists {
+			return nil, nil
+		}
+		messages, err := providerMessagesFromHook(rawSegment)
+		if err != nil {
+			return nil, fmt.Errorf("prompt.%s: %w", name, err)
+		}
+		return messages, nil
+	}
+	stable, err := readSegment("stable_prefix")
+	if err != nil {
+		return provider.PromptEnvelope{}, err
+	}
+	session, err := readSegment("session_prefix")
+	if err != nil {
+		return provider.PromptEnvelope{}, err
+	}
+	history, err := readSegment("history")
+	if err != nil {
+		return provider.PromptEnvelope{}, err
+	}
+	tail, err := readSegment("turn_tail")
+	if err != nil {
+		return provider.PromptEnvelope{}, err
+	}
+	return provider.PromptEnvelope{
+		StablePrefix: stable, SessionPrefix: session, History: history, TurnTail: tail,
+	}, nil
 }
 
 func providerMessagesFromHook(raw any) ([]provider.Message, error) {
@@ -151,8 +256,7 @@ func providerMessagesFromHook(raw any) ([]provider.Message, error) {
 		if err != nil {
 			return nil, fmt.Errorf("messages[%d].content: %w", index, err)
 		}
-		cacheControl, _ := item["cache_control"].(bool)
-		result = append(result, provider.Message{Role: role, Content: content, CacheControl: cacheControl})
+		result = append(result, provider.Message{Role: role, Content: content})
 	}
 	return result, nil
 }

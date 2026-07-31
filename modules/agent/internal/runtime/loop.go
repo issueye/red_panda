@@ -108,20 +108,24 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		rounds = append(rounds, append([]provider.ToolExchange(nil), history...))
 	}
 	turnsUsed := 0
+	// Snapshot all prompt and tool-definition inputs once. Tool turns may only
+	// append transcript; they must not refresh Todo or reorder the prefix.
+	if ctxTodos := r.todoContextForRun(params.RunID); ctxTodos != nil {
+		params.Options.TodoContext = ctxTodos
+	}
+	definitions := provider.CanonicalToolDefinitions(runRegistry.FilterDefinitions(runRegistry.Definitions(), params.Options))
+	baseRequest := newPromptComposer().compose(params, providerInput, definitions, nil)
+	baseRequest.Options = provider.WithRegistry(baseRequest.Options, r.providers)
 	for turn := 0; turn < maxTurns; turn++ {
 		if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
 			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
 		}
-		// 循环中：从运行快照刷新 Todo 上下文。
-		if ctxTodos := r.todoContextForRun(params.RunID); ctxTodos != nil {
-			params.Options.TodoContext = ctxTodos
-		}
 		var requestedCalls []tools.Call
 		emittedText := false
 		flatHistory := flattenToolRounds(rounds)
-		definitions := runRegistry.FilterDefinitions(runRegistry.Definitions(), params.Options)
-		request := newPromptComposer().compose(params, providerInput, definitions, rounds)
-		request.Options = provider.WithRegistry(request.Options, r.providers)
+		request := baseRequest
+		request.ToolHistory = append([]provider.ToolExchange(nil), flatHistory...)
+		request.ToolRounds = cloneToolRounds(rounds)
 		err := r.completeProvider(ctx, params, request, func(chunk provider.ProviderChunk) error {
 			if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
 				return err
@@ -148,6 +152,8 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 				if emptyContinuationAttempts < maxEmptyContinuationAttempts && turn+1 < maxTurns {
 					emptyContinuationAttempts++
 					providerInput = emptyProviderContinuationPrompt(input, emptyContinuationAttempts)
+					baseRequest = newPromptComposer().compose(params, providerInput, definitions, nil)
+					baseRequest.Options = provider.WithRegistry(baseRequest.Options, r.providers)
 					continue
 				}
 				// 不使用工具重试一次，迫使模型生成最终答案。
@@ -278,17 +284,6 @@ func (r *Runtime) consumeProviderChunk(
 			return err
 		}
 	}
-	if chunk.Usage != nil {
-		if err := r.emitEvent(ctx, params, events.EventUsage, nil, map[string]any{
-			"provider_name":      r.provider.Name(),
-			"input_tokens":       chunk.Usage.InputTokens,
-			"output_tokens":      chunk.Usage.OutputTokens,
-			"cache_read_tokens":  chunk.Usage.CacheReadTokens,
-			"cache_write_tokens": chunk.Usage.CacheWriteTokens,
-		}); err != nil {
-			return err
-		}
-	}
 	if len(chunk.ToolCalls) > 0 {
 		*requestedCalls = append(*requestedCalls, chunk.ToolCalls...)
 		return nil
@@ -401,6 +396,17 @@ func flattenToolRounds(rounds [][]provider.ToolExchange) []provider.ToolExchange
 		out = append(out, round...)
 	}
 	return out
+}
+
+func cloneToolRounds(rounds [][]provider.ToolExchange) [][]provider.ToolExchange {
+	if len(rounds) == 0 {
+		return nil
+	}
+	result := make([][]provider.ToolExchange, 0, len(rounds))
+	for _, round := range rounds {
+		result = append(result, append([]provider.ToolExchange(nil), round...))
+	}
+	return result
 }
 
 // synthesizeToolAnswer 在提供方结束工具循环却未输出自然语言回复时，构建面向用户的可见摘要。

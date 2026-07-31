@@ -298,6 +298,10 @@ func (r RunService) applyProviderProfile(params *methods.RunExecuteParams) error
 	params.Options.ProviderStream = &profile.Stream
 	params.Options.ProviderHTTPProxy = profile.HTTPProxy
 	params.Options.SupportsVision = profile.SupportsVision
+	params.Options.ProviderCacheMode = effectiveProfileCacheMode(profile.Provider, profile.CacheMode)
+	params.Options.ProviderCacheKey = profile.CacheKeySupported
+	params.Options.ProviderCacheRetain = profile.CacheRetention
+	params.Options.ProviderMinCache = profile.MinCacheTokens
 	if params.Options.Model == "" {
 		params.Options.Model = profile.Model
 	}

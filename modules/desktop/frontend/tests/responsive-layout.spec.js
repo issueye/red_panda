@@ -105,6 +105,7 @@ test('panel fixtures stay visible in narrow review viewports', async ({ page }) 
   await page.setViewportSize({ width: 390, height: 760 });
   await page.goto('/activity-fixture.html');
   await expect(page.getByTestId('activity-panel')).toBeVisible();
+  await page.getByTestId('activity-run-toggle').click();
   await expect(page.getByTestId('activity-event-timeline')).toBeVisible();
 
   await page.goto('/memory-fixture.html');

@@ -34,6 +34,7 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 		}
 		var chunk struct {
 			Usage struct {
+				CachedTokens     int `json:"cached_tokens"`
 				PromptTokens     int `json:"prompt_tokens"`
 				CompletionTokens int `json:"completion_tokens"`
 				PromptDetails    struct {
@@ -59,8 +60,12 @@ func (p HTTPCompatibleProvider) completeStream(reader io.Reader, emit func(Provi
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return err
 		}
-		if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || chunk.Usage.PromptDetails.CachedTokens > 0 {
-			if err := emit(ProviderChunk{Usage: &ProviderUsage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, CacheReadTokens: chunk.Usage.PromptDetails.CachedTokens}}); err != nil {
+		cachedTokens := chunk.Usage.PromptDetails.CachedTokens
+		if chunk.Usage.CachedTokens > cachedTokens {
+			cachedTokens = chunk.Usage.CachedTokens
+		}
+		if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || cachedTokens > 0 {
+			if err := emit(ProviderChunk{Usage: &ProviderUsage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, CacheReadTokens: cachedTokens}}); err != nil {
 				return err
 			}
 		}

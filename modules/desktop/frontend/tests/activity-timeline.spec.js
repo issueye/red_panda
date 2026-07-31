@@ -12,25 +12,26 @@ test('Activity timeline filters groups and payload inspection work in browser', 
   await page.getByTestId('activity-run-toggle').click();
   const timeline = page.getByTestId('activity-event-timeline');
   await expect(timeline).toBeVisible();
-  await expect(page.getByTestId('activity-event-count')).toHaveText('4/4');
-  await expect(page.getByTestId('activity-event-group')).toHaveCount(4);
+  await expect(page.getByTestId('activity-event-count')).toHaveText('5/5');
+  await expect(page.getByTestId('activity-event-group')).toHaveCount(5);
+  await expect(page.getByTestId('activity-cache-hit-ratio')).toHaveText('99.2%');
   await expect(page.getByTestId('activity-tool-summary')).toHaveCount(2);
   await expect(page.getByTestId('activity-tool-summary').filter({ hasText: 'Read file' })).toContainText('× 2');
 
   await chooseMenuOption(page.getByTestId('activity-event-kind-filter'), '工具');
-  await expect(page.getByTestId('activity-event-count')).toHaveText('1/4');
+  await expect(page.getByTestId('activity-event-count')).toHaveText('1/5');
   await expect(timeline.getByText('workspace.read_file')).toBeVisible();
   await expect(timeline.getByText('planner saw the file')).toHaveCount(0);
 
   await chooseMenuOption(page.getByTestId('activity-event-kind-filter'), '全部类型');
   await chooseMenuOption(page.getByTestId('activity-event-worker-filter'), 'Worker · worker-02 · planner');
-  await expect(page.getByTestId('activity-event-count')).toHaveText('1/4');
+  await expect(page.getByTestId('activity-event-count')).toHaveText('1/5');
   await expect(timeline.getByText('planner saw the file')).toBeVisible();
   await expect(timeline.getByText('workspace.read_file')).toHaveCount(0);
 
   await chooseMenuOption(page.getByTestId('activity-event-worker-filter'), '全部 Worker');
   await chooseMenuOption(page.getByTestId('activity-event-kind-filter'), '授权');
-  await expect(page.getByTestId('activity-event-count')).toHaveText('1/4');
+  await expect(page.getByTestId('activity-event-count')).toHaveText('1/5');
   await page.getByTestId('activity-event-payload-toggle').click();
   await expect(page.getByTestId('activity-event-payload')).toContainText('"permission_id": "perm_fixture"');
   await expect(page.getByTestId('activity-event-payload')).toContainText('"tool_name": "shell.exec"');

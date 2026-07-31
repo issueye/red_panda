@@ -75,12 +75,12 @@ func TestOpenAIResponsesContentInputImage(t *testing.T) {
 
 func TestOpenAICompatibleMessagesWithImageParts(t *testing.T) {
 	req := ProviderRequest{
-		Messages: []Message{
+		Prompt: PromptEnvelope{TurnTail: []Message{
 			{Role: "user", Content: []Part{
 				{Type: "text", Text: "what is this?"},
 				{Type: "image_url", ImageURL: &ImageURL{URL: "data:image/png;base64,QQ=="}},
 			}},
-		},
+		}},
 	}
 	msgs := openAICompatibleMessages(req)
 	if len(msgs) != 1 {

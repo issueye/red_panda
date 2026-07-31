@@ -51,7 +51,7 @@ func (p AnthropicProvider) completeAttempt(ctx context.Context, req Request, emi
 		body["system"] = system
 	}
 	if len(req.Tools) > 0 {
-		body["tools"] = anthropicTools(req.Tools)
+		body["tools"] = anthropicTools(req.Tools, explicitCacheEnabled(req.Options, "anthropic"))
 		body["tool_choice"] = map[string]any{"type": "auto"}
 	}
 	rawBody, err := json.Marshal(body)
@@ -102,16 +102,19 @@ func anthropicMessagesURL(raw string) string {
 
 func anthropicMessages(req Request) ([]map[string]any, []map[string]any) {
 	var systems []map[string]any
-	messages := make([]map[string]any, 0, len(req.Messages)+len(req.ToolHistory)*2)
-	for _, message := range req.Messages {
+	promptMessages := req.Prompt.FlattenMessages()
+	messages := make([]map[string]any, 0, len(promptMessages)+len(req.ToolHistory)*2)
+	cacheableSystemCount := 0
+	explicitCache := explicitCacheEnabled(req.Options, "anthropic")
+	for index, message := range promptMessages {
 		if message.Role == "system" {
 			// System prompts stay plain text (Anthropic top-level "system" field).
 			if text := strings.TrimSpace(MessageText(message.Content)); text != "" {
 				block := map[string]any{"type": "text", "text": text}
-				if message.CacheControl {
-					block["cache_candidate"] = true
-				}
 				systems = append(systems, block)
+				if explicitCache && index < len(req.Prompt.StablePrefix)+len(req.Prompt.SessionPrefix) {
+					cacheableSystemCount = len(systems)
+				}
 			}
 			continue
 		}
@@ -128,25 +131,19 @@ func anthropicMessages(req Request) ([]map[string]any, []map[string]any) {
 			messages = append(messages, map[string]any{"role": "assistant", "content": uses}, map[string]any{"role": "user", "content": results})
 		}
 	}
-	for index := len(systems) - 1; index >= 0; index-- {
-		if _, ok := systems[index]["cache_candidate"]; ok {
-			delete(systems[index], "cache_candidate")
-			systems[index]["cache_control"] = map[string]any{"type": "ephemeral"}
-			break
-		}
-	}
-	for _, block := range systems {
-		delete(block, "cache_candidate")
+	if cacheableSystemCount > 0 {
+		systems[cacheableSystemCount-1]["cache_control"] = map[string]any{"type": "ephemeral"}
 	}
 	return systems, messages
 }
 
-func anthropicTools(definitions []tools.Definition) []map[string]any {
+func anthropicTools(definitions []tools.Definition, explicitCache bool) []map[string]any {
+	definitions = CanonicalToolDefinitions(definitions)
 	items := make([]map[string]any, 0, len(definitions))
 	for _, definition := range definitions {
 		items = append(items, map[string]any{"name": publicToolName(definition.Name), "description": definition.Description, "input_schema": definition.Parameters})
 	}
-	if len(items) > 0 {
+	if explicitCache && len(items) > 0 {
 		items[len(items)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
 	}
 	return items

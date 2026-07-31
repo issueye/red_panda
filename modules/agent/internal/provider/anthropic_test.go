@@ -33,7 +33,7 @@ func TestAnthropicProviderRequestAndNonStreamToolUse(t *testing.T) {
 	p := AnthropicProvider{providerConfig{BaseURL: server.URL, APIKey: "secret", Model: "claude-test", Client: server.Client()}}
 	var chunks []ProviderChunk
 	err := p.Complete(context.Background(), Request{
-		Messages:    []Message{{Role: "system", Content: "be direct", CacheControl: true}, {Role: "user", Content: "inspect"}},
+		Prompt:      PromptEnvelope{StablePrefix: []Message{{Role: "system", Content: "be direct"}}, TurnTail: []Message{{Role: "user", Content: "inspect"}}},
 		Options:     RequestOptions{EnableThinking: true, ReasoningEffort: "xhigh"},
 		Tools:       []tools.Definition{{Name: "workspace.read_file", Description: "Read", Parameters: map[string]any{"type": "object"}}},
 		ToolHistory: []ToolExchange{{Call: tools.Call{ID: "call_1", Name: "workspace.list", Arguments: map[string]any{"path": "."}}, Result: tools.Result{Status: tools.CallStatusFailed, Error: "denied"}}},
@@ -66,6 +66,34 @@ func TestAnthropicProviderRequestAndNonStreamToolUse(t *testing.T) {
 	}}}}
 	if !reflect.DeepEqual(chunks, want) {
 		t.Fatalf("chunks = %#v", chunks)
+	}
+}
+
+func TestAnthropicCacheBreakpointsCanBeDisabled(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.WriteString(w, `{"content":[{"type":"text","text":"ok"}]}`)
+	}))
+	defer server.Close()
+	p := AnthropicProvider{providerConfig{BaseURL: server.URL, Model: "m", Client: server.Client()}}
+	err := p.Complete(context.Background(), Request{
+		Prompt:  PromptEnvelope{StablePrefix: []Message{{Role: "system", Content: "stable"}}, TurnTail: []Message{{Role: "user", Content: "hello"}}},
+		Options: RequestOptions{CacheMode: CacheModeDisabled},
+		Tools:   []tools.Definition{{Name: "workspace.read_file", Parameters: map[string]any{"type": "object"}}},
+	}, func(ProviderChunk) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := body["system"].([]any)
+	if _, ok := system[0].(map[string]any)["cache_control"]; ok {
+		t.Fatalf("system cache breakpoint was not disabled: %#v", system)
+	}
+	tool := body["tools"].([]any)[0].(map[string]any)
+	if _, ok := tool["cache_control"]; ok {
+		t.Fatalf("tool cache breakpoint was not disabled: %#v", tool)
 	}
 }
 

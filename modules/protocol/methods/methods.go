@@ -65,6 +65,10 @@ type RunExecuteOptions struct {
 	Model               string                        `json:"model,omitempty"`
 	EnableThinking      bool                          `json:"enable_thinking,omitempty"`
 	ReasoningEffort     string                        `json:"reasoning_effort,omitempty"`
+	ProviderCacheMode   string                        `json:"provider_cache_mode,omitempty"`
+	ProviderCacheKey    bool                          `json:"provider_cache_key_supported,omitempty"`
+	ProviderCacheRetain string                        `json:"provider_cache_retention,omitempty"`
+	ProviderMinCache    int                           `json:"provider_min_cache_tokens,omitempty"`
 	PermissionMode      string                        `json:"permission_mode,omitempty"`
 	ToolPolicy          string                        `json:"tool_policy,omitempty"`
 	ToolAllowlist       []string                      `json:"tool_allowlist,omitempty"`
@@ -312,18 +316,22 @@ type ReplyOptions struct {
 	ProviderAPIKey    string `json:"provider_api_key,omitempty"`
 	// ProviderHTTPProxy mirrors RunExecuteOptions.ProviderHTTPProxy: an optional
 	// HTTP(S)/SOCKS5 proxy for provider requests. Distinct from WebHTTPProxy.
-	ProviderHTTPProxy string         `json:"provider_http_proxy,omitempty"`
-	ProviderStream    *bool          `json:"provider_stream,omitempty"`
-	Model             string         `json:"model,omitempty"`
-	EnableThinking    bool           `json:"enable_thinking,omitempty"`
-	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
-	PermissionMode    string         `json:"permission_mode,omitempty"`
-	ToolPolicy        string         `json:"tool_policy,omitempty"`
-	ToolAllowlist     []string       `json:"tool_allowlist,omitempty"`
-	ToolDenylist      []string       `json:"tool_denylist,omitempty"`
-	EmitToolEvents    bool           `json:"emit_tool_events"`
-	RequirePermission bool           `json:"require_permission,omitempty"`
-	MemoryContext     *MemoryContext `json:"memory_context,omitempty"`
+	ProviderHTTPProxy   string         `json:"provider_http_proxy,omitempty"`
+	ProviderStream      *bool          `json:"provider_stream,omitempty"`
+	Model               string         `json:"model,omitempty"`
+	EnableThinking      bool           `json:"enable_thinking,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
+	ProviderCacheMode   string         `json:"provider_cache_mode,omitempty"`
+	ProviderCacheKey    bool           `json:"provider_cache_key_supported,omitempty"`
+	ProviderCacheRetain string         `json:"provider_cache_retention,omitempty"`
+	ProviderMinCache    int            `json:"provider_min_cache_tokens,omitempty"`
+	PermissionMode      string         `json:"permission_mode,omitempty"`
+	ToolPolicy          string         `json:"tool_policy,omitempty"`
+	ToolAllowlist       []string       `json:"tool_allowlist,omitempty"`
+	ToolDenylist        []string       `json:"tool_denylist,omitempty"`
+	EmitToolEvents      bool           `json:"emit_tool_events"`
+	RequirePermission   bool           `json:"require_permission,omitempty"`
+	MemoryContext       *MemoryContext `json:"memory_context,omitempty"`
 	// TodoContext is the session checklist injected into provider messages.
 	TodoContext *TodoContext `json:"todo_context,omitempty"`
 	// SkillsContext is refreshed on every conversation start so newly created

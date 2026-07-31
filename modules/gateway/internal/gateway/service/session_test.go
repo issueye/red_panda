@@ -16,6 +16,7 @@ import (
 	"redpanda/gateway/internal/gateway/infra/database"
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
+	"redpanda/protocol"
 	"redpanda/protocol/methods"
 )
 
@@ -209,6 +210,9 @@ func TestSessionServiceCompactPreviewAndApply(t *testing.T) {
 		result.Compaction.TargetSessionID != source.ID {
 		t.Fatalf("compact result mismatch: %#v", result)
 	}
+	if result.Compaction.SummaryDigest == "" || result.Compaction.CacheEpoch == "" || result.Compaction.PromptSchemaVersion != protocol.PromptSchemaVersion {
+		t.Fatalf("compaction cache metadata missing: %#v", result.Compaction)
+	}
 
 	originalMessages, err := repos.Messages.List(source.ID, 10)
 	if err != nil {
@@ -313,6 +317,9 @@ func TestSessionServiceCompactSupersedesPreviousSnapshot(t *testing.T) {
 	}
 	if first.Compaction.ID == second.Compaction.ID {
 		t.Fatal("expected a new snapshot")
+	}
+	if first.Compaction.CacheEpoch == "" || first.Compaction.CacheEpoch == second.Compaction.CacheEpoch {
+		t.Fatalf("compaction must create one new cache epoch: %q -> %q", first.Compaction.CacheEpoch, second.Compaction.CacheEpoch)
 	}
 	rows, err := repos.Compactions.ListForSession(source.ID)
 	if err != nil {

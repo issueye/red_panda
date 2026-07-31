@@ -80,6 +80,37 @@ func TestProviderModelsForReadUpgradesLegacyProfile(t *testing.T) {
 	}
 }
 
+func TestNormalizeCacheModeAndProfileDefaults(t *testing.T) {
+	for input, want := range map[string]string{"": "", "implicit": "implicit", "explicit": "explicit", "disabled": "disabled", " IMPLICIT ": "implicit"} {
+		got, err := normalizeCacheMode(input)
+		if err != nil || got != want {
+			t.Fatalf("normalizeCacheMode(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := normalizeCacheMode("fast"); err == nil {
+		t.Fatal("invalid cache mode should be rejected")
+	}
+	if got := defaultCacheMode("anthropic"); got != "explicit" {
+		t.Fatalf("defaultCacheMode(anthropic) = %q", got)
+	}
+	if got := effectiveProfileCacheMode("openai_compatible", ""); got != "implicit" {
+		t.Fatalf("effectiveProfileCacheMode = %q", got)
+	}
+	if got := effectiveProfileCacheMode("anthropic", ""); got != "explicit" {
+		t.Fatalf("effectiveProfileCacheMode(anthropic) = %q", got)
+	}
+}
+
+func TestProviderProfileDTOIncludesCacheCapabilities(t *testing.T) {
+	dto := providerProfileDTO(model.ProviderProfile{
+		Provider: "openai_responses", CacheMode: "explicit", CacheKeySupported: true,
+		CacheRetention: "24h", MinCacheTokens: 1024,
+	})
+	if dto.CacheMode != "explicit" || !dto.CacheKeySupported || dto.CacheRetention != "24h" || dto.MinCacheTokens != 1024 {
+		t.Fatalf("cache capabilities = %#v", dto)
+	}
+}
+
 func TestNormalizeProviderHTTPProxy(t *testing.T) {
 	tests := []struct {
 		name    string

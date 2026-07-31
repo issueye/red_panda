@@ -14,7 +14,7 @@ import (
 
 // 拨号与 TLS 握手超时,避免代理初始化或首次握手永久挂起。
 const (
-	proxyDialTimeout       = 15 * time.Second
+	proxyDialTimeout         = 15 * time.Second
 	proxyTLSHandshakeTimeout = 15 * time.Second
 )
 

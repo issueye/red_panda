@@ -36,6 +36,12 @@ func (p OpenAIResponsesProvider) completeAttempt(ctx context.Context, req Reques
 		model = p.Model
 	}
 	body := map[string]any{"model": model, "input": openAIResponsesInput(req), "stream": p.Stream}
+	if responseCacheKeyEnabled(req.Options) && strings.TrimSpace(req.Prompt.CacheEpoch) != "" {
+		body["prompt_cache_key"] = req.Prompt.CacheEpoch
+		if retention := strings.TrimSpace(req.Options.CacheRetention); retention != "" {
+			body["prompt_cache_retention"] = retention
+		}
+	}
 	if req.Options.EnableThinking {
 		reasoning := map[string]any{"summary": "auto"}
 		if effort := strings.TrimSpace(req.Options.ReasoningEffort); effort != "" {
@@ -93,8 +99,9 @@ func openAIResponsesURL(raw string) string {
 }
 
 func openAIResponsesInput(req Request) []map[string]any {
-	items := make([]map[string]any, 0, len(req.Messages)+len(req.ToolHistory)*2)
-	for _, message := range req.Messages {
+	promptMessages := req.Prompt.FlattenMessages()
+	items := make([]map[string]any, 0, len(promptMessages)+len(req.ToolHistory)*2)
+	for _, message := range promptMessages {
 		items = append(items, map[string]any{"role": message.Role, "content": openAIResponsesContent(message.Content)})
 	}
 	for _, round := range toolRoundsForRequest(req) {
@@ -116,6 +123,7 @@ func openAIResponsesInput(req Request) []map[string]any {
 }
 
 func openAIResponsesTools(definitions []tools.Definition) []map[string]any {
+	definitions = CanonicalToolDefinitions(definitions)
 	items := make([]map[string]any, 0, len(definitions))
 	for _, definition := range definitions {
 		items = append(items, map[string]any{

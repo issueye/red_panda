@@ -16,9 +16,8 @@ type Provider interface {
 // (docs/51 §6.6 / docs/52 Slice C). Adapters serialize Content appropriately;
 // pure-text paths keep Content as string so existing golden JSON stays valid.
 type Message struct {
-	Role         string
-	Content      any  // string | []Part
-	CacheControl bool // provider may place an explicit prompt-cache breakpoint here
+	Role    string
+	Content any // string | []Part
 }
 
 // Part is one multimodal content part (OpenAI-compatible / Anthropic / Responses).
@@ -65,6 +64,10 @@ type RequestOptions struct {
 	Model             string
 	EnableThinking    bool
 	ReasoningEffort   string
+	CacheMode         string
+	CacheKeySupported bool
+	CacheRetention    string
+	MinCacheTokens    int
 	LogLLMRequests    bool
 	// Headers contains only host-approved, non-sensitive request headers.
 	Headers  map[string]string
@@ -81,7 +84,7 @@ type Request struct {
 	RunID     string
 	SessionID string
 	Input     string
-	Messages  []Message
+	Prompt    PromptEnvelope
 	Options   RequestOptions
 	Tools     []tools.Definition
 	// ToolHistory 是平铺列表，供 EchoProvider 和测试使用。

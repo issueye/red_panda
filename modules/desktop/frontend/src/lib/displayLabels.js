@@ -70,6 +70,7 @@ const sessionKindLabel = {
 };
 
 const eventKindLabel = {
+  cache: '缓存',
   done: '完成',
   error: '错误',
   event: '事件',

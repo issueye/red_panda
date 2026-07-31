@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,9 +11,25 @@ import (
 
 	"redpanda/agent/internal/provider"
 	"redpanda/agent/internal/runtime/hooks"
+	"redpanda/protocol/events"
+	"redpanda/protocol/jsonrpc"
 	"redpanda/protocol/methods"
 	"redpanda/protocol/tools"
 )
+
+type splitUsageProvider struct{}
+
+func (*splitUsageProvider) Name() string { return "split-usage" }
+
+func (*splitUsageProvider) Complete(_ context.Context, _ provider.Request, emit func(provider.ProviderChunk) error) error {
+	if err := emit(provider.ProviderChunk{Usage: &provider.ProviderUsage{InputTokens: 100, CacheWriteTokens: 20}}); err != nil {
+		return err
+	}
+	if err := emit(provider.ProviderChunk{Delta: "done", Usage: &provider.ProviderUsage{OutputTokens: 7, CacheReadTokens: 80}}); err != nil {
+		return err
+	}
+	return emit(provider.ProviderChunk{Final: true})
+}
 
 type providerHookRecorder struct {
 	request provider.Request
@@ -37,7 +54,7 @@ func TestProviderHooksTransformSafeRequestAndObserveResponse(t *testing.T) {
 	var after map[string]any
 	rt.bus.MustRegister(hooks.HookContextCompose, hooks.HookOrderPlugin, "js:test", func(_ *hooks.HookContext, _ map[string]any) *hooks.HookResult {
 		return &hooks.HookResult{Transform: map[string]any{
-			"messages": []any{map[string]any{"role": "user", "content": "composed"}},
+			"prompt": map[string]any{"turn_tail": []any{map[string]any{"role": "user", "content": "composed"}}},
 		}}
 	})
 	rt.bus.MustRegister(hooks.HookBeforeProviderRequest, hooks.HookOrderPlugin, "js:test", func(_ *hooks.HookContext, event map[string]any) *hooks.HookResult {
@@ -48,12 +65,13 @@ func TestProviderHooksTransformSafeRequestAndObserveResponse(t *testing.T) {
 		if strings.Contains(string(raw), "provider-secret") {
 			t.Fatalf("provider secret leaked to hook: %s", raw)
 		}
-		messages, err := providerMessagesFromHook(event["messages"])
+		prompt, _ := event["prompt"].(map[string]any)
+		messages, err := providerMessagesFromHook(prompt["turn_tail"])
 		if err != nil || len(messages) != 1 || messages[0].Content != "composed" {
 			t.Fatalf("provider hook received messages %#v: %v", messages, err)
 		}
 		return &hooks.HookResult{Transform: map[string]any{
-			"messages": []any{map[string]any{"role": "user", "content": "rewritten"}},
+			"prompt": map[string]any{"turn_tail": []any{map[string]any{"role": "user", "content": "rewritten"}}},
 			"tools": []any{map[string]any{
 				"name": "test.changed", "display_name": "Changed", "risk": "low",
 				"parameters": map[string]any{"type": "object"},
@@ -67,15 +85,16 @@ func TestProviderHooksTransformSafeRequestAndObserveResponse(t *testing.T) {
 	})
 
 	request := provider.Request{
-		Messages: []provider.Message{{Role: "user", Content: "original"}},
-		Options:  provider.RequestOptions{ProviderAPIKey: "provider-secret", Model: "model-test"},
+		Prompt:  provider.PromptEnvelope{TurnTail: []provider.Message{{Role: "user", Content: "original"}}},
+		Options: provider.RequestOptions{ProviderAPIKey: "provider-secret", Model: "model-test"},
 	}
 	err := rt.completeProvider(context.Background(), methods.ReplyParams{RunID: "run_provider", Session: methods.ReplySession{ID: "session_provider"}}, request, func(provider.ProviderChunk) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !recorder.called || len(recorder.request.Messages) != 1 || recorder.request.Messages[0].Content != "rewritten" {
-		t.Fatalf("request messages = %#v", recorder.request.Messages)
+	recordedMessages := recorder.request.Prompt.FlattenMessages()
+	if !recorder.called || len(recordedMessages) != 1 || recordedMessages[0].Content != "rewritten" {
+		t.Fatalf("request messages = %#v", recordedMessages)
 	}
 	if len(recorder.request.Tools) != 1 || recorder.request.Tools[0].Name != "test.changed" {
 		t.Fatalf("request tools = %#v", recorder.request.Tools)
@@ -114,5 +133,47 @@ func TestProviderAfterHookRunsOnFailure(t *testing.T) {
 	err := rt.completeProvider(context.Background(), methods.ReplyParams{}, provider.Request{}, func(provider.ProviderChunk) error { return nil })
 	if err == nil || !called {
 		t.Fatalf("err = %v, called = %v", err, called)
+	}
+}
+
+func TestCompleteProviderAggregatesUsageIntoOneRunEvent(t *testing.T) {
+	var output bytes.Buffer
+	rt := &Runtime{provider: &splitUsageProvider{}, bus: hooks.NewBus(), out: &output, log: io.Discard}
+	request := provider.Request{
+		RunID: "run-usage", SessionID: "session-usage",
+		Prompt:  provider.PromptEnvelope{CacheEpoch: "epoch-usage"},
+		Options: provider.RequestOptions{ProviderName: "openai_compatible", Model: "model-usage"},
+	}
+	var downstreamUsage int
+	err := rt.completeProvider(context.Background(), methods.ReplyParams{
+		RunID: "run-usage", Session: methods.ReplySession{ID: "session-usage"},
+	}, request, func(chunk provider.ProviderChunk) error {
+		if chunk.Usage != nil {
+			downstreamUsage++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if downstreamUsage != 0 {
+		t.Fatalf("usage leaked as %d downstream chunks", downstreamUsage)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("usage notifications = %d, output=%s", len(lines), output.String())
+	}
+	var note jsonrpc.Notification
+	if err := json.Unmarshal([]byte(lines[0]), &note); err != nil {
+		t.Fatal(err)
+	}
+	var event events.EnvelopeV2
+	if err := json.Unmarshal(note.Params, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != events.EventUsage || event.Payload["input_tokens"] != float64(100) ||
+		event.Payload["output_tokens"] != float64(7) || event.Payload["cache_read_tokens"] != float64(80) ||
+		event.Payload["cache_write_tokens"] != float64(20) || event.Payload["cache_hit_ratio"] != float64(0.8) {
+		t.Fatalf("usage event = %#v", event)
 	}
 }

@@ -79,11 +79,12 @@ func (p EchoProvider) Complete(ctx context.Context, req ProviderRequest, emit fu
 func echoAttachmentReceipt(req ProviderRequest) string {
 	items := append([]RequestAttachment(nil), req.Attachments...)
 	if len(items) == 0 {
-		for i := len(req.Messages) - 1; i >= 0; i-- {
-			if req.Messages[i].Role != "user" {
+		messages := req.Prompt.FlattenMessages()
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role != "user" {
 				continue
 			}
-			parts, ok := req.Messages[i].Content.([]Part)
+			parts, ok := messages[i].Content.([]Part)
 			if !ok {
 				break
 			}

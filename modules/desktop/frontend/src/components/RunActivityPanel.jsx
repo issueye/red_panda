@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock3,
+  Database,
   KeyRound,
   Loader2,
   Search,
@@ -27,6 +28,12 @@ import {
   getRunEventTimelineMeta,
   groupRunEventsByKind,
 } from "../lib/activityEvents.js";
+import {
+  aggregateCacheMetrics,
+  displayCacheMissReason,
+  formatCacheRatio,
+  formatTokenCount,
+} from "../lib/cacheMetrics.js";
 import { compareToolCallOrder } from "../lib/conversationTimeline.js";
 import { classNames } from "../lib/format.js";
 import { StatusBadge } from "./ui/badge.jsx";
@@ -282,6 +289,7 @@ export function RunActivityPanel({
               );
               const runToolGroups = groupRunTools(runTools);
               const runEvents = runEventsByRun?.[run.id] || [];
+              const cacheMetrics = aggregateCacheMetrics(runEvents);
               const eventsLoading = Boolean(runEventsLoading?.[run.id]);
               const eventsError = runEventsError?.[run.id] || "";
               const expanded = expandedRunId === run.id;
@@ -357,6 +365,47 @@ export function RunActivityPanel({
                           <dd>{compactTime(run.startedAt)}</dd>
                         </div>
                       </dl>
+                      {cacheMetrics.calls > 0 ? (
+                        <div
+                          className="activity-detail-group activity-cache-metrics"
+                          data-testid="activity-cache-metrics"
+                        >
+                          <div className="activity-detail-title-row">
+                            <strong>
+                              <Database size={12} />
+                              提示词缓存
+                            </strong>
+                            <span>
+                              {cacheMetrics.hitCalls}/{cacheMetrics.calls} 次命中
+                            </span>
+                          </div>
+                          <div className="activity-cache-metrics-grid">
+                            <div>
+                              <strong data-testid="activity-cache-hit-ratio">
+                                {formatCacheRatio(cacheMetrics.hitRatio)}
+                              </strong>
+                              <span>命中率</span>
+                            </div>
+                            <div>
+                              <strong>{formatTokenCount(cacheMetrics.cacheReadTokens)}</strong>
+                              <span>缓存读取</span>
+                            </div>
+                            <div>
+                              <strong>{formatTokenCount(cacheMetrics.cacheWriteTokens)}</strong>
+                              <span>缓存写入</span>
+                            </div>
+                            <div>
+                              <strong>{formatTokenCount(cacheMetrics.inputTokens)}</strong>
+                              <span>输入 tokens</span>
+                            </div>
+                          </div>
+                          {cacheMetrics.latestMissReason ? (
+                            <p data-testid="activity-cache-miss-reason">
+                              最近未命中：{displayCacheMissReason(cacheMetrics.latestMissReason)}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div className="activity-detail-group">
                         <strong>工具调用</strong>
                         {runTools.length === 0 ? (

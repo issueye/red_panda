@@ -112,6 +112,9 @@ func (r *Registry) Resolve(options RequestOptions, fallbackStream bool) (Provide
 		return nil, fmt.Errorf("provider factory not found: %q", name)
 	}
 	options.ProviderName = name
+	if err := validateCacheOptions(options); err != nil {
+		return nil, err
+	}
 	return factory(options, fallbackStream)
 }
 

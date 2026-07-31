@@ -17,11 +17,11 @@ import (
 )
 
 type SessionService struct {
-	repos     repository.Set
-	store     sessionStore
-	purge     PurgeService
-	runtime   *runtimeclient.Client
-	hub       *eventhub.Hub
+	repos   repository.Set
+	store   sessionStore
+	purge   PurgeService
+	runtime *runtimeclient.Client
+	hub     *eventhub.Hub
 	// packer is the shared model-context packer (docs/plans/2026-07-19-convergence-wave.md
 	// Wave B Task B1). Injected by Set so SessionService and RunService share one instance.
 	packer *SessionContextPacker
@@ -56,21 +56,21 @@ type SessionPageDTO struct {
 }
 
 type MessageDTO struct {
-	ID           string                 `json:"id"`
-	SessionID    string                 `json:"session_id"`
-	Role         string                 `json:"role"`
-	Content      []methods.ContentBlock `json:"content"`
+	ID        string                 `json:"id"`
+	SessionID string                 `json:"session_id"`
+	Role      string                 `json:"role"`
+	Content   []methods.ContentBlock `json:"content"`
 	// Attachments is a parallel render surface for image_ref blocks (docs/51).
 	// The Desktop reads this without touching the text pipeline; the underlying
 	// content array still carries the authoritative image_ref blocks.
-	Attachments []AttachmentRef `json:"attachments,omitempty"`
-	Seq         uint64          `json:"seq"`
-	RunID       string          `json:"run_id,omitempty"`
-	AssignmentID string         `json:"assignment_id,omitempty"`
-	WorkerID    string          `json:"worker_id,omitempty"`
-	ProfileKey  string          `json:"profile_key,omitempty"`
-	Visibility  string          `json:"visibility,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
+	Attachments  []AttachmentRef `json:"attachments,omitempty"`
+	Seq          uint64          `json:"seq"`
+	RunID        string          `json:"run_id,omitempty"`
+	AssignmentID string          `json:"assignment_id,omitempty"`
+	WorkerID     string          `json:"worker_id,omitempty"`
+	ProfileKey   string          `json:"profile_key,omitempty"`
+	Visibility   string          `json:"visibility,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 type MessagePageDTO struct {
@@ -152,18 +152,21 @@ type CompactSessionRequest struct {
 }
 
 type CompactionDTO struct {
-	ID               string    `json:"id"`
-	SourceSessionID  string    `json:"source_session_id"`
-	TargetSessionID  string    `json:"target_session_id"`
-	Status           string    `json:"status"`
-	SourceStartSeq   uint64    `json:"source_start_seq"`
-	SourceEndSeq     uint64    `json:"source_end_seq"`
-	SummaryMessageID string    `json:"summary_message_id,omitempty"`
-	SummaryMethod    string    `json:"summary_method,omitempty"`
-	KeepTailMessages int       `json:"keep_tail_messages,omitempty"`
-	KeepTailTurns    int       `json:"keep_tail_turns,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	SourceSessionID     string    `json:"source_session_id"`
+	TargetSessionID     string    `json:"target_session_id"`
+	Status              string    `json:"status"`
+	SourceStartSeq      uint64    `json:"source_start_seq"`
+	SourceEndSeq        uint64    `json:"source_end_seq"`
+	SummaryMessageID    string    `json:"summary_message_id,omitempty"`
+	SummaryMethod       string    `json:"summary_method,omitempty"`
+	SummaryDigest       string    `json:"summary_digest,omitempty"`
+	PromptSchemaVersion string    `json:"prompt_schema_version,omitempty"`
+	CacheEpoch          string    `json:"cache_epoch,omitempty"`
+	KeepTailMessages    int       `json:"keep_tail_messages,omitempty"`
+	KeepTailTurns       int       `json:"keep_tail_turns,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type CompactSessionResult struct {
@@ -533,18 +536,21 @@ func lineageDTO(row model.SessionLineage) LineageDTO {
 
 func compactionDTO(row model.SessionCompaction) CompactionDTO {
 	return CompactionDTO{
-		ID:               row.ID,
-		SourceSessionID:  row.SourceSessionID,
-		TargetSessionID:  row.TargetSessionID,
-		Status:           row.Status,
-		SourceStartSeq:   row.SourceStartSeq,
-		SourceEndSeq:     row.SourceEndSeq,
-		SummaryMessageID: row.SummaryMessageID,
-		SummaryMethod:    row.SummaryMethod,
-		KeepTailMessages: row.KeepTailMessages,
-		KeepTailTurns:    row.KeepTailTurns,
-		CreatedAt:        row.CreatedAt,
-		UpdatedAt:        row.UpdatedAt,
+		ID:                  row.ID,
+		SourceSessionID:     row.SourceSessionID,
+		TargetSessionID:     row.TargetSessionID,
+		Status:              row.Status,
+		SourceStartSeq:      row.SourceStartSeq,
+		SourceEndSeq:        row.SourceEndSeq,
+		SummaryMessageID:    row.SummaryMessageID,
+		SummaryMethod:       row.SummaryMethod,
+		SummaryDigest:       row.SummaryDigest,
+		PromptSchemaVersion: row.PromptSchemaVersion,
+		CacheEpoch:          row.CacheEpoch,
+		KeepTailMessages:    row.KeepTailMessages,
+		KeepTailTurns:       row.KeepTailTurns,
+		CreatedAt:           row.CreatedAt,
+		UpdatedAt:           row.UpdatedAt,
 	}
 }
 
@@ -569,7 +575,7 @@ func messageDTO(row model.Message) (MessageDTO, error) {
 	return MessageDTO{
 		ID: row.ID, SessionID: row.SessionID, Role: row.Role, Content: content,
 		Attachments: attachmentRefsFromContent(content),
-		Seq: row.Seq, RunID: row.RunID, AssignmentID: metadata.AssignmentID,
+		Seq:         row.Seq, RunID: row.RunID, AssignmentID: metadata.AssignmentID,
 		WorkerID: metadata.WorkerID, ProfileKey: metadata.ProfileKey,
 		Visibility: metadata.Visibility, CreatedAt: row.CreatedAt,
 	}, nil
@@ -660,7 +666,6 @@ func lastMessageSeq(messages []model.Message) uint64 {
 	}
 	return messages[len(messages)-1].Seq
 }
-
 
 // rewriteCopiedMessageAttachmentIDs remaps image_ref.attachment_id values in
 // the target session's messages according to the fork id map.

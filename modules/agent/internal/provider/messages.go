@@ -8,8 +8,9 @@ import (
 )
 
 func openAICompatibleMessages(req ProviderRequest) []map[string]any {
-	messages := make([]map[string]any, 0, len(req.Messages)+len(req.ToolHistory)*2)
-	for _, message := range req.Messages {
+	promptMessages := req.Prompt.FlattenMessages()
+	messages := make([]map[string]any, 0, len(promptMessages)+len(req.ToolHistory)*2)
+	for _, message := range promptMessages {
 		messages = append(messages, map[string]any{
 			"role":    message.Role,
 			"content": openAICompatibleContent(message.Content),
@@ -69,6 +70,7 @@ func toolExchangeContent(result tools.Result) string {
 }
 
 func openAICompatibleTools(definitions []tools.Definition) []map[string]any {
+	definitions = CanonicalToolDefinitions(definitions)
 	items := make([]map[string]any, 0, len(definitions))
 	for _, definition := range definitions {
 		items = append(items, map[string]any{

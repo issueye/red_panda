@@ -79,6 +79,8 @@ type Runtime struct {
 	runRegistryMu        sync.RWMutex
 	runRegistryPrepareMu sync.Mutex
 	runRegistries        map[string]*registry.RunScopedRegistry
+	cacheDiagnosticsMu   sync.Mutex
+	cacheDiagnostics     map[string]cacheDiagnosticState
 }
 
 // Dependencies contains the replaceable collaborators used by Runtime.
@@ -103,16 +105,17 @@ func NewWithDependencies(in io.Reader, out io.Writer, log io.Writer, version str
 		modelProvider = provider.NewFromEnvWithRegistry(providerRegistry, log)
 	}
 	rt := &Runtime{
-		in:             in,
-		out:            out,
-		log:            log,
-		version:        version,
-		gatewayPending: map[jsonrpc.ID]chan jsonrpc.Response{},
-		permissions:    map[string]chan permission.ResolveParams{},
-		mcp:            agentmcp.NewManager(version, log),
-		provider:       modelProvider,
-		providers:      providerRegistry,
-		runRegistries:  map[string]*registry.RunScopedRegistry{},
+		in:               in,
+		out:              out,
+		log:              log,
+		version:          version,
+		gatewayPending:   map[jsonrpc.ID]chan jsonrpc.Response{},
+		permissions:      map[string]chan permission.ResolveParams{},
+		mcp:              agentmcp.NewManager(version, log),
+		provider:         modelProvider,
+		providers:        providerRegistry,
+		runRegistries:    map[string]*registry.RunScopedRegistry{},
+		cacheDiagnostics: map[string]cacheDiagnosticState{},
 	}
 	// Plugin system (v0.3.0)
 	rt.bus = hooks.NewBus()

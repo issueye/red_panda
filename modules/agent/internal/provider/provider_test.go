@@ -17,11 +17,10 @@ import (
 
 func TestOpenAICompatibleMessagesGolden(t *testing.T) {
 	req := ProviderRequest{
-		Messages: []Message{
-			{Role: "system", Content: "policy"},
-			{Role: "user", Content: "first question"},
-			{Role: "assistant", Content: "first answer"},
-			{Role: "user", Content: "current question"},
+		Prompt: PromptEnvelope{
+			StablePrefix: []Message{{Role: "system", Content: "policy"}},
+			History:      []Message{{Role: "user", Content: "first question"}, {Role: "assistant", Content: "first answer"}},
+			TurnTail:     []Message{{Role: "user", Content: "current question"}},
 		},
 		ToolRounds: [][]ToolExchange{{
 			{Call: tools.Call{ID: "call_1", Name: "workspace.read_file", Arguments: map[string]any{"path": "README.md"}}, Result: tools.Result{ToolCallID: "call_1", Name: "workspace.read_file", Status: tools.CallStatusCompleted, Output: "project readme"}},
@@ -62,7 +61,7 @@ func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 
 	var chunks []ProviderChunk
 	err := (EchoProvider{}).Complete(context.Background(), ProviderRequest{
-		RunID: "run_profile", Input: "hello", Messages: []Message{{Role: "user", Content: "hello"}},
+		RunID: "run_profile", Input: "hello", Prompt: PromptEnvelope{TurnTail: []Message{{Role: "user", Content: "hello"}}},
 		Options: RequestOptions{ProviderName: "openai_compatible", ProviderBaseURL: server.URL, ProviderAPIKey: "sk-profile", Model: "profile-model", EnableThinking: true, ReasoningEffort: "low"},
 	}, func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil })
 	if err != nil {
@@ -89,7 +88,7 @@ func TestHTTPCompatibleProviderRetriesBeforeOutput(t *testing.T) {
 	defer server.Close()
 
 	p := HTTPCompatibleProvider{BaseURL: server.URL, Model: "model", Client: server.Client(), MaxAttempts: 3, RetryBaseDelay: time.Millisecond}
-	if err := p.Complete(context.Background(), ProviderRequest{Messages: []Message{{Role: "user", Content: "go"}}}, func(ProviderChunk) error { return nil }); err != nil {
+	if err := p.Complete(context.Background(), ProviderRequest{Prompt: PromptEnvelope{TurnTail: []Message{{Role: "user", Content: "go"}}}}, func(ProviderChunk) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if attempts != 3 {
@@ -110,7 +109,7 @@ func TestHTTPCompatibleProviderRetriesUnauthorized(t *testing.T) {
 	defer server.Close()
 
 	p := HTTPCompatibleProvider{BaseURL: server.URL, Model: "model", Client: server.Client(), MaxAttempts: 3, RetryBaseDelay: time.Millisecond}
-	if err := p.Complete(context.Background(), ProviderRequest{Messages: []Message{{Role: "user", Content: "go"}}}, func(ProviderChunk) error { return nil }); err != nil {
+	if err := p.Complete(context.Background(), ProviderRequest{Prompt: PromptEnvelope{TurnTail: []Message{{Role: "user", Content: "go"}}}}, func(ProviderChunk) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if attempts != 3 {
@@ -158,7 +157,7 @@ func TestHTTPCompatibleProviderDoesNotRetryAfterStreamOutput(t *testing.T) {
 
 	p := HTTPCompatibleProvider{BaseURL: server.URL, Model: "model", Stream: true, Client: server.Client(), MaxAttempts: 3, RetryBaseDelay: time.Millisecond}
 	var chunks []ProviderChunk
-	err := p.Complete(context.Background(), ProviderRequest{Messages: []Message{{Role: "user", Content: "go"}}}, func(chunk ProviderChunk) error {
+	err := p.Complete(context.Background(), ProviderRequest{Prompt: PromptEnvelope{TurnTail: []Message{{Role: "user", Content: "go"}}}}, func(chunk ProviderChunk) error {
 		chunks = append(chunks, chunk)
 		return nil
 	})
@@ -190,6 +189,17 @@ func TestOpenAIUsageIncludesCachedTokens(t *testing.T) {
 	}
 }
 
+func TestOpenAIUsageAcceptsTopLevelCompatibleCachedTokens(t *testing.T) {
+	var chunks []ProviderChunk
+	raw := []byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"prompt_tokens":120,"completion_tokens":8,"cached_tokens":96}}`)
+	if err := completeHTTPResponse(raw, func(chunk ProviderChunk) error { chunks = append(chunks, chunk); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) < 1 || chunks[0].Usage == nil || chunks[0].Usage.CacheReadTokens != 96 {
+		t.Fatalf("usage = %#v", chunks)
+	}
+}
+
 func TestHTTPCompatibleProviderSendsNeutralRequest(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -203,9 +213,9 @@ func TestHTTPCompatibleProviderSendsNeutralRequest(t *testing.T) {
 	p := HTTPCompatibleProvider{BaseURL: server.URL, Model: "fallback", Client: server.Client()}
 	err := p.Complete(context.Background(), ProviderRequest{
 		RunID: "run_1", SessionID: "session_1", Input: "inspect",
-		Messages: []Message{{Role: "system", Content: "time"}, {Role: "user", Content: "inspect"}},
-		Options:  RequestOptions{Model: "selected"},
-		Tools:    []tools.Definition{{Name: "workspace.read_file", Description: "Read", Parameters: map[string]any{"type": "object"}}},
+		Prompt:  PromptEnvelope{StablePrefix: []Message{{Role: "system", Content: "time"}}, TurnTail: []Message{{Role: "user", Content: "inspect"}}},
+		Options: RequestOptions{Model: "selected"},
+		Tools:   []tools.Definition{{Name: "workspace.read_file", Description: "Read", Parameters: map[string]any{"type": "object"}}},
 	}, func(ProviderChunk) error { return nil })
 	if err != nil {
 		t.Fatal(err)
@@ -216,9 +226,27 @@ func TestHTTPCompatibleProviderSendsNeutralRequest(t *testing.T) {
 	if _, exists := body["enable_thinking"]; exists {
 		t.Fatalf("disabled thinking must not add enable_thinking: %#v", body)
 	}
+	if _, exists := body["prompt_cache_key"]; exists {
+		t.Fatalf("generic Chat endpoint must not receive cache fields: %#v", body)
+	}
 	messages, ok := body["messages"].([]any)
 	if !ok || len(messages) != 2 {
 		t.Fatalf("messages = %#v", body["messages"])
+	}
+}
+
+func TestValidateCacheOptionsRejectsUnsupportedExplicitFields(t *testing.T) {
+	if err := validateCacheOptions(RequestOptions{ProviderName: "openai_compatible", CacheMode: CacheModeExplicit}); err == nil {
+		t.Fatal("generic explicit cache mode should be rejected")
+	}
+	if err := validateCacheOptions(RequestOptions{ProviderName: "openai_responses", CacheMode: CacheModeExplicit}); err == nil {
+		t.Fatal("Responses explicit mode without cache-key support should be rejected")
+	}
+	if err := validateCacheOptions(RequestOptions{ProviderName: "openai_responses", CacheMode: CacheModeExplicit, CacheKeySupported: true, CacheRetention: "24h"}); err != nil {
+		t.Fatalf("supported Responses cache options rejected: %v", err)
+	}
+	if err := validateCacheOptions(RequestOptions{ProviderName: "anthropic", CacheMode: CacheModeExplicit}); err != nil {
+		t.Fatalf("Anthropic explicit cache mode rejected: %v", err)
 	}
 }
 

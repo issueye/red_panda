@@ -13,32 +13,40 @@ type ProviderProfileController struct {
 }
 
 type providerProfileCreateRequest struct {
-	Name           string                       `json:"name"`
-	Provider       string                       `json:"provider"`
-	BaseURL        string                       `json:"base_url"`
-	Model          string                       `json:"model"`
-	MaxTokens      int                          `json:"max_tokens"`
-	Models         []service.ProviderModelInput `json:"models"`
-	APIKey         string                       `json:"api_key"`
-	IsDefault      bool                         `json:"is_default"`
-	Stream         *bool                        `json:"stream"`
-	SupportsVision *bool                        `json:"supports_vision"`
-	HTTPProxy      string                       `json:"http_proxy"`
+	Name              string                       `json:"name"`
+	Provider          string                       `json:"provider"`
+	BaseURL           string                       `json:"base_url"`
+	Model             string                       `json:"model"`
+	MaxTokens         int                          `json:"max_tokens"`
+	Models            []service.ProviderModelInput `json:"models"`
+	APIKey            string                       `json:"api_key"`
+	IsDefault         bool                         `json:"is_default"`
+	Stream            *bool                        `json:"stream"`
+	SupportsVision    *bool                        `json:"supports_vision"`
+	HTTPProxy         string                       `json:"http_proxy"`
+	CacheMode         string                       `json:"cache_mode"`
+	CacheKeySupported *bool                        `json:"cache_key_supported"`
+	CacheRetention    string                       `json:"cache_retention"`
+	MinCacheTokens    int                          `json:"min_cache_tokens"`
 }
 
 type providerProfileUpdateRequest struct {
-	Name           *string                       `json:"name"`
-	Provider       *string                       `json:"provider"`
-	BaseURL        *string                       `json:"base_url"`
-	Model          *string                       `json:"model"`
-	MaxTokens      *int                          `json:"max_tokens"`
-	Models         *[]service.ProviderModelInput `json:"models"`
-	APIKey         *string                       `json:"api_key"`
-	IsDefault      *bool                         `json:"is_default"`
-	Stream         *bool                         `json:"stream"`
-	Active         *bool                         `json:"active"`
-	SupportsVision *bool                         `json:"supports_vision"`
-	HTTPProxy      *string                       `json:"http_proxy"`
+	Name              *string                       `json:"name"`
+	Provider          *string                       `json:"provider"`
+	BaseURL           *string                       `json:"base_url"`
+	Model             *string                       `json:"model"`
+	MaxTokens         *int                          `json:"max_tokens"`
+	Models            *[]service.ProviderModelInput `json:"models"`
+	APIKey            *string                       `json:"api_key"`
+	IsDefault         *bool                         `json:"is_default"`
+	Stream            *bool                         `json:"stream"`
+	Active            *bool                         `json:"active"`
+	SupportsVision    *bool                         `json:"supports_vision"`
+	HTTPProxy         *string                       `json:"http_proxy"`
+	CacheMode         *string                       `json:"cache_mode"`
+	CacheKeySupported *bool                         `json:"cache_key_supported"`
+	CacheRetention    *string                       `json:"cache_retention"`
+	MinCacheTokens    *int                          `json:"min_cache_tokens"`
 }
 
 type providerModelListRequest struct {
@@ -80,17 +88,21 @@ func (p ProviderProfileController) Create(c *gin.Context) {
 		return
 	}
 	item, err := p.Services.Provider.Create(service.ProviderProfileCreate{
-		Name:           req.Name,
-		Provider:       req.Provider,
-		BaseURL:        req.BaseURL,
-		Model:          req.Model,
-		MaxTokens:      req.MaxTokens,
-		Models:         req.Models,
-		APIKey:         req.APIKey,
-		IsDefault:      req.IsDefault,
-		Stream:         req.Stream,
-		SupportsVision: req.SupportsVision,
-		HTTPProxy:      req.HTTPProxy,
+		Name:              req.Name,
+		Provider:          req.Provider,
+		BaseURL:           req.BaseURL,
+		Model:             req.Model,
+		MaxTokens:         req.MaxTokens,
+		Models:            req.Models,
+		APIKey:            req.APIKey,
+		IsDefault:         req.IsDefault,
+		Stream:            req.Stream,
+		SupportsVision:    req.SupportsVision,
+		HTTPProxy:         req.HTTPProxy,
+		CacheMode:         req.CacheMode,
+		CacheKeySupported: req.CacheKeySupported,
+		CacheRetention:    req.CacheRetention,
+		MinCacheTokens:    req.MinCacheTokens,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_create_failed", "message": err.Error()}})
@@ -115,18 +127,22 @@ func (p ProviderProfileController) Update(c *gin.Context) {
 		return
 	}
 	item, err := p.Services.Provider.Update(c.Param("id"), service.ProviderProfileUpdate{
-		Name:           req.Name,
-		Provider:       req.Provider,
-		BaseURL:        req.BaseURL,
-		Model:          req.Model,
-		MaxTokens:      req.MaxTokens,
-		Models:         req.Models,
-		APIKey:         req.APIKey,
-		IsDefault:      req.IsDefault,
-		Stream:         req.Stream,
-		Active:         req.Active,
-		SupportsVision: req.SupportsVision,
-		HTTPProxy:      req.HTTPProxy,
+		Name:              req.Name,
+		Provider:          req.Provider,
+		BaseURL:           req.BaseURL,
+		Model:             req.Model,
+		MaxTokens:         req.MaxTokens,
+		Models:            req.Models,
+		APIKey:            req.APIKey,
+		IsDefault:         req.IsDefault,
+		Stream:            req.Stream,
+		Active:            req.Active,
+		SupportsVision:    req.SupportsVision,
+		HTTPProxy:         req.HTTPProxy,
+		CacheMode:         req.CacheMode,
+		CacheKeySupported: req.CacheKeySupported,
+		CacheRetention:    req.CacheRetention,
+		MinCacheTokens:    req.MinCacheTokens,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "provider_profile_update_failed", "message": err.Error()}})

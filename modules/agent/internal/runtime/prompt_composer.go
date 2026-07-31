@@ -21,25 +21,33 @@ func newPromptComposer() promptComposer {
 
 func (c promptComposer) compose(params methods.ReplyParams, input string, definitions []tools.Definition, rounds [][]provider.ToolExchange) provider.Request {
 	history := flattenToolRounds(rounds)
-	messages := make([]provider.Message, 0, 8+len(params.Session.Conversation))
-	appendSystem := func(content string) {
+	stablePrefix := make([]provider.Message, 0, 4)
+	sessionPrefix := make([]provider.Message, 0, 2)
+	conversation := make([]provider.Message, 0, len(params.Session.Conversation))
+	appendSystem := func(target *[]provider.Message, content string) {
 		if content = strings.TrimSpace(content); content != "" {
-			messages = append(messages, provider.Message{Role: "system", Content: content, CacheControl: true})
+			*target = append(*target, provider.Message{Role: "system", Content: content})
 		}
 	}
 
 	if hasToolNamed(definitions, "worker.delegate") {
-		appendSystem(rootAgentOrchestrationPolicy)
-		appendSystem(rootAgentPostDelegationPolicy)
+		appendSystem(&stablePrefix, rootAgentOrchestrationPolicy)
+		appendSystem(&stablePrefix, rootAgentPostDelegationPolicy)
 	}
 	if hasToolNamed(definitions, "todo.write") {
-		appendSystem(rootAgentTodoPolicy)
+		appendSystem(&stablePrefix, rootAgentTodoPolicy)
 	}
 	if options := params.Options; options.SpecialistContext == nil && hasToolNamed(definitions, "git.status") {
-		appendSystem(rootAgentFileChangeReportPolicy)
+		appendSystem(&stablePrefix, rootAgentFileChangeReportPolicy)
 	}
 
 	options := params.Options
+	if options.SpecialistContext != nil {
+		appendSystem(&sessionPrefix, options.SpecialistContext.Context)
+	}
+	if options.SkillsContext != nil {
+		appendSystem(&sessionPrefix, options.SkillsContext.Context)
+	}
 
 	// Index ephemeral inline payloads by attachment_id / path so history
 	// image_ref blocks can rehydrate pixels when Gateway inlined them
@@ -54,21 +62,33 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 		if content == nil || content == "" {
 			continue
 		}
-		messages = append(messages, provider.Message{Role: message.Role, Content: content})
+		if message.Role == "system" {
+			sessionPrefix = append(sessionPrefix, provider.Message{Role: "system", Content: content})
+			continue
+		}
+		conversation = append(conversation, provider.Message{Role: message.Role, Content: content})
 	}
 
 	// Current user turn: text input + current-run attachments as multimodal parts.
 	runtimeContext := runtimeContextText(options, input, c.now())
 	userContent := composeUserTurnContent(runtimeContext+input, params.Input.Attachments)
-	messages = append(messages, provider.Message{Role: "user", Content: userContent})
+	turnTail := []provider.Message{{Role: "user", Content: userContent}}
 
 	reqAttachments := toRequestAttachments(params.Input.Attachments)
+	definitions = provider.CanonicalToolDefinitions(definitions)
+	prompt := provider.PromptEnvelope{
+		StablePrefix:  stablePrefix,
+		SessionPrefix: sessionPrefix,
+		History:       conversation,
+		TurnTail:      turnTail,
+	}
+	prompt.CacheEpoch = provider.ComputeCacheEpoch(options.ProviderName, options.Model, definitions, prompt)
 
 	return provider.Request{
 		RunID:     params.RunID,
 		SessionID: params.Session.ID,
 		Input:     input,
-		Messages:  messages,
+		Prompt:    prompt,
 		Options: provider.RequestOptions{
 			ProviderName:      options.ProviderName,
 			ProviderBaseURL:   options.ProviderBaseURL,
@@ -78,6 +98,10 @@ func (c promptComposer) compose(params methods.ReplyParams, input string, defini
 			Model:             options.Model,
 			EnableThinking:    options.EnableThinking,
 			ReasoningEffort:   options.ReasoningEffort,
+			CacheMode:         options.ProviderCacheMode,
+			CacheKeySupported: options.ProviderCacheKey,
+			CacheRetention:    options.ProviderCacheRetain,
+			MinCacheTokens:    options.ProviderMinCache,
 			LogLLMRequests:    options.LogLLMRequests,
 		},
 		Tools:       definitions,
@@ -93,12 +117,6 @@ func runtimeContextText(options methods.ReplyOptions, input string, now time.Tim
 		if content = strings.TrimSpace(content); content != "" {
 			sections = append(sections, content)
 		}
-	}
-	if options.SpecialistContext != nil {
-		appendSection(options.SpecialistContext.Context)
-	}
-	if options.SkillsContext != nil {
-		appendSection(options.SkillsContext.Context)
 	}
 	if options.MemoryContext != nil {
 		appendSection(options.MemoryContext.Context)

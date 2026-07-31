@@ -42,6 +42,12 @@ export function summarizeRunEvent(event) {
     const reason = firstPresent(payload.summary, payload.reason, payload.risk ? `${displayRisk(payload.risk)}风险` : '');
     return trimSummary(joinParts(['授权', action ? displayStatus(action) : '', payload.tool_name, reason]));
   }
+  if (kind === 'cache') {
+    const input = Number(payload.input_tokens) || 0;
+    const cached = Number(payload.cache_read_tokens) || 0;
+    const ratio = input > 0 ? `${((cached / input) * 100).toFixed(1)}%` : '0.0%';
+    return trimSummary(joinParts(['提示词缓存', ratio, cached > 0 ? `${cached} tokens 命中` : payload.cache_miss_reason]));
+  }
   if (kind === 'error') return trimSummary(firstPresent(payload.error, payload.message, payload.summary, event?.type, '错误'));
   if (kind === 'done') return trimSummary(joinParts(['完成', payload.status ? displayStatus(payload.status) : '']));
   return trimSummary(firstPresent(payload.delta, payload.message, payload.summary,
@@ -96,6 +102,7 @@ export function formatRunEventPayload(event) {
 
 export function classifyRunEventKind(type, payload = {}) {
   const value = String(type || '').toLowerCase();
+  if (value === 'usage' || payload.cache_read_tokens !== undefined || payload.cache_write_tokens !== undefined) return 'cache';
   if (value.includes('permission') || payload.permission_id || payload.decision) return 'permission';
   if (value.includes('memory') || payload.memory_ids) return 'memory';
   if (value.includes('todo')) return 'todo';
@@ -113,7 +120,7 @@ function sortRunEvents(events) {
     || new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
 }
 function eventKindRank(kind) {
-  return ({ all: -1, error: 0, permission: 1, memory: 2, tool: 3, message: 4, done: 5, event: 6 })[kind] ?? 99;
+  return ({ all: -1, error: 0, permission: 1, memory: 2, cache: 3, tool: 4, message: 5, done: 6, event: 7 })[kind] ?? 99;
 }
 function formatRunEventScope(event) {
   if (!event?.workerId) return 'Run';

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"redpanda/gateway/internal/gateway/infra/runtimeclient"
 	"redpanda/gateway/internal/gateway/model"
 	"redpanda/gateway/internal/gateway/repository"
+	"redpanda/protocol"
 	"redpanda/protocol/methods"
 )
 
@@ -167,6 +170,8 @@ func (c *SessionCompactor) Apply(sessionID string, req CompactSessionRequest) (r
 	if err != nil {
 		return CompactSessionResult{}, err
 	}
+	summaryDigest := digestHex(summaryJSON)
+	cacheEpoch := digestHex([]byte(fmt.Sprintf("compaction:%s:%s:%d:%d", source.ID, summaryDigest, plan.StartSeq, plan.EndSeq)))
 
 	err = c.repos.DB.Transaction(func(tx *gorm.DB) error {
 		txRepos := repository.NewSet(tx)
@@ -174,15 +179,18 @@ func (c *SessionCompactor) Apply(sessionID string, req CompactSessionRequest) (r
 			return err
 		}
 		compaction, err := txRepos.Compactions.Create(model.SessionCompaction{
-			SourceSessionID:  source.ID,
-			TargetSessionID:  source.ID,
-			Status:           "applied",
-			SourceStartSeq:   plan.StartSeq,
-			SourceEndSeq:     plan.EndSeq,
-			SummaryJSON:      string(summaryJSON),
-			SummaryMethod:    summaryMethod,
-			KeepTailMessages: plan.KeepTailMessages,
-			KeepTailTurns:    plan.KeepTailTurns,
+			SourceSessionID:     source.ID,
+			TargetSessionID:     source.ID,
+			Status:              "applied",
+			SourceStartSeq:      plan.StartSeq,
+			SourceEndSeq:        plan.EndSeq,
+			SummaryJSON:         string(summaryJSON),
+			SummaryMethod:       summaryMethod,
+			SummaryDigest:       summaryDigest,
+			PromptSchemaVersion: protocol.PromptSchemaVersion,
+			CacheEpoch:          cacheEpoch,
+			KeepTailMessages:    plan.KeepTailMessages,
+			KeepTailTurns:       plan.KeepTailTurns,
 		})
 		if err != nil {
 			return err
@@ -206,6 +214,11 @@ func (c *SessionCompactor) Apply(sessionID string, req CompactSessionRequest) (r
 		return nil
 	})
 	return result, err
+}
+
+func digestHex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // State returns the latest applied-in-place compaction for the session.

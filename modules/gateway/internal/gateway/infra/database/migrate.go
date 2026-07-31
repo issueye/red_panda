@@ -1,12 +1,15 @@
 package database
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
 	"gorm.io/gorm"
 
 	"redpanda/gateway/internal/gateway/model"
+	"redpanda/protocol"
 )
 
 func Migrate(db *gorm.DB) error {
@@ -50,6 +53,9 @@ func Migrate(db *gorm.DB) error {
 		if err := migrateProviderProfileHTTPProxy(tx); err != nil {
 			return err
 		}
+		if err := migratePromptCacheMetadata(tx); err != nil {
+			return err
+		}
 		// Goal feature removed (docs/37, docs/31-34): drop legacy tables + column
 		// left behind by prior migrations. Idempotent; no-op on fresh databases.
 		if err := dropGoalLegacySchema(tx); err != nil {
@@ -57,6 +63,40 @@ func Migrate(db *gorm.DB) error {
 		}
 		return tx.Migrator().DropTable("agent_definitions")
 	})
+}
+
+func migratePromptCacheMetadata(db *gorm.DB) error {
+	if db.Migrator().HasTable(&model.ProviderProfile{}) {
+		if err := db.Model(&model.ProviderProfile{}).
+			Where("cache_mode IS NULL OR TRIM(cache_mode) = ''").
+			Update("cache_mode", gorm.Expr("CASE WHEN LOWER(provider) = ? THEN ? ELSE ? END", "anthropic", "explicit", "implicit")).Error; err != nil {
+			return err
+		}
+	}
+	if !db.Migrator().HasTable(&model.SessionCompaction{}) {
+		return nil
+	}
+	var rows []model.SessionCompaction
+	if err := db.Where("summary_json <> '' AND (summary_digest = '' OR prompt_schema_version = '' OR cache_epoch = '')").Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		summaryDigest := migrationDigestHex([]byte(row.SummaryJSON))
+		cacheEpoch := migrationDigestHex([]byte(fmt.Sprintf("compaction:%s:%s:%d:%d", row.SourceSessionID, summaryDigest, row.SourceStartSeq, row.SourceEndSeq)))
+		if err := db.Model(&model.SessionCompaction{}).Where("id = ?", row.ID).Updates(map[string]any{
+			"summary_digest":        summaryDigest,
+			"prompt_schema_version": protocol.PromptSchemaVersion,
+			"cache_epoch":           cacheEpoch,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrationDigestHex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // dropGoalLegacySchema removes the Goal feature tables and the RunRecord.GoalID
