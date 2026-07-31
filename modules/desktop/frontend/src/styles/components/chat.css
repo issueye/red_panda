@@ -729,7 +729,7 @@
   flex-direction: column;
   gap: 4px;
   left: 50%;
-  max-width: 860px;
+  max-width: 660px;
   padding: 0 20px;
   pointer-events: none;
   position: absolute;
@@ -763,8 +763,8 @@
 
 .todo-composer-bar {
   align-items: center;
-  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
-  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(125%);
   border: 0;
   border-radius: 999px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
@@ -857,8 +857,8 @@
 }
 
 .todo-composer-list {
-  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
-  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  backdrop-filter: blur(16px) saturate(120%);
   border: 0;
   border-radius: 10px;
   box-shadow:
@@ -866,7 +866,7 @@
     0 0 0 1px rgba(15, 23, 42, 0.04);
   list-style: none;
   margin: 0;
-  max-height: min(200px, 28vh);
+  max-height: min(156px, 23vh);
   overflow-y: auto;
   padding: 4px 0 6px;
   transform-origin: bottom center;

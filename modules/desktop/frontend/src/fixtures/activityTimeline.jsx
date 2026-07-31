@@ -71,6 +71,10 @@ const tools = [{
   displayName: 'Read file',
   status: 'completed',
   runSeq: 1,
+}, {
+  id: 'tool_fixture_2', runId, name: 'workspace.read_file', displayName: 'Read file', status: 'completed', runSeq: 2,
+}, {
+  id: 'tool_fixture_3', runId, name: 'shell.exec', displayName: 'Shell', status: 'failed', runSeq: 3,
 }];
 
 const permissions = [{

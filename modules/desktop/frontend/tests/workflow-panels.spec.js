@@ -144,6 +144,37 @@ test('All tool calls stay compact until the user expands them', async ({ page })
   ))).toBe(true);
 });
 
+test('Worker thinking indicator follows the selected Assignment status', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+  await expect(page.getByTestId('running-panda-row')).toHaveCount(0);
+
+  const runningAssignment = page.getByTestId('worker-assignment').filter({ hasText: 'worker-02' });
+  await runningAssignment.getByTestId('worker-assignment-open').click();
+  await expect(page.getByTestId('chat-tab-worker')).toContainText('运行中');
+  await expect(page.getByTestId('running-panda-row')).toBeVisible();
+
+  const completedAssignment = page.getByTestId('worker-assignment').filter({ hasText: 'worker-01' });
+  await completedAssignment.getByTestId('worker-assignment-open').click();
+  await expect(page.getByTestId('chat-tab-worker').filter({ hasText: 'archivist' })).toContainText('已完成');
+  await expect(page.getByTestId('running-panda-row')).toHaveCount(0);
+  await expect(page.getByText('暂无 Worker 输出')).toBeVisible();
+});
+
+test('Expanded task panel stays narrow and translucent', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+  await page.getByTestId('todo-composer-toggle').click();
+  const list = page.getByTestId('todo-composer-list');
+  await expect(list).toBeVisible();
+  const appearance = await list.evaluate((element) => ({
+    backdropFilter: getComputedStyle(element).backdropFilter,
+    backgroundColor: getComputedStyle(element).backgroundColor,
+    width: element.getBoundingClientRect().width,
+  }));
+  expect(appearance.width).toBeLessThanOrEqual(660);
+  expect(appearance.backdropFilter).not.toBe('none');
+  expect(appearance.backgroundColor).not.toBe('rgb(255, 255, 255)');
+});
+
 test('Consecutive tools render as a collapsed execution group', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
   const group = page.getByTestId('tool-execution-group');

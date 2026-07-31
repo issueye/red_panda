@@ -11,6 +11,10 @@ import {
 import { classNames } from '../../lib/format.js';
 import { ConversationView } from './ConversationView.jsx';
 
+const ACTIVE_ASSIGNMENT_STATUSES = new Set([
+  'queued', 'running', 'cancelling', 'waiting_permission', 'paused',
+]);
+
 /** Main Run conversation plus read-only Worker Assignment tabs. */
 export function ChatPanel({
   messages = [],
@@ -56,6 +60,9 @@ export function ChatPanel({
   const activeTab = conversationTabs.find((tab) => tab.id === activeConversationTab)
     || conversationTabs[0]
     || { id: 'main', kind: 'main', title: '主对话' };
+  const workerRunning = activeTab.kind === 'worker'
+    && ACTIVE_ASSIGNMENT_STATUSES.has(activeTab.status);
+  const conversationRunning = activeTab.kind === 'worker' ? workerRunning : running;
 
   const scoped = useMemo(() => {
     if (activeTab.kind === 'worker') {
@@ -77,7 +84,7 @@ export function ChatPanel({
         messages: assignmentInput ? [assignmentInput, ...workerMessages] : workerMessages,
         tools: filterWorkerTools(scope, tools),
         permissions: filterWorkerPermissions(scope, permissions),
-        emptyTitle: '等待 Worker 输出',
+        emptyTitle: workerRunning ? '等待 Worker 输出' : '暂无 Worker 输出',
         showComposer: false,
         readOnlyHint: `查看 Worker「${activeTab.title}」的对话与工具轨迹（只读）`,
       };
@@ -153,7 +160,7 @@ export function ChatPanel({
         reasoningEffort={reasoningEffort}
         providerProfiles={providerProfiles}
         readOnlyHint={scoped.readOnlyHint}
-        running={running}
+        running={conversationRunning}
         showComposer={scoped.showComposer}
         attachments={attachments}
         uploading={uploading}

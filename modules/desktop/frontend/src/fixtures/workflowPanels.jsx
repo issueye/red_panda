@@ -164,6 +164,7 @@ function WorkflowFixture() {
     { id: 'main', kind: 'main', title: '主对话', closable: false },
   ]);
   const [activeConversationTab, setActiveConversationTab] = useState('main');
+  const [todosExpanded, setTodosExpanded] = useState(false);
   const [providerSelection, setProviderSelection] = useState({
     providerProfileId: 'provider_fixture', model: 'model-fast', enableThinking: false, reasoningEffort: '',
   });
@@ -233,6 +234,7 @@ function WorkflowFixture() {
               ...current, enableThinking,
             }))}
             onSelectConversationTab={setActiveConversationTab}
+            onTodosExpandToggle={() => setTodosExpanded((value) => !value)}
             permissions={permissionItems}
             providerProfileId={providerSelection.providerProfileId}
             providerProfiles={providerProfiles}
@@ -242,6 +244,7 @@ function WorkflowFixture() {
               id: 'todo_restore', content: 'Verify restored workflow', status: 'in_progress',
             }]}
             todoOpenCount={1}
+            todosExpanded={todosExpanded}
             tools={tools}
           />
         </section>

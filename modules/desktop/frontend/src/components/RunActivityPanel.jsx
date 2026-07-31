@@ -83,6 +83,19 @@ function lastEventLabel(run) {
   return displayEventKind(kind) || run.lastEventType;
 }
 
+function groupRunTools(tools) {
+  const groups = new Map();
+  tools.forEach((tool) => {
+    const name = tool.displayName || tool.name || "工具";
+    const status = tool.status || "running";
+    const key = `${name}\u0000${status}`;
+    const current = groups.get(key) || { key, name, status, count: 0 };
+    current.count += 1;
+    groups.set(key, current);
+  });
+  return Array.from(groups.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
 export function RunActivityPanel({
   currentRunId,
   globalPendingPermissions,
@@ -119,7 +132,7 @@ export function RunActivityPanel({
   const [eventKindFilter, setEventKindFilter] = useState("all");
   const [eventScopeFilter, setEventScopeFilter] = useState("all");
   const [expandedPayloads, setExpandedPayloads] = useState({});
-  const [expandedRunId, setExpandedRunId] = useState(currentRunId || "");
+  const [expandedRunId, setExpandedRunId] = useState("");
   const [filterTouched, setFilterTouched] = useState(false);
 
   // Prefer "进行中" while runs are active, unless the user already picked a filter.
@@ -267,6 +280,7 @@ export function RunActivityPanel({
               const runPermissions = safePermissions.filter(
                 (item) => item.runId === run.id,
               );
+              const runToolGroups = groupRunTools(runTools);
               const runEvents = runEventsByRun?.[run.id] || [];
               const eventsLoading = Boolean(runEventsLoading?.[run.id]);
               const eventsError = runEventsError?.[run.id] || "";
@@ -288,6 +302,7 @@ export function RunActivityPanel({
                   key={run.id}
                 >
                   <button
+                    aria-label={expanded ? "收起运行详情" : "展开运行详情"}
                     className="activity-run-toggle"
                     data-testid="activity-run-toggle"
                     onClick={() => toggleRun(run.id, expanded)}
@@ -298,7 +313,6 @@ export function RunActivityPanel({
                     ) : (
                       <ChevronRight size={14} />
                     )}
-                    <span>{expanded ? "收起" : "展开"}</span>
                   </button>
                   <div className="activity-row-head">
                     <StatusBadge
@@ -344,16 +358,14 @@ export function RunActivityPanel({
                         </div>
                       </dl>
                       <div className="activity-detail-group">
-                        <strong>工具</strong>
+                        <strong>工具调用</strong>
                         {runTools.length === 0 ? (
                           <span>本次运行没有工具调用。</span>
                         ) : (
-                          runTools.map((tool, index) => (
-                            <p key={tool.id}>
-                              {index + 1}/{runTools.length}{" "}
-                              {tool.displayName || tool.name}
-                              {" · "}
-                              {displayStatus(tool.status || "running")}
+                          runToolGroups.map((group) => (
+                            <p data-testid="activity-tool-summary" key={group.key}>
+                              {group.name} · {displayStatus(group.status)}
+                              {group.count > 1 ? ` × ${group.count}` : ""}
                             </p>
                           ))
                         )}
@@ -435,9 +447,9 @@ export function RunActivityPanel({
                               >
                                 {displayEventKind(group.kind)}
                               </span>
-                              <em>{group.count}</em>
+                              <em>最近 {Math.min(group.count, 5)}/{group.count}</em>
                             </div>
-                            {group.events.slice(0, 16).map((event) => {
+                            {group.events.slice(-5).reverse().map((event) => {
                               const meta = getRunEventTimelineMeta(event);
                               const payload = formatRunEventPayload(event);
                               const eventKey =
