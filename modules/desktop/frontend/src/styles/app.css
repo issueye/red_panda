@@ -4529,16 +4529,16 @@ button.activity-summary-card:hover {
   box-shadow: inset 3px 0 0 var(--color-danger-text);
 }
 
-/* Tool calls stay as quiet one-line timeline entries until expanded. */
+/* Tool groups read as flat execution traces rather than nested cards. */
 .tool-execution-group {
   align-self: stretch;
-  background: #f8fafb;
-  border: 1px solid #dfe5ea;
-  border-left: 3px solid #78909c;
-  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   max-width: min(760px, 100%);
   min-width: 0;
-  padding: 2px;
+  padding: 0;
   position: relative;
 }
 
@@ -4557,24 +4557,7 @@ button.activity-summary-card:hover {
 }
 
 .tool-execution-group.is-running {
-  background: #f3f7ff;
-  border-color: #cfdcf4;
-  border-left-color: #3f67b1;
   overflow: hidden;
-}
-
-.tool-execution-group.is-completed {
-  border-left-color: #168568;
-}
-
-.tool-execution-group.is-failed {
-  background: #fff7f7;
-  border-left-color: var(--color-danger-text);
-}
-
-.tool-execution-group.is-attention {
-  background: var(--color-warning-bg);
-  border-left-color: var(--color-warning-text);
 }
 
 .tool-execution-group.is-running::after {
@@ -4588,10 +4571,6 @@ button.activity-summary-card:hover {
   width: 32%;
 }
 
-.tool-execution-group.is-expanded {
-  padding-bottom: 6px;
-}
-
 .tool-execution-group-toggle {
   align-items: center;
   background: transparent;
@@ -4602,20 +4581,18 @@ button.activity-summary-card:hover {
   font: inherit;
   gap: 8px;
   grid-template-columns: 26px minmax(0, 1fr) max-content 16px;
-  min-height: 42px;
-  padding: 4px 7px 4px 5px;
+  min-height: 38px;
+  padding: 3px 2px;
   text-align: left;
   width: 100%;
 }
 
 .tool-execution-group-toggle:hover {
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--color-surface-subtle);
 }
 
 .tool-execution-group-icon {
   align-items: center;
-  background: #e8eef2;
-  border-radius: 5px;
   color: #4f6472;
   display: inline-flex;
   height: 26px;
@@ -4624,7 +4601,6 @@ button.activity-summary-card:hover {
 }
 
 .tool-execution-group.is-running .tool-execution-group-icon {
-  background: #e1eaff;
   color: #315b9e;
 }
 
@@ -4648,16 +4624,14 @@ button.activity-summary-card:hover {
 
 .tool-execution-group-heading em {
   align-items: center;
-  background: #e9edf1;
-  border-radius: 4px;
   color: #596775;
   display: inline-flex;
   font-size: 10px;
   font-style: normal;
-  height: 16px;
+  height: auto;
   justify-content: center;
-  min-width: 18px;
-  padding: 0 4px;
+  min-width: 0;
+  padding: 0;
 }
 
 .tool-execution-group-summary {
@@ -4693,10 +4667,34 @@ button.activity-summary-card:hover {
 .tool-execution-group-chevron.is-open { transform: rotate(90deg); }
 
 .tool-execution-group-body {
+  border-left: 1px solid var(--color-border);
   display: grid;
-  gap: 4px;
+  gap: 0;
+  margin-left: 13px;
   min-width: 0;
-  padding: 4px 4px 0 30px;
+  padding: 2px 0 0 17px;
+}
+
+.tool-execution-group-body .tool-card {
+  border-radius: 0;
+}
+
+.tool-execution-group-body .tool-card.is-expanded,
+.tool-execution-group-body .tool-card.is-live:not(.is-expanded),
+.tool-execution-group-body .tool-card.is-failed:not(.is-expanded),
+.tool-execution-group-body .tool-card.is-attention:not(.is-expanded) {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.tool-execution-group-body .tool-card + .tool-card {
+  border-top: 1px solid var(--color-border);
+}
+
+.tool-execution-group-body .tool-card::after {
+  display: none;
 }
 
 @media (max-width: 520px) {
@@ -4705,7 +4703,10 @@ button.activity-summary-card:hover {
   }
 
   .tool-execution-group-status { display: none; }
-  .tool-execution-group-body { padding-left: 8px; }
+  .tool-execution-group-body {
+    margin-left: 13px;
+    padding-left: 9px;
+  }
 }
 
 .tool-card {

@@ -244,6 +244,17 @@ test('Consecutive tools render as a collapsed execution group', async ({ page })
   await page.goto('/workflow-fixture.html');
   const group = page.getByTestId('tool-execution-group');
   await expect(group).toHaveCount(1);
+  expect(await group.evaluate((element) => ({
+    background: getComputedStyle(element).backgroundColor,
+    borderStyle: getComputedStyle(element).borderStyle,
+    borderRadius: getComputedStyle(element).borderRadius,
+    boxShadow: getComputedStyle(element).boxShadow,
+  }))).toEqual({
+    background: 'rgba(0, 0, 0, 0)',
+    borderStyle: 'none',
+    borderRadius: '0px',
+    boxShadow: 'none',
+  });
   await expect(group.getByTestId('tool-execution-group-toggle')).toHaveAttribute('aria-expanded', 'false');
   await expect(group).toContainText('工具调用');
   await expect(group).toContainText('Read file · Workspace stats');
@@ -256,6 +267,10 @@ test('Consecutive tools render as a collapsed execution group', async ({ page })
   await expect(group.getByTestId('tool-call-index')).toHaveCount(0);
   await expect(group.getByTestId('tool-card').nth(0)).toContainText('Read file');
   await expect(group.getByTestId('tool-card').nth(1)).toContainText('Workspace stats');
+  expect(await group.getByTestId('tool-card').evaluateAll((items) => items.every((item) => {
+    const style = getComputedStyle(item);
+    return style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.borderRadius === '0px';
+  }))).toBe(true);
 });
 
 test('Composer switches provider models and reasoning effort', async ({ page }) => {
