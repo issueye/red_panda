@@ -148,12 +148,16 @@ test('All tool calls stay compact until the user expands them', async ({ page })
   ))).toBe(true);
 });
 
-test('Chat messages use distinct content hierarchy surfaces', async ({ page }) => {
+test('Chat messages use a flat layout while keeping role avatars', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 
   const userBubble = page.locator('.message-row.role-user .message-bubble');
   const assistantBubble = page.locator('.message-row.role-assistant .message-bubble');
+  const userAvatar = page.locator('.message-row.role-user .message-avatar');
+  const assistantAvatar = page.locator('.message-row.role-assistant .message-avatar');
   const reasoning = page.getByTestId('reasoning-block');
+  await expect(userAvatar).toBeVisible();
+  await expect(assistantAvatar).toBeVisible();
   await expect(reasoning.locator('.message-thinking-action-open')).toBeVisible();
   await expect(reasoning.locator('.message-thinking-action-close')).toBeHidden();
   await reasoning.locator('summary').click();
@@ -162,18 +166,23 @@ test('Chat messages use distinct content hierarchy surfaces', async ({ page }) =
   const appearance = await Promise.all([
     userBubble.evaluate((element) => ({
       background: getComputedStyle(element).backgroundColor,
-      border: getComputedStyle(element).borderColor,
+      borderStyle: getComputedStyle(element).borderStyle,
+      boxShadow: getComputedStyle(element).boxShadow,
     })),
     assistantBubble.evaluate((element) => ({
       background: getComputedStyle(element).backgroundColor,
-      border: getComputedStyle(element).borderColor,
+      borderStyle: getComputedStyle(element).borderStyle,
+      boxShadow: getComputedStyle(element).boxShadow,
     })),
     reasoning.evaluate((element) => getComputedStyle(element).backgroundColor),
   ]);
 
-  expect(appearance[0].background).not.toBe(appearance[1].background);
-  expect(appearance[0].border).not.toBe('rgba(0, 0, 0, 0)');
-  expect(appearance[1].border).not.toBe('rgba(0, 0, 0, 0)');
+  expect(appearance[0]).toEqual({
+    background: 'rgba(0, 0, 0, 0)',
+    borderStyle: 'none',
+    boxShadow: 'none',
+  });
+  expect(appearance[1]).toEqual(appearance[0]);
   expect(appearance[2]).not.toBe('rgba(0, 0, 0, 0)');
 });
 
