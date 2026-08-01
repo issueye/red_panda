@@ -242,8 +242,12 @@ function WorkflowFixture() {
             showComposer
             todos={[{
               id: 'todo_restore', content: 'Verify restored workflow', status: 'in_progress',
+            }, {
+              id: 'todo_pending', content: 'Review tool output hierarchy', status: 'pending',
+            }, {
+              id: 'todo_completed', content: 'Restore session state', status: 'completed',
             }]}
-            todoOpenCount={1}
+            todoOpenCount={2}
             todosExpanded={todosExpanded}
             tools={tools}
           />

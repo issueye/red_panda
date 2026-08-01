@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	agenttools "redpanda/agent/internal/tools"
 	"redpanda/agent/internal/worker"
@@ -202,7 +203,7 @@ func TestForgedNestedWorkerDelegateIsRejectedByPool(t *testing.T) {
 	}
 }
 
-func TestDelegatedAssignmentRetriesWithoutStoppingSiblingWorker(t *testing.T) {
+func TestDelegatedAssignmentFailureDoesNotRepeatBudgetOrStopSiblingWorker(t *testing.T) {
 	executor := &retryIsolationExecutor{
 		entryStarted: make(chan struct{}),
 		otherStarted: make(chan struct{}),
@@ -240,11 +241,11 @@ func TestDelegatedAssignmentRetriesWithoutStoppingSiblingWorker(t *testing.T) {
 	assignment, result, err := rt.executeDelegatedAssignment(ctx, agenttools.ToolRunContext{
 		RunID: "run-retry", SessionID: "session-retry", AssignmentID: string(entry.AssignmentID), Reply: &reply,
 	}, workerExecutionSpec{Kind: workerExecutionDelegated, Parent: reply, ProfileKey: "reviewer", Task: "retry", MaxTurns: 2})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "transient worker timeout") {
+		t.Fatalf("delegate error = %v, want original failure", err)
 	}
-	if result.Status != worker.AssignmentCompleted || assignment.Attempt != 2 || assignment.RetryOf == "" {
-		t.Fatalf("retry result = assignment:%+v result:%+v", assignment, result)
+	if result.Status != worker.AssignmentFailed || assignment.Attempt != 1 || assignment.RetryOf != "" {
+		t.Fatalf("failure result = assignment:%+v result:%+v", assignment, result)
 	}
 	snapshot := pool.Snapshot()
 	siblingSnapshot := findRuntimeAssignment(t, snapshot, sibling.AssignmentID)
@@ -252,7 +253,6 @@ func TestDelegatedAssignmentRetriesWithoutStoppingSiblingWorker(t *testing.T) {
 		t.Fatalf("sibling assignment was affected by retry: %+v", siblingSnapshot)
 	}
 	failed := 0
-	completedRetry := 0
 	for _, item := range snapshot.Assignments {
 		if item.Task != "retry" {
 			continue
@@ -260,15 +260,12 @@ func TestDelegatedAssignmentRetriesWithoutStoppingSiblingWorker(t *testing.T) {
 		if item.Status == worker.AssignmentFailed && item.Attempt == 1 {
 			failed++
 		}
-		if item.Status == worker.AssignmentCompleted && item.Attempt == 2 && item.RetryOf != "" {
-			completedRetry++
-		}
 	}
-	if failed != 1 || completedRetry != 1 {
-		t.Fatalf("retry ledger mismatch: %+v", snapshot.Assignments)
+	if failed != 1 || executor.retryAttempts != 1 {
+		t.Fatalf("assignment repeated after failure: attempts=%d ledger=%+v", executor.retryAttempts, snapshot.Assignments)
 	}
-	if !strings.Contains(output.String(), `"retrying":true`) || !strings.Contains(output.String(), `"attempt":2`) {
-		t.Fatalf("retry events are not visible: %s", output.String())
+	if strings.Contains(output.String(), `"retrying":true`) || strings.Contains(output.String(), `"attempt":2`) {
+		t.Fatalf("unexpected retry event: %s", output.String())
 	}
 }
 
@@ -458,6 +455,54 @@ func TestWorkerListRedactsOtherParallelRun(t *testing.T) {
 	pool.CancelRun(context.Background(), first.RunID, "cleanup")
 	pool.CancelRun(context.Background(), second.RunID, "cleanup")
 	_ = executor
+}
+
+func TestWorkerResultReadsCompleteReportInUTF8SafeChunks(t *testing.T) {
+	report := strings.Repeat("分析结果与证据路径。", 8000) + "报告结束"
+	pool, err := worker.NewPool(worker.Config{Size: 1}, func(worker.WorkerID) (worker.Executor, error) {
+		return &staticReportExecutor{report: report}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeWorkerPoolForTest(t, pool)
+	assignment, err := pool.SubmitEntry(context.Background(), worker.SubmitRequest{RunID: "run-report", Task: "report"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Wait(context.Background(), assignment.AssignmentID); err != nil {
+		t.Fatal(err)
+	}
+	rt := &Runtime{workerPool: pool}
+	offset := 0
+	var rebuilt strings.Builder
+	for {
+		raw, err := rt.executeWorkerResult(context.Background(), agenttools.ToolRunContext{RunID: "run-report"}, protocoltools.Call{Arguments: map[string]any{
+			"assignment_id": string(assignment.AssignmentID), "offset": offset, "max_bytes": 65537,
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var chunk struct {
+			Output     string `json:"output"`
+			NextOffset int    `json:"next_offset"`
+			Complete   bool   `json:"complete"`
+		}
+		if err := json.Unmarshal([]byte(raw), &chunk); err != nil {
+			t.Fatal(err)
+		}
+		if !utf8.ValidString(chunk.Output) || chunk.NextOffset <= offset {
+			t.Fatalf("invalid chunk at offset %d: %+v", offset, chunk)
+		}
+		rebuilt.WriteString(chunk.Output)
+		offset = chunk.NextOffset
+		if chunk.Complete {
+			break
+		}
+	}
+	if rebuilt.String() != report {
+		t.Fatalf("rebuilt report bytes=%d want=%d", rebuilt.Len(), len(report))
+	}
 }
 
 func TestWorkerPoolStatusRedactsOtherParallelRun(t *testing.T) {
@@ -755,6 +800,16 @@ type retryIsolationExecutor struct {
 	otherStarted  chan struct{}
 	otherRelease  chan struct{}
 }
+
+type staticReportExecutor struct{ report string }
+
+func (e *staticReportExecutor) Execute(context.Context, worker.ExecuteRequest, worker.EventSink) (worker.ExecuteResult, error) {
+	return worker.ExecuteResult{Output: e.report}, nil
+}
+func (*staticReportExecutor) Cancel(context.Context, worker.AssignmentID, string) error { return nil }
+func (*staticReportExecutor) Reset(context.Context) error                               { return nil }
+func (*staticReportExecutor) Healthy() bool                                             { return true }
+func (*staticReportExecutor) Close(context.Context) error                               { return nil }
 
 func (e *retryIsolationExecutor) Execute(ctx context.Context, request worker.ExecuteRequest, _ worker.EventSink) (worker.ExecuteResult, error) {
 	switch request.Task {

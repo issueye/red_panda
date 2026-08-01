@@ -52,6 +52,27 @@ func TestToolRoundModelContentsSharesRoundBudget(t *testing.T) {
 	}
 }
 
+func TestToolRoundModelContentsPreservesLargeWorkerReport(t *testing.T) {
+	report := strings.Repeat("analysis-line\n", 3000) + "END-OF-WORKER-REPORT"
+	raw, err := json.Marshal(map[string]any{
+		"assignment_id": "assignment-1", "worker_id": "worker-02",
+		"status": "completed", "output": report, "report_complete": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := toolRoundModelContents([]ToolExchange{{
+		Call:   tools.Call{Name: "worker.delegate"},
+		Result: tools.Result{Name: "worker.delegate", Status: tools.CallStatusCompleted, Output: string(raw)},
+	}})
+	if len(contents) != 1 || !strings.Contains(contents[0], "END-OF-WORKER-REPORT") {
+		t.Fatalf("large Worker report was truncated: bytes=%d tail=%v", len(contents[0]), strings.Contains(contents[0], "END-OF-WORKER-REPORT"))
+	}
+	if !strings.Contains(contents[0], "assignment-1") {
+		t.Fatalf("Worker metadata missing: %s", contents[0][:min(512, len(contents[0]))])
+	}
+}
+
 func TestEchoProviderUsesPerRunHTTPProviderOverride(t *testing.T) {
 	var auth string
 	var model string

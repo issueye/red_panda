@@ -66,6 +66,32 @@ test('assignment terminal state is irreversible', () => {
   assert.deepEqual(late.assignmentOrder, ['assignment_1']);
 });
 
+test('projects worker execution budgets without conflating turns and tools', () => {
+  const base = createEmptySessionRuntime();
+  const next = reduceRunEvent(base, event('worker_assignment_updated', 1, {
+    status: 'completed',
+    execution_stats: {
+      max_turns: 19,
+      loop_turns: 19,
+      provider_requests: 20,
+      tool_calls_requested: 92,
+      tool_calls_executed: 76,
+      tool_call_budget: 76,
+      tool_budget_reached: true,
+    },
+  })).runtime.assignmentsById.assignment_1;
+  assert.deepEqual(next.executionStats, {
+    maxTurns: 19,
+    loopTurns: 19,
+    providerRequests: 20,
+    toolCallsRequested: 92,
+    toolCallsExecuted: 76,
+    toolCallBudget: 76,
+    maxTurnsReached: false,
+    toolBudgetReached: true,
+  });
+});
+
 test('paused assignment remains active and can return to running', () => {
   const base = createEmptySessionRuntime({
     running: true,

@@ -27,7 +27,7 @@ func TestModelFacingContentWrapsLegacyAndTruncates(t *testing.T) {
 		t.Fatalf("legacy result duplicated model content in data: %#v", env.Data)
 	}
 
-	big := strings.Repeat("a", maxResultForModel+100)
+	big := strings.Repeat("a", defaultResultForModel+100)
 	standard, _ := json.Marshal(modelFacingEnvelope{
 		Schema: ResultSchemaV1,
 		Tool:   "workspace.read_file",
@@ -47,7 +47,7 @@ func TestModelFacingContentWrapsLegacyAndTruncates(t *testing.T) {
 	if !env.Meta.Truncated {
 		t.Fatalf("expected truncation: %#v", env.Meta)
 	}
-	if len(truncated) > maxResultForModel {
+	if len(truncated) > defaultResultForModel {
 		t.Fatalf("model-facing envelope still too large: %d", len(truncated))
 	}
 }

@@ -174,6 +174,16 @@ func methodAssignmentRecord(item worker.AssignmentSnapshot) methods.AssignmentRe
 		ID: string(item.ID), RunID: item.RunID, WorkerID: string(item.WorkerID),
 		OriginWorkerID: string(item.OriginWorkerID), ProfileKey: item.ProfileKey, Task: item.Task,
 		Status: methods.AssignmentStatus(item.Status), Result: item.Result, Error: item.Error,
-		CreatedAt: item.CreatedAt, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt,
+		ExecutionStats: methodWorkerExecutionStats(item.Stats),
+		CreatedAt:      item.CreatedAt, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt,
+	}
+}
+
+func methodWorkerExecutionStats(stats worker.ExecutionStats) methods.WorkerExecutionStats {
+	return methods.WorkerExecutionStats{
+		MaxTurns: stats.MaxTurns, LoopTurns: stats.LoopTurns, ProviderRequests: stats.ProviderRequests,
+		ToolCallsRequested: stats.ToolCallsRequested, ToolCallsExecuted: stats.ToolCallsExecuted,
+		ToolCallBudget: stats.ToolCallBudget, MaxTurnsReached: stats.MaxTurnsReached,
+		ToolBudgetReached: stats.ToolBudgetReached,
 	}
 }

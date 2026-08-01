@@ -102,6 +102,7 @@ test('toolItemFromMessageSegment builds card payload', () => {
 
 test('Worker communication tools have readable labels', () => {
   assert.equal(toolDisplayName('worker.delegate'), 'Delegate work');
+  assert.equal(toolDisplayName('worker.result'), 'Read Worker report');
   assert.equal(toolDisplayName('worker.send'), 'Send to Worker');
   assert.equal(toolDisplayName('worker.receive'), 'Receive from Worker');
 });

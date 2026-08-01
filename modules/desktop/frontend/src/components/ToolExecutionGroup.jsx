@@ -17,10 +17,19 @@ function groupState(items) {
 export function ToolExecutionGroup({ items = [] }) {
   const [open, setOpen] = useState(false);
   const state = useMemo(() => groupState(items), [items]);
+  const toolSummary = useMemo(() => {
+    const names = items
+      .map((item) => item.displayName || item.name || '工具')
+      .filter((name, index, values) => values.indexOf(name) === index);
+    const visible = names.slice(0, 3);
+    const remaining = Math.max(0, names.length - visible.length);
+    return `${visible.join(' · ')}${remaining ? ` · +${remaining}` : ''}`;
+  }, [items]);
   if (items.length === 0) return null;
 
   return (
     <section
+      aria-busy={state.status === 'running' ? 'true' : undefined}
       className={classNames('tool-execution-group', open && 'is-expanded', `is-${state.status}`)}
       data-testid="tool-execution-group"
       data-timeline-type="tool"
@@ -32,8 +41,16 @@ export function ToolExecutionGroup({ items = [] }) {
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
-        <Wrench aria-hidden="true" size={14} />
-        <span className="tool-execution-group-title">执行了 {items.length} 个工具</span>
+        <span className="tool-execution-group-icon" aria-hidden="true">
+          <Wrench size={13} />
+        </span>
+        <span className="tool-execution-group-copy">
+          <span className="tool-execution-group-heading">
+            <strong>工具调用</strong>
+            <em>{items.length}</em>
+          </span>
+          <span className="tool-execution-group-summary" title={toolSummary}>{toolSummary}</span>
+        </span>
         <span className={classNames('tool-execution-group-status', `is-${state.status}`)}>
           {state.icon}
           {state.label}

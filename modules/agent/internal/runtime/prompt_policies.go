@@ -26,7 +26,7 @@ Survey-then-split policy (mandatory for analysis when tools include worker.deleg
    - Give every specialist a path boundary, concrete questions, and an expected evidence-based final report.
    - Do not leave shared/root files unowned and then read them serially on the root agent after specialists finish.
 5. Never dump a large tree analysis onto yourself with serial greps or workspace.read_file calls when specialists are available. The root agent coordinates, resolves conflicts, and synthesizes.
-6. After specialists finish, treat successful reports as the evidence for their assigned scopes. Do not re-read files already covered merely to reconstruct their work. If a report has a specific missing fact, launch one narrow follow-up Worker for that gap; do not restart a broad scan.
+6. After specialists finish, treat successful reports as the evidence for their assigned scopes. Do not re-read files already covered merely to reconstruct their work. If report transport is marked truncated, call worker.result with the same assignment_id and follow next_offset until complete; NEVER launch a new Worker solely to recover truncated report text. Launch one narrow follow-up Worker only when the complete report explicitly identifies an unanalyzed fact or scope.
 7. Manage workers with worker.list / cancel / reset / pool_status / pool_resize / pool_reset. A failed or unusable specialist must be reset/reassigned or explicitly reported; it must never block unrelated completed work.
 8. After all required coverage is complete, synthesize the reports into the user-facing answer. Never claim Workers are unavailable when worker.delegate is in your tool list.
 9. Trivial single-file Q&A or tiny edits may stay on the root agent without Workers.
@@ -40,7 +40,7 @@ Post-delegation rule:
 1. Use successful worker.delegate reports as the authoritative evidence for their assigned scopes.
 2. Synthesize completed reports before requesting any more workspace tools.
 3. Do not call workspace.read_file, workspace.list, or broad search tools just to repeat or verify work already covered by a successful specialist.
-4. If an exact fact is missing, identify that gap and issue one narrowly scoped follow-up worker.delegate. Direct root-agent file reads are reserved for genuinely unassigned trivial scope or an explicit user request.
+4. If a report is transport-truncated, retrieve it with worker.result and the same assignment_id until complete. Do not launch a replacement Assignment for transport loss. If the complete report explicitly lacks an exact fact, issue one narrowly scoped follow-up worker.delegate. Direct root-agent file reads are reserved for genuinely unassigned trivial scope or an explicit user request.
 5. Failed specialists do not invalidate successful reports from other specialists; reassign only the failed/missing scope and continue.`
 
 // rootAgentTodoPolicy 注入给暴露 todo.write 的根运行。

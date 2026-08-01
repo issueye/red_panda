@@ -19,21 +19,39 @@ import (
 type loopEndReason string
 
 const (
-	loopEndNoTools   loopEndReason = "no_tools"
-	loopEndMaxTurns  loopEndReason = "max_turns"
-	loopEndCancelled loopEndReason = "cancelled"
-	loopEndFailed    loopEndReason = "failed"
-	loopEndBudget    loopEndReason = "budget_exhausted"
+	loopEndNoTools    loopEndReason = "no_tools"
+	loopEndMaxTurns   loopEndReason = "max_turns"
+	loopEndToolBudget loopEndReason = "tool_budget_reached"
+	loopEndCancelled  loopEndReason = "cancelled"
+	loopEndFailed     loopEndReason = "failed"
+	loopEndBudget     loopEndReason = "budget_exhausted"
 	// Empty provider responses after tool execution are often transient. A
 	// small segment-wide cap lets the model resume the unfinished task without
 	// turning an empty-response provider into an unbounded retry loop.
 	maxEmptyContinuationAttempts = 2
 )
 
+const (
+	maxToolsPerProviderTurn = 8
+	toolBudgetPerTurn       = 4
+)
+
+type providerExecutionStats struct {
+	MaxTurns           int
+	LoopTurns          int
+	ProviderRequests   int
+	ToolCallsRequested int
+	ToolCallsExecuted  int
+	ToolCallBudget     int
+	MaxTurnsReached    bool
+	ToolBudgetReached  bool
+}
+
 // providerSegmentResult 表示一次 runProviderLoopSegment 的结果。
 type providerSegmentResult struct {
 	Reason    loopEndReason
 	ToolTurns int
+	Stats     providerExecutionStats
 	// History 是为 carry_summarized 和下一分段累计的工具交互记录。
 	History []provider.ToolExchange
 }
@@ -44,7 +62,7 @@ func finishStatusFromLoopEnd(reason loopEndReason) string {
 		return "cancelled"
 	case loopEndFailed, loopEndBudget:
 		return "failed"
-	case loopEndNoTools, loopEndMaxTurns:
+	case loopEndNoTools, loopEndMaxTurns, loopEndToolBudget:
 		// 分段生成可恢复答案时（包括达到最大回合数后的综合），对外结束状态仍为“completed”。
 		// 区分性的原因会以 loop_end_reason 保留在结束载荷中。
 		return "completed"
@@ -99,6 +117,14 @@ func (r *Runtime) runProviderLoop(ctx context.Context, params methods.ReplyParam
 // emitRun 或 Goal 多分段控制器负责。
 func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.ReplyParams, input string, history []provider.ToolExchange, messageID string, streamID string, streamSeq *uint64) providerSegmentResult {
 	maxTurns := effectiveProviderToolTurns(params.Options)
+	stats := providerExecutionStats{MaxTurns: maxTurns, ToolCallBudget: maxTurns * toolBudgetPerTurn}
+	turnsUsed := 0
+	finish := func(reason loopEndReason, rounds [][]provider.ToolExchange) providerSegmentResult {
+		stats.LoopTurns = turnsUsed
+		stats.MaxTurnsReached = reason == loopEndMaxTurns
+		stats.ToolBudgetReached = reason == loopEndToolBudget
+		return providerSegmentResult{Reason: reason, ToolTurns: stats.LoopTurns, Stats: stats, History: flattenToolRounds(rounds)}
+	}
 	runRegistry := r.prepareRegistryForRun(ctx, params)
 	providerInput := input
 	emptyContinuationAttempts := 0
@@ -107,7 +133,6 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		// 初始循环前工具（如有）视为一个回合。
 		rounds = append(rounds, append([]provider.ToolExchange(nil), history...))
 	}
-	turnsUsed := 0
 	// Snapshot all prompt and tool-definition inputs once. Tool turns may only
 	// append transcript; they must not refresh Todo or reorder the prefix.
 	if ctxTodos := r.todoContextForRun(params.RunID); ctxTodos != nil {
@@ -118,7 +143,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 	baseRequest.Options = provider.WithRegistry(baseRequest.Options, r.providers)
 	for turn := 0; turn < maxTurns; turn++ {
 		if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
-			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+			return finish(loopEndCancelled, rounds)
 		}
 		var requestedCalls []tools.Call
 		emittedText := false
@@ -126,6 +151,7 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		request := baseRequest
 		request.ToolHistory = append([]provider.ToolExchange(nil), flatHistory...)
 		request.ToolRounds = cloneToolRounds(rounds)
+		stats.ProviderRequests++
 		err := r.completeProvider(ctx, params, request, func(chunk provider.ProviderChunk) error {
 			if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
 				return err
@@ -135,17 +161,17 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 		turnsUsed++
 		if err != nil {
 			if ctx.Err() != nil {
-				return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+				return finish(loopEndCancelled, rounds)
 			}
 			_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
 				"message":       err.Error(),
 				"status":        "failed",
 				"provider_name": r.provider.Name(),
 			})
-			return providerSegmentResult{Reason: loopEndFailed, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+			return finish(loopEndFailed, rounds)
 		}
 		if ctx.Err() != nil {
-			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+			return finish(loopEndCancelled, rounds)
 		}
 		if len(requestedCalls) == 0 {
 			if !emittedText && len(flatHistory) > 0 {
@@ -157,8 +183,9 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 					continue
 				}
 				// 不使用工具重试一次，迫使模型生成最终答案。
+				stats.ProviderRequests++
 				if r.retryFinalAnswer(ctx, params, providerInput, rounds, messageID, streamID, streamSeq) {
-					return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+					return finish(loopEndNoTools, rounds)
 				}
 				fallback := recoveryAnswerForRun(params, flatHistory)
 				_ = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
@@ -175,25 +202,45 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 				})
 				(*streamSeq)++
 			}
-			return providerSegmentResult{Reason: loopEndNoTools, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+			return finish(loopEndNoTools, rounds)
 		}
 		// 在历史记录中保留调用顺序；多个 worker.delegate 工作进程可并发执行。
 		if err := r.runStates.WaitIfPaused(ctx, params.RunID); err != nil {
-			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+			return finish(loopEndCancelled, rounds)
 		}
-		exchanges, cancelled := r.executeToolBatch(ctx, params, requestedCalls)
+		stats.ToolCallsRequested += len(requestedCalls)
+		remaining := stats.ToolCallBudget - stats.ToolCallsExecuted
+		allowed, rejected := boundedToolCalls(requestedCalls, remaining)
+		exchanges, cancelled := r.executeToolBatch(ctx, params, allowed)
+		stats.ToolCallsExecuted += len(allowed)
+		exchanges = append(exchanges, rejected...)
 		if len(exchanges) > 0 {
 			rounds = append(rounds, exchanges)
 		}
 		if cancelled {
-			return providerSegmentResult{Reason: loopEndCancelled, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+			return finish(loopEndCancelled, rounds)
+		}
+		if stats.ToolCallsExecuted >= stats.ToolCallBudget {
+			stats.ProviderRequests++
+			if !r.retryFinalAnswer(ctx, params, input, rounds, messageID, streamID, streamSeq) {
+				fallback := recoveryAnswerForRun(params, flattenToolRounds(rounds))
+				_ = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
+					StreamID: streamID, Kind: events.StreamMessage, Seq: *streamSeq, Final: true,
+				}, map[string]any{
+					"message_id": messageID, "delta": fallback, "provider_name": r.provider.Name(),
+					"recovered": true, "recovery_kind": "fallback", "tool_call_budget": stats.ToolCallBudget,
+				})
+				(*streamSeq)++
+			}
+			return finish(loopEndToolBudget, rounds)
 		}
 	}
 	// 工具执行后预算耗尽时，仍尝试仅文本的最终综合。
 	// 原因保持为 max_turns，以便 Goal 外层循环开启下一分段。
 	if len(rounds) > 0 {
+		stats.ProviderRequests++
 		if r.retryFinalAnswer(ctx, params, input, rounds, messageID, streamID, streamSeq) {
-			return providerSegmentResult{Reason: loopEndMaxTurns, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+			return finish(loopEndMaxTurns, rounds)
 		}
 		fallback := recoveryAnswerForRun(params, flattenToolRounds(rounds))
 		_ = r.emitEvent(ctx, params, events.EventMessageDelta, &events.StreamRef{
@@ -210,14 +257,38 @@ func (r *Runtime) runProviderLoopSegment(ctx context.Context, params methods.Rep
 			"max_turns":     maxTurns,
 		})
 		(*streamSeq)++
-		return providerSegmentResult{Reason: loopEndMaxTurns, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+		return finish(loopEndMaxTurns, rounds)
 	}
 	_ = r.emitEvent(ctx, params, events.EventError, nil, map[string]any{
 		"message":   fmt.Sprintf("provider exceeded tool turn limit (%d)", maxTurns),
 		"status":    "failed",
 		"max_turns": maxTurns,
 	})
-	return providerSegmentResult{Reason: loopEndFailed, ToolTurns: turnsUsed, History: flattenToolRounds(rounds)}
+	return finish(loopEndFailed, rounds)
+}
+
+func boundedToolCalls(calls []tools.Call, remaining int) ([]tools.Call, []provider.ToolExchange) {
+	limit := remaining
+	if limit > maxToolsPerProviderTurn {
+		limit = maxToolsPerProviderTurn
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	if limit > len(calls) {
+		limit = len(calls)
+	}
+	allowed := append([]tools.Call(nil), calls[:limit]...)
+	rejected := make([]provider.ToolExchange, 0, len(calls)-limit)
+	for _, call := range calls[limit:] {
+		rejected = append(rejected, provider.ToolExchange{Call: call, Result: tools.Result{
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Status:     tools.CallStatusFailed,
+			Error:      fmt.Sprintf("tool call budget exceeded: at most %d calls per model turn and %d calls remain", maxToolsPerProviderTurn, remaining),
+		}})
+	}
+	return allowed, rejected
 }
 
 func emptyProviderContinuationPrompt(input string, attempt int) string {

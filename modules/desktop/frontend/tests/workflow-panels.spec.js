@@ -102,7 +102,11 @@ test('All tool calls stay compact until the user expands them', async ({ page })
   // Running and failed tools also stay one-line until the user asks for details.
   await expect(runningTool).toHaveClass(/is-collapsed/);
   await expect(runningTool).toHaveClass(/is-live/);
+  await expect(runningTool).toHaveAttribute('aria-busy', 'true');
   await expect(runningTool.getByTestId('tool-status-label')).toContainText('进行中');
+  expect(await runningTool.evaluate((element) => (
+    getComputedStyle(element, '::after').animationName
+  ))).toBe('tool-progress-scan');
   await expect(runningTool.getByTestId('tool-card-body')).toHaveCount(0);
   await expect(failedTool).toHaveClass(/is-collapsed/);
   await expect(failedTool.getByTestId('tool-card-body')).toHaveCount(0);
@@ -144,6 +148,58 @@ test('All tool calls stay compact until the user expands them', async ({ page })
   ))).toBe(true);
 });
 
+test('Chat messages use distinct content hierarchy surfaces', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+
+  const userBubble = page.locator('.message-row.role-user .message-bubble');
+  const assistantBubble = page.locator('.message-row.role-assistant .message-bubble');
+  const reasoning = page.getByTestId('reasoning-block');
+  await expect(reasoning.locator('.message-thinking-action-open')).toBeVisible();
+  await expect(reasoning.locator('.message-thinking-action-close')).toBeHidden();
+  await reasoning.locator('summary').click();
+  await expect(reasoning.locator('.message-thinking-action-open')).toBeHidden();
+  await expect(reasoning.locator('.message-thinking-action-close')).toBeVisible();
+  const appearance = await Promise.all([
+    userBubble.evaluate((element) => ({
+      background: getComputedStyle(element).backgroundColor,
+      border: getComputedStyle(element).borderColor,
+    })),
+    assistantBubble.evaluate((element) => ({
+      background: getComputedStyle(element).backgroundColor,
+      border: getComputedStyle(element).borderColor,
+    })),
+    reasoning.evaluate((element) => getComputedStyle(element).backgroundColor),
+  ]);
+
+  expect(appearance[0].background).not.toBe(appearance[1].background);
+  expect(appearance[0].border).not.toBe('rgba(0, 0, 0, 0)');
+  expect(appearance[1].border).not.toBe('rgba(0, 0, 0, 0)');
+  expect(appearance[2]).not.toBe('rgba(0, 0, 0, 0)');
+});
+
+test('Running sessions animate while attention and idle sessions stay stable', async ({ page }) => {
+  await page.goto('/sidebar-state-fixture.html');
+
+  const runningStatus = page.getByTestId('session-run-status').filter({ hasText: '运行中' });
+  const runningRow = page.locator('.tree-session-row.is-running');
+  const permissionStatus = page.getByTestId('session-run-status').filter({ hasText: '授权' });
+  await expect(runningStatus).toHaveAccessibleName('会话运行中');
+  await expect(permissionStatus).toHaveAccessibleName('等待授权');
+  await expect(page.locator('.tree-session-row').filter({ hasText: '已完成的会话' }))
+    .not.toHaveClass(/is-running/);
+  expect(await runningStatus.locator('.session-run-spinner').evaluate((element) => (
+    getComputedStyle(element).animationName
+  ))).toBe('session-spinner');
+  expect(await runningRow.locator('.tree-session-main').evaluate((element) => (
+    getComputedStyle(element, '::after').animationName
+  ))).toBe('session-progress-scan');
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await runningStatus.locator('.session-run-spinner').evaluate((element) => (
+    getComputedStyle(element).animationName
+  ))).toBe('none');
+});
+
 test('Worker thinking indicator follows the selected Assignment status', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
   await expect(page.getByTestId('running-panda-row')).toHaveCount(0);
@@ -180,7 +236,8 @@ test('Consecutive tools render as a collapsed execution group', async ({ page })
   const group = page.getByTestId('tool-execution-group');
   await expect(group).toHaveCount(1);
   await expect(group.getByTestId('tool-execution-group-toggle')).toHaveAttribute('aria-expanded', 'false');
-  await expect(group).toContainText('执行了 2 个工具');
+  await expect(group).toContainText('工具调用');
+  await expect(group).toContainText('Read file · Workspace stats');
   await expect(group.getByTestId('tool-execution-group-body')).toHaveCount(0);
   await expect(group.getByTestId('tool-card')).toHaveCount(0);
 
@@ -201,6 +258,7 @@ test('Composer switches provider models and reasoning effort', async ({ page }) 
   await expect(thinking).toHaveAttribute('aria-checked', 'true');
 
   const reasoning = page.getByTestId('reasoning-block');
+  await expect(reasoning.locator('.message-thinking-preview')).toContainText('First inspect the restored run state');
   await expect(reasoning).not.toHaveAttribute('open', '');
   await reasoning.locator('summary').click();
   await expect(reasoning).toContainText('First inspect the restored run state');
@@ -232,6 +290,22 @@ test('Composer switches provider models and reasoning effort', async ({ page }) 
     return box.left >= 0 && box.right <= window.innerWidth;
   })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+});
+
+test('Task progress is docked above the composer without covering the timeline', async ({ page }) => {
+  await page.goto('/workflow-fixture.html');
+
+  const strip = page.getByTestId('todo-composer-strip');
+  const composer = page.locator('.chat-composer');
+  const layout = await Promise.all([
+    page.locator('.composer-strips').evaluate((element) => getComputedStyle(element).position),
+    strip.boundingBox(),
+    composer.boundingBox(),
+  ]);
+  expect(layout[0]).toBe('relative');
+  expect(layout[1].y + layout[1].height).toBeLessThanOrEqual(layout[2].y + 1);
+  await expect(strip).toContainText('Verify restored workflow');
+  await expect(strip).toContainText('已完成 1');
 });
 
 test('Worker panel only shows assignments in a scrollable region', async ({ page }) => {

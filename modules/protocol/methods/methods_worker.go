@@ -54,18 +54,30 @@ type WorkerRef struct {
 }
 
 type AssignmentRecord struct {
-	ID             string           `json:"id"`
-	RunID          string           `json:"run_id"`
-	WorkerID       string           `json:"worker_id"`
-	OriginWorkerID string           `json:"origin_worker_id,omitempty"`
-	ProfileKey     string           `json:"profile_key,omitempty"`
-	Task           string           `json:"task"`
-	Status         AssignmentStatus `json:"status"`
-	Result         string           `json:"result,omitempty"`
-	Error          string           `json:"error,omitempty"`
-	CreatedAt      time.Time        `json:"created_at"`
-	StartedAt      *time.Time       `json:"started_at,omitempty"`
-	FinishedAt     *time.Time       `json:"finished_at,omitempty"`
+	ID             string               `json:"id"`
+	RunID          string               `json:"run_id"`
+	WorkerID       string               `json:"worker_id"`
+	OriginWorkerID string               `json:"origin_worker_id,omitempty"`
+	ProfileKey     string               `json:"profile_key,omitempty"`
+	Task           string               `json:"task"`
+	Status         AssignmentStatus     `json:"status"`
+	Result         string               `json:"result,omitempty"`
+	Error          string               `json:"error,omitempty"`
+	ExecutionStats WorkerExecutionStats `json:"execution_stats,omitempty"`
+	CreatedAt      time.Time            `json:"created_at"`
+	StartedAt      *time.Time           `json:"started_at,omitempty"`
+	FinishedAt     *time.Time           `json:"finished_at,omitempty"`
+}
+
+type WorkerExecutionStats struct {
+	MaxTurns           int  `json:"max_turns,omitempty"`
+	LoopTurns          int  `json:"loop_turns,omitempty"`
+	ProviderRequests   int  `json:"provider_requests,omitempty"`
+	ToolCallsRequested int  `json:"tool_calls_requested,omitempty"`
+	ToolCallsExecuted  int  `json:"tool_calls_executed,omitempty"`
+	ToolCallBudget     int  `json:"tool_call_budget,omitempty"`
+	MaxTurnsReached    bool `json:"max_turns_reached,omitempty"`
+	ToolBudgetReached  bool `json:"tool_budget_reached,omitempty"`
 }
 
 type PoolSnapshot struct {

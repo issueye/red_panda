@@ -9,12 +9,12 @@ import (
 	ptools "redpanda/protocol/tools"
 )
 
-// TestRegisterCount verifies exactly 11 tools are registered.
+// TestRegisterCount verifies exactly 12 tools are registered.
 func TestRegisterCount(t *testing.T) {
 	reg := registry.NewRegistry()
 	names := Register(reg, nil, Dependencies{})
-	if len(names) != 11 {
-		t.Fatalf("expected 11 registered tools, got %d: %v", len(names), names)
+	if len(names) != 12 {
+		t.Fatalf("expected 12 registered tools, got %d: %v", len(names), names)
 	}
 }
 
@@ -22,7 +22,7 @@ func TestRegisterCount(t *testing.T) {
 func TestRegisterNames(t *testing.T) {
 	want := []string{
 		"skill.list", "skill.create", "skill.update", "skill.delete", "skill.run",
-		"worker.delegate", "worker.list", "worker.cancel",
+		"worker.delegate", "worker.list", "worker.result", "worker.cancel",
 		"worker.pool_status", "worker.send", "worker.receive",
 	}
 	reg := registry.NewRegistry()
@@ -39,7 +39,7 @@ func TestRegisterSourceOrder(t *testing.T) {
 	names := reg.Names()
 	want := []string{
 		"skill.list", "skill.create", "skill.update", "skill.delete", "skill.run",
-		"worker.delegate", "worker.list", "worker.cancel",
+		"worker.delegate", "worker.list", "worker.result", "worker.cancel",
 		"worker.pool_status", "worker.send", "worker.receive",
 	}
 	if !reflect.DeepEqual(names, want) {
@@ -63,6 +63,7 @@ var expectedEntries = map[string]expectedEntry{
 	"skill.run":          {risk: ptools.RiskHigh, timeoutClass: registry.SelfManagedToolTimeout, opsOnly: false, source: "builtin:orchestration"},
 	"worker.delegate":    {risk: ptools.RiskMedium, timeoutClass: registry.SelfManagedToolTimeout, opsOnly: false, source: "builtin:orchestration"},
 	"worker.list":        {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
+	"worker.result":      {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
 	"worker.cancel":      {risk: ptools.RiskMedium, timeoutClass: registry.LocalToolTimeout, opsOnly: false, source: "builtin:orchestration"},
 	"worker.pool_status": {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: true, source: "builtin:orchestration"},
 	"worker.send":        {risk: ptools.RiskLow, timeoutClass: registry.LocalToolTimeout, opsOnly: true, source: "builtin:orchestration"},
@@ -125,7 +126,7 @@ func TestOpsOnlyMatchesPolicy(t *testing.T) {
 
 	// From policy.go: skill.create, skill.update, skill.delete,
 	// worker.pool_status, worker.send, worker.receive are opsOnly.
-	// skill.list, skill.run, worker.delegate, worker.list, worker.cancel are NOT.
+	// skill.list, skill.run, worker.delegate, worker.list, worker.result, worker.cancel are NOT.
 	opsOnlyWant := map[string]bool{
 		"skill.list":         false,
 		"skill.create":       true,
@@ -134,6 +135,7 @@ func TestOpsOnlyMatchesPolicy(t *testing.T) {
 		"skill.run":          false,
 		"worker.delegate":    false,
 		"worker.list":        false,
+		"worker.result":      false,
 		"worker.cancel":      false,
 		"worker.pool_status": true,
 		"worker.send":        true,
@@ -173,15 +175,15 @@ func TestImplementedSkillHandlers(t *testing.T) {
 	}
 }
 
-// TestDefinitionsMatchOldDefs verifies all 11 definitions match the
+// TestDefinitionsMatchOldDefs verifies orchestration definitions match the
 // schemas in agent/internal/tools/defs_orchestration.go.
 func TestDefinitionsMatchOldDefs(t *testing.T) {
 	reg := registry.NewRegistry()
 	Register(reg, nil, Dependencies{})
 	defs := reg.Definitions()
 
-	if len(defs) != 11 {
-		t.Fatalf("expected 11 definitions, got %d", len(defs))
+	if len(defs) != 12 {
+		t.Fatalf("expected 12 definitions, got %d", len(defs))
 	}
 
 	byName := make(map[string]ptools.Definition, len(defs))
@@ -223,11 +225,16 @@ func TestDefinitionsMatchOldDefs(t *testing.T) {
 		"worker.delegate": {
 			displayName: "Delegate work", risk: ptools.RiskMedium,
 			required: []string{"task"},
-			props:    map[string]struct{}{"task": {}, "profile_key": {}, "max_turns": {}},
+			props:    map[string]struct{}{"task": {}, "profile_key": {}, "max_turns": {}, "file_count": {}, "path": {}},
 		},
 		"worker.list": {
 			displayName: "List workers", risk: ptools.RiskLow,
 			props: map[string]struct{}{"worker_id": {}, "assignment_id": {}},
+		},
+		"worker.result": {
+			displayName: "Read Worker report", risk: ptools.RiskLow,
+			required: []string{"assignment_id"},
+			props:    map[string]struct{}{"assignment_id": {}, "offset": {}, "max_bytes": {}},
 		},
 		"worker.cancel": {
 			displayName: "Cancel assignment", risk: ptools.RiskMedium,

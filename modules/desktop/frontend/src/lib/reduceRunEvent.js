@@ -100,6 +100,7 @@ function updateTodos(next, body) {
 
 function assignmentFromEvent(event, current) {
   const body = event.payload?.assignment || event.payload || {};
+  const rawStats = body.execution_stats || body.executionStats || {};
   const status = body.status || current?.status || 'running';
   if (current && TERMINAL_ASSIGNMENT_STATUSES.has(current.status)
     && !TERMINAL_ASSIGNMENT_STATUSES.has(status)) {
@@ -124,6 +125,16 @@ function assignmentFromEvent(event, current) {
     startedAt: body.started_at || current?.startedAt,
     finishedAt: body.finished_at || current?.finishedAt,
     workerSeq: Number(event.worker_seq) || current?.workerSeq || 0,
+    executionStats: {
+      maxTurns: Number(rawStats.max_turns ?? rawStats.maxTurns) || current?.executionStats?.maxTurns || 0,
+      loopTurns: Number(rawStats.loop_turns ?? rawStats.loopTurns) || current?.executionStats?.loopTurns || 0,
+      providerRequests: Number(rawStats.provider_requests ?? rawStats.providerRequests) || current?.executionStats?.providerRequests || 0,
+      toolCallsRequested: Number(rawStats.tool_calls_requested ?? rawStats.toolCallsRequested) || current?.executionStats?.toolCallsRequested || 0,
+      toolCallsExecuted: Number(rawStats.tool_calls_executed ?? rawStats.toolCallsExecuted) || current?.executionStats?.toolCallsExecuted || 0,
+      toolCallBudget: Number(rawStats.tool_call_budget ?? rawStats.toolCallBudget) || current?.executionStats?.toolCallBudget || 0,
+      maxTurnsReached: Boolean(rawStats.max_turns_reached ?? rawStats.maxTurnsReached ?? current?.executionStats?.maxTurnsReached),
+      toolBudgetReached: Boolean(rawStats.tool_budget_reached ?? rawStats.toolBudgetReached ?? current?.executionStats?.toolBudgetReached),
+    },
   };
 }
 

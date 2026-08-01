@@ -21,13 +21,15 @@ type CaptureOptions struct {
 type Capture struct {
 	options CaptureOptions
 
-	message   strings.Builder
-	reasoning strings.Builder
+	currentMessage strings.Builder
+	finalMessage   string
+	reasoning      strings.Builder
 
 	finishStatus      string
 	finishMessage     string
 	lastError         string
 	recoveredFallback bool
+	stats             ExecutionStats
 
 	messageDeltas   int
 	reasoningDeltas int
@@ -65,19 +67,21 @@ func (c *Capture) observe(typ events.EventType, stream *events.StreamRef, payloa
 	switch typ {
 	case events.EventMessageDelta:
 		delta, _ := payload["delta"].(string)
-		if delta == "" {
-			return
-		}
 		kind := events.StreamMessage
 		if stream != nil && stream.Kind != "" {
 			kind = stream.Kind
 		}
 		if kind == events.StreamReasoning {
+			if delta == "" {
+				return
+			}
 			c.reasoningDeltas++
 			c.appendReasoning(delta)
 			return
 		}
-		c.messageDeltas++
+		if delta != "" {
+			c.messageDeltas++
+		}
 		// A successful text-only final-answer retry is still a usable report.
 		// Only deterministic/legacy recovery placeholders are fallbacks. Treat an
 		// unknown kind conservatively as a fallback for compatibility with events
@@ -86,14 +90,19 @@ func (c *Capture) observe(typ events.EventType, stream *events.StreamRef, payloa
 			payloadString(payload, "recovery_kind", "fallback") != "final_answer_retry" {
 			c.recoveredFallback = true
 		}
-		c.message.WriteString(delta)
+		c.currentMessage.WriteString(delta)
+		if stream != nil && stream.Final {
+			c.finalMessage = strings.TrimSpace(c.currentMessage.String())
+		}
 	case events.EventMessage:
 		if text := payloadString(payload, "text", ""); text != "" {
 			c.messageDeltas++
-			c.message.WriteString(text)
+			c.currentMessage.WriteString(text)
+			c.finalMessage = strings.TrimSpace(c.currentMessage.String())
 		} else if message := payloadString(payload, "message", ""); message != "" {
 			c.messageDeltas++
-			c.message.WriteString(message)
+			c.currentMessage.WriteString(message)
+			c.finalMessage = strings.TrimSpace(c.currentMessage.String())
 		}
 	case events.EventReasoningDelta:
 		if delta := payloadString(payload, "delta", ""); delta != "" {
@@ -107,6 +116,9 @@ func (c *Capture) observe(typ events.EventType, stream *events.StreamRef, payloa
 		}
 	case events.EventToolStarted:
 		c.toolStarted++
+		// Text before a tool call is progress narration, not the Worker report.
+		c.currentMessage.Reset()
+		c.finalMessage = ""
 		name := payloadString(payload, "tool_name", payloadString(payload, "display_name", "tool"))
 		if len(c.startedTools) < 12 {
 			c.startedTools = append(c.startedTools, name)
@@ -115,6 +127,8 @@ func (c *Capture) observe(typ events.EventType, stream *events.StreamRef, payloa
 		c.toolFinished++
 	case events.EventToolFailed:
 		c.toolFailed++
+		c.currentMessage.Reset()
+		c.finalMessage = ""
 		name := payloadString(payload, "tool_name", "tool")
 		errText := payloadString(payload, "error", payloadString(payload, "message", "failed"))
 		if len(c.failedTools) < 8 {
@@ -129,8 +143,11 @@ func (c *Capture) observe(typ events.EventType, stream *events.StreamRef, payloa
 		if c.lastError == "" {
 			c.lastError = payloadString(payload, "error", "")
 		}
-		if text := payloadString(payload, "text", ""); text != "" && c.message.Len() == 0 {
-			c.message.WriteString(text)
+		c.stats = executionStatsFromPayload(payload, c.options.MaxTurns)
+		if text := payloadString(payload, "text", ""); text != "" && c.finalMessage == "" {
+			c.finalMessage = strings.TrimSpace(text)
+		} else if c.finalMessage == "" {
+			c.finalMessage = strings.TrimSpace(c.currentMessage.String())
 		}
 	}
 }
@@ -139,7 +156,14 @@ func (c *Capture) FinalText() string {
 	if c == nil {
 		return ""
 	}
-	return strings.TrimSpace(c.message.String())
+	return strings.TrimSpace(c.finalMessage)
+}
+
+func (c *Capture) Stats() ExecutionStats {
+	if c == nil {
+		return ExecutionStats{}
+	}
+	return c.stats
 }
 
 func (c *Capture) FinishStatus() string {
@@ -147,6 +171,37 @@ func (c *Capture) FinishStatus() string {
 		return ""
 	}
 	return c.finishStatus
+}
+
+func executionStatsFromPayload(payload map[string]any, fallbackMaxTurns int) ExecutionStats {
+	return ExecutionStats{
+		MaxTurns:           payloadInt(payload, "max_turns", fallbackMaxTurns),
+		LoopTurns:          payloadInt(payload, "loop_turns", payloadInt(payload, "tool_turns", 0)),
+		ProviderRequests:   payloadInt(payload, "provider_requests", 0),
+		ToolCallsRequested: payloadInt(payload, "tool_calls_requested", 0),
+		ToolCallsExecuted:  payloadInt(payload, "tool_calls_executed", 0),
+		ToolCallBudget:     payloadInt(payload, "tool_call_budget", 0),
+		MaxTurnsReached:    payloadBool(payload, "max_turns_reached"),
+		ToolBudgetReached:  payloadBool(payload, "tool_budget_reached"),
+	}
+}
+
+func payloadInt(payload map[string]any, key string, fallback int) int {
+	switch value := payload[key].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return fallback
+	}
+}
+
+func payloadBool(payload map[string]any, key string) bool {
+	value, _ := payload[key].(bool)
+	return value
 }
 
 func (c *Capture) RecoveredFallback() bool {

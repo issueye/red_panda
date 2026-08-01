@@ -85,6 +85,18 @@ type ExecuteRequest struct {
 
 type ExecuteResult struct {
 	Output string
+	Stats  ExecutionStats
+}
+
+type ExecutionStats struct {
+	MaxTurns           int  `json:"max_turns,omitempty"`
+	LoopTurns          int  `json:"loop_turns,omitempty"`
+	ProviderRequests   int  `json:"provider_requests,omitempty"`
+	ToolCallsRequested int  `json:"tool_calls_requested,omitempty"`
+	ToolCallsExecuted  int  `json:"tool_calls_executed,omitempty"`
+	ToolCallBudget     int  `json:"tool_call_budget,omitempty"`
+	MaxTurnsReached    bool `json:"max_turns_reached,omitempty"`
+	ToolBudgetReached  bool `json:"tool_budget_reached,omitempty"`
 }
 
 // Executor owns the reusable execution resource attached to one Worker slot.
@@ -124,6 +136,7 @@ type Assignment struct {
 	Status         AssignmentStatus
 	Result         string
 	Error          string
+	Stats          ExecutionStats
 	CreatedAt      time.Time
 	StartedAt      *time.Time
 	FinishedAt     *time.Time
@@ -160,6 +173,7 @@ type AssignmentResult struct {
 	Status       AssignmentStatus
 	Output       string
 	Error        string
+	Stats        ExecutionStats
 }
 
 type WorkerSnapshot struct {
@@ -184,6 +198,7 @@ type AssignmentSnapshot struct {
 	Status         AssignmentStatus `json:"status"`
 	Result         string           `json:"result,omitempty"`
 	Error          string           `json:"error,omitempty"`
+	Stats          ExecutionStats   `json:"execution_stats,omitempty"`
 	CreatedAt      time.Time        `json:"created_at"`
 	StartedAt      *time.Time       `json:"started_at,omitempty"`
 	FinishedAt     *time.Time       `json:"finished_at,omitempty"`

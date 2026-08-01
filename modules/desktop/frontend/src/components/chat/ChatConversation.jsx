@@ -196,6 +196,12 @@ export function ChatConversation({
           const isUser = message.role === 'user';
           const isReasoning = message.role === 'reasoning';
           if (isReasoning) {
+            const reasoningPreview = String(message.text || '')
+              .replace(/\s+/g, ' ')
+              .trim();
+            const compactPreview = reasoningPreview.length > 96
+              ? `${reasoningPreview.slice(0, 96)}…`
+              : reasoningPreview;
             return (
               <article
                 className="message-row role-reasoning"
@@ -208,9 +214,20 @@ export function ChatConversation({
                 </div>
                 <details className="message-thinking" data-testid="reasoning-block">
                   <summary>
+                    <span className="message-thinking-heading">
+                      <strong>思考</strong>
+                      {message.runSeq ? <span>{formatSeq(message.runSeq)}</span> : null}
+                    </span>
+                    {compactPreview ? (
+                      <span className="message-thinking-preview" title={compactPreview}>
+                        {compactPreview}
+                      </span>
+                    ) : null}
+                    <span className="message-thinking-action" aria-hidden="true">
+                      <span className="message-thinking-action-open">查看</span>
+                      <span className="message-thinking-action-close">收起</span>
+                    </span>
                     <ChevronRight aria-hidden="true" className="message-thinking-chevron" size={13} />
-                    <strong>思考过程</strong>
-                    {message.runSeq ? <span>{formatSeq(message.runSeq)}</span> : null}
                   </summary>
                   <Markdown className="message-thinking-content" workspaceRoot={workspaceRoot}>
                     {message.text}

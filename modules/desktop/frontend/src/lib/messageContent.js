@@ -41,6 +41,7 @@ const TOOL_DISPLAY_NAMES = {
   'web.search': 'Web search',
   'web.fetch': 'Web fetch',
   'worker.delegate': 'Delegate work',
+  'worker.result': 'Read Worker report',
   'worker.send': 'Send to Worker',
   'worker.receive': 'Receive from Worker',
   'memory.create': 'Create memory',

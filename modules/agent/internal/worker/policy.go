@@ -7,9 +7,9 @@ import (
 
 const (
 	// 为文件处理后的推理和最终分析报告预留的回合数。
-	SummaryTurns = 8
+	SummaryTurns = 16
 	// 仅在未提供 max_turns、file_count 或 path 时使用的回退值。
-	DefaultToolTurns = 16
+	DefaultToolTurns = 32
 )
 
 // DelegatedDenylist is applied to Worker tool allowlists (canonical names only).

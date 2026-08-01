@@ -10,7 +10,7 @@ const maxToolOutputBytes = 64 * 1024
 const maxGrepFileBytes = 2 * 1024 * 1024
 const maxListEntries = 500
 const maxPatchBytes = 256 * 1024
-const WorkerSummaryTurns = 8
+const WorkerSummaryTurns = 16
 
 const DefaultListDepth = 3
 const DefaultGrepMatches = 100

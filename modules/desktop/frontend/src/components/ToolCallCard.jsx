@@ -221,6 +221,8 @@ export function ToolCallCard({ item }) {
 
   return (
     <article
+      aria-busy={isRunning ? 'true' : undefined}
+      aria-label={`${title}：${statusLabel}`}
       className={classNames(
         'tool-card',
         `tool-${status}`,
@@ -266,6 +268,7 @@ export function ToolCallCard({ item }) {
                 isStale && 'is-stale',
               )}
               data-testid="tool-status-label"
+              role="status"
             >
               {statusLabel}
             </span>

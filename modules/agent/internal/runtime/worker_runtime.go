@@ -30,6 +30,8 @@ type workerExecutionSpec struct {
 	ProfileKey string
 	Task       string
 	MaxTurns   int
+	FileCount  int
+	ScopePath  string
 }
 
 type workerExecutionContextKey struct{}
@@ -133,10 +135,12 @@ func (e *lazyProcessExecutor) executeDelegated(ctx context.Context, request work
 	var capture *worker.Capture
 	for attempt := 0; attempt < 2; attempt++ {
 		capture = worker.NewCapture(worker.CaptureOptions{
-			MaxTurns: spec.MaxTurns,
-			Backend:  "worker_pool",
-			Name:     firstNonEmpty(spec.ProfileKey, string(request.WorkerID)),
-			Task:     spec.Task,
+			MaxTurns:  spec.MaxTurns,
+			Backend:   "worker_pool",
+			Name:      firstNonEmpty(spec.ProfileKey, string(request.WorkerID)),
+			Task:      spec.Task,
+			FileCount: spec.FileCount,
+			ScopePath: spec.ScopePath,
 		})
 		err = process.Start(ctx, childParams, func(event events.EnvelopeV2) {
 			capture.ObserveV2(event)
@@ -147,7 +151,7 @@ func (e *lazyProcessExecutor) executeDelegated(ctx context.Context, request work
 		}
 		if ctx.Err() != nil || processHealthy(process) || attempt > 0 {
 			e.discardProcess(process)
-			return worker.ExecuteResult{}, capture.FailureError(fmt.Sprintf("worker process error: %v", err))
+			return worker.ExecuteResult{Stats: capture.Stats()}, capture.FailureError(fmt.Sprintf("worker process error: %v", err))
 		}
 		e.discardProcess(process)
 		process, err = e.processFor(childParams, string(request.AssignmentID))
@@ -156,16 +160,16 @@ func (e *lazyProcessExecutor) executeDelegated(ctx context.Context, request work
 		}
 	}
 	if status := capture.FinishStatus(); status != "" && status != "completed" {
-		return worker.ExecuteResult{}, capture.FailureError("worker assignment finished with status " + status)
+		return worker.ExecuteResult{Stats: capture.Stats()}, capture.FailureError("worker assignment finished with status " + status)
 	}
 	if capture.RecoveredFallback() {
-		return worker.ExecuteResult{}, capture.FailureError("worker assignment returned a recovered fallback instead of a final report")
+		return worker.ExecuteResult{Stats: capture.Stats()}, capture.FailureError("worker assignment returned a recovered fallback instead of a final report")
 	}
 	output := capture.FinalText()
 	if !worker.ReportUsable(output) {
-		return worker.ExecuteResult{}, capture.FailureError("worker assignment returned an empty final report")
+		return worker.ExecuteResult{Stats: capture.Stats()}, capture.FailureError("worker assignment returned an empty final report")
 	}
-	return worker.ExecuteResult{Output: output}, nil
+	return worker.ExecuteResult{Output: output, Stats: capture.Stats()}, nil
 }
 
 func (r *Runtime) bridgeWorkerEvent(ctx context.Context, parent methods.ReplyParams, request worker.ExecuteRequest, profileKey string, child events.EnvelopeV2) error {

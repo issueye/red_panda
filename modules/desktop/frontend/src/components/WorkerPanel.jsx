@@ -29,11 +29,17 @@ function shortId(value, max = 14) {
 
 function assignmentDetail(assignment) {
   if (assignment.retrying) {
-    return `失败，第 ${Math.max(assignment.attempt || 1, 1) + 1} / 2 次尝试准备中`;
+    return '执行器正在恢复子进程';
   }
   if (assignment.error) return truncate(assignment.error, 96);
   if (assignment.summary) return truncate(assignment.summary, 96);
   return '';
+}
+
+function executionSummary(assignment) {
+  const stats = assignment.executionStats || {};
+  if (!stats.loopTurns && !stats.providerRequests && !stats.toolCallsExecuted) return '';
+  return `工具回合 ${stats.loopTurns || 0} · 模型请求 ${stats.providerRequests || 0} · 已执行工具 ${stats.toolCallsExecuted || 0}`;
 }
 
 function recentOutput(assignment) {
@@ -85,6 +91,7 @@ export function WorkerPanel({
                 const detail = assignmentDetail(assignment);
                 const expanded = expandedId === assignment.id;
                 const output = recentOutput(assignment);
+                const metrics = executionSummary(assignment);
                 return (
                   <article
                     className={classNames(
@@ -122,8 +129,9 @@ export function WorkerPanel({
                         ) : null}
                         <span className="worker-meta" title={assignment.workerId || ''}>
                           {shortId(assignment.workerId) || '等待 Worker'}
-                          {assignment.attempt > 1 ? ` · 尝试 ${assignment.attempt}/2` : ''}
+                          {assignment.attempt > 1 ? ` · 尝试 ${assignment.attempt}` : ''}
                         </span>
+                        {metrics ? <small className="worker-detail">{metrics}</small> : null}
                         {detail && !expanded ? (
                           <small
                             className={classNames('worker-detail', failed && 'is-error')}
@@ -173,6 +181,16 @@ export function WorkerPanel({
                               {assignment.workerId || '尚未分配'}
                             </dd>
                           </div>
+                          {metrics ? (
+                            <div>
+                              <dt>执行统计</dt>
+                              <dd>
+                                {metrics}
+                                {assignment.executionStats?.maxTurnsReached ? ' · 已达回合上限' : ''}
+                                {assignment.executionStats?.toolBudgetReached ? ' · 已达工具上限' : ''}
+                              </dd>
+                            </div>
+                          ) : null}
                         </dl>
                         {output ? (
                           <div className={classNames('worker-output-preview', failed && 'is-error')}>

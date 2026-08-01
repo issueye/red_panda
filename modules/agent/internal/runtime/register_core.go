@@ -30,6 +30,7 @@ func initCorePlugins(rt *Runtime, reg *registry.Registry, bus *hooks.ExtensionBu
 		SkillRun:         runtimeOrchestrationExecutor(rt.executeSkillRun),
 		WorkerDelegate:   runtimeOrchestrationExecutor(rt.executeWorkerDelegate),
 		WorkerList:       runtimeOrchestrationExecutor(rt.executeWorkerList),
+		WorkerResult:     runtimeOrchestrationExecutor(rt.executeWorkerResult),
 		WorkerCancel:     runtimeOrchestrationExecutor(rt.executeWorkerCancel),
 		WorkerPoolStatus: runtimeOrchestrationExecutor(rt.executeWorkerPoolStatus),
 		WorkerSend:       runtimeOrchestrationExecutor(rt.executeWorkerSend),

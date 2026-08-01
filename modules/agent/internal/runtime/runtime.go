@@ -28,21 +28,26 @@ import (
 const (
 	defaultProviderToolTurns = 12
 	maxProviderToolTurnsCap  = 48
+	maxWorkerToolTurnsCap    = 128
 	maxJSONRPCLineBytes      = 4 * 1024 * 1024
 )
 
 // effectiveProviderToolTurns 返回单次回复中提供方与工具循环的预算。
 func effectiveProviderToolTurns(options methods.ReplyOptions) int {
+	maxTurns := maxProviderToolTurnsCap
+	if options.WorkerContext != nil {
+		maxTurns = maxWorkerToolTurnsCap
+	}
 	if options.MaxToolTurns > 0 {
-		if options.MaxToolTurns > maxProviderToolTurnsCap {
-			return maxProviderToolTurnsCap
+		if options.MaxToolTurns > maxTurns {
+			return maxTurns
 		}
 		return options.MaxToolTurns
 	}
 	if env := os.Getenv("RED_PANDA_MAX_TOOL_TURNS"); env != "" {
 		if parsed, err := strconv.Atoi(env); err == nil && parsed > 0 {
-			if parsed > maxProviderToolTurnsCap {
-				return maxProviderToolTurnsCap
+			if parsed > maxTurns {
+				return maxTurns
 			}
 			return parsed
 		}

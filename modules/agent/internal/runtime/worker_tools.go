@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	goruntime "runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	agenttools "redpanda/agent/internal/tools"
 	"redpanda/agent/internal/worker"
@@ -31,7 +33,7 @@ var delegatedWorkerDenylist = []string{
 const (
 	internalWorkerSendMethod    = "internal.worker.send"
 	internalWorkerReceiveMethod = "internal.worker.receive"
-	workerDelegateMaxAttempts   = 2
+	workerDelegateMaxAttempts   = 1
 )
 
 func (r *Runtime) executeWorkerDelegate(ctx context.Context, runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
@@ -47,6 +49,11 @@ func (r *Runtime) executeWorkerDelegate(ctx context.Context, runCtx agenttools.T
 	}
 	profileKey := strings.TrimSpace(agenttools.StringArg(call.Arguments, "profile_key"))
 	maxTurns := agenttools.IntArg(call.Arguments, "max_turns", 0)
+	fileCount := agenttools.IntArg(call.Arguments, "file_count", 0)
+	scopePath := strings.TrimSpace(agenttools.StringArg(call.Arguments, "path"))
+	if maxTurns <= 0 && fileCount > 0 {
+		maxTurns = worker.RecommendedTurns(fileCount)
+	}
 	child := delegatedWorkerReply(*runCtx.Reply, task, profileKey, maxTurns)
 	assignment, result, err := r.executeDelegatedAssignment(ctx, runCtx, workerExecutionSpec{
 		Kind:       workerExecutionDelegated,
@@ -55,15 +62,20 @@ func (r *Runtime) executeWorkerDelegate(ctx context.Context, runCtx agenttools.T
 		ProfileKey: profileKey,
 		Task:       task,
 		MaxTurns:   child.Options.MaxToolTurns,
+		FileCount:  fileCount,
+		ScopePath:  scopePath,
 	})
 	if err != nil {
 		return "", err
 	}
 	return marshalToolJSON(map[string]any{
-		"assignment_id": assignment.AssignmentID,
-		"worker_id":     assignment.WorkerID,
-		"status":        result.Status,
-		"output":        strings.TrimSpace(agenttools.TruncateToolOutput(result.Output)),
+		"assignment_id":   assignment.AssignmentID,
+		"worker_id":       assignment.WorkerID,
+		"status":          result.Status,
+		"output":          strings.TrimSpace(result.Output),
+		"report_bytes":    len(strings.TrimSpace(result.Output)),
+		"report_complete": true,
+		"execution_stats": result.Stats,
 	})
 }
 
@@ -108,6 +120,7 @@ func (r *Runtime) executeDelegatedAssignment(ctx context.Context, runCtx agentto
 				"attempt": assignment.Attempt, "retry_of": string(assignment.RetryOf),
 				"retrying": retrying, "retry_in_ms": retryDelay(attempt).Milliseconds(),
 				"result": strings.TrimSpace(result.Output), "error": errText,
+				"execution_stats": result.Stats,
 				"worker": map[string]any{"id": string(assignment.WorkerID), "state": workerState,
 					"profile_key": spec.ProfileKey, "current_assignment_id": currentID},
 			})
@@ -211,7 +224,13 @@ func delegatedWorkerReply(parent methods.ReplyParams, task, profileKey string, m
 		maxTurns = worker.DefaultToolTurns
 	}
 	child.Options.MaxToolTurns = maxTurns
-	role := "You are a delegated Worker. Complete only the assigned task and return one final report. You cannot delegate or start legacy Workers."
+	role := `You are a delegated Worker. Complete only the assigned task and return one final report. You cannot delegate or start legacy Workers.
+Do not emit progress narration such as what you will inspect next; use tools directly and reserve assistant text for the final report.
+Prefer workspace.read_files and workspace.grep over many small shell commands. Request no more than 8 tool calls in one model response.`
+	role += fmt.Sprintf("\nYou have up to %d model/tool-loop turns. Keep the final report focused and complete, normally within 24 KiB, with concrete file paths and findings. Finish tool investigation early enough to reserve the final response.", maxTurns)
+	if goruntime.GOOS == "windows" {
+		role += "\nThe host shell is Windows PowerShell. Use PowerShell commands and syntax; do not use Unix-only commands such as nl, sed, head, tail, grep, or cat."
+	}
 	if hasProfile && strings.TrimSpace(profile.SystemPrompt) != "" {
 		role = strings.TrimSpace(profile.SystemPrompt) + "\n\n" + role
 	}
@@ -260,6 +279,69 @@ func (r *Runtime) executeWorkerList(_ context.Context, runCtx agenttools.ToolRun
 		assignments = append(assignments, item)
 	}
 	return marshalToolJSON(map[string]any{"workers": workers, "assignments": assignments})
+}
+
+const (
+	defaultWorkerReportChunkBytes = 24 * 1024
+	maxWorkerReportChunkBytes     = 24 * 1024
+)
+
+func (r *Runtime) executeWorkerResult(_ context.Context, runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {
+	if r.workerPool == nil {
+		return "", fmt.Errorf("WorkerPool is not available")
+	}
+	id := worker.AssignmentID(strings.TrimSpace(agenttools.StringArg(call.Arguments, "assignment_id")))
+	if id == "" {
+		return "", fmt.Errorf("assignment_id is required")
+	}
+	var assignment *worker.AssignmentSnapshot
+	for _, item := range r.workerPool.Snapshot().Assignments {
+		if item.ID == id && item.RunID == runCtx.RunID {
+			copy := item
+			assignment = &copy
+			break
+		}
+	}
+	if assignment == nil {
+		return "", worker.ErrAssignmentNotFound
+	}
+	if !assignment.Status.Terminal() {
+		return "", fmt.Errorf("assignment %s is not finished", id)
+	}
+	report := strings.TrimSpace(assignment.Result)
+	offset := agenttools.IntArg(call.Arguments, "offset", 0)
+	if offset < 0 || offset > len(report) {
+		return "", fmt.Errorf("offset must be between 0 and %d", len(report))
+	}
+	for offset < len(report) && !utf8.RuneStart(report[offset]) {
+		offset++
+	}
+	maxBytes := agenttools.IntArg(call.Arguments, "max_bytes", defaultWorkerReportChunkBytes)
+	if maxBytes < 1 {
+		maxBytes = defaultWorkerReportChunkBytes
+	}
+	if maxBytes > maxWorkerReportChunkBytes {
+		maxBytes = maxWorkerReportChunkBytes
+	}
+	end := offset + maxBytes
+	if end > len(report) {
+		end = len(report)
+	}
+	for end > offset && end < len(report) && !utf8.RuneStart(report[end]) {
+		end--
+	}
+	return marshalToolJSON(map[string]any{
+		"assignment_id":   assignment.ID,
+		"worker_id":       assignment.WorkerID,
+		"status":          assignment.Status,
+		"offset":          offset,
+		"next_offset":     end,
+		"report_bytes":    len(report),
+		"complete":        end >= len(report),
+		"output":          report[offset:end],
+		"error":           assignment.Error,
+		"execution_stats": assignment.Stats,
+	})
 }
 
 func (r *Runtime) executeWorkerCancel(ctx context.Context, runCtx agenttools.ToolRunContext, call tools.Call) (string, error) {

@@ -4,8 +4,10 @@ import {
   ExternalLink,
   FolderOpen,
   FolderPlus,
+  LoaderCircle,
   MessageSquare,
   MessageSquarePlus,
+  ShieldAlert,
   Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -253,10 +255,17 @@ export function Sidebar({
                                       <strong>{session.title}</strong>
                                       {runStatus !== 'idle' ? (
                                         <em
+                                          aria-label={runStatus === 'waiting_permission' ? '等待授权' : '会话运行中'}
                                           className={classNames('session-run-dot', `is-${runStatus}`)}
                                           data-testid="session-run-status"
+                                          role="status"
                                         >
-                                          {runStatus === 'waiting_permission' ? '授权' : '运行'}
+                                          {runStatus === 'waiting_permission' ? (
+                                            <ShieldAlert aria-hidden="true" size={11} />
+                                          ) : (
+                                            <LoaderCircle aria-hidden="true" className="session-run-spinner" size={11} />
+                                          )}
+                                          <span>{runStatus === 'waiting_permission' ? '授权' : '运行中'}</span>
                                         </em>
                                       ) : null}
                                     </button>

@@ -281,14 +281,21 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 	runEnd["status"] = status
 	runEnd["loop_end_reason"] = string(seg.Reason)
 	runEnd["tool_turns"] = seg.ToolTurns
+	for key, value := range providerStatsPayload(seg.Stats) {
+		runEnd[key] = value
+	}
 	if status != "completed" {
 		if status == "cancelled" {
 			r.emitCancelled(params)
 		} else {
-			_ = r.emitEvent(ctx, params, events.EventFinish, nil, map[string]any{
+			finishPayload := map[string]any{
 				"status":          status,
 				"loop_end_reason": string(seg.Reason),
-			})
+			}
+			for key, value := range providerStatsPayload(seg.Stats) {
+				finishPayload[key] = value
+			}
+			_ = r.emitEvent(ctx, params, events.EventFinish, nil, finishPayload)
 		}
 		return
 	}
@@ -304,10 +311,29 @@ func (r *Runtime) emitRun(ctx context.Context, params methods.ReplyParams) {
 		"loop_end_reason": string(seg.Reason),
 		"tool_turns":      seg.ToolTurns,
 	}
+	for key, value := range providerStatsPayload(seg.Stats) {
+		finishPayload[key] = value
+	}
 	if seg.Reason == loopEndMaxTurns {
 		finishPayload["max_turns_reached"] = true
 	}
+	if seg.Reason == loopEndToolBudget {
+		finishPayload["tool_budget_reached"] = true
+	}
 	_ = r.emitEvent(ctx, params, events.EventFinish, nil, finishPayload)
+}
+
+func providerStatsPayload(stats providerExecutionStats) map[string]any {
+	return map[string]any{
+		"max_turns":            stats.MaxTurns,
+		"loop_turns":           stats.LoopTurns,
+		"provider_requests":    stats.ProviderRequests,
+		"tool_calls_requested": stats.ToolCallsRequested,
+		"tool_calls_executed":  stats.ToolCallsExecuted,
+		"tool_call_budget":     stats.ToolCallBudget,
+		"max_turns_reached":    stats.MaxTurnsReached,
+		"tool_budget_reached":  stats.ToolBudgetReached,
+	}
 }
 
 func (r *Runtime) emitCancelled(params methods.ReplyParams) {

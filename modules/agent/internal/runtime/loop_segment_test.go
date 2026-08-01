@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -19,6 +20,9 @@ func TestFinishStatusFromLoopEnd(t *testing.T) {
 	if got := finishStatusFromLoopEnd(loopEndMaxTurns); got != "completed" {
 		t.Fatalf("max_turns -> %q want completed (recoverable)", got)
 	}
+	if got := finishStatusFromLoopEnd(loopEndToolBudget); got != "completed" {
+		t.Fatalf("tool_budget_reached -> %q want completed synthesis", got)
+	}
 	if got := finishStatusFromLoopEnd(loopEndCancelled); got != "cancelled" {
 		t.Fatalf("cancelled -> %q", got)
 	}
@@ -27,6 +31,20 @@ func TestFinishStatusFromLoopEnd(t *testing.T) {
 	}
 	if got := finishStatusFromLoopEnd(loopEndBudget); got != "failed" {
 		t.Fatalf("budget_exhausted -> %q", got)
+	}
+}
+
+func TestEffectiveProviderToolTurnsUsesLargerWorkerCap(t *testing.T) {
+	root := effectiveProviderToolTurns(methods.ReplyOptions{MaxToolTurns: 999})
+	if root != maxProviderToolTurnsCap {
+		t.Fatalf("root cap = %d, want %d", root, maxProviderToolTurnsCap)
+	}
+	delegated := effectiveProviderToolTurns(methods.ReplyOptions{
+		MaxToolTurns:  999,
+		WorkerContext: &methods.WorkerExecutionContext{AssignmentID: "assignment-1"},
+	})
+	if delegated != maxWorkerToolTurnsCap {
+		t.Fatalf("Worker cap = %d, want %d", delegated, maxWorkerToolTurnsCap)
 	}
 }
 
@@ -103,6 +121,54 @@ func TestRunProviderLoopSegmentReportsMaxTurnsReason(t *testing.T) {
 	}
 	if seg.ToolTurns < 1 {
 		t.Fatalf("tool turns = %d", seg.ToolTurns)
+	}
+	if seg.Stats.ProviderRequests != 3 || seg.Stats.LoopTurns != 2 {
+		t.Fatalf("execution stats = %+v, want 2 loop turns and 3 provider requests", seg.Stats)
+	}
+}
+
+type oversizedToolBatchProvider struct{ calls int }
+
+func (*oversizedToolBatchProvider) Name() string { return "oversized-tool-batch-test" }
+
+func (p *oversizedToolBatchProvider) Complete(_ context.Context, req provider.ProviderRequest, emit func(provider.ProviderChunk) error) error {
+	p.calls++
+	if len(req.Tools) == 0 {
+		return emit(provider.ProviderChunk{Delta: "budget-limited summary", Final: true})
+	}
+	calls := make([]tools.Call, 0, 8)
+	for i := 0; i < 8; i++ {
+		calls = append(calls, tools.Call{ID: fmt.Sprintf("call_%d", i), Name: "workspace.list", Risk: tools.RiskLow, Arguments: map[string]any{"path": ".", "max_depth": 1}})
+	}
+	return emit(provider.ProviderChunk{ToolCalls: calls})
+}
+
+func TestRunProviderLoopSegmentBoundsWorkerToolCalls(t *testing.T) {
+	model := &oversizedToolBatchProvider{}
+	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
+	rt.provider = model
+	params := methods.ReplyParams{
+		RunID:   "run_tool_budget",
+		Session: methods.ReplySession{ID: "session_tool_budget", WorkingDir: t.TempDir()},
+		Input:   methods.ReplyInput{Text: "request too many tools"},
+		Options: methods.ReplyOptions{MaxToolTurns: 1, WorkerContext: &methods.WorkerExecutionContext{WorkerID: "worker-02", AssignmentID: "assignment-02", RunID: "run_tool_budget"}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if !rt.registerRun(params.RunID, cancel) {
+		t.Fatal("register run")
+	}
+	defer rt.unregisterRun(params.RunID)
+	seq := uint64(1)
+	seg := rt.runProviderLoopSegment(ctx, params, params.Input.Text, nil, "msg", "stream", &seq)
+	if seg.Reason != loopEndToolBudget {
+		t.Fatalf("reason = %q, want tool_budget_reached", seg.Reason)
+	}
+	if seg.Stats.ToolCallsRequested != 8 || seg.Stats.ToolCallsExecuted != 4 || seg.Stats.ToolCallBudget != 4 {
+		t.Fatalf("tool stats = %+v", seg.Stats)
+	}
+	if len(seg.History) != 8 || model.calls != 2 {
+		t.Fatalf("history=%d provider requests=%d", len(seg.History), model.calls)
 	}
 }
 

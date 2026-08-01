@@ -11,9 +11,13 @@ import (
 // Gateway projections, and provider model context.
 const ResultSchemaV1 = "red_panda.tool_result.v1"
 
-// maxResultForModel limits each tool result returned to the next LLM turn.
-// Full outputs remain available on tool events and UI cards.
-const maxResultForModel = 16 * 1024
+const (
+	// defaultResultForModel keeps ordinary tool results compact.
+	defaultResultForModel = 16 * 1024
+	// maxResultForModel is reserved for report-style tools whose content is the
+	// actual delegated result rather than raw diagnostic output.
+	maxResultForModel = 128 * 1024
+)
 
 type modelFacingEnvelope struct {
 	Schema string          `json:"schema"`
@@ -37,7 +41,7 @@ type modelFacingMeta struct {
 // ModelFacingContent returns the standardized, size-limited tool result view for
 // the next provider turn. Full Result.Output remains for UI and event streams.
 func ModelFacingContent(result Result) string {
-	return ModelFacingContentWithLimit(result, maxResultForModel)
+	return ModelFacingContentWithLimit(result, defaultResultForModel)
 }
 
 // ModelFacingContentWithLimit returns the same stable envelope while applying

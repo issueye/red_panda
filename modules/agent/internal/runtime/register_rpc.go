@@ -155,7 +155,7 @@ func initRPCDispatcher(r *Runtime) *registry.Dispatcher {
 			result.Workers = append(result.Workers, methods.WorkerRef{
 				ID: string(item.ID), State: methods.WorkerState(item.State),
 				CurrentAssignmentID: string(item.CurrentAssignmentID),
-				ProfileKey: item.ProfileKey, MailboxDepth: item.MailboxDepth,
+				ProfileKey:          item.ProfileKey, MailboxDepth: item.MailboxDepth,
 				MailboxCapacity: item.MailboxCapacity, Healthy: item.Healthy,
 			})
 		}
@@ -171,7 +171,8 @@ func initRPCDispatcher(r *Runtime) *registry.Dispatcher {
 				OriginWorkerID: string(item.OriginWorkerID), ProfileKey: item.ProfileKey,
 				Task: item.Task, Status: methods.AssignmentStatus(item.Status),
 				Result: item.Result, Error: item.Error,
-				CreatedAt: item.CreatedAt, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt,
+				ExecutionStats: methodWorkerExecutionStats(item.Stats),
+				CreatedAt:      item.CreatedAt, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt,
 			})
 		}
 		if result.Workers == nil {

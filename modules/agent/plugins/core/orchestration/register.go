@@ -32,13 +32,14 @@ type Dependencies struct {
 	SkillRun         HostExecutor
 	WorkerDelegate   HostExecutor
 	WorkerList       HostExecutor
+	WorkerResult     HostExecutor
 	WorkerCancel     HostExecutor
 	WorkerPoolStatus HostExecutor
 	WorkerSend       HostExecutor
 	WorkerReceive    HostExecutor
 }
 
-// Register registers the 11 skill.* and worker.* tools into reg.
+// Register registers the skill.* and worker.* tools into reg.
 // Order of registration is preserved; returned names reflect that order.
 func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies) []string {
 	specs := []toolSpec{
@@ -145,7 +146,9 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 					"properties": map[string]any{
 						"task":        map[string]any{"type": "string", "description": "Focused task with scope and expected output."},
 						"profile_key": map[string]any{"type": "string", "description": "Optional Worker Profile key."},
-						"max_turns":   map[string]any{"type": "integer", "minimum": 1, "description": "Optional tool-turn budget."},
+						"max_turns":   map[string]any{"type": "integer", "minimum": 1, "description": "Optional model/tool-loop budget. Each loop is one provider request and may request multiple tools; one extra text-only final synthesis request can occur. Executed tools are separately bounded."},
+						"file_count":  map[string]any{"type": "integer", "minimum": 1, "description": "Files in this scope. When max_turns is omitted, the runtime derives a generous budget from this count."},
+						"path":        map[string]any{"type": "string", "description": "Assigned workspace scope for diagnostics."},
 					},
 					"required": []string{"task"},
 				},
@@ -171,6 +174,26 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			timeoutClass: registry.LocalToolTimeout,
 			opsOnly:      false,
 			hostExecutor: deps.WorkerList,
+		},
+		{
+			def: ptools.Definition{
+				Name:        "worker.result",
+				DisplayName: "Read Worker report",
+				Description: "Read a completed Worker's report by Assignment ID. Use offset/next_offset to continue an oversized report; do not create another Assignment merely because report transport was truncated.",
+				Risk:        ptools.RiskLow,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"assignment_id": map[string]any{"type": "string", "description": "Completed Assignment ID returned by worker.delegate."},
+						"offset":        map[string]any{"type": "integer", "minimum": 0, "description": "Byte offset, normally the previous next_offset."},
+						"max_bytes":     map[string]any{"type": "integer", "minimum": 1, "maximum": 24576, "description": "Maximum report bytes for this chunk."},
+					},
+					"required": []string{"assignment_id"},
+				},
+			},
+			timeoutClass: registry.LocalToolTimeout,
+			opsOnly:      false,
+			hostExecutor: deps.WorkerResult,
 		},
 		{
 			def: ptools.Definition{

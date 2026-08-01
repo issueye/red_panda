@@ -217,6 +217,7 @@ func (p *Pool) execute(ctx context.Context, worker *Worker, assignment *Assignme
 	}
 	p.mu.Lock()
 	assignment.cancel = nil
+	assignment.Stats = result.Stats
 	if !assignment.Status.Terminal() {
 		finished := time.Now().UTC()
 		assignment.FinishedAt = &finished
@@ -617,6 +618,7 @@ func snapshotAssignment(assignment *Assignment) AssignmentSnapshot {
 		Status:         assignment.Status,
 		Result:         assignment.Result,
 		Error:          assignment.Error,
+		Stats:          assignment.Stats,
 		CreatedAt:      assignment.CreatedAt,
 		StartedAt:      assignment.StartedAt,
 		FinishedAt:     assignment.FinishedAt,
@@ -632,6 +634,7 @@ func assignmentResult(assignment *Assignment) AssignmentResult {
 		Status:       assignment.Status,
 		Output:       assignment.Result,
 		Error:        assignment.Error,
+		Stats:        assignment.Stats,
 	}
 }
 

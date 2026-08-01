@@ -7,7 +7,11 @@ import (
 	"redpanda/protocol/tools"
 )
 
-const maxToolRoundModelBytes = 8 * 1024
+const (
+	maxToolRoundModelBytes     = 8 * 1024
+	maxWorkerReportRoundBytes  = 256 * 1024
+	maxWorkerReportResultBytes = 96 * 1024
+)
 
 func openAICompatibleMessages(req ProviderRequest) []map[string]any {
 	promptMessages := req.Prompt.FlattenMessages()
@@ -76,15 +80,60 @@ func toolRoundModelContents(round []ToolExchange) []string {
 	if len(round) == 0 {
 		return nil
 	}
-	perResult := maxToolRoundModelBytes / len(round)
-	if perResult < 512 {
-		perResult = 512
+	ordinaryCount := 0
+	workerReportCount := 0
+	for _, exchange := range round {
+		if isWorkerReportTool(exchange.Call.Name) {
+			workerReportCount++
+		} else {
+			ordinaryCount++
+		}
 	}
 	contents := make([]string, len(round))
 	for index, exchange := range round {
-		contents[index] = tools.ModelFacingContentWithLimit(exchange.Result, perResult)
+		limit := sharedToolResultBudget(maxToolRoundModelBytes, ordinaryCount, 512)
+		result := exchange.Result
+		if isWorkerReportTool(exchange.Call.Name) {
+			limit = sharedToolResultBudget(maxWorkerReportRoundBytes, workerReportCount, 4096)
+			if limit > maxWorkerReportResultBytes {
+				limit = maxWorkerReportResultBytes
+			}
+			result = workerReportModelResult(result)
+		}
+		contents[index] = tools.ModelFacingContentWithLimit(result, limit)
 	}
 	return contents
+}
+
+func sharedToolResultBudget(total int, count int, minimum int) int {
+	if count <= 0 {
+		return minimum
+	}
+	budget := total / count
+	if budget < minimum {
+		return minimum
+	}
+	return budget
+}
+
+func isWorkerReportTool(name string) bool {
+	return name == "worker.delegate" || name == "worker.result"
+}
+
+func workerReportModelResult(result tools.Result) tools.Result {
+	var payload map[string]any
+	if json.Unmarshal([]byte(result.Output), &payload) != nil {
+		return result
+	}
+	report, _ := payload["output"].(string)
+	if strings.TrimSpace(report) == "" {
+		return result
+	}
+	delete(payload, "output")
+	metadata, _ := json.Marshal(payload)
+	next := result
+	next.Output = "Worker report metadata: " + string(metadata) + "\n\n" + report
+	return next
 }
 
 func openAICompatibleTools(definitions []tools.Definition) []map[string]any {

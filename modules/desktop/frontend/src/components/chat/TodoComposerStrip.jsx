@@ -1,4 +1,14 @@
-import { ChevronDown, ChevronRight, GripVertical, RefreshCw } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  GripVertical,
+  ListChecks,
+  LoaderCircle,
+  RefreshCw,
+  X,
+} from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { classNames } from '../../lib/format.js';
 import { todoStatusLabel } from '../../lib/todos.js';
@@ -6,6 +16,15 @@ import { IconButton } from '../ui/button.jsx';
 
 const TODO_POSITION_STORAGE_KEY = 'red_panda_todo_strip_position_v1';
 const TODO_DRAG_MARGIN = 8;
+
+function TodoStatusIcon({ status }) {
+  if (status === 'completed') return <Check aria-hidden size={13} strokeWidth={2.5} />;
+  if (status === 'in_progress') {
+    return <LoaderCircle aria-hidden className="todo-composer-item-spinner" size={13} />;
+  }
+  if (status === 'cancelled') return <X aria-hidden size={13} />;
+  return <Circle aria-hidden size={12} />;
+}
 
 function readStoredTodoPosition() {
   if (typeof window === 'undefined') return { x: 0, y: 0 };
@@ -150,6 +169,7 @@ export function TodoComposerStrip({
   const inProgress = items.find((item) => item.status === 'in_progress');
   const pending = items.filter((item) => item.status === 'pending').length;
   const completed = items.filter((item) => item.status === 'completed').length;
+  const progress = items.length > 0 ? Math.round((completed / items.length) * 100) : 0;
   const summaryBits = [];
   if (inProgress) summaryBits.push(`进行中 1`);
   if (pending > 0) summaryBits.push(`待办 ${pending}`);
@@ -201,12 +221,25 @@ export function TodoComposerStrip({
             title="由代理通过 todo 工具维护"
             type="button"
           >
+            <span className="todo-composer-icon" aria-hidden="true">
+              <ListChecks size={14} />
+            </span>
+            <span className="todo-composer-copy">
+              <span className="todo-composer-heading">
+                <span className="todo-composer-title">任务</span>
+                {!expanded && inProgress?.content ? (
+                  <span className="todo-composer-preview">{inProgress.activeForm || inProgress.content}</span>
+                ) : null}
+              </span>
+              <span className="todo-composer-summary">{summaryBits.join(' · ')}</span>
+            </span>
+            <span
+              aria-hidden="true"
+              className="todo-composer-progress"
+            >
+              <i style={{ width: `${progress}%` }} />
+            </span>
             <Chevron aria-hidden className="todo-composer-chevron" size={14} />
-            <span className="todo-composer-title">任务</span>
-            <span className="todo-composer-summary">{summaryBits.join(' · ')}</span>
-            {!expanded && inProgress?.content ? (
-              <span className="todo-composer-preview">{inProgress.activeForm || inProgress.content}</span>
-            ) : null}
           </button>
           {expanded && onRefresh ? (
             <IconButton
@@ -229,13 +262,16 @@ export function TodoComposerStrip({
                   className={classNames('todo-composer-item', `is-${item.status}`)}
                   key={item.id || item.clientKey || item.content}
                 >
-                  <span className="todo-composer-badge">{todoStatusLabel(item.status)}</span>
+                  <span className="todo-composer-item-icon">
+                    <TodoStatusIcon status={item.status} />
+                  </span>
                   <div className="todo-composer-item-body">
                     <span className="todo-composer-item-content">{item.content}</span>
                     {item.activeForm && item.status === 'in_progress' ? (
                       <span className="todo-composer-item-active">{item.activeForm}</span>
                     ) : null}
                   </div>
+                  <span className="todo-composer-badge">{todoStatusLabel(item.status)}</span>
                 </li>
               ))
             )}
