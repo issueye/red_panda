@@ -206,7 +206,9 @@ export function ToolCallCard({ item }) {
     ? '可能卡住'
     : isRunning
       ? '进行中'
-      : displayStatus(status);
+      : status === 'completed'
+        ? '已运行'
+        : displayStatus(status);
 
   function toggleCard() {
     if (!hasBody) return;

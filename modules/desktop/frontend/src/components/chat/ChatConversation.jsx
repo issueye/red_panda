@@ -1,4 +1,4 @@
-import { ArrowDown, Bot, BrainCircuit, ChevronRight, UserRound } from 'lucide-react';
+import { ArrowDown, BrainCircuit, ChevronRight, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildConversationTimeline,
@@ -236,11 +236,11 @@ export function ChatConversation({
               </article>
             );
           }
-          const avatar = (
+          const avatar = isUser ? (
             <div className="message-avatar" aria-hidden="true">
-              {isUser ? <UserRound size={14} /> : <Bot size={14} />}
+              <UserRound size={14} />
             </div>
-          );
+          ) : null;
           const bubble = (
             <div className="message-bubble">
               <div className="message-meta">
@@ -263,7 +263,11 @@ export function ChatConversation({
           );
           return (
             <article
-              className={classNames('message-row', `role-${message.role}`)}
+              className={classNames(
+                'message-row',
+                `role-${message.role}`,
+                !isUser && 'message-row-no-avatar',
+              )}
               data-testid="message-row"
               data-timeline-type="message"
               key={item.key}
@@ -274,10 +278,7 @@ export function ChatConversation({
                   {avatar}
                 </>
               ) : (
-                <>
-                  {avatar}
-                  {bubble}
-                </>
+                bubble
               )}
             </article>
           );

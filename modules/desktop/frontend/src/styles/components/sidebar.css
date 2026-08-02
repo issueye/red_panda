@@ -391,7 +391,7 @@
 .conversation {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 2px;
   min-height: 0;
   overflow: auto;
   padding: 20px 28px 8px;

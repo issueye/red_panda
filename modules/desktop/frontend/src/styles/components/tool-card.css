@@ -139,7 +139,7 @@
   grid-template-columns: 16px minmax(0, 1fr);
   line-height: 1.4;
   min-height: 24px;
-  padding: 1px 3px;
+  padding: 0px;
   text-align: left;
   width: 100%;
 }
@@ -410,5 +410,3 @@
 .tool-spin {
   animation: tool-spin 900ms linear infinite;
 }
-
-@keyframes tool-spin {

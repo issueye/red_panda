@@ -148,7 +148,7 @@ test('All tool calls stay compact until the user expands them', async ({ page })
   ))).toBe(true);
 });
 
-test('Chat messages use a flat layout while keeping role avatars', async ({ page }) => {
+test('Chat messages keep the user avatar and omit the assistant avatar', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 
   const userBubble = page.locator('.message-row.role-user .message-bubble');
@@ -157,7 +157,7 @@ test('Chat messages use a flat layout while keeping role avatars', async ({ page
   const assistantAvatar = page.locator('.message-row.role-assistant .message-avatar');
   const reasoning = page.getByTestId('reasoning-block');
   await expect(userAvatar).toBeVisible();
-  await expect(assistantAvatar).toBeVisible();
+  await expect(assistantAvatar).toHaveCount(0);
   await expect(reasoning.locator('.message-thinking-action-open')).toBeVisible();
   await expect(reasoning.locator('.message-thinking-action-close')).toBeHidden();
   await reasoning.locator('summary').click();
@@ -174,7 +174,10 @@ test('Chat messages use a flat layout while keeping role avatars', async ({ page
       borderStyle: getComputedStyle(element).borderStyle,
       boxShadow: getComputedStyle(element).boxShadow,
     })),
-    reasoning.evaluate((element) => getComputedStyle(element).backgroundColor),
+    reasoning.evaluate((element) => ({
+      background: getComputedStyle(element).backgroundColor,
+      borderStyle: getComputedStyle(element).borderStyle,
+    })),
   ]);
 
   expect(appearance[0]).toEqual({
@@ -183,7 +186,21 @@ test('Chat messages use a flat layout while keeping role avatars', async ({ page
     boxShadow: 'none',
   });
   expect(appearance[1]).toEqual(appearance[0]);
-  expect(appearance[2]).not.toBe('rgba(0, 0, 0, 0)');
+  expect(appearance[2]).toEqual({
+    background: 'rgba(0, 0, 0, 0)',
+    borderStyle: 'none',
+  });
+
+  const toolGroup = page.getByTestId('tool-execution-group');
+  await toolGroup.getByTestId('tool-execution-group-toggle').click();
+  const [reasoningRail, toolRail] = await Promise.all([
+    reasoning.locator('.message-thinking-content').boundingBox(),
+    toolGroup.getByTestId('tool-execution-group-body').boundingBox(),
+  ]);
+  expect(Math.abs(reasoningRail.x - toolRail.x)).toBeLessThanOrEqual(1);
+  expect(await reasoning.locator('.message-thinking-content').evaluate((element) => (
+    getComputedStyle(element).paddingLeft
+  ))).toBe('18px');
 });
 
 test('Running sessions animate while attention and idle sessions stay stable', async ({ page }) => {
@@ -256,8 +273,10 @@ test('Consecutive tools render as a collapsed execution group', async ({ page })
     boxShadow: 'none',
   });
   await expect(group.getByTestId('tool-execution-group-toggle')).toHaveAttribute('aria-expanded', 'false');
-  await expect(group).toContainText('工具调用');
+  await expect(group).toContainText('已运行');
   await expect(group).toContainText('Read file · Workspace stats');
+  expect((await group.getByTestId('tool-execution-group-toggle').boundingBox()).height)
+    .toBeLessThanOrEqual(32);
   await expect(group.getByTestId('tool-execution-group-body')).toHaveCount(0);
   await expect(group.getByTestId('tool-card')).toHaveCount(0);
 
