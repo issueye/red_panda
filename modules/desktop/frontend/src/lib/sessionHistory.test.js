@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { loadAllSessionHistory, loadAllSessions } from './sessionHistory.js';
+import { loadAllSessionHistory, loadAllSessions, loadSessionBootstrap } from './sessionHistory.js';
 
 test('loadAllSessions follows offset pages until complete', async () => {
   const urls = [];
@@ -35,4 +35,15 @@ test('loadAllSessionHistory rejects a stalled cursor', async () => {
     loadAllSessionHistory('s1', async () => ({ items: [], has_more: true, next_after_seq: 0 })),
     /cursor did not advance/,
   );
+});
+
+test('loadSessionBootstrap carries authoritative run streams', async () => {
+  const result = await loadSessionBootstrap('s1', async () => ({
+    history: { items: [{ id: 'message-1' }] },
+    streams: [{ id: 'event-1', role: 'reasoning', run_seq: 2 }],
+    runs: [],
+    context: {},
+  }));
+  assert.equal(result.history[0].id, 'message-1');
+  assert.equal(result.streams[0].id, 'event-1');
 });

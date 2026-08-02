@@ -65,6 +65,25 @@ export function normalizeHistoryMessage(message) {
   };
 }
 
+/** Gateway run stream projection -> Desktop transcript message. */
+export function normalizeRunMessageStream(stream) {
+  return {
+    id: stream.id,
+    role: stream.role === 'reasoning' ? 'reasoning' : 'assistant',
+    messageSeq: 0,
+    runId: stream.run_id || '',
+    assignmentId: stream.assignment_id || '',
+    workerId: stream.worker_id || '',
+    profileKey: stream.profile_key || '',
+    runSeq: stream.run_seq || 0,
+    endRunSeq: stream.end_run_seq || stream.run_seq || 0,
+    visibility: stream.visibility || 'run_public',
+    createdAt: stream.created_at,
+    text: stream.text || '',
+    countsTowardContext: false,
+  };
+}
+
 /**
  * @param {any} item
  */

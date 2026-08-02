@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { estimateEffectiveSessionTokens, estimateSessionTokens } from './tokenBudget.js';
-import { mergeSessionHistoryMessages } from './sessionMessageMerge.js';
+import {
+  mergeSessionHistoryMessages,
+  replaceHistoryWithRunStreams,
+} from './sessionMessageMerge.js';
 
 const identity = {
   role: 'assistant',
@@ -64,6 +67,36 @@ test('drops live reasoning once refreshed history persists it', () => {
   ];
 
   assert.deepEqual(mergeSessionHistoryMessages(previous, history), history);
+});
+
+test('authoritative run streams replace reordered persisted output', () => {
+  const history = [
+    { id: 'user-1', messageSeq: 1, role: 'user', runId: 'run-1', text: 'question' },
+    { id: 'old-reasoning', messageSeq: 2, ...identity, role: 'reasoning', text: 'before toolafter tool' },
+    { id: 'old-answer', messageSeq: 3, ...identity, text: 'answer' },
+    { id: 'legacy-answer', messageSeq: 4, ...identity, runId: 'run-legacy', text: 'legacy' },
+  ];
+  const streams = [
+    { id: 'evt-1', ...identity, role: 'reasoning', runSeq: 1, text: 'before tool' },
+    { id: 'evt-4', ...identity, role: 'reasoning', runSeq: 4, text: 'after tool' },
+    { id: 'evt-6', ...identity, runSeq: 6, text: 'answer' },
+  ];
+
+  const merged = replaceHistoryWithRunStreams(history, streams);
+  assert.deepEqual(merged.map((message) => message.id), [
+    'user-1', 'legacy-answer', 'evt-1', 'evt-4', 'evt-6',
+  ]);
+});
+
+test('authoritative streams fall back to persisted output on text mismatch', () => {
+  const history = [
+    { id: 'saved', messageSeq: 1, ...identity, text: 'complete answer' },
+  ];
+  const streams = [
+    { id: 'partial-event', ...identity, runSeq: 2, text: 'partial' },
+  ];
+
+  assert.deepEqual(replaceHistoryWithRunStreams(history, streams), history);
 });
 
 test('trims a partially persisted streamed row', () => {

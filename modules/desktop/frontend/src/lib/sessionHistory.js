@@ -60,6 +60,7 @@ export async function loadSessionBootstrap(sessionId, request = apiJson) {
           : [];
       return {
         history: historyItems,
+        streams: Array.isArray(data.streams) ? data.streams : [],
         runs: Array.isArray(data.runs) ? data.runs : [],
         tools: Array.isArray(data.tools) ? data.tools : [],
         permissions: Array.isArray(data.permissions) ? data.permissions : [],
@@ -80,6 +81,7 @@ export async function loadSessionBootstrap(sessionId, request = apiJson) {
   ]);
   return {
     history: Array.isArray(history) ? history : [],
+    streams: [],
     runs: Array.isArray(runs) ? runs : [],
     tools: Array.isArray(tools) ? tools : [],
     permissions: Array.isArray(permissions) ? permissions : [],

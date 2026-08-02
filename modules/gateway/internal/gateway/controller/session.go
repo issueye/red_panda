@@ -154,6 +154,11 @@ func (s SessionController) Bootstrap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
 		return
 	}
+	streams, err := s.Services.Run.MessageStreamsBySession(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
+		return
+	}
 	tools, err := s.Services.Tool.ListBySession(id, 200)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": gin.H{"code": "session_bootstrap_failed", "message": err.Error()}})
@@ -176,6 +181,7 @@ func (s SessionController) Bootstrap(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, envelope(c, service.SessionBootstrapResult{
 		History:     history,
+		Streams:     streams,
 		Runs:        runs,
 		Tools:       tools,
 		Permissions: permissions,

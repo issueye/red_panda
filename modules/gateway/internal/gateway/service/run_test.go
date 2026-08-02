@@ -572,20 +572,51 @@ func TestRunServiceAggregatesConversationMessagesAndHidesWorkerPrivateDeltas(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 4 {
-		t.Fatalf("len(rows) = %d, want 4", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("len(rows) = %d, want 3", len(rows))
 	}
 	assertServiceMessage(t, rows[0], "user", "run_1", "prompt")
-	assertServiceMessage(t, rows[1], "reasoning", "run_1", "inspect files")
-	assertServiceMessage(t, rows[2], "assistant", "run_1", "hello world")
-	assertServiceMessage(t, rows[3], "assistant", "run_2", "new run")
+	assertServiceMessage(t, rows[1], "assistant", "run_1", "hello world")
+	assertServiceMessage(t, rows[2], "assistant", "run_2", "new run")
 
 	history, err := NewSessionService(repos, nil, nil, "").History("session_1", 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if history.Items[1].Role != "reasoning" || history.Items[1].WorkerID != "worker-01" || history.Items[1].AssignmentID != "assignment_run_1" || history.Items[1].ProfileKey != "general" {
+	if history.Items[1].WorkerID != "worker-01" || history.Items[1].AssignmentID != "assignment_run_1" || history.Items[1].ProfileKey != "general" {
 		t.Fatalf("history lost Worker attribution: %#v", history.Items[1])
+	}
+
+	streams, err := service.MessageStreamsBySession("session_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(streams) != 5 {
+		t.Fatalf("len(streams) = %d, want 5: %#v", len(streams), streams)
+	}
+	if streams[0].Role != "reasoning" || streams[0].Text != "inspect files" || streams[0].RunSeq != 1 || streams[0].EndRunSeq != 2 {
+		t.Fatalf("reasoning stream mismatch: %#v", streams[0])
+	}
+	if streams[3].Role != "reasoning" || streams[3].Visibility != "worker_private" {
+		t.Fatalf("private reasoning stream mismatch: %#v", streams[3])
+	}
+}
+
+func TestRunServiceSplitsReasoningAcrossRunSequenceGaps(t *testing.T) {
+	_, service := newRunServiceTestFixture(t)
+	service.HandleRuntimeEvent(reasoningDeltaEvent("evt_1", "run_gap", "session_gap", 1, false, "before tool"))
+	service.HandleRuntimeEvent(events.EnvelopeV2{
+		EventID: "evt_usage", RunID: "run_gap", SessionID: "session_gap", RunSeq: 2,
+		Type: events.EventUsage, Payload: map[string]any{"input_tokens": 10}, CreatedAt: time.Now().UTC(),
+	})
+	service.HandleRuntimeEvent(reasoningDeltaEvent("evt_3", "run_gap", "session_gap", 3, false, "after tool"))
+
+	streams, err := service.MessageStreamsBySession("session_gap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(streams) != 2 || streams[0].RunSeq != 1 || streams[1].RunSeq != 3 {
+		t.Fatalf("reasoning gap projection = %#v", streams)
 	}
 }
 

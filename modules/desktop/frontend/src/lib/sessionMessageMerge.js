@@ -13,7 +13,8 @@ function streamedMessageKey(message) {
   const workerId = String(message.workerId || '');
   const profileKey = String(message.profileKey || '');
   if (!runId && !assignmentId && !workerId && !profileKey) return '';
-  return [message.role, runId, assignmentId, workerId, profileKey, message.visibility || 'run_public'].join('\u0000');
+  const visibility = message.visibility === 'worker_private' ? 'worker_private' : 'run_public';
+  return [message.role, runId, assignmentId, workerId, profileKey, visibility].join('\u0000');
 }
 
 function aggregatePersistedStreamText(messages) {
@@ -150,4 +151,35 @@ export function mergeSessionHistoryMessages(previousMessages = [], historyMessag
   }
 
   return extras.length > 0 ? [...history, ...extras] : history;
+}
+
+/**
+ * Replace persisted output rows with the run-event projection for each
+ * represented run/role. User messages and legacy runs without events remain.
+ */
+export function replaceHistoryWithRunStreams(historyMessages = [], streamMessages = []) {
+  const history = Array.isArray(historyMessages) ? historyMessages : [];
+  const streams = Array.isArray(streamMessages) ? streamMessages : [];
+  if (streams.length === 0) return history;
+
+  const aggregate = (messages) => {
+    const result = new Map();
+    for (const message of messages) {
+      const key = streamedMessageKey(message);
+      if (!key) continue;
+      result.set(key, `${result.get(key) || ''}${messageText(message)}`);
+    }
+    return result;
+  };
+  const historyText = aggregate(history);
+  const streamText = aggregate(streams);
+  const replaceable = new Set();
+  for (const [key, text] of streamText) {
+    const persisted = historyText.get(key) || '';
+    if (!persisted || persisted === text) replaceable.add(key);
+  }
+
+  const retained = history.filter((message) => !replaceable.has(streamedMessageKey(message)));
+  const acceptedStreams = streams.filter((message) => replaceable.has(streamedMessageKey(message)));
+  return [...retained, ...acceptedStreams];
 }

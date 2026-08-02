@@ -55,3 +55,30 @@ func (r RunEventRepository) ListAfter(runID string, afterSeq uint64, limit int) 
 	}
 	return items, nil
 }
+
+// ListMessageStreamsBySession returns the complete persisted text/reasoning
+// event source for Desktop transcript reconstruction.
+func (r RunEventRepository) ListMessageStreamsBySession(sessionID string) ([]events.EnvelopeV2, error) {
+	var rows []model.RunEvent
+	if err := r.db.Model(&model.RunEvent{}).
+		Select("run_events.*").
+		Joins("JOIN run_records ON run_records.id = run_events.run_id").
+		Where("run_records.session_id = ? AND run_events.type IN ?", sessionID, []string{
+			string(events.EventMessageDelta),
+			string(events.EventReasoningDelta),
+		}).
+		Order("run_events.created_at asc, run_events.run_id asc, run_events.run_seq asc").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]events.EnvelopeV2, 0, len(rows))
+	for _, row := range rows {
+		var event events.EnvelopeV2
+		if err := json.Unmarshal([]byte(row.PayloadJSON), &event); err != nil {
+			return nil, err
+		}
+		items = append(items, event)
+	}
+	return items, nil
+}

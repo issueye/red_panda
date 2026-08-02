@@ -6,6 +6,7 @@ import {
   normalizeHistoryMessage,
   normalizePermission,
   normalizeRun,
+  normalizeRunMessageStream,
   normalizeSession,
   normalizeToolCall,
   normalizeWorkspace,
@@ -61,6 +62,17 @@ test('normalizeHistoryMessage preserves persisted reasoning role', () => {
   });
   assert.equal(got.role, 'reasoning');
   assert.equal(got.text, 'inspect files');
+});
+
+test('normalizeRunMessageStream keeps event ordering and excludes model context', () => {
+  const got = normalizeRunMessageStream({
+    id: 'evt-3', role: 'reasoning', text: 'inspect', run_id: 'run_1',
+    run_seq: 3, end_run_seq: 5, profile_key: 'root',
+  });
+  assert.equal(got.role, 'reasoning');
+  assert.equal(got.runSeq, 3);
+  assert.equal(got.endRunSeq, 5);
+  assert.equal(got.countsTowardContext, false);
 });
 
 test('normalizeToolCall and normalizeRun keep status fields', () => {

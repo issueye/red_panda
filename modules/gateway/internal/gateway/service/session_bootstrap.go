@@ -7,10 +7,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// SessionBootstrapResult is a single-round-trip hydrate payload for Desktop
-// (docs/48 Wave D). Field shapes match the previous multi-endpoint contract.
+// SessionBootstrapResult is a single-round-trip hydrate payload for Desktop.
+// Streams is the run-event transcript projection; history remains the
+// model-facing message store.
 type SessionBootstrapResult struct {
 	History     MessagePageDTO         `json:"history"`
+	Streams     []RunMessageStreamDTO  `json:"streams"`
 	Runs        []RunRecordDTO         `json:"runs"`
 	Tools       []ToolCallDTO          `json:"tools"`
 	Permissions []PermissionRequestDTO `json:"permissions"`

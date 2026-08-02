@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiJson } from '../lib/api.js';
 import { loadSessionBootstrap } from '../lib/sessionHistory.js';
-import { mergeSessionHistoryMessages } from '../lib/sessionMessageMerge.js';
+import {
+  mergeSessionHistoryMessages,
+  replaceHistoryWithRunStreams,
+} from '../lib/sessionMessageMerge.js';
 import {
   createEmptySessionRuntime,
 } from '../lib/sessionRuntime.js';
@@ -11,6 +14,7 @@ import {
   normalizeHistoryMessage,
   normalizePermission,
   normalizeRun,
+  normalizeRunMessageStream,
   normalizeSession,
   normalizeToolCall,
   normalizeWorkspace,
@@ -72,12 +76,15 @@ export function useSessionBootstrap({
       const boot = await loadSessionBootstrap(sessionId);
       if (isStale()) return;
       const history = boot.history;
+      const streams = boot.streams;
       const serverRuns = boot.runs;
       const toolCalls = boot.tools;
       const permissionItems = boot.permissions;
       const todoData = boot.todos;
       const contextData = boot.context;
-      const normalized = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
+      const normalizedHistory = Array.isArray(history) ? history.map(normalizeHistoryMessage) : [];
+      const normalizedStreams = Array.isArray(streams) ? streams.map(normalizeRunMessageStream) : [];
+      const normalized = replaceHistoryWithRunStreams(normalizedHistory, normalizedStreams);
       const normalizedRuns = Array.isArray(serverRuns) ? serverRuns.map(normalizeRun) : [];
       const activeRun = latestActiveRun(serverRuns);
       const runSeqByRun = Object.fromEntries(normalizedRuns.map((run) => [run.id, Number(run.lastRunSeq) || 0]));
