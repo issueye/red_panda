@@ -36,6 +36,7 @@ export function appendWorkerText(items, event, text) {
     && previous.runId === event.run_id
     && previous.assignmentId === event.assignment_id
     && previous.workerId === event.worker?.id
+    && previous.visibility === (event.payload?.visibility || 'run_public')
     && previous.eventSeq > 0
     && Number(event.run_seq) === previous.eventSeq + 1;
   if (canAppend) {
@@ -298,7 +299,7 @@ export function reduceRunEvent(runtime, event) {
   }
 
   const text = event.payload?.delta || event.payload?.message || '';
-  if (!text || event.payload?.visibility === 'worker_private') return { runtime: next, effects };
+  if (!text) return { runtime: next, effects };
   next = {
     ...next,
     messages: appendWorkerText(next.messages, event, text),

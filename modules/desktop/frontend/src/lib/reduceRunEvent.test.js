@@ -7,6 +7,7 @@ import {
   reduceRunEvent,
   WORKER_PROTOCOL_VERSION,
 } from './reduceRunEvent.js';
+import { filterMainMessages, filterWorkerMessages } from './conversationScope.js';
 
 const event = (type, runSeq, payload = {}) => ({
   protocol_version: WORKER_PROTOCOL_VERSION,
@@ -108,12 +109,28 @@ test('paused assignment remains active and can return to running', () => {
   assert.equal(resumed.currentRunId, 'run_1');
 });
 
-test('worker private text never enters main conversation', () => {
+test('worker private reasoning and messages are retained only for the Worker conversation', () => {
   const base = createEmptySessionRuntime();
-  const next = reduceRunEvent(base, event('message_delta', 1, {
+  const reasoned = reduceRunEvent(base, event('reasoning_delta', 1, {
+    delta: 'private ', visibility: 'worker_private',
+  })).runtime;
+  const reasoningComplete = reduceRunEvent(reasoned, event('reasoning_delta', 2, {
+    delta: 'reasoning', visibility: 'worker_private',
+  })).runtime;
+  const next = reduceRunEvent(reasoningComplete, event('message_delta', 3, {
     delta: 'private report', visibility: 'worker_private',
   })).runtime;
-  assert.equal(next.messages.length, 0);
+
+  assert.deepEqual(next.messages.map(({ role, text, visibility }) => ({ role, text, visibility })), [
+    { role: 'reasoning', text: 'private reasoning', visibility: 'worker_private' },
+    { role: 'assistant', text: 'private report', visibility: 'worker_private' },
+  ]);
+  assert.equal(filterMainMessages(next.messages).length, 0);
+  assert.deepEqual(
+    filterWorkerMessages({ assignmentId: 'assignment_1', workerId: 'worker-01' }, next.messages)
+      .map((item) => item.text),
+    ['private reasoning', 'private report'],
+  );
 });
 
 test('finish closes run and pending permission', () => {
