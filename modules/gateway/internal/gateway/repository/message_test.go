@@ -74,6 +74,32 @@ func TestMessageRepositoryAddOrAppendAggregatesConsecutiveSubagentDeltas(t *test
 	assertMessageText(t, rows[0], "plan step")
 }
 
+func TestMessageRepositoryAddOrAppendAggregatesReasoningSeparatelyFromAnswer(t *testing.T) {
+	repo := newMessageTestRepository(t)
+	if _, err := repo.AddOrAppend("session_1", "reasoning", "inspect ", "run_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddOrAppend("session_1", "reasoning", "files", "run_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddOrAppend("session_1", "assistant", "done", "run_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := repo.List("session_1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0].Role != "reasoning" || rows[1].Role != "assistant" {
+		t.Fatalf("message roles = %q, %q", rows[0].Role, rows[1].Role)
+	}
+	assertMessageText(t, rows[0], "inspect files")
+	assertMessageText(t, rows[1], "done")
+}
+
 func TestMessageRepositorySeparatesWorkerAttributedDeltas(t *testing.T) {
 	repo := newMessageTestRepository(t)
 	workerOne := `{"assignment_id":"assignment-1","worker_id":"worker-01","profile_key":"planner"}`
@@ -160,6 +186,9 @@ func TestMessageRepositoryListLatestConversationFiltersSubagentsBeforeLimit(t *t
 		if _, err := repo.Add("session_1", "subagent", "private planner detail", "run_subagent"); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := repo.Add("session_1", "reasoning", "visible audit reasoning", "run_root"); err != nil {
+		t.Fatal(err)
 	}
 
 	rows, err := repo.ListLatestConversation("session_1", 2)

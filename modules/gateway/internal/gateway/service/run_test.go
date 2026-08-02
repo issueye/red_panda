@@ -560,27 +560,31 @@ func TestRunServiceAggregatesConversationMessagesAndHidesWorkerPrivateDeltas(t *
 		t.Fatal(err)
 	}
 
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_1", "run_1", "session_1", 1, false, "hello "))
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_2", "run_1", "session_1", 2, false, "world"))
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_3", "run_2", "session_1", 1, false, "new run"))
-	service.HandleRuntimeEvent(messageDeltaEvent("evt_4", "run_2", "session_1", 2, true, "private plan"))
+	service.HandleRuntimeEvent(reasoningDeltaEvent("evt_1", "run_1", "session_1", 1, false, "inspect "))
+	service.HandleRuntimeEvent(reasoningDeltaEvent("evt_2", "run_1", "session_1", 2, false, "files"))
+	service.HandleRuntimeEvent(messageDeltaEvent("evt_3", "run_1", "session_1", 3, false, "hello "))
+	service.HandleRuntimeEvent(messageDeltaEvent("evt_4", "run_1", "session_1", 4, false, "world"))
+	service.HandleRuntimeEvent(messageDeltaEvent("evt_5", "run_2", "session_1", 1, false, "new run"))
+	service.HandleRuntimeEvent(reasoningDeltaEvent("evt_6", "run_2", "session_1", 2, true, "private reasoning"))
+	service.HandleRuntimeEvent(messageDeltaEvent("evt_7", "run_2", "session_1", 3, true, "private plan"))
 
 	rows, err := repos.Messages.List("session_1", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 3 {
-		t.Fatalf("len(rows) = %d, want 3", len(rows))
+	if len(rows) != 4 {
+		t.Fatalf("len(rows) = %d, want 4", len(rows))
 	}
 	assertServiceMessage(t, rows[0], "user", "run_1", "prompt")
-	assertServiceMessage(t, rows[1], "assistant", "run_1", "hello world")
-	assertServiceMessage(t, rows[2], "assistant", "run_2", "new run")
+	assertServiceMessage(t, rows[1], "reasoning", "run_1", "inspect files")
+	assertServiceMessage(t, rows[2], "assistant", "run_1", "hello world")
+	assertServiceMessage(t, rows[3], "assistant", "run_2", "new run")
 
 	history, err := NewSessionService(repos, nil, nil, "").History("session_1", 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if history.Items[1].WorkerID != "worker-01" || history.Items[1].AssignmentID != "assignment_run_1" || history.Items[1].ProfileKey != "general" {
+	if history.Items[1].Role != "reasoning" || history.Items[1].WorkerID != "worker-01" || history.Items[1].AssignmentID != "assignment_run_1" || history.Items[1].ProfileKey != "general" {
 		t.Fatalf("history lost Worker attribution: %#v", history.Items[1])
 	}
 }
@@ -876,6 +880,17 @@ func messageDeltaEvent(eventID string, runID string, sessionID string, runSeq ui
 		Payload:      payload,
 		CreatedAt:    time.Now().UTC(),
 	}
+}
+
+func reasoningDeltaEvent(eventID string, runID string, sessionID string, runSeq uint64, workerPrivate bool, delta string) events.EnvelopeV2 {
+	event := messageDeltaEvent(eventID, runID, sessionID, runSeq, workerPrivate, delta)
+	event.Type = events.EventReasoningDelta
+	event.Stream = &events.StreamRef{
+		StreamID: "stream_" + runID + ":reasoning",
+		Kind:     events.StreamReasoning,
+		Seq:      runSeq,
+	}
+	return event
 }
 
 func assertServiceMessage(t *testing.T, row model.Message, role string, runID string, text string) {

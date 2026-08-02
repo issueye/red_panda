@@ -51,6 +51,18 @@ test('normalizeHistoryMessage extracts first text block', () => {
   assert.equal(got.runSeq, 5);
 });
 
+test('normalizeHistoryMessage preserves persisted reasoning role', () => {
+  const got = normalizeHistoryMessage({
+    id: 'm-reasoning',
+    role: 'reasoning',
+    seq: 4,
+    run_id: 'run_1',
+    content: [{ type: 'text', text: 'inspect files' }],
+  });
+  assert.equal(got.role, 'reasoning');
+  assert.equal(got.text, 'inspect files');
+});
+
 test('normalizeToolCall and normalizeRun keep status fields', () => {
   const tool = normalizeToolCall({
     id: 't1',

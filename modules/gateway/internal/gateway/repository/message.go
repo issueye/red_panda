@@ -101,7 +101,7 @@ func (r MessageRepository) addWithMetadata(sessionID string, role string, text s
 }
 
 func isAppendableDeltaRole(role string) bool {
-	return role == "assistant" || role == "subagent"
+	return role == "assistant" || role == "reasoning" || role == "subagent"
 }
 
 func (r MessageRepository) List(sessionID string, limit int) ([]model.Message, error) {

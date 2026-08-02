@@ -39,7 +39,14 @@ func (r RunService) HandleRuntimeEvent(event events.EnvelopeV2) {
 		NewScheduleService(r.repos, r.hub, nil).OnRunTerminal(event.RunID, status, errText)
 	}
 	_ = r.repos.RunEvents.Save(event)
-	if event.Type == events.EventMessageDelta && payloadString(event.Payload, "visibility") != "worker_private" {
+	messageRole := ""
+	switch event.Type {
+	case events.EventMessageDelta:
+		messageRole = "assistant"
+	case events.EventReasoningDelta:
+		messageRole = "reasoning"
+	}
+	if messageRole != "" && payloadString(event.Payload, "visibility") != "worker_private" {
 		if delta, ok := event.Payload["delta"].(string); ok && delta != "" {
 			metadata, _ := json.Marshal(map[string]any{
 				"assignment_id": event.AssignmentID,
@@ -47,7 +54,7 @@ func (r RunService) HandleRuntimeEvent(event events.EnvelopeV2) {
 				"profile_key":   event.Worker.ProfileKey,
 				"visibility":    payloadString(event.Payload, "visibility"),
 			})
-			_, _ = r.repos.Messages.AddOrAppendWithMetadata(event.SessionID, "assistant", delta, event.RunID, string(metadata))
+			_, _ = r.repos.Messages.AddOrAppendWithMetadata(event.SessionID, messageRole, delta, event.RunID, string(metadata))
 			_ = r.repos.Sessions.Touch(event.SessionID)
 		}
 	}

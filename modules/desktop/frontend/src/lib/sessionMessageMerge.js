@@ -6,21 +6,21 @@ function isPersisted(message) {
   return (Number(message?.messageSeq) || 0) > 0;
 }
 
-function assistantStreamKey(message) {
-  if (!message || message.role !== 'assistant' || message.agent === 'system') return '';
+function streamedMessageKey(message) {
+  if (!message || !['assistant', 'reasoning'].includes(message.role) || message.agent === 'system') return '';
   const runId = String(message.runId || '');
   const assignmentId = String(message.assignmentId || '');
   const workerId = String(message.workerId || '');
   const profileKey = String(message.profileKey || '');
   if (!runId && !assignmentId && !workerId && !profileKey) return '';
-  return [runId, assignmentId, workerId, profileKey, message.visibility || 'run_public'].join('\u0000');
+  return [message.role, runId, assignmentId, workerId, profileKey, message.visibility || 'run_public'].join('\u0000');
 }
 
-function aggregatePersistedAssistantText(messages) {
+function aggregatePersistedStreamText(messages) {
   const result = new Map();
   for (const message of messages) {
     if (!isPersisted(message)) continue;
-    const key = assistantStreamKey(message);
+    const key = streamedMessageKey(message);
     if (!key) continue;
     result.set(key, `${result.get(key) || ''}${messageText(message)}`);
   }
@@ -33,7 +33,7 @@ function persistedAdvance(previousText, historyText) {
   return historyText;
 }
 
-function reconcileAssistantRows(rows, previousPersistedText, historyPersistedText) {
+function reconcileStreamRows(rows, previousPersistedText, historyPersistedText) {
   const liveText = rows.map(messageText).join('');
   if (!liveText) return rows;
 
@@ -92,23 +92,23 @@ export function mergeSessionHistoryMessages(previousMessages = [], historyMessag
   if (history.length === 0) return previous;
 
   const historyIds = new Set(history.map((message) => message?.id).filter(Boolean));
-  const previousPersisted = aggregatePersistedAssistantText(previous);
-  const historyPersisted = aggregatePersistedAssistantText(history);
-  const assistantRowsByKey = new Map();
+  const previousPersisted = aggregatePersistedStreamText(previous);
+  const historyPersisted = aggregatePersistedStreamText(history);
+  const streamRowsByKey = new Map();
 
   for (const message of previous) {
     if (!message || isPersisted(message) || (message.id && historyIds.has(message.id))) continue;
-    const key = assistantStreamKey(message);
+    const key = streamedMessageKey(message);
     if (!key) continue;
-    const rows = assistantRowsByKey.get(key) || [];
+    const rows = streamRowsByKey.get(key) || [];
     rows.push(message);
-    assistantRowsByKey.set(key, rows);
+    streamRowsByKey.set(key, rows);
   }
 
-  const retainedAssistantRows = new Set();
-  const trimmedAssistantRows = new Map();
-  for (const [key, rows] of assistantRowsByKey) {
-    const retained = reconcileAssistantRows(
+  const retainedStreamRows = new Set();
+  const trimmedStreamRows = new Map();
+  for (const [key, rows] of streamRowsByKey) {
+    const retained = reconcileStreamRows(
       rows,
       previousPersisted.get(key) || '',
       historyPersisted.get(key) || '',
@@ -116,8 +116,8 @@ export function mergeSessionHistoryMessages(previousMessages = [], historyMessag
     for (const row of retained) {
       const original = rows.find((candidate) => candidate === row || candidate.id === row.id);
       if (!original) continue;
-      retainedAssistantRows.add(original);
-      if (row !== original) trimmedAssistantRows.set(original, row);
+      retainedStreamRows.add(original);
+      if (row !== original) trimmedStreamRows.set(original, row);
     }
   }
 
@@ -139,10 +139,10 @@ export function mergeSessionHistoryMessages(previousMessages = [], historyMessag
       }
       continue;
     }
-    const key = assistantStreamKey(message);
+    const key = streamedMessageKey(message);
     if (key) {
-      if (retainedAssistantRows.has(message)) {
-        extras.push(trimmedAssistantRows.get(message) || message);
+      if (retainedStreamRows.has(message)) {
+        extras.push(trimmedStreamRows.get(message) || message);
       }
       continue;
     }

@@ -53,6 +53,19 @@ test('keeps repeated live text when refreshed history did not advance', () => {
   assert.deepEqual(mergeSessionHistoryMessages([saved, repeated], [saved]), [saved, repeated]);
 });
 
+test('drops live reasoning once refreshed history persists it', () => {
+  const reasoningIdentity = { ...identity, role: 'reasoning' };
+  const previous = [
+    { id: 'msg-r1', messageSeq: 1, ...reasoningIdentity, text: 'inspect ' },
+    { id: 'evt-r2', ...reasoningIdentity, text: 'files' },
+  ];
+  const history = [
+    { id: 'msg-r1', messageSeq: 1, ...reasoningIdentity, text: 'inspect files' },
+  ];
+
+  assert.deepEqual(mergeSessionHistoryMessages(previous, history), history);
+});
+
 test('trims a partially persisted streamed row', () => {
   const previous = [
     { id: 'msg-1', messageSeq: 1, ...identity, text: 'saved ' },

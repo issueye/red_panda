@@ -44,9 +44,14 @@ export function normalizeHistoryMessage(message) {
   const firstText = Array.isArray(message.content)
     ? message.content.find((item) => item.type === 'text')?.text
     : '';
+  const role = message.role === 'user'
+    ? 'user'
+    : message.role === 'reasoning'
+      ? 'reasoning'
+      : 'assistant';
   return {
     id: message.id,
-    role: message.role === 'user' ? 'user' : 'assistant',
+    role,
     messageSeq: message.seq || 0,
     runId: message.run_id || '',
     assignmentId: message.assignment_id || '',
