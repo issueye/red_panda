@@ -28,7 +28,6 @@ type Config struct {
 	DatabaseDSN string
 	Token       string
 	Version     string
-	SkillsDir   string
 
 	AgentCommand string
 	AgentArgs    []string
@@ -42,19 +41,6 @@ type Config struct {
 }
 
 func Run(ctx context.Context, cfg Config) error {
-	skillsDir, err := gatewaySkillsDirectory(cfg.SkillsDir)
-	if err != nil {
-		return err
-	}
-	if err := service.EnsureBuiltinSkills(skillsDir); err != nil {
-		return fmt.Errorf("initialize builtin skills: %w", err)
-	}
-	// Keep the resolved value in the Gateway environment as well as the
-	// runtime client's child environment so IPC and stdio launches agree.
-	if err := os.Setenv(methods.EnvSkillsDir, skillsDir); err != nil {
-		return fmt.Errorf("configure builtin skills environment: %w", err)
-	}
-
 	db, err := database.Open(cfg.DatabaseDSN)
 	if err != nil {
 		return err
@@ -97,7 +83,6 @@ func Run(ctx context.Context, cfg Config) error {
 			return nil, fmt.Errorf("method not found: %s", method)
 		}
 	})
-	runtime.SetSkillsRoot(skillsDir)
 	archiveDir := cfg.SessionArchiveDir
 	if strings.TrimSpace(archiveDir) == "" {
 		archiveDir = service.DefaultSessionArchiveDir(cfg.DatabaseDSN)
@@ -166,7 +151,6 @@ func NewRouter(cfg Config, controllers controller.Set) *gin.Engine {
 	api.GET("/sessions/:id/history", controllers.Session.History)
 	api.GET("/sessions/:id/bootstrap", controllers.Session.Bootstrap)
 	api.POST("/sessions/:id/fork", controllers.Session.Fork)
-	api.POST("/sessions/:id/truncate", controllers.Session.Truncate)
 	api.GET("/sessions/:id/compact", controllers.Session.CompactionState)
 	api.GET("/sessions/:id/summaries", controllers.Session.Summaries)
 	api.GET("/sessions/:id/context", controllers.Session.ContextState)
@@ -251,23 +235,4 @@ func agentCommand(configured string) string {
 		return filepath.Join(filepath.Dir(exe), name)
 	}
 	return "red-panda-agent"
-}
-
-func gatewaySkillsDirectory(configured string) (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("resolve Gateway executable: %w", err)
-	}
-	root := strings.TrimSpace(configured)
-	if root == "" {
-		root = "skills"
-	}
-	if !filepath.IsAbs(root) {
-		root = filepath.Join(filepath.Dir(exe), root)
-	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolve Gateway skills directory: %w", err)
-	}
-	return filepath.Clean(abs), nil
 }

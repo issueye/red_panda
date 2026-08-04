@@ -26,6 +26,10 @@ tasks:
     preconditions:
       - sh: npm version
         msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
+    # 当 node_modules 已存在时跳过安装，避免 dev 模式下每次启动都重跑 npm install，
+    # 从而超过 Wails 等待前端 dev server 的 5 秒窗口（见 GH#5059/#5504）。
+    status:
+      - test -d node_modules
     cmds:
       - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/npm-with-node.ps1 -Command install
         platforms: [windows]

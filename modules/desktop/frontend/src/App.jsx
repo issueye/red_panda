@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LeftPanelResizer } from './components/app/PanelResizer.jsx';
-import { RightInspector } from './components/app/RightInspector.jsx';
+import { X } from 'lucide-react';
 import { ChatPanel } from './components/chat/ChatPanel.jsx';
 import { MemoryPanel } from './components/MemoryPanel.jsx';
 import { RunActivityPanel } from './components/RunActivityPanel.jsx';
@@ -10,8 +9,10 @@ import { Sidebar } from './components/Sidebar.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
 import { WorkerPanel } from './components/WorkerPanel.jsx';
 import { TopBar } from './components/TopBar.jsx';
+import { IconButton } from './components/ui/button.jsx';
 import { useDialog } from './components/ui/dialog.jsx';
 import { useToast } from './components/ui/toast.jsx';
+import { TabButton } from './components/ui/tabs.jsx';
 import { WorkspacePanel } from './components/WorkspacePanel.jsx';
 import { WorkspacePickerDialog } from './components/WorkspacePickerDialog.jsx';
 import { useConversationTabs } from './hooks/useConversationTabs.js';
@@ -33,6 +34,17 @@ import {
   filterVisibleMessagesAfterCompaction,
 } from './lib/conversationScope.js';
 import { displayRuntimeMode, displayStatus, displayWorkerProfileName } from './lib/displayLabels.js';
+import {
+  clampLeftPanelWidth,
+  clampRightPanelWidth,
+  LEFT_PANEL_WIDTH_DEFAULT,
+  LEFT_PANEL_WIDTH_MAX,
+  LEFT_PANEL_WIDTH_MIN,
+  RIGHT_PANEL_WIDTH_DEFAULT,
+  RIGHT_PANEL_WIDTH_MAX,
+  RIGHT_PANEL_WIDTH_MIN,
+  rightPanelTabs,
+} from './lib/panelLayout.js';
 import { providerModelFor } from './lib/providerProfiles.js';
 import { loadRunSettings, persistRunSettings } from './lib/runSettingsStorage.js';
 import { reconcileAssignmentsWithRuns, reduceRunEvent, upsertByID } from './lib/reduceRunEvent.js';
@@ -455,36 +467,6 @@ export function App() {
     }
   }, [patchRuntime]);
 
-  // Roll back a session to before the given user message: the targeted message
-  // and everything after it (AI replies, tool runs, permissions) are removed on
-  // the Gateway, then the message text is restored into the composer so the user
-  // can edit and resend it.
-  const rollbackMessage = useCallback(async (message) => {
-    const sessionId = currentSessionIdRef.current;
-    const seq = Number(message?.messageSeq || message?.seq || 0);
-    if (!sessionId || !seq) return;
-    const text = String(message?.text || '').trim();
-    const ok = await dialog.confirm({
-      title: '回滚到此消息',
-      message: '将删除该条消息及其之后的所有回复，并把原消息放回输入框以便重新编辑。',
-      description: text ? `原消息：${text.slice(0, 80)}${text.length > 80 ? '…' : ''}` : undefined,
-      confirmLabel: '回滚',
-      tone: 'warning',
-      testId: 'confirm-rollback-message',
-    });
-    if (!ok) return;
-    try {
-      await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/truncate`, {
-        method: 'POST',
-        body: JSON.stringify({ message_seq: seq }),
-      });
-      patchRuntime(sessionId, (rt) => ({ ...rt, draft: text }));
-      await loadSessionState(sessionId, { preserveLive: false });
-    } catch (error) {
-      toast?.error(error?.message || '回滚失败，请重试', { title: '回滚失败' });
-    }
-  }, [currentSessionIdRef, dialog, loadSessionState, patchRuntime, toast]);
-
   const {
     createSession,
     deleteSession,
@@ -658,10 +640,33 @@ export function App() {
           workspaces={recentWorkspaces}
         />
         {!compactLayout ? (
-          <LeftPanelResizer
-            onChange={setLeftPanelWidth}
+          <button
+            aria-label="拖拽调整左侧面板宽度"
+            aria-orientation="vertical"
+            aria-valuemax={LEFT_PANEL_WIDTH_MAX}
+            aria-valuemin={LEFT_PANEL_WIDTH_MIN}
+            aria-valuenow={leftPanelWidth}
+            className="left-panel-resizer"
+            data-testid="left-panel-resizer"
+            onDoubleClick={() => setLeftPanelWidth(LEFT_PANEL_WIDTH_DEFAULT)}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                setLeftPanelWidth((width) => clampLeftPanelWidth(width - 16));
+              } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                setLeftPanelWidth((width) => clampLeftPanelWidth(width + 16));
+              } else if (event.key === 'Home') {
+                event.preventDefault();
+                setLeftPanelWidth(LEFT_PANEL_WIDTH_MIN);
+              } else if (event.key === 'End') {
+                event.preventDefault();
+                setLeftPanelWidth(LEFT_PANEL_WIDTH_MAX);
+              }
+            }}
             onPointerDown={startLeftPanelResize}
-            value={leftPanelWidth}
+            role="separator"
+            type="button"
           />
         ) : null}
         <WorkspacePickerDialog
@@ -700,7 +705,6 @@ export function App() {
           }))}
           onResolvePermission={resolvePermission}
           onSend={sendTask}
-          onRollbackMessage={rollbackMessage}
           onSelectConversationTab={(tabId) => patchCurrentRuntime((rt) => ({
             ...rt, activeConversationTab: tabId,
           }))}
@@ -730,6 +734,37 @@ export function App() {
           enterToSend={runSettings.enterToSend !== false}
           workspaceRoot={currentWorkspaceRoot()}
         />
+        <div
+          aria-label="辅助面板"
+          className="right-panel-rail"
+          onKeyDown={handleRightPanelTabsKeyDown}
+          role="tablist"
+        >
+          {rightPanelTabs.map((tab) => (
+            <TabButton
+              active={rightPanelTab === tab.id}
+              badge={tab.id === 'workers' ? activeWorkerCount : tab.id === 'activity' ? pendingPermissionBadge : null}
+              badgeTone={tab.id === 'activity' ? 'warning' : 'info'}
+              data-right-panel-tab={tab.id}
+              data-testid={tab.testId ? `${tab.testId}-rail` : undefined}
+              key={tab.id}
+              onClick={() => selectRightPanelTab(tab.id)}
+              panelId="right-panel-content"
+            >
+              {tab.label}
+            </TabButton>
+          ))}
+        </div>
+        {rightPanelDrawerOpen ? (
+          <button
+            aria-label="关闭辅助面板"
+            aria-hidden="true"
+            className="right-panel-backdrop"
+            onClick={closeRightPanelDrawer}
+            tabIndex={-1}
+            type="button"
+          />
+        ) : null}
         {workspacePanelExpanded && !compactLayout && leftPanelTab === 'workspace' ? (
           <button
             aria-label="返回侧栏"
@@ -739,21 +774,83 @@ export function App() {
             type="button"
           />
         ) : null}
-        <RightInspector
-          activeWorkerCount={activeWorkerCount}
-          closeRightPanelDrawer={closeRightPanelDrawer}
-          compactLayout={compactLayout}
-          content={rightPanelContent}
-          handleRightPanelTabsKeyDown={handleRightPanelTabsKeyDown}
-          pendingPermissionBadge={pendingPermissionBadge}
-          rightPanelCloseRef={rightPanelCloseRef}
-          rightPanelDrawerOpen={rightPanelDrawerOpen}
-          rightPanelTab={rightPanelTab}
-          rightPanelWidth={rightPanelWidth}
-          selectRightPanelTab={selectRightPanelTab}
-          setRightPanelWidth={setRightPanelWidth}
-          startRightPanelResize={startRightPanelResize}
-        />
+        <aside
+          aria-label="辅助面板"
+          aria-hidden={compactLayout && !rightPanelDrawerOpen ? 'true' : undefined}
+          className={[
+            'right-panel',
+            rightPanelDrawerOpen ? 'drawer-open' : '',
+          ].filter(Boolean).join(' ')}
+          inert={compactLayout && !rightPanelDrawerOpen ? '' : undefined}
+          onKeyDown={(event) => {
+            if (compactLayout && event.key === 'Escape') closeRightPanelDrawer();
+          }}
+        >
+          {!compactLayout ? (
+            <button
+              aria-label="拖拽调整右侧面板宽度"
+              aria-orientation="vertical"
+              aria-valuemax={RIGHT_PANEL_WIDTH_MAX}
+              aria-valuemin={RIGHT_PANEL_WIDTH_MIN}
+              aria-valuenow={rightPanelWidth}
+              className="right-panel-resizer"
+              data-testid="right-panel-resizer"
+              onDoubleClick={() => setRightPanelWidth(RIGHT_PANEL_WIDTH_DEFAULT)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowLeft') {
+                  event.preventDefault();
+                  setRightPanelWidth((w) => clampRightPanelWidth(w + 16));
+                } else if (event.key === 'ArrowRight') {
+                  event.preventDefault();
+                  setRightPanelWidth((w) => clampRightPanelWidth(w - 16));
+                } else if (event.key === 'Home') {
+                  event.preventDefault();
+                  setRightPanelWidth(RIGHT_PANEL_WIDTH_MAX);
+                } else if (event.key === 'End') {
+                  event.preventDefault();
+                  setRightPanelWidth(RIGHT_PANEL_WIDTH_MIN);
+                }
+              }}
+              onPointerDown={startRightPanelResize}
+              role="separator"
+              type="button"
+            />
+          ) : null}
+          <div className="right-panel-mobile-header">
+            <strong>{rightPanelTabs.find((tab) => tab.id === rightPanelTab)?.label || '辅助面板'}</strong>
+            <IconButton label="关闭辅助面板" onClick={closeRightPanelDrawer} ref={rightPanelCloseRef}>
+              <X size={17} />
+            </IconButton>
+          </div>
+          <div
+            aria-label="辅助面板"
+            className="right-panel-tabs"
+            onKeyDown={handleRightPanelTabsKeyDown}
+            role="tablist"
+          >
+            {rightPanelTabs.map((tab) => (
+              <TabButton
+                active={rightPanelTab === tab.id}
+                badge={tab.id === 'workers' ? activeWorkerCount : tab.id === 'activity' ? pendingPermissionBadge : null}
+                badgeTone={tab.id === 'activity' ? 'warning' : 'info'}
+                data-right-panel-tab={tab.id}
+                data-testid={tab.testId || undefined}
+                key={tab.id}
+                onClick={() => selectRightPanelTab(tab.id)}
+                panelId="right-panel-content"
+              >
+                {tab.label}
+              </TabButton>
+            ))}
+          </div>
+          <div
+            className="right-panel-content"
+            id="right-panel-content"
+            role="tabpanel"
+          >
+            {rightPanelContent}
+          </div>
+        </aside>
       </main>
       <StatusBar
         runSeq={runSeq}

@@ -199,23 +199,6 @@ func (r MessageRepository) ListRange(sessionID string, startSeq uint64, endSeq u
 	return rows, err
 }
 
-// DeleteFromSeq permanently removes all messages with seq >= startSeq
-// (including the target message itself) for the given session. It returns the
-// removed rows so the caller can cascade-delete associated runs/tools/etc.
-func (r MessageRepository) DeleteFromSeq(sessionID string, startSeq uint64) ([]model.Message, error) {
-	var rows []model.Message
-	if err := r.db.Where("session_id = ? AND seq >= ?", sessionID, startSeq).
-		Order("seq asc").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	err := r.db.Where("session_id = ? AND seq >= ?", sessionID, startSeq).
-		Delete(&model.Message{}).Error
-	return rows, err
-}
-
 func (r MessageRepository) LatestSeq(sessionID string) (uint64, error) {
 	var last model.Message
 	err := r.db.Where("session_id = ?", sessionID).Order("seq desc").First(&last).Error

@@ -96,25 +96,6 @@ func (s SessionController) Fork(c *gin.Context) {
 	c.JSON(http.StatusOK, envelope(c, result))
 }
 
-// Truncate handles POST /api/v1/sessions/:id/truncate.
-func (s SessionController) Truncate(c *gin.Context) {
-	var req service.TruncateSessionRequest
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": gin.H{"code": "invalid_payload", "message": "invalid truncate payload"}})
-		return
-	}
-	result, err := s.Services.Session.Truncate(c.Param("id"), req)
-	if err != nil {
-		status := http.StatusBadRequest
-		if err.Error() == "session not found" {
-			status = http.StatusNotFound
-		}
-		c.JSON(status, gin.H{"ok": false, "error": gin.H{"code": "session_truncate_failed", "message": err.Error()}})
-		return
-	}
-	c.JSON(http.StatusOK, envelope(c, result))
-}
-
 func (s SessionController) CompactPreview(c *gin.Context) {
 	var req service.CompactPreviewRequest
 	if err := c.BindJSON(&req); err != nil {

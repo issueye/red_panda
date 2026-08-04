@@ -90,21 +90,6 @@ type ForkSessionRequest struct {
 	ForkPoint ForkPoint `json:"fork_point"`
 }
 
-// TruncateSessionRequest specifies the user message to roll back to. All
-// messages from this seq onward (including the message itself) are removed and
-// the message text is returned so the Desktop can refill its composer.
-type TruncateSessionRequest struct {
-	MessageSeq uint64 `json:"message_seq"`
-}
-
-// TruncateSessionResult reports the removed message span and the text to
-// restore into the composer for editing.
-type TruncateSessionResult struct {
-	TruncatedMessage string `json:"truncated_message"`
-	RemovedMessages  int    `json:"removed_messages"`
-	RemovedRuns      int    `json:"removed_runs"`
-}
-
 type LineageDTO struct {
 	ID              string    `json:"id"`
 	SourceSessionID string    `json:"source_session_id"`
@@ -403,81 +388,6 @@ func (s SessionService) Fork(sessionID string, req ForkSessionRequest) (ForkSess
 	}
 	if row, e := s.repos.Sessions.Get(result.Session.ID); e == nil {
 		broadcastSessionUpserted(s.hub, row, map[string]any{"reason": "fork"})
-	}
-	return result, nil
-}
-
-// Truncate rolls a session back to before the given user message. It removes the
-// target message and everything after it (messages, runs, tool calls, permissions,
-// run events) in a single transaction, then returns the truncated message text so
-// the Desktop can refill its composer for editing.
-func (s SessionService) Truncate(sessionID string, req TruncateSessionRequest) (TruncateSessionResult, error) {
-	if req.MessageSeq == 0 {
-		return TruncateSessionResult{}, fmt.Errorf("message_seq is required")
-	}
-	if _, err := s.repos.Sessions.Get(sessionID); err != nil {
-		return TruncateSessionResult{}, err
-	}
-
-	var result TruncateSessionResult
-	err := s.repos.DB.Transaction(func(tx *gorm.DB) error {
-		txRepos := repository.NewSet(tx)
-		// Locate the target message to restore its text.
-		targets, err := txRepos.Messages.ListRange(sessionID, req.MessageSeq, req.MessageSeq)
-		if err != nil {
-			return err
-		}
-		if len(targets) == 0 {
-			return fmt.Errorf("message not found")
-		}
-		target := targets[0]
-		if target.Role != "user" {
-			return fmt.Errorf("only user messages can be rolled back")
-		}
-		result.TruncatedMessage = messageText(target)
-
-		// Remove the target message and everything after it.
-		removed, err := txRepos.Messages.DeleteFromSeq(sessionID, req.MessageSeq)
-		if err != nil {
-			return err
-		}
-		result.RemovedMessages = len(removed)
-
-		// Collect the runs whose messages were removed so we can cascade.
-		seen := make(map[string]struct{})
-		runIDs := make([]string, 0, len(removed))
-		for _, msg := range removed {
-			if msg.RunID == "" {
-				continue
-			}
-			if _, ok := seen[msg.RunID]; ok {
-				continue
-			}
-			seen[msg.RunID] = struct{}{}
-			runIDs = append(runIDs, msg.RunID)
-		}
-		if len(runIDs) > 0 {
-			if err := txRepos.RunEvents.DeleteByRunIDs(runIDs); err != nil {
-				return err
-			}
-			if err := txRepos.ToolCalls.DeleteByRunIDs(runIDs); err != nil {
-				return err
-			}
-			if err := txRepos.Permissions.DeleteByRunIDs(runIDs); err != nil {
-				return err
-			}
-			if err := txRepos.Runs.DeleteByRunIDs(runIDs); err != nil {
-				return err
-			}
-			result.RemovedRuns = len(runIDs)
-		}
-		if err := txRepos.Sessions.Touch(sessionID); err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return TruncateSessionResult{}, err
 	}
 	return result, nil
 }

@@ -5,7 +5,10 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react(), wails('./bindings')],
   server: {
-    host: '127.0.0.1',
+    // 用 :: 同时监听 IPv4 与 IPv6。Wails 等待 http://localhost:9245，而 Windows 上
+    // localhost 会解析为 ::1（IPv6）与 127.0.0.1（IPv4）；若只监听其一，Go 客户端
+    // 优先解析到不可达的地址会导致连接失败（见 GH#5059/#4905）。
+    host: '::',
     port: Number(process.env.WAILS_VITE_PORT) || 5177,
     strictPort: false,
     proxy: {
