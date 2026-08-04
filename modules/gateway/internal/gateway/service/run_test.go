@@ -620,6 +620,82 @@ func TestRunServiceSplitsReasoningAcrossRunSequenceGaps(t *testing.T) {
 	}
 }
 
+func TestRunServiceAggregatesOneWorkerStreamAcrossOtherWorkerEvents(t *testing.T) {
+	_, service := newRunServiceTestFixture(t)
+	worker4First := messageDeltaEvent("evt_worker4_1", "run_workers", "session_workers", 1, true, "渲")
+	worker4First.AssignmentID = "assignment_4"
+	worker4First.Worker = events.EventWorkerRef{ID: "worker-04", ProfileKey: "general"}
+	worker4First.WorkerSeq = 1
+	worker4First.Stream = &events.StreamRef{StreamID: "stream_worker4_message", Kind: events.StreamMessage, Seq: 1}
+
+	worker2 := messageDeltaEvent("evt_worker2_1", "run_workers", "session_workers", 2, true, "其他任务")
+	worker2.AssignmentID = "assignment_2"
+	worker2.Worker = events.EventWorkerRef{ID: "worker-02", ProfileKey: "general"}
+	worker2.WorkerSeq = 1
+	worker2.Stream = &events.StreamRef{StreamID: "stream_worker2_message", Kind: events.StreamMessage, Seq: 1}
+
+	worker4Second := messageDeltaEvent("evt_worker4_2", "run_workers", "session_workers", 3, true, "染完成")
+	worker4Second.AssignmentID = "assignment_4"
+	worker4Second.Worker = events.EventWorkerRef{ID: "worker-04", ProfileKey: "general"}
+	worker4Second.WorkerSeq = 2
+	worker4Second.Stream = &events.StreamRef{StreamID: "stream_worker4_message", Kind: events.StreamMessage, Seq: 2}
+
+	worker4Final := messageDeltaEvent("evt_worker4_3", "run_workers", "session_workers", 4, true, "")
+	worker4Final.AssignmentID = "assignment_4"
+	worker4Final.Worker = events.EventWorkerRef{ID: "worker-04", ProfileKey: "general"}
+	worker4Final.WorkerSeq = 3
+	worker4Final.Stream = &events.StreamRef{StreamID: "stream_worker4_message", Kind: events.StreamMessage, Seq: 3, Final: true}
+
+	service.HandleRuntimeEvent(worker4First)
+	service.HandleRuntimeEvent(worker2)
+	service.HandleRuntimeEvent(worker4Second)
+	service.HandleRuntimeEvent(worker4Final)
+
+	streams, err := service.MessageStreamsBySession("session_workers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(streams) != 2 {
+		t.Fatalf("len(streams) = %d, want 2: %#v", len(streams), streams)
+	}
+	worker4 := streams[0]
+	if worker4.WorkerID != "worker-04" || worker4.Text != "渲染完成" || worker4.RunSeq != 1 || worker4.EndRunSeq != 4 {
+		t.Fatalf("worker-04 stream mismatch: %#v", worker4)
+	}
+	if worker4.WorkerSeq != 1 || worker4.EndWorkerSeq != 3 || worker4.StreamID != "stream_worker4_message" || !worker4.StreamFinal {
+		t.Fatalf("worker-04 stream metadata mismatch: %#v", worker4)
+	}
+}
+
+func TestRunServiceSplitsOneWorkerStreamAtItsOwnToolBoundary(t *testing.T) {
+	_, service := newRunServiceTestFixture(t)
+	before := messageDeltaEvent("evt_before", "run_tool_boundary", "session_tool_boundary", 1, true, "工具前")
+	before.WorkerSeq = 1
+	before.Stream = &events.StreamRef{StreamID: "stream_message", Kind: events.StreamMessage, Seq: 1}
+	service.HandleRuntimeEvent(before)
+
+	service.HandleRuntimeEvent(events.EnvelopeV2{
+		EventID: "evt_tool", RunID: "run_tool_boundary", SessionID: "session_tool_boundary",
+		AssignmentID: before.AssignmentID, RunSeq: 2, WorkerSeq: 2, Worker: before.Worker,
+		Type: events.EventToolStarted, Payload: map[string]any{
+			"tool_call_id": "tool_1", "tool_name": "shell.exec", "arguments": map[string]any{},
+		}, CreatedAt: time.Now().UTC(),
+	})
+
+	after := messageDeltaEvent("evt_after", "run_tool_boundary", "session_tool_boundary", 3, true, "工具后")
+	after.WorkerSeq = 3
+	after.Stream = &events.StreamRef{StreamID: "stream_message", Kind: events.StreamMessage, Seq: 2, Final: true}
+	service.HandleRuntimeEvent(after)
+
+	streams, err := service.MessageStreamsBySession("session_tool_boundary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(streams) != 2 || streams[0].Text != "工具前" || streams[1].Text != "工具后" {
+		t.Fatalf("tool boundary streams = %#v", streams)
+	}
+}
+
 func TestRunServiceApplyProviderProfile(t *testing.T) {
 	repos, service := newRunServiceTestFixture(t)
 	profile, err := repos.Providers.Create(model.ProviderProfile{

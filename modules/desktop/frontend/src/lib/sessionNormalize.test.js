@@ -67,11 +67,20 @@ test('normalizeHistoryMessage preserves persisted reasoning role', () => {
 test('normalizeRunMessageStream keeps event ordering and excludes model context', () => {
   const got = normalizeRunMessageStream({
     id: 'evt-3', role: 'reasoning', text: 'inspect', run_id: 'run_1',
-    run_seq: 3, end_run_seq: 5, profile_key: 'root',
+    run_seq: 3, end_run_seq: 5, worker_seq: 7, end_worker_seq: 9,
+    stream_id: 'stream_1_reasoning', stream_kind: 'reasoning',
+    stream_seq: 2, end_stream_seq: 4, stream_final: true, profile_key: 'root',
   });
   assert.equal(got.role, 'reasoning');
   assert.equal(got.runSeq, 3);
   assert.equal(got.endRunSeq, 5);
+  assert.equal(got.workerSeq, 7);
+  assert.equal(got.endWorkerSeq, 9);
+  assert.equal(got.streamId, 'stream_1_reasoning');
+  assert.equal(got.streamKind, 'reasoning');
+  assert.equal(got.streamSeq, 2);
+  assert.equal(got.endStreamSeq, 4);
+  assert.equal(got.streamFinal, true);
   assert.equal(got.countsTowardContext, false);
 });
 

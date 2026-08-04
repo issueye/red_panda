@@ -15,6 +15,9 @@ func Open(path string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetConnMaxLifetime(0)
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		return nil, err
 	}

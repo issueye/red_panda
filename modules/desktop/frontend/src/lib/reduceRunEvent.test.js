@@ -29,6 +29,23 @@ const eventForRun = (runId, type, runSeq, payload = {}) => ({
   assignment_id: `assignment_${runId}`,
 });
 
+const streamEvent = ({
+  type = 'message_delta', runSeq, workerSeq, streamSeq, workerId, assignmentId, delta,
+  final = false, visibility = 'worker_private', streamId,
+}) => ({
+  ...event(type, runSeq, { delta, visibility }),
+  event_id: `evt_${workerId}_${runSeq}`,
+  assignment_id: assignmentId,
+  worker_seq: workerSeq,
+  worker: { id: workerId, profile_key: 'general' },
+  stream: {
+    stream_id: streamId || `stream_${assignmentId}_${type}`,
+    kind: type === 'reasoning_delta' ? 'reasoning' : 'message',
+    seq: streamSeq,
+    final,
+  },
+});
+
 test('rejects legacy live event envelopes', () => {
   const base = createEmptySessionRuntime();
   const { runtime, effects } = reduceRunEvent(base, { root_run_id: 'run_1', root_seq: 1, type: 'finish' });
@@ -208,6 +225,65 @@ test('appendWorkerText merges consecutive deltas for one assignment', () => {
   const second = appendWorkerText(newline, event('message_delta', 3, { delta: '## Report' }), '## Report');
   assert.equal(second.length, 1);
   assert.equal(second[0].text, 'Hello\n\n## Report');
+});
+
+test('interleaved Worker events keep one live message per stream', () => {
+  const base = createEmptySessionRuntime();
+  const worker4First = reduceRunEvent(base, streamEvent({
+    runSeq: 1, workerSeq: 1, streamSeq: 1,
+    workerId: 'worker-04', assignmentId: 'assignment_4', delta: '渲',
+  })).runtime;
+  const worker2 = reduceRunEvent(worker4First, streamEvent({
+    runSeq: 2, workerSeq: 1, streamSeq: 1,
+    workerId: 'worker-02', assignmentId: 'assignment_2', delta: '其他任务',
+  })).runtime;
+  const worker4Second = reduceRunEvent(worker2, streamEvent({
+    runSeq: 3, workerSeq: 2, streamSeq: 2,
+    workerId: 'worker-04', assignmentId: 'assignment_4', delta: '染完成',
+  })).runtime;
+  const finished = reduceRunEvent(worker4Second, streamEvent({
+    runSeq: 4, workerSeq: 3, streamSeq: 3,
+    workerId: 'worker-04', assignmentId: 'assignment_4', delta: '', final: true,
+  })).runtime;
+
+  const worker4Messages = filterWorkerMessages(
+    { assignmentId: 'assignment_4', workerId: 'worker-04' },
+    finished.messages,
+  );
+  assert.equal(worker4Messages.length, 1);
+  assert.equal(worker4Messages[0].text, '渲染完成');
+  assert.equal(worker4Messages[0].runSeq, 1);
+  assert.equal(worker4Messages[0].endRunSeq, 4);
+  assert.equal(worker4Messages[0].workerSeq, 1);
+  assert.equal(worker4Messages[0].endWorkerSeq, 3);
+  assert.equal(worker4Messages[0].streamFinal, true);
+  assert.equal(finished.messages.find((item) => item.workerId === 'worker-02').text, '其他任务');
+});
+
+test('a tool event from the same Worker splits one stream into timeline segments', () => {
+  const base = createEmptySessionRuntime();
+  const beforeTool = reduceRunEvent(base, streamEvent({
+    runSeq: 1, workerSeq: 1, streamSeq: 1,
+    workerId: 'worker-04', assignmentId: 'assignment_4', delta: '工具前',
+    streamId: 'stream_assignment_4_message',
+  })).runtime;
+  const tool = reduceRunEvent(beforeTool, {
+    ...event('tool_started', 2, {
+      tool_call_id: 'tool_4', tool_name: 'shell.exec', arguments: { command: 'go test ./...' },
+    }),
+    assignment_id: 'assignment_4',
+    worker_seq: 2,
+    worker: { id: 'worker-04', profile_key: 'general' },
+  }).runtime;
+  const afterTool = reduceRunEvent(tool, streamEvent({
+    runSeq: 3, workerSeq: 3, streamSeq: 2,
+    workerId: 'worker-04', assignmentId: 'assignment_4', delta: '工具后', final: true,
+    streamId: 'stream_assignment_4_message',
+  })).runtime;
+
+  assert.deepEqual(afterTool.messages.map((item) => item.text), ['工具前', '工具后']);
+  assert.equal(afterTool.messages[0].streamId, afterTool.messages[1].streamId);
+  assert.equal(afterTool.tools.length, 1);
 });
 
 test('reasoning deltas stay separate from the final assistant answer', () => {

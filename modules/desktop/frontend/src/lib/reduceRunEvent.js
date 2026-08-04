@@ -29,23 +29,60 @@ export function reconcileAssignmentsWithRuns(assignments = [], runs = []) {
 }
 
 export function appendWorkerText(items, event, text) {
-  const previous = items[items.length - 1];
   const role = event.type === 'reasoning_delta' ? 'reasoning' : 'assistant';
-  const canAppend = (event.type === 'message_delta' || event.type === 'reasoning_delta')
-    && previous?.role === role
-    && previous.runId === event.run_id
-    && previous.assignmentId === event.assignment_id
-    && previous.workerId === event.worker?.id
-    && previous.visibility === (event.payload?.visibility || 'run_public')
-    && previous.eventSeq > 0
-    && Number(event.run_seq) === previous.eventSeq + 1;
-  if (canAppend) {
-    return [...items.slice(0, -1), {
+  const visibility = event.payload?.visibility || 'run_public';
+  const streamId = event.stream?.stream_id || '';
+  const streamKind = event.stream?.kind || role;
+  const runSeq = Number(event.run_seq) || 0;
+  const workerSeq = Number(event.worker_seq) || 0;
+  const streamSeq = Number(event.stream?.seq) || 0;
+  let previousIndex = -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.role === role
+      && item.runId === event.run_id
+      && item.assignmentId === event.assignment_id
+      && item.workerId === event.worker?.id
+      && item.visibility === visibility
+      && (item.streamId || '') === streamId
+      && (item.streamKind || role) === streamKind) {
+      previousIndex = index;
+      break;
+    }
+  }
+  const previous = previousIndex >= 0 ? items[previousIndex] : null;
+  if (!text) {
+    if (!previous || !event.stream?.final) return items;
+    const updated = {
       ...previous,
-      eventSeq: Number(event.run_seq),
-      runSeq: Number(event.run_seq),
+      eventSeq: runSeq,
+      endRunSeq: runSeq,
+      endWorkerSeq: workerSeq,
+      endStreamSeq: streamSeq,
+      streamFinal: true,
+    };
+    return items.map((item, index) => (index === previousIndex ? updated : item));
+  }
+  const previousWorkerSeq = Number(previous?.endWorkerSeq ?? previous?.workerSeq) || 0;
+  const previousRunSeq = Number(previous?.endRunSeq ?? previous?.eventSeq ?? previous?.runSeq) || 0;
+  const sequenceContinues = workerSeq > 0 && previousWorkerSeq > 0
+    ? workerSeq === previousWorkerSeq + 1
+    : runSeq > 0 && runSeq === previousRunSeq + 1;
+  const canAppend = (event.type === 'message_delta' || event.type === 'reasoning_delta')
+    && previous
+    && !previous.streamFinal
+    && sequenceContinues;
+  if (canAppend) {
+    const updated = {
+      ...previous,
+      eventSeq: runSeq,
+      endRunSeq: runSeq,
+      endWorkerSeq: workerSeq,
+      endStreamSeq: streamSeq,
+      streamFinal: Boolean(event.stream?.final),
       text: `${previous.text}${text}`,
-    }];
+    };
+    return items.map((item, index) => (index === previousIndex ? updated : item));
   }
   return [...items, {
     id: event.event_id || `evt_${Date.now()}`,
@@ -54,9 +91,17 @@ export function appendWorkerText(items, event, text) {
     assignmentId: event.assignment_id || '',
     workerId: event.worker?.id || '',
     profileKey: event.worker?.profile_key || '',
-    eventSeq: Number(event.run_seq) || 0,
-    runSeq: Number(event.run_seq) || 0,
-    visibility: event.payload?.visibility || 'run_public',
+    eventSeq: runSeq,
+    runSeq,
+    endRunSeq: runSeq,
+    workerSeq,
+    endWorkerSeq: workerSeq,
+    streamId,
+    streamKind,
+    streamSeq,
+    endStreamSeq: streamSeq,
+    streamFinal: Boolean(event.stream?.final),
+    visibility,
     createdAt: event.created_at || new Date().toISOString(),
     text,
   }];
@@ -299,10 +344,13 @@ export function reduceRunEvent(runtime, event) {
   }
 
   const text = event.payload?.delta || event.payload?.message || '';
-  if (!text) return { runtime: next, effects };
+  const messages = appendWorkerText(next.messages, event, text);
+  if (!text) {
+    return { runtime: messages === next.messages ? next : { ...next, messages }, effects };
+  }
   next = {
     ...next,
-    messages: appendWorkerText(next.messages, event, text),
+    messages,
     runs: updateRunByID(next.runs, runId, {
       lastEventType: event.type, lastRunSeq: runSeq,
       messageCount: ((next.runs.find((item) => item.id === runId)?.messageCount) || 0) + 1,
