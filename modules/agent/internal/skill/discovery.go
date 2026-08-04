@@ -16,15 +16,10 @@ import (
 // 每次都会重新读取，使新建技能能够立即使用。
 func BuildContext(workspaceRoot string) *methods.SkillsContext {
 	root := strings.TrimSpace(workspaceRoot)
-	if root == "" {
-		return &methods.SkillsContext{
-			Context: "Managed skills: no workspace selected. Skills live under .codex/skills after a workspace is opened.",
-		}
-	}
-	items, err := ListManaged(root)
+	items, err := ListAvailable(root)
 	if err != nil {
 		return &methods.SkillsContext{
-			Context: "Managed skills: failed to load .codex/skills (" + err.Error() + "). Use skill.list to retry.",
+			Context: "Managed skills: failed to load skill directories (" + err.Error() + "). Use skill.list to retry.",
 		}
 	}
 	return &methods.SkillsContext{
@@ -35,8 +30,8 @@ func BuildContext(workspaceRoot string) *methods.SkillsContext {
 
 func formatSkillsCatalog(items []methods.SkillSummary) string {
 	var b strings.Builder
-	b.WriteString("Managed skills catalog (refreshed for this conversation from .codex/skills).\n")
-	b.WriteString("When a skill matches the user task, read its SKILL.md with workspace.read_file and decide how to apply it. Do not use a separate skill runner.\n")
+	b.WriteString("Managed skills catalog (refreshed for this conversation from the Gateway skill directory and workspace .codex/skills).\n")
+	b.WriteString("When a skill matches the user task, read its SKILL.md with workspace.read_file using the listed path and decide how to apply it. Do not use a separate skill runner.\n")
 	b.WriteString("Use skill.list to re-check, skill.create/update/delete to manage skills.\n")
 	if len(items) == 0 {
 		b.WriteString("Currently available skills: none.\n")
@@ -56,9 +51,74 @@ func formatSkillsCatalog(items []methods.SkillSummary) string {
 		b.WriteString(name)
 		b.WriteString(": ")
 		b.WriteString(desc)
+		if path := strings.TrimSpace(item.Path); path != "" {
+			b.WriteString(" (path: ")
+			b.WriteString(path)
+			b.WriteString(")")
+		}
 		b.WriteString("\n")
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// ListAvailable returns Gateway-owned built-in skills plus workspace-managed
+// skills. Built-ins win on duplicate names so every workspace uses the same
+// bundled instructions without copying them into the workspace.
+func ListAvailable(workspaceRoot string) ([]methods.SkillSummary, error) {
+	items := make([]methods.SkillSummary, 0)
+	globalRoot, err := builtinSkillsRoot()
+	if err != nil {
+		return nil, err
+	}
+	if globalRoot != "" {
+		globalItems, err := listSkillRoot(globalRoot, true)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, globalItems...)
+	}
+	if strings.TrimSpace(workspaceRoot) != "" {
+		workspaceItems, err := ListManaged(workspaceRoot)
+		if err != nil {
+			return nil, err
+		}
+		seen := make(map[string]struct{}, len(items))
+		for _, item := range items {
+			seen[item.Name] = struct{}{}
+		}
+		for _, item := range workspaceItems {
+			if _, exists := seen[item.Name]; exists {
+				continue
+			}
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return items, nil
+}
+
+func builtinSkillsRoot() (string, error) {
+	configured := strings.TrimSpace(os.Getenv(methods.EnvSkillsDir))
+	if configured == "" {
+		return "", nil
+	}
+	root, err := filepath.Abs(configured)
+	if err != nil {
+		return "", err
+	}
+	root = filepath.Clean(root)
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", fmt.Errorf("Gateway skill directory is not accessible: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("Gateway skill directory is not a directory: %q", root)
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
 }
 
 func ListManaged(workspaceRoot string) ([]methods.SkillSummary, error) {
@@ -102,6 +162,37 @@ func ListManaged(workspaceRoot string) ([]methods.SkillSummary, error) {
 	return items, nil
 }
 
+func listSkillRoot(root string, absolutePaths bool) ([]methods.SkillSummary, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]methods.SkillSummary, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || !managedSkillNamePattern.MatchString(entry.Name()) {
+			continue
+		}
+		name := entry.Name()
+		target := filepath.Join(root, name, "SKILL.md")
+		displayPath := filepath.ToSlash(filepath.Join(managedSkillsPath, name, "SKILL.md"))
+		if absolutePaths {
+			displayPath = filepath.ToSlash(target)
+		}
+		detail, err := loadSkillDetail(target, name, false, displayPath)
+		if err != nil {
+			continue
+		}
+		items = append(items, methods.SkillSummary{
+			Name:            detail.Name,
+			Description:     detail.Description,
+			Path:            detail.Path,
+			HasInstructions: true,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return items, nil
+}
+
 func LoadManagedDetail(workspaceRoot string, name string, includeInstructions bool) (methods.SkillDetail, error) {
 	name = strings.TrimSpace(name)
 	if !managedSkillNamePattern.MatchString(name) {
@@ -111,6 +202,10 @@ func LoadManagedDetail(workspaceRoot string, name string, includeInstructions bo
 	if err != nil {
 		return methods.SkillDetail{}, err
 	}
+	return loadSkillDetail(path, name, includeInstructions, filepath.ToSlash(filepath.Join(managedSkillsPath, name, "SKILL.md")))
+}
+
+func loadSkillDetail(path string, name string, includeInstructions bool, displayPath string) (methods.SkillDetail, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -138,7 +233,7 @@ func LoadManagedDetail(workspaceRoot string, name string, includeInstructions bo
 	detail := methods.SkillDetail{
 		Name:        name,
 		Description: parsed.Description,
-		Path:        filepath.ToSlash(filepath.Join(managedSkillsPath, name, "SKILL.md")),
+		Path:        displayPath,
 		SizeBytes:   info.Size(),
 	}
 	if includeInstructions {
@@ -213,7 +308,7 @@ func decodeFrontmatterDescription(raw string) string {
 }
 
 func RunList(workspaceRoot string) (string, error) {
-	items, err := ListManaged(workspaceRoot)
+	items, err := ListAvailable(workspaceRoot)
 	if err != nil {
 		return "", err
 	}

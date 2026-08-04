@@ -32,35 +32,32 @@ var builtinSkills = []builtinSkillDefinition{
 	{name: "automation-workflows", content: builtinAutomationWorkflowsSkill},
 }
 
-// ensureBuiltinSkills installs Gateway-bundled skills only when the active
-// workspace does not already provide them. Existing workspace content is
-// user-owned and is never overwritten.
-func ensureBuiltinSkills(workspaceRoot string) error {
-	workspaceRoot = strings.TrimSpace(workspaceRoot)
-	if workspaceRoot == "" {
-		return nil
+// EnsureBuiltinSkills installs Gateway-bundled skills into the Gateway-owned
+// skill directory. Existing files are user-owned and are never overwritten.
+func EnsureBuiltinSkills(skillsRoot string) error {
+	skillsRoot = strings.TrimSpace(skillsRoot)
+	if skillsRoot == "" {
+		return fmt.Errorf("builtin skills root is required")
 	}
 
-	root, err := filepath.Abs(workspaceRoot)
+	root, err := filepath.Abs(skillsRoot)
 	if err != nil {
 		return err
 	}
 	root = filepath.Clean(root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("create builtin skills root: %w", err)
+	}
 	info, err := os.Stat(root)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// The Gateway does not own workspace creation. A later runtime
-			// validation will report the missing workspace with its usual error.
-			return nil
-		}
-		return fmt.Errorf("workspace root is not accessible: %w", err)
+		return fmt.Errorf("builtin skills root is not accessible: %w", err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("workspace root is not a directory: %q", root)
+		return fmt.Errorf("builtin skills root is not a directory: %q", root)
 	}
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return fmt.Errorf("resolve workspace root: %w", err)
+		return fmt.Errorf("resolve builtin skills root: %w", err)
 	}
 	realRoot = filepath.Clean(realRoot)
 
@@ -73,7 +70,7 @@ func ensureBuiltinSkills(workspaceRoot string) error {
 }
 
 func ensureBuiltinSkill(realRoot, lexicalRoot string, skill builtinSkillDefinition) error {
-	targetDir := filepath.Join(lexicalRoot, ".codex", "skills", skill.name)
+	targetDir := filepath.Join(lexicalRoot, skill.name)
 	if err := ensureBuiltinSkillDirectory(realRoot, lexicalRoot, targetDir); err != nil {
 		return err
 	}
@@ -107,12 +104,12 @@ func ensureBuiltinSkill(realRoot, lexicalRoot string, skill builtinSkillDefiniti
 	return nil
 }
 
-// ensureBuiltinSkillDirectory creates the managed skill directory one
-// component at a time and rejects symlinks that resolve outside the workspace.
+// ensureBuiltinSkillDirectory creates a skill directory one component at a
+// time and rejects symlinks that resolve outside the Gateway skill root.
 func ensureBuiltinSkillDirectory(realRoot, lexicalRoot, target string) error {
 	rel, err := filepath.Rel(lexicalRoot, target)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("builtin skill path escapes workspace root")
+		return fmt.Errorf("builtin skill path escapes Gateway skill root")
 	}
 	current := lexicalRoot
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
@@ -138,7 +135,7 @@ func ensureBuiltinSkillDirectory(realRoot, lexicalRoot, target string) error {
 				return fmt.Errorf("resolve builtin skill directory: %w", evalErr)
 			}
 			if !pathInside(realRoot, evaluated) {
-				return fmt.Errorf("builtin skill path escapes workspace root")
+				return fmt.Errorf("builtin skill path escapes Gateway skill root")
 			}
 			info, statErr = os.Stat(evaluated)
 			if statErr != nil {

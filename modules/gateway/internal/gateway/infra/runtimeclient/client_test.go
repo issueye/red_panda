@@ -69,6 +69,18 @@ func TestClientReadStdoutAcceptsLargeToolEvent(t *testing.T) {
 	}
 }
 
+func TestClientSetSkillsRootAddsGatewayEnvironment(t *testing.T) {
+	client := New("", nil, "test", nil, nil)
+	client.SetSkillsRoot(`C:\gateway\skills`)
+	client.SetSkillsRoot(`C:\gateway\skills-v2`)
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.extraEnv) != 1 || client.extraEnv[0] != methods.EnvSkillsDir+`=C:\gateway\skills-v2` {
+		t.Fatalf("skills environment = %#v", client.extraEnv)
+	}
+}
+
 func TestClientHandlesRuntimeOriginatedRequest(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()

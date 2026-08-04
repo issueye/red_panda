@@ -70,6 +70,34 @@ func TestBuildSkillsContextReflectsLatestDiskSkills(t *testing.T) {
 	}
 }
 
+func TestBuildSkillsContextIncludesGatewayOwnedSkills(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	gatewayRoot := t.TempDir()
+	t.Setenv(methods.EnvSkillsDir, gatewayRoot)
+	target := filepath.Join(gatewayRoot, "coding", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: coding\ndescription: Gateway coding instructions.\n---\n\nRead this file.\n"
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	context := skill.BuildContext(workspaceRoot)
+	if len(context.Items) != 1 || context.Items[0].Name != "coding" {
+		t.Fatalf("gateway skills = %#v", context.Items)
+	}
+	if context.Items[0].Path != filepath.ToSlash(target) {
+		t.Fatalf("gateway skill path = %q, want %q", context.Items[0].Path, filepath.ToSlash(target))
+	}
+	if !strings.Contains(context.Context, filepath.ToSlash(target)) {
+		t.Fatalf("catalog did not expose gateway skill path: %q", context.Context)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, ".codex", "skills")); !os.IsNotExist(err) {
+		t.Fatalf("gateway skill discovery created workspace files: %v", err)
+	}
+}
+
 func TestManagedSkillCreateAndUpdate(t *testing.T) {
 	root := t.TempDir()
 	createOutput, err := skill.RunCreate(root, "code-review", "Review code safely.", "# Workflow\n\n1. Inspect the diff.\n2. Report findings.")

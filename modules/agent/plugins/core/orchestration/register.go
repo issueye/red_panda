@@ -46,7 +46,7 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			def: ptools.Definition{
 				Name:        "skill.list",
 				DisplayName: "List skills",
-				Description: "List managed workspace skills under .codex/skills with name and description only. The catalog is also injected at conversation start; call this to re-check after skill.create/update/delete in the same run.",
+				Description: "List Gateway built-in and managed workspace skills with name and description only. The catalog is also injected at conversation start; call this to re-check after skill.create/update/delete in the same run.",
 				Risk:        ptools.RiskLow,
 				Parameters: map[string]any{
 					"type":       "object",

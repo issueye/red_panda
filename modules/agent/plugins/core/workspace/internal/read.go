@@ -42,7 +42,11 @@ type workspaceStatsResult struct {
 // ---------- read-file (copied from workspace_read.go runReadFile) ----------
 
 func RunReadFile(root string, relPath string) (string, error) {
-	target, err := resolveWorkspacePath(root, relPath)
+	return RunReadFileFromRoots(root, relPath, "")
+}
+
+func RunReadFileFromRoots(root string, relPath string, extraRoot string) (string, error) {
+	target, err := resolveReadablePath(root, relPath, extraRoot)
 	if err != nil {
 		return "", err
 	}

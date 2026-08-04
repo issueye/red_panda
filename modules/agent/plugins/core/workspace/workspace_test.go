@@ -11,6 +11,7 @@ import (
 	"redpanda/agent/internal/runtime/hooks"
 	"redpanda/agent/internal/runtime/registry"
 	"redpanda/agent/plugins/core/workspace/internal"
+	"redpanda/protocol/methods"
 )
 
 func TestRegisterReturnsAllTools(t *testing.T) {
@@ -94,6 +95,37 @@ func TestReadFileHandlerSuccessAndNotFound(t *testing.T) {
 	}
 	if res.Status != "failed" {
 		t.Errorf("expected status failed, got %s", res.Status)
+	}
+}
+
+func TestReadFileHandlerAllowsGatewaySkillRootOnlyForReads(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	gatewayRoot := t.TempDir()
+	t.Setenv(methods.EnvSkillsDir, gatewayRoot)
+	skillFile := filepath.Join(gatewayRoot, "coding", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillFile, []byte("gateway instructions"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	toolCtx := &registry.ToolContext{WorkingDir: workspaceRoot}
+	res, err := runReadFileHandler(ctx, toolCtx, map[string]any{"path": skillFile})
+	if err != nil || res.Output != "gateway instructions" {
+		t.Fatalf("gateway skill read = %#v, %v", res, err)
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runReadFileHandler(ctx, toolCtx, map[string]any{"path": outside}); err == nil {
+		t.Fatal("read handler allowed an unrelated absolute path")
+	}
+	if _, err := runWriteFileHandler(ctx, toolCtx, map[string]any{"path": skillFile, "content": "overwrite"}); err == nil {
+		t.Fatal("write handler allowed an absolute Gateway skill path")
 	}
 }
 

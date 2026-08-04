@@ -2,10 +2,12 @@ package workspace
 
 import (
 	"context"
+	"os"
 
 	"redpanda/agent/internal/runtime/hooks"
 	"redpanda/agent/internal/runtime/registry"
 	"redpanda/agent/plugins/core/workspace/internal"
+	"redpanda/protocol/methods"
 	ptools "redpanda/protocol/tools"
 )
 
@@ -25,12 +27,12 @@ var tools = []registry.ToolEntry{
 		Definition: ptools.Definition{
 			Name:        "workspace.read_file",
 			DisplayName: "Read file",
-			Description: "Read a text file inside the active workspace.",
+			Description: "Read a text file inside the active workspace or a listed read-only Gateway skill path.",
 			Risk:        ptools.RiskLow,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path": map[string]any{"type": "string", "description": "Workspace-relative file path."},
+					"path": map[string]any{"type": "string", "description": "Workspace-relative file path, or an absolute path listed in the managed Gateway skill catalog."},
 				},
 				"required": []string{"path"},
 			},
@@ -125,7 +127,7 @@ var tools = []registry.ToolEntry{
 				"type": "object",
 				"properties": map[string]any{
 					"paths": map[string]any{
-						"type": "array", "description": "Workspace-relative text file paths.",
+						"type": "array", "description": "Workspace-relative text file paths or listed Gateway skill paths.",
 						"items": map[string]any{"type": "string"}, "maxItems": internal.DefaultReadFiles,
 					},
 				},
@@ -232,7 +234,7 @@ func runReadFileHandler(ctx context.Context, toolCtx *registry.ToolContext, args
 	_ = ctx
 	root := toolCtx.WorkingDir
 	relPath := internal.StringArg(args, "path")
-	output, err := internal.RunReadFile(root, relPath)
+	output, err := internal.RunReadFileFromRoots(root, relPath, os.Getenv(methods.EnvSkillsDir))
 	if err != nil {
 		return failResult(err), err
 	}
@@ -294,7 +296,7 @@ func runReadFilesHandler(ctx context.Context, toolCtx *registry.ToolContext, arg
 	root := toolCtx.WorkingDir
 	paths := internal.StringListArg(args, "paths")
 	_ = paths
-	output, err := internal.RunReadFiles(root, paths)
+	output, err := internal.RunReadFilesFromRoots(root, paths, os.Getenv(methods.EnvSkillsDir))
 	if err != nil {
 		return failResult(err), err
 	}

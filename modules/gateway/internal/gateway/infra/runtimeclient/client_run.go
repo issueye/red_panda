@@ -161,7 +161,10 @@ func (c *Client) executePerRun(ctx context.Context, params methods.RunExecutePar
 			handler(params.RunID, err)
 		}
 	}
-	// Propagate worker pool size (and any future extra env) to the dedicated child.
+	// Propagate Gateway-owned roots and other process configuration.
+	c.mu.Lock()
+	child.extraEnv = append([]string(nil), c.extraEnv...)
+	c.mu.Unlock()
 	child.setWorkerPoolSize(params.Options.WorkerPoolSize)
 	c.mu.Lock()
 	if _, exists := c.perRuns[params.RunID]; exists {

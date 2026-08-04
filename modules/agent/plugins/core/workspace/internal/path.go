@@ -159,6 +159,35 @@ func resolveWorkspacePath(root string, relPath string) (string, error) {
 	return cleanTarget, nil
 }
 
+// resolveReadablePath permits absolute paths only inside the explicitly
+// Gateway-owned read-only skill root. All other paths retain workspace-only
+// sandboxing.
+func resolveReadablePath(root string, relPath string, extraRoot string) (string, error) {
+	if strings.TrimSpace(extraRoot) == "" || !filepath.IsAbs(strings.TrimSpace(relPath)) {
+		return resolveWorkspacePath(root, relPath)
+	}
+	allowedRoot, err := filepath.Abs(extraRoot)
+	if err != nil {
+		return "", err
+	}
+	allowedRoot, err = filepath.EvalSymlinks(filepath.Clean(allowedRoot))
+	if err != nil {
+		return "", fmt.Errorf("Gateway skill directory is not accessible: %w", err)
+	}
+	target, err := filepath.Abs(relPath)
+	if err != nil {
+		return "", err
+	}
+	target = filepath.Clean(target)
+	if resolved, evalErr := filepath.EvalSymlinks(target); evalErr == nil {
+		target = filepath.Clean(resolved)
+	}
+	if !pathutil.IsPathInside(allowedRoot, target) {
+		return "", fmt.Errorf("path escapes Gateway skill directory")
+	}
+	return target, nil
+}
+
 func workspaceRelativeDisplay(root string, target string) (string, error) {
 	rel, err := filepath.Rel(root, target)
 	if err != nil {
@@ -292,6 +321,10 @@ func RunFindFiles(root string, relPath string, pattern string, maxResults int) (
 // ---------- read-files implementation (copied from coding.go runReadFiles) ----------
 
 func RunReadFiles(root string, paths []string) (string, error) {
+	return RunReadFilesFromRoots(root, paths, "")
+}
+
+func RunReadFilesFromRoots(root string, paths []string, extraRoot string) (string, error) {
 	if len(paths) == 0 {
 		return "", fmt.Errorf("paths is required")
 	}
@@ -304,7 +337,7 @@ func RunReadFiles(root string, paths []string) (string, error) {
 		if p == "" {
 			return "", fmt.Errorf("paths contains an empty path")
 		}
-		content, err := RunReadFile(root, p)
+		content, err := RunReadFileFromRoots(root, p, extraRoot)
 		if err != nil {
 			return output.String(), fmt.Errorf("%s: %w", p, err)
 		}

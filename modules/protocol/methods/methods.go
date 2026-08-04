@@ -7,6 +7,10 @@ import (
 )
 
 const (
+	// EnvSkillsDir is the Gateway-owned, read-only built-in skill directory
+	// shared with Agent processes.
+	EnvSkillsDir = "RED_PANDA_SKILLS_DIR"
+
 	CoreInitialize = "core.initialize"
 	CorePing       = "core.ping"
 	CoreShutdown   = "core.shutdown"
@@ -428,7 +432,7 @@ type CancelParams struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// Managed skill discovery and management (workspace .codex/skills).
+// Managed skill discovery and management (Gateway skills plus workspace .codex/skills).
 
 type SkillSummary struct {
 	Name            string `json:"name"`

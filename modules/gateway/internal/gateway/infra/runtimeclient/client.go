@@ -67,16 +67,27 @@ func (c *Client) setWorkerPoolSize(size int) {
 	if size < 1 || size > 8 {
 		return
 	}
+	c.setExtraEnv("RED_PANDA_WORKER_POOL_SIZE", fmt.Sprintf("%d", size))
+}
+
+// SetSkillsRoot exposes the Gateway-owned built-in skill directory to Agent
+// processes. Workspace write tools remain scoped to their working directory.
+func (c *Client) SetSkillsRoot(root string) {
+	c.setExtraEnv(methods.EnvSkillsDir, strings.TrimSpace(root))
+}
+
+func (c *Client) setExtraEnv(key, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// Replace any previous setting for this key.
 	filtered := make([]string, 0, len(c.extraEnv))
 	for _, e := range c.extraEnv {
-		if !strings.HasPrefix(e, "RED_PANDA_WORKER_POOL_SIZE=") {
+		if !strings.HasPrefix(e, key+"=") {
 			filtered = append(filtered, e)
 		}
 	}
-	filtered = append(filtered, fmt.Sprintf("RED_PANDA_WORKER_POOL_SIZE=%d", size))
+	if value != "" {
+		filtered = append(filtered, key+"="+value)
+	}
 	c.extraEnv = filtered
 }
 
