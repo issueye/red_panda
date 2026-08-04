@@ -14,10 +14,11 @@ The desktop frontend is a dense operational workspace: top bar, left session rai
 
 ## Design tokens
 
-- Color: semantic tokens in `app.css` cover text, muted text, surfaces, borders, focus, brand, success, warning, danger, and info.
-- Radius: cards and controls use 8px, compact tree rows and code blocks may use 6px, pills use 999px.
-- Spacing: 6/8/10/12/14/18/24px remain the active scale to match the dense desktop layout.
-- Typography: Inter/Segoe/system stack, 10-15px component text, code preview uses Cascadia Code/Consolas.
+- Color: semantic tokens in `src/styles/tokens.css` cover text hierarchy, conversation text, surfaces, borders, overlays, focus, brand, success, warning, danger, and info.
+- Radius: controls use 6px, framed content uses 8px, compact rows use 4px, and status badges use the pill token.
+- Spacing: all shared components use the 4px-based `--space-*` scale; feature CSS may use an intermediate value only when dense alignment requires it.
+- Typography: the global UI and mono stacks plus `--text-*`, `--leading-*`, and `--font-*` scales are the source of truth.
+- Motion and elevation: shared durations, easing, and shadows live in `tokens.css`; feature styles must not introduce a competing focus ring or accent color.
 - States: hover, disabled, active, error, warning, success, and info states are expressed as token-backed classes.
 
 ## Normalization rules
@@ -29,3 +30,5 @@ The desktop frontend is a dense operational workspace: top bar, left session rai
 - Empty, loading, and error states should use `EmptyState`, `InlineEmpty`, and `ErrorMessage`, with legacy class names kept only where a panel needs local layout.
 - New form rows should use `Field` so labels, spacing, and focus behavior stay consistent across settings and inspectors.
 - New dropdowns should use `SelectMenu`; native `<select>` controls are intentionally avoided so hover, focus, menu shape, and compact sizing stay consistent.
+- `app.css` is an import manifest only. New feature styles belong in the closest file under `styles/components`, while cross-feature primitives belong in `tokens.css`, `base.css`, `layout.css`, or `components/ui.css`.
+- Conversation body copy uses `--color-conversation-text`; metadata, timestamps, placeholders, and collapsed reasoning remain on muted text tokens.

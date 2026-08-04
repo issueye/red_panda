@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"redpanda/agent/internal/skill"
 	agenttools "redpanda/agent/internal/tools"
 	"redpanda/agent/internal/worker"
 	"redpanda/protocol/events"
@@ -161,6 +162,24 @@ func TestDelegatedWorkerReplyHidesDelegateAndLegacyRunTools(t *testing.T) {
 	}
 	if child.Options.SpecialistContext == nil || !strings.Contains(child.Options.SpecialistContext.Context, "Worker profile prompt.") {
 		t.Fatalf("worker profile prompt not applied: %#v", child.Options.SpecialistContext)
+	}
+}
+
+func TestDelegatedWorkerReplyInjectsCodingSkill(t *testing.T) {
+	root := t.TempDir()
+	if _, err := skill.RunCreate(root, "coding", "Focused coding workflow.", "# Coding rules\n\nUse one bounded read and do not repeat unchanged operations."); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := methods.ReplyParams{
+		Session: methods.ReplySession{WorkingDir: root},
+	}
+	child := delegatedWorkerReply(parent, "implement the fix", "implementer", 4)
+	if child.Options.SpecialistContext == nil || !strings.Contains(child.Options.SpecialistContext.Context, "Mandatory coding skill instructions:") {
+		t.Fatalf("coding skill was not injected: %#v", child.Options.SpecialistContext)
+	}
+	if !strings.Contains(child.Options.SpecialistContext.Context, "do not repeat unchanged operations") {
+		t.Fatalf("coding skill instructions missing: %q", child.Options.SpecialistContext.Context)
 	}
 }
 

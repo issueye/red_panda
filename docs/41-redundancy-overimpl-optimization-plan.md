@@ -109,7 +109,7 @@ Wave 5  结构拆分（大文件）    ── 不改行为
 | **W1-1** | 主写路径收敛（Goal 默认） | Goal allowlist 仅保留 `workspace.write_file` + `diff_file`；`edit_file`/`apply_patch` 需显式 allowlist 或 debug | Goal 默认 schema 无 edit/patch；非 Goal 不变 |
 | **W1-2** | Worker 消息工具 ops-only | `worker.send`/`worker.receive` 进 `opsOnlyTools`；Goal allowlist 同步移除 | 默认不可见；debug 可开 |
 | **W1-3** | 非 Goal 隐藏完整 context CRUD？ | **不做**：context 仅 Goal 模式有意义，已由 Goal allowlist 约束 | — |
-| **W1-4** | skill.run 在 Goal 中的定位 | 保留；文档注明与 worker.delegate 分工（skill=配方，worker=编制角色） | 描述更新 |
+| **W1-4** | Skill 在 Goal 中的定位 | 移除独立 skill runner；模型通过 `workspace.read_file` 自主读取技能，`worker.delegate` 负责执行编制 | 描述更新 |
 
 门禁：
 

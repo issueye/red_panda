@@ -180,15 +180,15 @@ try {
     Write-Host "gateway lists skill: $($skillList.items[0].name) - $($skillList.items[0].description)"
   } finally { $ws.Dispose() }
 
-  # ===== TEST 2: skill RUN via real provider =====
-  Write-Host "`n=== TEST 2: skill.run via real provider ($Model) ==="
+  # ===== TEST 2: model-directed skill read via real provider =====
+  Write-Host "`n=== TEST 2: model-directed SKILL.md read via real provider ($Model) ==="
   $ws2 = New-WsClient
   try {
     Send-WsJson $ws2 @{
-      id = "run_run"; type = "request"; method = "run.start"
+      id = "read_skill"; type = "request"; method = "run.start"
       payload = @{
         session_id = $session.id
-        input = @{ text = "Run the managed skill 'summarizer' on this task: summarize the sentence 'The quick brown fox jumps over the lazy dog while a distant bell rings twice.' Use the skill__run tool with name=summarizer." }
+        input = @{ text = "Read .codex/skills/summarizer/SKILL.md with workspace.read_file, then follow its instructions to summarize the sentence 'The quick brown fox jumps over the lazy dog while a distant bell rings twice.' Do not use a skill runner." }
         options = @{
           working_dir = $Workspace
           provider_profile_id = $profile.id
@@ -199,19 +199,15 @@ try {
       }
     }
     $runEvents = @()
-    $runResp = Wait-WsResponseWithEvents $ws2 "run_run" ([ref]$runEvents)
-    Assert-True ($runResp.type -eq "response" -and $runResp.payload.accepted) "skill.run start mismatch"
+    $runResp = Wait-WsResponseWithEvents $ws2 "read_skill" ([ref]$runEvents)
+    Assert-True ($runResp.type -eq "response" -and $runResp.payload.accepted) "model-directed skill read start mismatch"
     $runFinish = Wait-RunFinish $ws2 ([ref]$runEvents)
-    Write-Host "skill.run status: $($runFinish.payload.status)"
+    Write-Host "model-directed skill read status: $($runFinish.payload.status)"
 
-    $subagentEvents = @($runEvents | Where-Object { $_.type -eq "subagent_update" })
-    Write-Host "subagent_update events: $($subagentEvents.Count)"
-    foreach ($e in $subagentEvents) { Write-Host "  - $($e.payload.status): $($e.payload.summary)" }
-
-    # collect assistant message text (the final root result includes skill output)
-    $deltas = @($runEvents | Where-Object { $_.type -eq "message_delta" -and $_.agent.role -ne "subagent" })
+    # collect assistant message text after the model reads the skill itself
+    $deltas = @($runEvents | Where-Object { $_.type -eq "message_delta" })
     $finalText = ($deltas | ForEach-Object { $_.payload.delta }) -join ""
-    Write-Host "`nroot final message (skill result excerpt):"
+    Write-Host "`nroot final message (model-directed skill result excerpt):"
     Write-Host $finalText.Substring(0, [Math]::Min(400, $finalText.Length))
   } finally { $ws2.Dispose() }
 
@@ -223,7 +219,6 @@ try {
     skill_created = (Test-Path $skillPath)
     create_status = $createFinish.payload.status
     run_status = $runFinish.payload.status
-    subagent_updates = $subagentEvents.Count
   } | ConvertTo-Json -Compress
 } finally {
   if ($gateway -and -not $gateway.HasExited) {

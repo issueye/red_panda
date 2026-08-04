@@ -117,7 +117,7 @@ func RunReadFileHandler(ctx *tools.ToolContext, args map[string]any) (*tools.Res
 - 超时分类映射：
   - `strings.HasPrefix(name, "workspace.")` 等 workspace 类 → `LocalToolTimeout`
   - `strings.HasPrefix(name, "memory.")`、`strings.HasPrefix(name, "todo.")` → `GatewayToolTimeout`
-  - `shell.exec`、`skill.run`、`worker.*`、`web.*` → `SelfManagedToolTimeout`
+  - `shell.exec`、`worker.*`、`web.*` → `SelfManagedToolTimeout`
 - 所有迁移后的工具仍走 `registry_test.go` 的公开顺序锁定测试。
 
 #### T3: plugins/core/workspace/ — 11 个工具
@@ -143,7 +143,7 @@ func RunReadFileHandler(ctx *tools.ToolContext, args map[string]any) (*tools.Res
 
 | 旧文件 | 迁移目标 | 工具 |
 | --- | --- | --- |
-| `dispatch_orchestration.go` | `orchestration/register.go` | `skill.list`、`skill.create`、`skill.update`、`skill.delete`、`skill.run`、`worker.delegate`、`worker.list`、`worker.cancel`、`worker.pool_status`、`worker.send`、`worker.receive` |
+| `dispatch_orchestration.go` | `orchestration/register.go` | `skill.list`、`skill.create`、`skill.update`、`skill.delete`、`worker.delegate`、`worker.list`、`worker.cancel`、`worker.pool_status`、`worker.send`、`worker.receive` |
 | 实现函数（在 runtime 各工具文件） | 对应 orchestration/internal/ | — |
 
 #### T6: plugins/core/state/ — 7 个工具

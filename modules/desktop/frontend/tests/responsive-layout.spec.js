@@ -44,13 +44,21 @@ test('narrow app layout keeps right panel tools reachable without horizontal ove
   await page.setViewportSize({ width: 980, height: 760 });
   await page.goto('/');
 
+  const workspaceBox = await page.locator('.workspace').boundingBox();
+  const chatBox = await page.locator('.chat-panel').boundingBox();
   const railBox = await page.locator('.right-panel-rail').boundingBox();
   const messageBox = await page.locator('.message-bubble').boundingBox();
+  expect(chatBox.y).toBe(workspaceBox.y);
+  await expect(page.locator('.right-panel-rail')).toHaveCSS('position', 'absolute');
   expect(railBox.y + railBox.height).toBeLessThanOrEqual(messageBox.y);
 
   await expect(page.getByTestId('right-tab-activity-rail')).toBeVisible();
   await page.getByTestId('right-tab-activity-rail').click();
-  await expect(page.locator('.right-panel.drawer-open')).toBeVisible();
+  const drawer = page.locator('.right-panel.drawer-open');
+  await expect(drawer).toBeVisible();
+  await expect(drawer.locator('.right-panel-tabs')).toHaveCount(0);
+  await expect(drawer.getByRole('tablist')).toHaveCount(0);
+  await expect(drawer.locator('.right-panel-mobile-header strong')).toHaveText('活动');
   await expect(page.getByTestId('activity-panel')).toBeVisible();
   await expect(page.getByRole('button', { name: '关闭辅助面板' })).toBeFocused();
 
@@ -62,6 +70,8 @@ test('narrow app layout keeps right panel tools reachable without horizontal ove
   await page.setViewportSize({ width: 520, height: 760 });
   const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(hasHorizontalOverflow).toBe(false);
+  const compactRailBox = await page.locator('.right-panel-rail').boundingBox();
+  expect(compactRailBox.width).toBeLessThan(260);
 });
 
 test('desktop side panels resize by dragging their separators', async ({ page }) => {
@@ -80,6 +90,8 @@ test('desktop side panels resize by dragging their separators', async ({ page })
   expect(leftAfter.width).toBeGreaterThan(leftBefore.width + 40);
 
   const rightPanel = page.locator('.right-panel');
+  await expect(rightPanel.locator('.right-panel-tabs')).toBeVisible();
+  await expect(rightPanel.getByRole('tab')).toHaveCount(3);
   const rightHandle = page.getByTestId('right-panel-resizer');
   const rightBefore = await rightPanel.boundingBox();
   const rightHandleBox = await rightHandle.boundingBox();
@@ -102,6 +114,26 @@ test('settings uses the full viewport at the compact breakpoint', async ({ page 
 });
 
 test('panel fixtures stay visible in narrow review viewports', async ({ page }) => {
+  await page.setViewportSize({ width: 980, height: 820 });
+  await page.goto('/workflow-fixture.html');
+  const toolbarBounds = await page.locator('.composer-toolbar').evaluate((element) => {
+    const toolbar = element.getBoundingClientRect();
+    const children = Array.from(element.children).map((child) => {
+      const box = child.getBoundingClientRect();
+      return { left: box.left, right: box.right };
+    });
+    return {
+      left: toolbar.left,
+      right: toolbar.right,
+      children,
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+  expect(toolbarBounds.pageOverflow).toBe(0);
+  expect(toolbarBounds.children.every((child) => (
+    child.left >= toolbarBounds.left && child.right <= toolbarBounds.right
+  ))).toBe(true);
+
   await page.setViewportSize({ width: 390, height: 760 });
   await page.goto('/activity-fixture.html');
   await expect(page.getByTestId('activity-panel')).toBeVisible();

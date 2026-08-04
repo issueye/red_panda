@@ -42,7 +42,7 @@ Updated: 2026-07-26
 - Desktop Memory UI is implemented: the right panel exposes a Memory tab for inspecting project/session memory, creating records, editing content/status, disabling/deleting records, and previewing injected context through the Gateway `preview-run` API.
 - Runtime memory tools are implemented: `memory.list`, `memory.create`, `memory.update`, and `memory.delete` use normal Runtime tool policy, permission, and `tool_*` events while Gateway executes persistence through internal `memory.tool.execute` JSON-RPC with current run/session/workspace scope validation.
 - Agent Runtime unit coverage includes process subagent success, cancellation, process-pool reuse, and failed child creation/start paths while preserving root-run finish behavior and ordered `root_seq`.
-- Managed skill discovery and management is implemented end to end: Protocol DTOs and `agent.skills` / `agent.skill.load` / `agent.skill.create` / `agent.skill.update` / `agent.skill.delete` JSON-RPC methods, Runtime `listManagedSkills` / `loadManagedSkillDetail` / `runDeleteSkill` plus low-risk `skill.list` and high-risk `skill.delete` tools with frontmatter parsing and symlink/path-escape protection, Gateway service/controller `GET/POST/PUT/DELETE /api/v1/skills[/:name]` proxying Runtime, and Desktop SettingsPanel Skills tab backed by Gateway (list/create/edit/delete with read-only path meta). Skill run isolation and create/update semantics are unchanged.
+- Managed skill discovery and management is implemented end to end: Protocol DTOs and `agent.skills` / `agent.skill.load` / `agent.skill.create` / `agent.skill.update` / `agent.skill.delete` JSON-RPC methods, Runtime `listManagedSkills` / `loadManagedSkillDetail` / `runDeleteSkill` plus low-risk `skill.list` and high-risk `skill.delete` tools with frontmatter parsing and symlink/path-escape protection, Gateway service/controller `GET/POST/PUT/DELETE /api/v1/skills[/:name]` proxying Runtime, and Desktop SettingsPanel Skills tab backed by Gateway (list/create/edit/delete with read-only path meta). Models read matching skill files directly with workspace tools.
 - Gateway Runtime subprocess is detached from the request context: `ensureStarted` spawns the long-lived single-core Runtime with `exec.Command` instead of `exec.CommandContext(reqCtx)`, so one-shot management requests (skills, MCP discovery) no longer kill the Runtime when their HTTP handler returns. A regression test locks this in.
 - Network access tools are implemented: high-risk `web.search` (DuckDuckGo HTML endpoint, no API key, structured title/url/snippet results with sponsored-result filtering and `uddg=` redirect decoding) and high-risk `web.fetch` (http/https GET with scheme validation, body-size cap, HTML-to-text extraction). Both honor `RiskHigh` permission policy and per-run tuning (`web_search_max_results`, `web_fetch_max_bytes`) transparently passed from Desktop settings through `run.start` options. No SSRF IP filtering by design (permission-gated); URL scheme is validated to http/https only.
 - Desktop SettingsPanel exposes a "网络工具" (Web Tools) section for search result count and fetch byte cap; `runOptions.js` forwards them as `run.start` options; Gateway extracts them via a new `intOption` helper into `ReplyOptions`.
@@ -213,17 +213,14 @@ Updated: 2026-07-26
     - both tools are high risk and use the existing policy, permission, audit event, allowlist, and denylist paths,
     - validation covers names, required content, size limits, duplicate/missing state, and symlink escape,
     - deterministic HTTP Provider integration verifies the public `skill__create` function-call mapping and tool-result follow-up round.
-95. Added isolated managed skill execution:
-    - `skill.run` always starts a fresh `runtime_process` subagent and synchronously returns only its final message as tool output,
-    - child conversation and root memory are cleared; the managed `SKILL.md` is injected only into child system context,
-    - child tool visibility follows allowlist/denylist and is restricted to read-only workspace tools, preventing recursive `skill.run` and unresolved child permission requests,
-    - subagent reasoning/message events remain auditable, while Provider and Gateway root-conversation queries exclude `subagent` and unknown roles before applying the 200-message limit,
-    - automatic compaction summaries also exclude subagent content,
-    - real StepFun coverage completed `skill.create -> skill.run -> runtime_process child -> root result` without exposing the private skill description.
+95. Removed the isolated managed skill runner:
+    - the model receives the managed-skill catalog and reads a matching `SKILL.md` with `workspace.read_file` when needed,
+    - no separate skill runner tool or hidden child execution path is exposed,
+    - delegated coding Workers receive the built-in coding skill automatically and follow its bounded investigation workflow.
 96. Added managed skill discovery and management:
     - Protocol `SkillSummary` / `SkillDetail` DTOs and `agent.skills`, `agent.skill.load`, `agent.skill.create`, `agent.skill.update`, `agent.skill.delete` method constants,
     - Runtime `listManagedSkills`, `loadManagedSkillDetail`, `parseManagedSkillMarkdown`, `runListSkills`, and `runDeleteSkill` with `.codex/skills` directory, frontmatter, symlink, path-escape, and size guardrails,
-    - low-risk `skill.list` tool returning summaries only (no instructions body) and high-risk `skill.delete` tool using the existing policy/permission/audit paths; skill subagent denylist keeps create/update/delete/run away from children,
+    - low-risk `skill.list` tool returning summaries only (no instructions body) and high-risk `skill.delete` tool using the existing policy/permission/audit paths,
     - Runtime unit coverage for empty/single-skill list, summary-only load, delete success/missing, and JSON-RPC `agent.skills` / `agent.skill.load` / `agent.skill.delete` handlers.
 97. Added Gateway skill management APIs proxying Runtime JSON-RPC:
     - runtimeclient `ListSkills` / `LoadSkill` / `CreateSkill` / `UpdateSkill` / `DeleteSkill`,
@@ -254,7 +251,7 @@ Updated: 2026-07-26
     - extracted concurrent lifecycle state into `internal/subagent.Registry`, including sticky terminal states, root-run scoping, one-shot cancellation, reset, query, and removal,
     - added `internal/subagent.Coordinator` with consumer-owned `ProcessProvider` and `EventSink` ports for register→acquire→start→capture→validate→release execution,
     - added Runtime process/event adapters while keeping Goal specialist resolution, ChildParams construction, tool handlers, JSON-RPC handlers, and root event sequencing Runtime-owned,
-    - migrated ordinary `subagent.run` to Coordinator and routed planner, skill, list, cancel, and reset state access directly through Registry,
+    - migrated ordinary `subagent.run` to Coordinator and routed planner, list, cancel, and reset state access directly through Registry,
     - verified the package boundary with Agent full tests and race tests for `internal/subagent` and `internal/runtime`.
 
 ## Modules
@@ -262,7 +259,7 @@ Updated: 2026-07-26
 | Module | Status | Notes |
 | --- | --- | --- |
 | `modules/protocol` | Complete | JSON-RPC, WebSocket envelope, agent event, permission/tool/subagent DTOs, MCP server config/timeout/CRUD DTOs, managed skill summary/detail/mutate/delete DTOs |
-| `modules/agent` | MVP complete | stdio JSON-RPC Runtime, Provider abstraction, per-run OpenAI-compatible provider override with env fallback, ToolRunner MVP, low-risk workspace tools, medium-risk `memory.list`, high-risk workspace writes, `memory.create/update/delete`, managed `skill.create/update`, low-risk `skill.list`, high-risk `skill.delete`, and isolated process-only `skill.run`, `agent.skills` / `agent.skill.load` / `agent.skill.create` / `agent.skill.update` / `agent.skill.delete` JSON-RPC handlers, permission blocking, in-process subagent lifecycle/query/cancel, `runtime_process` child-process subagent backend, reusable `process_pool` child-process subagent backend |
+| `modules/agent` | MVP complete | stdio JSON-RPC Runtime, Provider abstraction, per-run OpenAI-compatible provider override with env fallback, ToolRunner MVP, low-risk workspace tools, medium-risk `memory.list`, high-risk workspace writes, `memory.create/update/delete`, managed `skill.create/update`, low-risk `skill.list`, high-risk `skill.delete`, model-directed skill reads, `agent.skills` / `agent.skill.load` / `agent.skill.create` / `agent.skill.update` / `agent.skill.delete` JSON-RPC handlers, permission blocking, in-process subagent lifecycle/query/cancel, `runtime_process` child-process subagent backend, reusable `process_pool` child-process subagent backend |
 | `modules/gateway` | MVP complete | Gin/GORM/SQLite(no cgo), Runtime subprocess client (detached from request context), WebSocket channel, persistence replay, workspace/session/run/tool/permission/event APIs, provider profile and MCP config CRUD APIs, `provider_profile_id` run resolution, subagent list/cancel routing, root-run `per_run_process` runtime mode, Gateway-mediated memory tool execution, skill management `GET/POST/PUT/DELETE /api/v1/skills[/:name]` proxying Runtime |
 | `modules/desktop` | MVP complete | Wails v3, React/Vite, chat, permissions, tool cards, subagents, workspace/session restore, searchable RunActivityPanel, SettingsPanel runtime/policy, provider profile, Gateway-backed MCP config management, Gateway-backed Skills tab, and normalized shared UI primitives |
 | `modules/cli` | Placeholder | Future debugging entry |

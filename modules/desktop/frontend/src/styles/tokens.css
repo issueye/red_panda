@@ -1,28 +1,24 @@
 :root {
-  /* ═══════════════════════════════════════════════════════════
-     Design Tokens — Red Panda Desktop v0.2
-     Structured for consistency, extensibility, and dark-mode readiness.
-     ═══════════════════════════════════════════════════════════ */
-
-  /* ── Surface Elevation ── */
-  --color-bg: #f5f6f9;
+  /* Surfaces */
+  --color-bg: #f6f7f9;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
-  --color-surface-subtle: #f4f5f8;
-  --color-surface-muted: #ecedf1;
+  --color-surface-subtle: #f9fafb;
+  --color-surface-muted: #f3f4f6;
 
-  /* ── Text Hierarchy ── */
+  /* Text hierarchy */
   --color-text: #111827;
   --color-text-strong: #1f2937;
   --color-text-muted: #6b7280;
   --color-text-soft: #9ca3af;
+  --color-conversation-text: #080f1c;
 
-  /* ── Border Levels ── */
+  /* Borders */
   --color-border-subtle: #eef0f3;
-  --color-border: #e2e5ea;
-  --color-border-strong: #d0d4dc;
+  --color-border: #e8eaee;
+  --color-border-strong: #d8dce3;
 
-  /* ── Brand ── */
+  /* Brand */
   --color-brand: #d95f24;
   --color-brand-hover: #e36d2f;
   --color-brand-action: #c45119;
@@ -31,7 +27,7 @@
   --color-brand-border: #fed7aa;
   --color-brand-text: #9a3412;
 
-  /* ── Semantic Colors ── */
+  /* Semantic states */
   --color-success-bg: #ecfdf3;
   --color-success-border: #abefc6;
   --color-success-text: #067647;
@@ -44,21 +40,41 @@
   --color-info-bg: #eef4ff;
   --color-info-text: #3538cd;
 
-  /* ── Code ── */
-  --color-code-bg: #0f1419;
-  --color-code-text: #e5e7eb;
-
-  /* ── Interactive Overlays ── */
+  /* Overlays and code */
   --color-hover-overlay: rgba(15, 23, 42, 0.04);
   --color-active-overlay: rgba(15, 23, 42, 0.08);
   --color-selected-overlay: rgba(217, 95, 36, 0.08);
+  --color-backdrop: rgba(15, 23, 42, 0.36);
+  --color-on-dark: #f8fafc;
+  --color-code-bg: #0f1419;
+  --color-code-text: #e5e7eb;
 
-  /* ── Sidebar ── */
-  --sidebar-bg: #eff0f4;
-  --sidebar-hover: rgba(255, 255, 255, 0.6);
-  --sidebar-active: #ffffff;
+  /* Elevation */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm:
+    0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md:
+    0 4px 12px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow-lg:
+    0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 8px rgba(15, 23, 42, 0.06);
+  --shadow-xl:
+    0 24px 64px rgba(15, 23, 42, 0.18), 0 8px 16px rgba(15, 23, 42, 0.08);
+  --shadow-focus: 0 0 0 2px rgba(196, 81, 25, 0.18);
+  --shadow-drawer: -8px 0 24px rgba(15, 23, 42, 0.08);
+  --shadow-modal: var(--shadow-xl);
+  --shadow-soft: var(--shadow-xs);
 
-  /* ── Spacing (4px base grid) ── */
+  /* Radius */
+  --radius-xs: 3px;
+  --radius-compact: 4px;
+  --radius-sm: 5px;
+  --radius-control: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* Spacing: 4px base grid */
   --space-0: 0;
   --space-1: 4px;
   --space-2: 8px;
@@ -69,7 +85,7 @@
   --space-8: 32px;
   --space-10: 40px;
 
-  /* ── Typography Scale ── */
+  /* Typography */
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 13px;
@@ -83,43 +99,18 @@
   --font-medium: 500;
   --font-semibold: 600;
   --font-bold: 700;
+  --font-ui:
+    "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Code", Consolas, "SF Mono", ui-monospace, monospace;
 
-  /* ── Radius ── */
-  --radius-xs: 3px;
-  --radius-sm: 5px;
-  --radius-compact: 4px;
-  --radius-control: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-pill: 999px;
-
-  /* ── Elevation Shadows ── */
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);
-  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 8px rgba(15, 23, 42, 0.06);
-  --shadow-xl: 0 24px 64px rgba(15, 23, 42, 0.18), 0 8px 16px rgba(15, 23, 42, 0.08);
-  --shadow-soft: var(--shadow-xs);
-  --shadow-focus: 0 0 0 2px rgba(196, 81, 25, 0.18);
-  --shadow-drawer: -8px 0 24px rgba(15, 23, 42, 0.08);
-  --shadow-modal: var(--shadow-xl);
-  --shadow-inset-active: inset 3px 0 0 var(--color-brand-action);
-
-  /* ── Motion ── */
+  /* Motion */
   --duration-fast: 100ms;
   --duration-normal: 150ms;
   --duration-slow: 250ms;
   --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-
-  /* ── Font Families ── */
-  --font-ui:
-    "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC",
-    "Microsoft YaHei", sans-serif;
-  --font-mono: "Cascadia Code", Consolas, "SF Mono", ui-monospace, monospace;
 
   color: var(--color-text);
   background: var(--color-bg);

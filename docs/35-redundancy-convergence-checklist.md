@@ -88,7 +88,7 @@ go test ./modules/protocol/... ./modules/agent/... ./modules/gateway/...
 | ID | 标题 | 类型 | 风险 | 状态 | 主要改动 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **O1** | 默认隐藏 subagent 运维工具 | 过度暴露 | M | done | `opsOnlyTools` + `availableToolsForOptions`/`EvaluateToolPolicy`；`subagent.pool_*` 默认隐藏；`RED_PANDA_DEBUG_TOOLS` / `DebugTools` / allowlist 可开 | 默认 schema 无 pool_*；debug/allowlist 可开；policy 测绿 | — |
-| **O3** | Skill 管理工具移出默认主循环 | 过度暴露 | M | done | `skill.create/update/delete` 列入 ops-only；`skill.list`/`skill.run` 仍默认暴露；HTTP/Desktop CRUD 不受影响 | 默认 schema 无 create/update/delete；debug 下仍可测 skill.create | — |
+| **O3** | Skill 管理工具移出默认主循环 | 过度暴露 | M | done | `skill.create/update/delete` 列入 ops-only；`skill.list` 默认暴露；模型通过 `workspace.read_file` 自主读取技能；HTTP/Desktop CRUD 不受影响 | 默认 schema 无 create/update/delete/skill runner；debug 下仍可测 skill.create | — |
 | **O8** | Goal 模式默认工具白名单 | 选择税 | M | done | `goalModeDefaultAllowlist` + `effectiveToolAllowlist`；goals_enabled/bound goal 时默认收紧；客户端 allowlist 取交集 | Goal 隐藏 memory/ops；非 Goal 不变；policy 测绿 | O1/O3 |
 | **O5a** | Goal 设置面隐藏未稳预算 | 过度 | L | done | 条目标签仅显示工具轮次；段预算等放展开区「高级预算」；无独立 auto_continue 设置暴露 | 紧凑条无段计数；展开可见 advanced | — |
 | **R6** | Slash 命令降级 | 入口冗余 | L | done | `Parse` 默认关闭；`RED_PANDA_SLASH_TOOLS=1` 开启 | 默认 `/list` 不解析；env 开启后测仍绿 | — |

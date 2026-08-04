@@ -983,16 +983,11 @@ Do **not** treat `open_tasks` as the source of truth.
 | --- | --- | --- | --- |
 | Root | yes | yes | yes (budgeted session list) |
 | General subagent (`subagent.run`) | **deny** | **deny** | **`TodoContext = nil`** |
-| Skill subagent (`skill.run`) | **deny** | **deny** | **`TodoContext = nil`** |
+| Model-directed managed skill read | **allow read-only tools** | **deny skill management writes** | **`TodoContext = nil`** |
 
-**v1 chooses deny-both** for general and skill subagents (Key Decision 8 + 15). No “optional list” ambiguity.
+**v1 chooses deny-both** for general delegated Workers (Key Decision 8 + 15). No “optional list” ambiguity.
 
 ```go
-// skill_subagent.go — skillSubagentDenylist
-"todo.write",
-"todo.list",
-"todo_write", // alias if registered
-
 // subagent_tools.go — subagentRunDenylist
 "todo.write",
 "todo.list",
@@ -1001,7 +996,7 @@ Do **not** treat `open_tasks` as the source of truth.
 
 **Child option stripping (required — Key Decision 15):**
 
-Both `executeSubagentRun` and `executeSkillRun` do `childParams := params` then overwrite some fields. They must also:
+Delegated Worker execution does `childParams := params` then overwrites some fields. It must also:
 
 ```go
 childParams.Options.TodoContext = nil
@@ -1010,7 +1005,7 @@ childParams.Options.TodoContext = nil
 
 Without this, children inherit parent `TodoContext` once PR4 lands.
 
-**Tests:** assert denylist membership and `TodoContext == nil` in `skill_subagent_test.go` / `subagent_tools_test.go`.
+**Tests:** assert denylist membership and `TodoContext == nil` in delegated Worker tests.
 
 **Rationale:** avoid concurrent write races; root owns the plan; subagents get a focused task string.
 
@@ -1224,7 +1219,7 @@ None that block implementation. Defaults above are intentional:
   - `modules/agent/internal/runtime/policy.go` — risk_based decisions
   - `modules/agent/internal/runtime/runtime.go` — `callGateway`, `runProviderLoop`, `executeToolBatch` (params by value)
   - `modules/agent/internal/runtime/provider.go` — `openAICompatibleMessages` system blocks
-  - `modules/agent/internal/runtime/skill_subagent.go` / `subagent_tools.go` — denylist + childParams
+  - `modules/agent/internal/runtime/worker_tools.go` — delegated Worker denylist + childParams
   - `modules/gateway/internal/gateway/app/app.go` — `onRequest` switch
   - `modules/gateway/internal/gateway/service/run.go` — `applyMemoryContext`, `HandleRuntimeEvent`
   - `modules/gateway/internal/gateway/service/memory.go` — `memoryContextLimit`, ownership validation
@@ -1276,7 +1271,7 @@ Ordered, independently reviewable and mergeable PRs. Each should leave main gree
   - `tools.go` — definitions, dispatch, optional `todo_write` alias
   - `runtime.go` — `TodoExecutor`, `runTodos` map, `set/get/clearRunTodos`, emit `todo_updated`, seed on reply start, **reload `params.Options.TodoContext` in `runProviderLoop` each turn / after batch**
   - `provider.go` — TodoContext `system` message after memory; echo `/todo` helpers
-  - `skill_subagent.go`, `subagent_tools.go` — denylist both tools; **`TodoContext = nil`**
+  - `worker_tools.go` — denylist both tools; **`TodoContext = nil`**
   - tests: risk low; write updates second Complete system text; child denylist + nil context
 - **Dependencies:** PR1 (compile); PR2 for real Gateway e2e
 - **Acceptance criteria:**

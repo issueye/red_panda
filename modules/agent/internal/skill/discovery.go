@@ -36,7 +36,7 @@ func BuildContext(workspaceRoot string) *methods.SkillsContext {
 func formatSkillsCatalog(items []methods.SkillSummary) string {
 	var b strings.Builder
 	b.WriteString("Managed skills catalog (refreshed for this conversation from .codex/skills).\n")
-	b.WriteString("When a skill matches the user task, call skill.run with {name, task}.\n")
+	b.WriteString("When a skill matches the user task, read its SKILL.md with workspace.read_file and decide how to apply it. Do not use a separate skill runner.\n")
 	b.WriteString("Use skill.list to re-check, skill.create/update/delete to manage skills.\n")
 	if len(items) == 0 {
 		b.WriteString("Currently available skills: none.\n")

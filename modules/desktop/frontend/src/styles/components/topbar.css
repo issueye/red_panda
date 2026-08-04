@@ -1,14 +1,9 @@
-/* ═══════════════════════════════════════════════════════════
-   TopBar — Brand, window controls, connection pill
-   ═══════════════════════════════════════════════════════════ */
-
 .topbar {
   /* Custom caption bar — replaces native OS/Wails title bar. */
   --wails-draggable: drag;
   align-items: center;
   background: var(--color-surface);
-  border-bottom: 0;
-  box-shadow: var(--shadow-xs);
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   gap: 8px;
   height: 48px;
@@ -63,17 +58,7 @@
   animation: panda-topbar-wiggle 1.2s ease-in-out infinite;
 }
 
-.brand strong {
-  background: linear-gradient(135deg, var(--color-brand) 0%, #e87a3a 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
+.brand strong,
 .panel-header strong {
   display: block;
   font-size: 13px;
@@ -91,6 +76,7 @@
 }
 
 /* Worker rows use nested action buttons; do not force every span to block. */
+
 .worker-item .worker-meta,
 .worker-assignment .worker-meta {
   color: var(--color-text-muted);
@@ -178,11 +164,9 @@
 }
 
 .connection-pill {
-  align-items: center;
   border: 0;
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
-  display: inline-flex;
   font-size: 11px;
   font-weight: 500;
   padding: 3px 8px;
@@ -194,26 +178,9 @@
   color: var(--color-success-text);
 }
 
-.state-connected::before {
-  animation: status-pulse 2.4s ease-in-out infinite;
-  background: var(--color-success-text);
-  border-radius: 50%;
-  content: "";
-  display: inline-block;
-  height: 6px;
-  margin-right: 5px;
-  width: 6px;
-}
-
-@keyframes status-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
-}
-
 .state-error,
 .state-disconnected {
   background: var(--color-danger-bg);
   border-color: transparent;
   color: var(--color-danger-text);
 }
-

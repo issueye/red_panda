@@ -21,6 +21,15 @@ test('Restored workflow panels render permissions tools and Worker assignments',
   await expect(readTool.getByTestId('tool-output')).toHaveText('README.md loaded');
 
   await expect(page.getByTestId('permission-card')).toHaveCount(2);
+  const permissionBoxes = await page.getByTestId('permission-card').evaluateAll((items) => (
+    items.map((item) => {
+      const box = item.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom };
+    })
+  ));
+  expect(permissionBoxes.every((box, index) => (
+    index === 0 || box.top >= permissionBoxes[index - 1].bottom
+  ))).toBe(true);
   expect(await page.locator('.conversation > [data-timeline-type]').evaluateAll((items) => (
     items.map((item) => item.dataset.timelineType)
   ))).toEqual([
@@ -190,6 +199,9 @@ test('Chat messages keep the user avatar and omit the assistant avatar', async (
     background: 'rgba(0, 0, 0, 0)',
     borderStyle: 'none',
   });
+  expect(await page.locator('.message-plain').evaluateAll((items) => (
+    items.every((item) => getComputedStyle(item).color === 'rgb(8, 15, 28)')
+  ))).toBe(true);
 
   const toolGroup = page.getByTestId('tool-execution-group');
   await toolGroup.getByTestId('tool-execution-group-toggle').click();

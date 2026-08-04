@@ -1,20 +1,44 @@
-/* ═══════════════════════════════════════════════════════════
-   Tool Card — Tool call timeline entries
-   ═══════════════════════════════════════════════════════════ */
+/* Tool groups read as flat execution traces rather than nested cards. */
 
-/* Tool calls stay as quiet one-line timeline entries until expanded. */
 .tool-execution-group {
   align-self: stretch;
-  border-bottom: 1px solid transparent;
-  border-top: 1px solid var(--color-border);
-  max-width: min(760px, 100%);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  max-width: min(840px, 100%);
   min-width: 0;
-  padding: 2px 0;
+  padding: 0;
+  position: relative;
 }
 
-.tool-execution-group.is-expanded {
-  border-bottom-color: var(--color-border);
-  padding-bottom: 6px;
+.todo-composer-item-spinner {
+  animation: tool-spin 900ms linear infinite;
+}
+
+@media (max-width: 620px) {
+  .todo-composer-toggle {
+    grid-template-columns: 26px minmax(0, 1fr) 14px;
+  }
+
+  .todo-composer-progress {
+    display: none;
+  }
+}
+
+.tool-execution-group.is-running {
+  overflow: hidden;
+}
+
+.tool-execution-group.is-running::after {
+  animation: tool-progress-scan 1.45s ease-in-out infinite;
+  background: var(--color-brand-action);
+  bottom: 0;
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  width: 32%;
 }
 
 .tool-execution-group-toggle {
@@ -25,10 +49,10 @@
   cursor: pointer;
   display: grid;
   font: inherit;
-  gap: 6px;
-  grid-template-columns: 16px minmax(0, 1fr) max-content 16px;
+  gap: 7px;
+  grid-template-columns: 20px minmax(0, 1fr) max-content 14px;
   min-height: 30px;
-  padding: 2px 3px;
+  padding: 1px 0;
   text-align: left;
   width: 100%;
 }
@@ -37,10 +61,54 @@
   background: var(--color-surface-subtle);
 }
 
-.tool-execution-group-title {
+.tool-execution-group-icon {
+  align-items: center;
   color: var(--color-text-muted);
-  font-size: 13px;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+.tool-execution-group.is-running .tool-execution-group-icon {
+  color: var(--color-brand-action);
+}
+
+.tool-execution-group-copy {
+  display: block;
+  min-width: 0;
+}
+
+.tool-execution-group-heading {
+  align-items: center;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+}
+
+.tool-execution-group-heading strong {
+  color: var(--color-text-muted);
+  font-size: 12px;
   font-weight: 500;
+}
+
+.tool-execution-group-heading em {
+  align-items: center;
+  color: var(--color-text-soft);
+  display: inline-flex;
+  font-size: 10px;
+  font-style: normal;
+  height: auto;
+  justify-content: center;
+  min-width: 0;
+  padding: 0;
+}
+
+.tool-execution-group-summary {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.4;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -52,13 +120,17 @@
   color: var(--color-text-soft);
   display: inline-flex;
   font-size: 11px;
+  font-weight: 500;
   gap: 4px;
   white-space: nowrap;
 }
 
 .tool-execution-group-status.is-running { color: var(--color-brand-text); }
+
 .tool-execution-group-status.is-failed { color: var(--color-danger-text); }
+
 .tool-execution-group-status.is-attention { color: var(--color-warning-text); }
+
 .tool-execution-group-status.is-completed { color: var(--color-success-text); }
 
 .tool-execution-group-chevron {
@@ -69,23 +141,61 @@
 .tool-execution-group-chevron.is-open { transform: rotate(90deg); }
 
 .tool-execution-group-body {
+  border-left: 1px solid var(--color-border);
   display: grid;
-  gap: 4px;
+  gap: 0;
+  margin-left: 9px;
   min-width: 0;
-  padding: 2px 0 0 18px;
+  padding: 3px 0 1px 18px;
+}
+
+.tool-execution-group-body .tool-card {
+  border-radius: 0;
+}
+
+.tool-execution-group-body .tool-card.is-expanded,
+.tool-execution-group-body .tool-card.is-live:not(.is-expanded),
+.tool-execution-group-body .tool-card.is-failed:not(.is-expanded),
+.tool-execution-group-body .tool-card.is-attention:not(.is-expanded) {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.tool-execution-group-body .tool-card + .tool-card {
+  border-top: 1px solid var(--color-border);
+}
+
+.tool-execution-group-body .tool-card::after {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .tool-execution-group-toggle {
+    grid-template-columns: 20px minmax(0, 1fr) 14px;
+  }
+
+  .tool-execution-group-status { display: none; }
+  .message-thinking-content { padding-left: 11px; }
+  .tool-execution-group-body {
+    margin-left: 9px;
+    padding-left: 11px;
+  }
 }
 
 .tool-card {
   align-self: stretch;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   display: grid;
   flex: 0 0 auto;
   gap: 0;
-  max-width: min(760px, 100%);
+  max-width: min(840px, 100%);
   min-height: 24px;
   overflow: hidden;
+  position: relative;
   transition:
     background 120ms ease,
     box-shadow 120ms ease;
@@ -97,34 +207,36 @@
 }
 
 /* Running tools stay compact but get a quiet live accent so long chains remain scannable. */
+
 .tool-card.is-live:not(.is-expanded) {
-  animation: tool-live-pulse 2s ease-in-out infinite;
   background: color-mix(in srgb, var(--color-info-bg) 55%, transparent);
-  box-shadow: inset 3px 0 0 var(--color-info-text);
+  box-shadow: inset 2px 0 0 var(--color-brand-action);
 }
 
-@keyframes tool-live-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.85; }
+.tool-card.is-live::after {
+  animation: tool-progress-scan 1.35s ease-in-out infinite;
+  background: var(--color-brand-action);
+  bottom: 0;
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  width: 36%;
 }
 
 .tool-card.is-failed:not(.is-expanded),
 .tool-card.is-attention:not(.is-expanded) {
   background: color-mix(in srgb, var(--color-danger-bg) 70%, transparent);
-  box-shadow: inset 3px 0 0 var(--color-danger-text);
+  box-shadow: inset 2px 0 0 var(--color-danger-text);
 }
 
 .tool-card.is-attention:not(.is-expanded) {
   background: color-mix(in srgb, var(--color-warning-bg) 75%, transparent);
-  box-shadow: inset 3px 0 0 var(--color-warning-text);
+  box-shadow: inset 2px 0 0 var(--color-warning-text);
 }
 
 .tool-card.is-stale:not(.is-expanded) {
-  box-shadow: inset 3px 0 0 var(--color-warning-text);
-}
-
-.tool-card.is-succeeded:not(.is-expanded) {
-  box-shadow: inset 3px 0 0 var(--color-success-text);
+  box-shadow: inset 2px 0 0 var(--color-warning-text);
 }
 
 .tool-card-header {
@@ -139,7 +251,7 @@
   grid-template-columns: 16px minmax(0, 1fr);
   line-height: 1.4;
   min-height: 24px;
-  padding: 0px;
+  padding: 1px 3px;
   text-align: left;
   width: 100%;
 }
@@ -175,6 +287,22 @@
 .tool-status-dot.is-pending,
 .tool-status-dot.is-waiting_permission {
   color: var(--color-brand-text);
+}
+
+.tool-status-dot.is-running,
+.tool-status-dot.is-pending {
+  position: relative;
+}
+
+.tool-status-dot.is-running::after,
+.tool-status-dot.is-pending::after {
+  animation: tool-status-ring 1.6s ease-out infinite;
+  border: 1px solid var(--color-brand-action);
+  border-radius: 50%;
+  content: "";
+  inset: 1px;
+  opacity: 0;
+  position: absolute;
 }
 
 .tool-card-content {
@@ -270,7 +398,7 @@
   flex: 1 1 auto;
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.55;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -299,13 +427,6 @@
 }
 
 @media (max-width: 520px) {
-  .tool-execution-group-toggle {
-    grid-template-columns: 16px minmax(0, 1fr) 16px;
-  }
-
-  .tool-execution-group-status { display: none; }
-  .tool-execution-group-body { padding-left: 8px; }
-
   .tool-card-name {
     display: none;
   }
@@ -409,4 +530,48 @@
 
 .tool-spin {
   animation: tool-spin 900ms linear infinite;
+}
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes tool-progress-scan {
+  0% { transform: translateX(-115%); }
+  55%, 100% { transform: translateX(310%); }
+}
+
+@keyframes tool-status-ring {
+  0% { opacity: 0.55; transform: scale(0.7); }
+  75%, 100% { opacity: 0; transform: scale(1.45); }
+}
+
+@keyframes session-progress-scan {
+  0% { transform: translateX(-115%); }
+  55%, 100% { transform: translateX(300%); }
+}
+
+@keyframes session-spinner {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-spin,
+  .todo-composer-item-spinner,
+  .tool-card.is-live::after,
+  .tool-execution-group.is-running::after,
+  .tool-status-dot.is-running::after,
+  .tool-status-dot.is-pending::after,
+  .tree-session-row.is-running .tree-session-main::after,
+  .session-run-spinner,
+  .tool-card-chevron,
+  .tool-detail-chevron,
+  .message-thinking-chevron,
+  .todo-composer-chevron,
+  .todo-composer-progress i {
+    animation: none;
+    transition: none;
+  }
 }

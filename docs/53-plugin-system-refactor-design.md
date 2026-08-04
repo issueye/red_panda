@@ -527,7 +527,7 @@ module.exports = function(rp) {
   SYSTEM.md                   # 追加到 system prompt（AGENTS.md 同级）
 ```
 
-**Skill**（扩展现有 `.codex/skills`）：沿用现有磁盘扫描模式；路径扩展为全局 + 项目；`skill.run` 工具不变。
+**Skill**（扩展现有 `.codex/skills`）：沿用现有磁盘扫描模式；路径扩展为全局 + 项目；模型通过工作区读取工具自行加载匹配的 `SKILL.md`，不提供独立 skill runner 工具。
 
 **Prompt 模板**（新增）：`.md` 文件，frontmatter 可选（name/description），正文支持 `$1`/`$@`/`${1:-default}` 参数。
 

@@ -126,7 +126,7 @@ modules/agent/internal/
     web.go
     gateway_tools.go # memory/todo/goal/context 转发
   subagent/          # process, pool, specialist apply
-  skill/             # discovery + skill.run 隔离
+  skill/             # discovery + model-directed workspace reads
   mcp/               # discovery only（直至 D 轨道执行）
 ```
 

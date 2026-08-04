@@ -29,7 +29,6 @@ type HostExecutor func(context.Context, *registry.ToolContext, ptools.Call) (str
 // plugin owns tool registration; Runtime only supplies implementations that
 // need access to the Worker pool or run lifecycle.
 type Dependencies struct {
-	SkillRun         HostExecutor
 	WorkerDelegate   HostExecutor
 	WorkerList       HostExecutor
 	WorkerResult     HostExecutor
@@ -39,7 +38,7 @@ type Dependencies struct {
 	WorkerReceive    HostExecutor
 }
 
-// Register registers the skill.* and worker.* tools into reg.
+// Register registers the skill management and worker tools into reg.
 // Order of registration is preserved; returned names reflect that order.
 func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies) []string {
 	specs := []toolSpec{
@@ -115,25 +114,6 @@ func Register(reg *registry.Registry, bus *hooks.ExtensionBus, deps Dependencies
 			timeoutClass: registry.GatewayToolTimeout,
 			opsOnly:      true,
 			handler:      orchestration.HandlerSkillDelete,
-		},
-		{
-			def: ptools.Definition{
-				Name:        "skill.run",
-				DisplayName: "Run skill",
-				Description: "Run a managed workspace skill in an isolated Worker Assignment and return only its final result. Prefer names from the skills catalog injected for this conversation.",
-				Risk:        ptools.RiskHigh,
-				Parameters: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"name": map[string]any{"type": "string", "description": "Existing managed skill name."},
-						"task": map[string]any{"type": "string", "description": "Task for the isolated skill Worker."},
-					},
-					"required": []string{"name", "task"},
-				},
-			},
-			timeoutClass: registry.SelfManagedToolTimeout,
-			opsOnly:      false,
-			hostExecutor: deps.SkillRun,
 		},
 		{
 			def: ptools.Definition{

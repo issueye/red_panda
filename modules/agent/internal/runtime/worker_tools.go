@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"redpanda/agent/internal/skill"
 	agenttools "redpanda/agent/internal/tools"
 	"redpanda/agent/internal/worker"
 	"redpanda/protocol/events"
@@ -231,6 +232,7 @@ Prefer workspace.read_files and workspace.grep over many small shell commands. R
 	if goruntime.GOOS == "windows" {
 		role += "\nThe host shell is Windows PowerShell. Use PowerShell commands and syntax; do not use Unix-only commands such as nl, sed, head, tail, grep, or cat."
 	}
+	role = appendCodingSkill(role, parent.Session.WorkingDir)
 	if hasProfile && strings.TrimSpace(profile.SystemPrompt) != "" {
 		role = strings.TrimSpace(profile.SystemPrompt) + "\n\n" + role
 	}
@@ -239,6 +241,28 @@ Prefer workspace.read_files and workspace.grep over many small shell commands. R
 	}
 	child.Options.SpecialistContext = &methods.SpecialistContext{Kind: "delegated_worker_proxy", Context: role}
 	return child
+}
+
+// appendCodingSkill gives ordinary delegated Workers focused coding
+// discipline. A workspace skill can be updated without
+// rebuilding the agent; a missing skill is intentionally ignored so non-code
+// workspaces and older callers remain compatible.
+func appendCodingSkill(role, workspaceRoot string) string {
+	detail, err := skill.LoadManagedDetail(workspaceRoot, "coding", true)
+	if err != nil || strings.TrimSpace(detail.Instructions) == "" {
+		return role
+	}
+	return role + "\n\nMandatory coding skill instructions:\n" + strings.TrimSpace(detail.Instructions)
+}
+
+func appendUniqueStrings(items []string, values ...string) []string {
+	result := append([]string(nil), items...)
+	for _, value := range values {
+		if !agenttools.ContainsString(result, value) {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func workerProfile(profiles []methods.WorkerProfileRef, profileKey string) (methods.WorkerProfileRef, bool) {

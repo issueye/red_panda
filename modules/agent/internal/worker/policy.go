@@ -17,7 +17,6 @@ var DelegatedDenylist = []string{
 	"worker.delegate",
 	"worker.assignment.cancel",
 	"worker.pool.status",
-	"skill.run",
 	"todo.write",
 	"todo.list",
 }

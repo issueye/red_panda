@@ -1,125 +1,8 @@
-/* ═══════════════════════════════════════════════════════════
-   Right Panel — Tabs, panel content areas, panel headers
-   ═══════════════════════════════════════════════════════════ */
-
-.panel-header {
-  align-items: center;
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  min-height: 40px;
-  padding: 0 var(--space-3);
-}
-
-.panel-header strong {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.panel-header span,
-.panel-header em {
-  color: var(--color-text-muted);
-  display: block;
-  font-size: 12px;
-  font-weight: 400;
-}
-
-  filter: brightness(0.98);
-}
-
-.button,
-.icon-button {
-  align-items: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 500;
-  gap: 6px;
-  justify-content: center;
-  min-height: 30px;
-  padding: 0 10px;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.icon-button {
-  color: var(--color-text-muted);
-  min-width: 30px;
-  padding: 0;
-}
-
-.button-default {
-  background: var(--color-brand-action);
-  color: var(--color-surface);
-}
-
-.button-default:hover {
-  background: var(--color-brand-action-hover);
-}
-
-.button-danger,
-.button.button-danger {
-  background: var(--color-danger-text);
-  border-color: transparent;
-  color: #fff;
-}
-
-.button-danger:hover,
-.button.button-danger:hover {
-  background: #912018;
-  filter: none;
-}
-
-.button-soft {
-  background: var(--color-surface-muted);
-  border-color: transparent;
-  color: var(--color-text-strong);
-}
-
-.button-soft:hover {
-  background: var(--color-border);
-}
-
-.button-ghost {
-  background: transparent;
-  color: var(--color-text-muted);
-}
-
-.button-ghost:hover,
-.icon-button.button-ghost:hover {
-  background: var(--color-surface-muted);
-  color: var(--color-text);
-}
-
-.button:hover,
-.icon-button:hover {
-  filter: none;
-}
-
-.button:disabled,
-.icon-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
-.composer-send.icon-button:disabled {
-  background: var(--color-surface-muted);
-  color: var(--color-text-soft);
-  opacity: 1;
-}
-
 .right-panel-tabs {
   border-bottom: 1px solid var(--color-border);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
   gap: 0;
+  grid-template-columns: repeat(3, 1fr);
   padding: 0;
 }
 
@@ -214,3 +97,9 @@
 
 .memory-panel-content {
   overflow: auto;
+}
+
+.worker-panel-content {
+  overflow-x: hidden;
+  overflow-y: hidden;
+}

@@ -157,7 +157,7 @@ func TestManagedSkillCreateRejectsEscapingSymlinkWithoutOutsideWrites(t *testing
 func TestRegistryRegistersManagedSkillToolRisk(t *testing.T) {
 	rt := New(strings.NewReader(""), io.Discard, io.Discard, "test")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	for _, name := range []string{"skill.create", "skill.update", "skill.delete", "skill.run"} {
+	for _, name := range []string{"skill.create", "skill.update", "skill.delete"} {
 		entry, ok := rt.registry.Lookup(name)
 		if !ok || entry.Definition.Risk != tools.RiskHigh || entry.Definition.DisplayName == "" {
 			t.Fatalf("unexpected %s entry: %#v, %v", name, entry, ok)

@@ -115,7 +115,7 @@ func TestRuntimeRegistryPreservesCoreToolSnapshot(t *testing.T) {
 		"workspace.read_file", "workspace.list", "workspace.stats", "workspace.grep", "workspace.find_files", "workspace.read_files",
 		"workspace.write_file", "workspace.edit_file", "workspace.diff_file", "workspace.apply_patch",
 		"git.status", "git.diff", "git.log", "git.show", "shell.exec",
-		"skill.list", "skill.create", "skill.update", "skill.delete", "skill.run",
+		"skill.list", "skill.create", "skill.update", "skill.delete",
 		"worker.delegate", "worker.list", "worker.result", "worker.cancel", "worker.pool_status", "worker.send", "worker.receive",
 		"todo.write", "todo.list", "memory.list", "memory.create", "memory.update", "memory.delete",
 		"web.search", "web.fetch",

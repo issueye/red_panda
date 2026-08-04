@@ -1,0 +1,84 @@
+.button,
+.icon-button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 6px;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 10px;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.icon-button {
+  color: var(--color-text-muted);
+  min-width: 30px;
+  padding: 0;
+}
+
+.button-default {
+  background: var(--color-brand-action);
+  color: var(--color-surface);
+}
+
+.button-default:hover {
+  background: var(--color-brand-action-hover);
+}
+
+.button-danger,
+.button.button-danger {
+  background: var(--color-danger-text);
+  border-color: transparent;
+  color: #fff;
+}
+
+.button-danger:hover,
+.button.button-danger:hover {
+  background: #912018;
+  filter: none;
+}
+
+.button-soft {
+  background: var(--color-surface-muted);
+  border-color: transparent;
+  color: var(--color-text-strong);
+}
+
+.button-soft:hover {
+  background: var(--color-border);
+}
+
+.button-ghost {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.button-ghost:hover,
+.icon-button.button-ghost:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+.button:hover,
+.icon-button:hover {
+  filter: none;
+}
+
+.button:disabled,
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.composer-send.icon-button:disabled {
+  background: var(--color-surface-muted);
+  color: var(--color-text-soft);
+  opacity: 1;
+}

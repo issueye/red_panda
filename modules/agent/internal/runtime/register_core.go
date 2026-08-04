@@ -27,7 +27,6 @@ func initCorePlugins(rt *Runtime, reg *registry.Registry, bus *hooks.ExtensionBu
 	workspace.Register(reg, bus)
 	coding.Register(reg, bus)
 	orchestration.Register(reg, bus, orchestration.Dependencies{
-		SkillRun:         runtimeOrchestrationExecutor(rt.executeSkillRun),
 		WorkerDelegate:   runtimeOrchestrationExecutor(rt.executeWorkerDelegate),
 		WorkerList:       runtimeOrchestrationExecutor(rt.executeWorkerList),
 		WorkerResult:     runtimeOrchestrationExecutor(rt.executeWorkerResult),

@@ -88,7 +88,7 @@ Settings → MCP → 新建：
 
 路径：`.codex/skills/robotgo-flow/SKILL.md`
 
-- 随工作区加载；`skill.list` / `skill.run` 可见。
+- 随工作区加载；`skill.list` 可见。模型需要时用 `workspace.read_file` 读取 `SKILL.md`，自行决定如何应用。
 - 指导何时调用 MCP、YAML 写法、安全与排错。
 - **不**替代 MCP 执行；技能负责策略，MCP 负责调用。
 

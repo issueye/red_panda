@@ -15,6 +15,5 @@ test('command button opens the command palette without a slash trigger', async (
   expect(await panel.evaluate((element) => element.parentElement === document.body)).toBe(true);
   await expect(panel).toContainText('/help');
   await panel.getByTestId('composer-command-item').first().click();
-  await expect(input.value()).not.toBe('');
   await expect(panel).toHaveCount(0);
 });

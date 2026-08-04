@@ -1,12 +1,7 @@
-/* ═══════════════════════════════════════════════════════════
-   Dialogs — Modal dialog system, workspace picker
-   ═══════════════════════════════════════════════════════════ */
-
-
 /* Quiet modal dialogs */
+
 .ui-dialog-overlay {
   align-items: center;
-  animation: dialog-overlay-in var(--duration-normal) var(--ease-out) both;
   display: flex;
   inset: 0;
   justify-content: center;
@@ -15,13 +10,7 @@
   z-index: 100;
 }
 
-@keyframes dialog-overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 .ui-dialog-backdrop {
-  animation: dialog-backdrop-in var(--duration-normal) var(--ease-out) both;
   background: rgba(15, 23, 42, 0.28);
   border: 0;
   cursor: default;
@@ -30,13 +19,7 @@
   position: absolute;
 }
 
-@keyframes dialog-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 .ui-dialog {
-  animation: dialog-scale-in var(--duration-slow) var(--ease-spring) both;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 10px;
@@ -49,17 +32,6 @@
   position: relative;
   width: 420px;
   z-index: 1;
-}
-
-@keyframes dialog-scale-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
 }
 
 .ui-dialog-sm {
@@ -230,6 +202,3 @@
   gap: 8px;
   grid-template-columns: minmax(0, 1fr) auto;
 }
-
-.settings-overlay {
-  align-items: center;

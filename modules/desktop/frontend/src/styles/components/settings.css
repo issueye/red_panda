@@ -1,7 +1,4 @@
-/* ═══════════════════════════════════════════════════════════
-   Settings — Settings panel, model editor, MCP discovery
-   ═══════════════════════════════════════════════════════════ */
-
+.settings-overlay {
   align-items: center;
   background: rgba(15, 23, 42, 0.36);
   display: flex;
@@ -230,14 +227,6 @@
 .settings-model-editor-header > div {
   display: grid;
   gap: 2px;
-}
-
-.settings-model-actions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: flex-end;
 }
 
 .settings-model-editor-header strong {
@@ -570,7 +559,7 @@
   display: block;
   height: 18px;
   position: relative;
-  transition: background var(--duration-normal) var(--ease-spring);
+  transition: background 120ms ease;
   width: 32px;
 }
 
@@ -583,7 +572,7 @@
   left: 2px;
   position: absolute;
   top: 2px;
-  transition: transform var(--duration-normal) var(--ease-spring);
+  transition: transform 120ms ease;
   width: 14px;
 }
 
@@ -637,7 +626,7 @@
 .settings-log-viewer {
   background: rgba(15, 23, 42, 0.03);
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: var(--radius-panel, 12px);
+  border-radius: var(--radius-lg);
   margin-top: 8px;
   max-height: 280px;
   overflow: auto;

@@ -24,6 +24,9 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 	if err != nil {
 		return runAdmission{}, err
 	}
+	if err := ensureBuiltinCodingSkill(session.WorkspaceRoot); err != nil {
+		return runAdmission{}, err
+	}
 
 	inputText := stringInput(payload.Input, "text")
 	runtimeMode := normalizedRuntimeMode(stringOption(payload.Options, "runtime_mode"))

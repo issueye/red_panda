@@ -1,22 +1,3 @@
-/* ═══════════════════════════════════════════════════════════
-   Misc — Permissions, statusbar, toast, error boundary, buttons
-   ═══════════════════════════════════════════════════════════ */
-
-@keyframes tool-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tool-spin,
-  .tool-card-chevron,
-  .tool-detail-chevron {
-    animation: none;
-    transition: none;
-  }
-}
-
 .permission-title,
 .permission-actions {
   align-items: center;
@@ -252,4 +233,3 @@
     animation: none;
   }
 }
-
