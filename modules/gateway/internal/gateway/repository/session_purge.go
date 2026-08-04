@@ -29,6 +29,14 @@ func (r ToolCallRepository) DeleteBySessions(sessionIDs []string) error {
 	return r.db.Where("session_id IN ?", sessionIDs).Delete(&model.ToolCall{}).Error
 }
 
+// DeleteByRunIDs removes tool calls belonging to the given runs.
+func (r ToolCallRepository) DeleteByRunIDs(runIDs []string) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	return r.db.Where("run_id IN ?", runIDs).Delete(&model.ToolCall{}).Error
+}
+
 // DeleteBySessions removes permission rows for the sessions.
 func (r PermissionRequestRepository) DeleteBySessions(sessionIDs []string) error {
 	if len(sessionIDs) == 0 {
@@ -37,12 +45,28 @@ func (r PermissionRequestRepository) DeleteBySessions(sessionIDs []string) error
 	return r.db.Where("session_id IN ?", sessionIDs).Delete(&model.PermissionRequest{}).Error
 }
 
+// DeleteByRunIDs removes permission rows belonging to the given runs.
+func (r PermissionRequestRepository) DeleteByRunIDs(runIDs []string) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	return r.db.Where("run_id IN ?", runIDs).Delete(&model.PermissionRequest{}).Error
+}
+
 // DeleteBySessions removes run records for the sessions.
 func (r RunRecordRepository) DeleteBySessions(sessionIDs []string) error {
 	if len(sessionIDs) == 0 {
 		return nil
 	}
 	return r.db.Where("session_id IN ?", sessionIDs).Delete(&model.RunRecord{}).Error
+}
+
+// DeleteByRunIDs removes run records with the given ids.
+func (r RunRecordRepository) DeleteByRunIDs(runIDs []string) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	return r.db.Where("id IN ?", runIDs).Delete(&model.RunRecord{}).Error
 }
 
 // ListIDsBySessions returns run ids owned by the sessions.

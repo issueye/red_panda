@@ -26,6 +26,7 @@ export function ChatPanel({
   onSend,
   onCancel,
   onResolvePermission,
+  onRollbackMessage,
   attachments = [],
   onAttachmentsChange,
   onAddFiles,
@@ -150,6 +151,7 @@ export function ChatPanel({
         onEnableThinkingChange={onEnableThinkingChange}
         onReasoningEffortChange={onReasoningEffortChange}
         onResolvePermission={onResolvePermission}
+        onRollbackMessage={onRollbackMessage}
         onSend={onSend}
         onTodosExpandToggle={onTodosExpandToggle}
         onTodosRefresh={onTodosRefresh}

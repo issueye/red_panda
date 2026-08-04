@@ -467,6 +467,36 @@ export function App() {
     }
   }, [patchRuntime]);
 
+  // Roll back a session to before the given user message: the targeted message
+  // and everything after it (AI replies, tool runs, permissions) are removed on
+  // the Gateway, then the message text is restored into the composer so the user
+  // can edit and resend it.
+  const rollbackMessage = useCallback(async (message) => {
+    const sessionId = currentSessionIdRef.current;
+    const seq = Number(message?.messageSeq || message?.seq || 0);
+    if (!sessionId || !seq) return;
+    const text = String(message?.text || '').trim();
+    const ok = await dialog.confirm({
+      title: '回滚到此消息',
+      message: '将删除该条消息及其之后的所有回复，并把原消息放回输入框以便重新编辑。',
+      description: text ? `原消息：${text.slice(0, 80)}${text.length > 80 ? '…' : ''}` : undefined,
+      confirmLabel: '回滚',
+      tone: 'warning',
+      testId: 'confirm-rollback-message',
+    });
+    if (!ok) return;
+    try {
+      await apiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/truncate`, {
+        method: 'POST',
+        body: JSON.stringify({ message_seq: seq }),
+      });
+      patchRuntime(sessionId, (rt) => ({ ...rt, draft: text }));
+      await loadSessionState(sessionId, { preserveLive: false });
+    } catch (error) {
+      toast?.error(error?.message || '回滚失败，请重试', { title: '回滚失败' });
+    }
+  }, [currentSessionIdRef, dialog, loadSessionState, patchRuntime, toast]);
+
   const {
     createSession,
     deleteSession,
@@ -705,6 +735,7 @@ export function App() {
           }))}
           onResolvePermission={resolvePermission}
           onSend={sendTask}
+          onRollbackMessage={rollbackMessage}
           onSelectConversationTab={(tabId) => patchCurrentRuntime((rt) => ({
             ...rt, activeConversationTab: tabId,
           }))}

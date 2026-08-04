@@ -1,4 +1,4 @@
-import { ArrowDown, BrainCircuit, ChevronRight, UserRound } from 'lucide-react';
+import { ArrowDown, BrainCircuit, ChevronRight, Undo2, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildConversationTimeline,
@@ -137,6 +137,7 @@ export function ChatConversation({
   running = false,
   workspaceRoot = '',
   onResolvePermission,
+  onRollbackMessage,
   emptyTitle = '准备开始',
 }) {
   const viewportRef = useRef(null);
@@ -247,6 +248,18 @@ export function ChatConversation({
                 <strong>{displayMessageAgent(message)}</strong>
                 {message.runSeq ? <span title={`事件 ${formatSeq(message.runSeq)}`}>{formatSeq(message.runSeq)}</span> : null}
                 {!message.runSeq && message.messageSeq ? <span title={`消息 ${formatSeq(message.messageSeq)}`}>{formatSeq(message.messageSeq)}</span> : null}
+                {isUser && onRollbackMessage && message.messageSeq ? (
+                  <button
+                    className="message-rollback"
+                    data-testid="message-rollback"
+                    onClick={() => onRollbackMessage(message)}
+                    title="回滚到此消息并重新编辑"
+                    type="button"
+                  >
+                    <Undo2 aria-hidden="true" size={13} />
+                    <span>回滚</span>
+                  </button>
+                ) : null}
               </div>
               {isUser ? (
                 <>

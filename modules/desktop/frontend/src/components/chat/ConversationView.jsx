@@ -20,6 +20,7 @@ export function ConversationView({
   onSend,
   onCancel,
   onResolvePermission,
+  onRollbackMessage,
   attachments = [],
   onAttachmentsChange,
   onAddFiles,
@@ -54,6 +55,7 @@ export function ConversationView({
         emptyTitle={emptyTitle}
         messages={messages}
         onResolvePermission={showComposer ? onResolvePermission : undefined}
+        onRollbackMessage={showComposer ? onRollbackMessage : undefined}
         permissions={permissions}
         running={running}
         tools={tools}
