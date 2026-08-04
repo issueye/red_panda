@@ -33,7 +33,7 @@ func main() {
 		Title:            "red_panda",
 		Width:            1400,
 		Height:           900,
-		MinWidth:         1400,
+		MinWidth:         980,
 		MinHeight:        900,
 		BackgroundColour: application.NewRGB(247, 248, 251),
 		URL:              "/",

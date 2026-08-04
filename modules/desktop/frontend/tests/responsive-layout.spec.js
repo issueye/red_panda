@@ -59,6 +59,8 @@ test('narrow app layout keeps right panel tools reachable without horizontal ove
   await expect(drawer.locator('.right-panel-tabs')).toHaveCount(0);
   await expect(drawer.getByRole('tablist')).toHaveCount(0);
   await expect(drawer.locator('.right-panel-mobile-header strong')).toHaveText('活动');
+  await expect(page.getByRole('button', { name: '展开辅助面板' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '收起辅助面板' })).toHaveCount(0);
   await expect(page.getByTestId('activity-panel')).toBeVisible();
   await expect(page.getByRole('button', { name: '关闭辅助面板' })).toBeFocused();
 
@@ -92,6 +94,21 @@ test('desktop side panels resize by dragging their separators', async ({ page })
   const rightPanel = page.locator('.right-panel');
   await expect(rightPanel.locator('.right-panel-tabs')).toBeVisible();
   await expect(rightPanel.getByRole('tab')).toHaveCount(3);
+  const chatPanel = page.locator('.chat-panel');
+  const chatBeforeCollapse = await chatPanel.boundingBox();
+  const rightBeforeCollapse = await rightPanel.boundingBox();
+  const collapsePanel = page.getByRole('button', { name: '收起辅助面板' });
+  await collapsePanel.click();
+  await expect(rightPanel).toHaveClass(/is-collapsed/);
+  await expect(rightPanel).toHaveAttribute('aria-hidden', 'true');
+  const expandPanel = page.getByRole('button', { name: '展开辅助面板' });
+  await expect(expandPanel).toBeFocused();
+  const chatCollapsed = await chatPanel.boundingBox();
+  expect(chatCollapsed.width).toBeGreaterThan(chatBeforeCollapse.width + rightBeforeCollapse.width - 4);
+  await expandPanel.click();
+  await expect(rightPanel).not.toHaveClass(/is-collapsed/);
+  await expect(rightPanel).not.toHaveAttribute('aria-hidden', 'true');
+  await expect(collapsePanel).toBeFocused();
   const rightHandle = page.getByTestId('right-panel-resizer');
   const rightBefore = await rightPanel.boundingBox();
   const rightHandleBox = await rightHandle.boundingBox();

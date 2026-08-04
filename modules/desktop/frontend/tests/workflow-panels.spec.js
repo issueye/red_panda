@@ -187,6 +187,16 @@ test('Chat messages keep the user avatar and omit the assistant avatar', async (
   await reasoning.locator('summary').click();
   await expect(reasoning.locator('.message-thinking-action-open')).toBeHidden();
   await expect(reasoning.locator('.message-thinking-action-close')).toBeVisible();
+  const thinkingColors = await Promise.all([
+    reasoning.locator('summary strong').evaluate((element) => getComputedStyle(element).color),
+    reasoning.locator('.message-thinking-preview').evaluate((element) => getComputedStyle(element).color),
+    reasoning.locator('.message-thinking-content').evaluate((element) => getComputedStyle(element).color),
+  ]);
+  expect(thinkingColors).toEqual([
+    'rgb(11, 17, 27)',
+    'rgb(102, 112, 133)',
+    'rgb(3, 7, 18)',
+  ]);
   const appearance = await Promise.all([
     userBubble.evaluate((element) => ({
       background: getComputedStyle(element).backgroundColor,

@@ -2,8 +2,14 @@
   border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: 0;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 30px;
   padding: 0;
+}
+
+.right-panel-collapse {
+  align-self: center;
+  min-height: 28px;
+  min-width: 28px;
 }
 
 .right-tab {

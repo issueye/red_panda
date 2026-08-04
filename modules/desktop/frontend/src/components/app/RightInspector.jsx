@@ -1,4 +1,5 @@
-import { X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { PanelRightClose, PanelRightOpen, X } from 'lucide-react';
 import { rightPanelTabs } from '../../lib/panelLayout.js';
 import { IconButton } from '../ui/button.jsx';
 import { TabButton } from '../ui/tabs.jsx';
@@ -46,6 +47,22 @@ export function RightInspector({
   setRightPanelWidth,
   startRightPanelResize,
 }) {
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
+  const desktopCollapseRef = useRef(null);
+  const desktopExpandRef = useRef(null);
+  const panelCollapsed = !compactLayout && desktopCollapsed;
+  const panelHidden = compactLayout ? !rightPanelDrawerOpen : panelCollapsed;
+
+  function collapseDesktopPanel() {
+    setDesktopCollapsed(true);
+    window.requestAnimationFrame(() => desktopExpandRef.current?.focus());
+  }
+
+  function expandDesktopPanel() {
+    setDesktopCollapsed(false);
+    window.requestAnimationFrame(() => desktopCollapseRef.current?.focus());
+  }
+
   return (
     <>
       <div
@@ -62,6 +79,17 @@ export function RightInspector({
           testIdSuffix="-rail"
         />
       </div>
+      {panelCollapsed ? (
+        <IconButton
+          className="right-panel-expand"
+          label="展开辅助面板"
+          onClick={expandDesktopPanel}
+          ref={desktopExpandRef}
+          variant="soft"
+        >
+          <PanelRightOpen size={17} />
+        </IconButton>
+      ) : null}
       {rightPanelDrawerOpen ? (
         <button
           aria-hidden="true"
@@ -73,10 +101,14 @@ export function RightInspector({
         />
       ) : null}
       <aside
-        aria-hidden={compactLayout && !rightPanelDrawerOpen ? 'true' : undefined}
+        aria-hidden={panelHidden ? 'true' : undefined}
         aria-label="辅助面板"
-        className={['right-panel', rightPanelDrawerOpen ? 'drawer-open' : ''].filter(Boolean).join(' ')}
-        inert={compactLayout && !rightPanelDrawerOpen ? '' : undefined}
+        className={[
+          'right-panel',
+          rightPanelDrawerOpen ? 'drawer-open' : '',
+          panelCollapsed ? 'is-collapsed' : '',
+        ].filter(Boolean).join(' ')}
+        inert={panelHidden ? '' : undefined}
         onKeyDown={(event) => {
           if (compactLayout && event.key === 'Escape') closeRightPanelDrawer();
         }}
@@ -107,6 +139,14 @@ export function RightInspector({
               rightPanelTab={rightPanelTab}
               selectRightPanelTab={selectRightPanelTab}
             />
+            <IconButton
+              className="right-panel-collapse"
+              label="收起辅助面板"
+              onClick={collapseDesktopPanel}
+              ref={desktopCollapseRef}
+            >
+              <PanelRightClose size={16} />
+            </IconButton>
           </div>
         ) : null}
         <div className="right-panel-content" id="right-panel-content" role="tabpanel">

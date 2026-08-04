@@ -5,6 +5,7 @@
   /* grid-template-columns: 240px minmax(280px, 1fr) var(--right-panel-width); */
   display: flex;
   min-height: 0;
+  position: relative;
 }
 
 .sidebar,
@@ -68,6 +69,29 @@
   overflow: hidden;
   padding: 10px 12px 12px;
   position: relative;
+}
+
+.right-panel.is-collapsed {
+  border-left: 0;
+  flex-basis: 0;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  width: 0;
+}
+
+.right-panel.is-collapsed > * {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.right-panel-expand {
+  box-shadow: var(--shadow-sm);
+  position: absolute;
+  right: var(--space-2);
+  top: var(--space-2);
+  z-index: 9;
 }
 
 .workspace-window-backdrop {
