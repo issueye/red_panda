@@ -125,16 +125,18 @@
   min-height: 0;
   overflow: hidden;
   position: relative;
+  display: flex;
+  justify-content: center;
 }
 
 .conversation {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   min-height: 0;
   overflow: auto;
   padding: 20px 20px 8px;
   height: 100%;
+  max-width: 720px;
 }
 
 /* Timeline items must not shrink: overflow:hidden cards would collapse to hairlines. */
@@ -544,7 +546,7 @@
   flex: 0 0 auto;
   gap: 9px;
   grid-template-columns: 20px minmax(0, 1fr);
-  max-width: 840px;
+  max-width: 720px;
 }
 
 .message-row.role-user {
@@ -582,7 +584,7 @@
   border-radius: 0;
   box-shadow: none;
   min-width: 0;
-  padding: 0 0 4px;
+  padding: 4px 0 4px;
   width: 100%;
 }
 
@@ -641,8 +643,12 @@
 }
 
 .message-thinking-heading > span {
-  color: var(--color-text-soft);
+  color: var(--color-text-muted);
   font-size: 10px;
+}
+
+.message-thinking-heading > strong {
+  color: var(--color-text-muted) !important;
 }
 
 .message-thinking-preview {
@@ -694,7 +700,7 @@
 
 .message-thinking-content {
   border-left: 1px solid var(--color-border);
-  color: var(--color-conversation-text);
+  color: var(--color-text-muted) !important;
   font-size: 13px;
   line-height: 1.7;
   margin: 5px 0 1px -20px;

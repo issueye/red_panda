@@ -217,7 +217,6 @@ export function ChatConversation({
                   <summary>
                     <span className="message-thinking-heading">
                       <strong>思考</strong>
-                      {message.runSeq ? <span>{formatSeq(message.runSeq)}</span> : null}
                     </span>
                     {compactPreview ? (
                       <span className="message-thinking-preview" title={compactPreview}>
