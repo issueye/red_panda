@@ -10,6 +10,9 @@ const maxToolOutputBytes = 64 * 1024
 const maxGrepFileBytes = 2 * 1024 * 1024
 const maxListEntries = 500
 const maxPatchBytes = 256 * 1024
+
+// MaxEditFileBytes 限制 edit_file 单次编辑的最大文件字节数，避免超大文件被整个读入内存。
+const MaxEditFileBytes = 2 * 1024 * 1024
 const WorkerSummaryTurns = 16
 
 const DefaultListDepth = 3

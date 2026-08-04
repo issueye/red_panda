@@ -48,10 +48,18 @@ func RunEditFile(root string, relPath string, oldText string, newText string, re
 	if err != nil {
 		return "", err
 	}
+	if len(raw) > MaxEditFileBytes {
+		return "", fmt.Errorf("%s exceeds %d bytes", relPath, MaxEditFileBytes)
+	}
 	if bytes.IndexByte(raw, 0) >= 0 {
 		return "", fmt.Errorf("%s appears to be a binary file", relPath)
 	}
+	// 统一 old_text/new_text 与文件内容的换行符为 LF，避免 CRLF/LF 混用导致匹配失败。
+	oldText = normalizeNewlines(oldText)
+	newText = normalizeNewlines(newText)
 	content := string(raw)
+	crlf := bytes.Contains(raw, []byte("\r\n"))
+	content = normalizeNewlines(content)
 	count := strings.Count(content, oldText)
 	if count == 0 {
 		return "", fmt.Errorf("old_text not found in %s", relPath)
@@ -65,10 +73,20 @@ func RunEditFile(root string, relPath string, oldText string, newText string, re
 		replaced = strings.ReplaceAll(content, oldText, newText)
 		changed = count
 	}
+	// 若原文件使用 CRLF，回写时恢复 CRLF，保持文件既有换行风格。
+	if crlf {
+		replaced = strings.ReplaceAll(replaced, "\n", "\r\n")
+	}
 	if err := os.WriteFile(target, []byte(replaced), info.Mode().Perm()); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("edited %s: replaced %d occurrence(s)", relPath, changed), nil
+}
+
+// normalizeNewlines 将字符串中的 CRLF 与单独 CR 统一替换为 LF，用于跨平台换行匹配。
+func normalizeNewlines(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	return strings.ReplaceAll(value, "\r", "\n")
 }
 
 // ---------- diff (copied from workspace_write.go runDiffFile) ----------

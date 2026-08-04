@@ -10,6 +10,7 @@ import (
 
 	"redpanda/agent/internal/runtime/hooks"
 	"redpanda/agent/internal/runtime/registry"
+	"redpanda/agent/plugins/core/workspace/internal"
 )
 
 func TestRegisterReturnsAllTools(t *testing.T) {
@@ -267,5 +268,124 @@ func TestReadFilesAndGlobHandlers(t *testing.T) {
 	found, err := runFindFilesHandler(context.Background(), toolCtx, map[string]any{"pattern": "**/*_test.go", "path": "."})
 	if err != nil || !strings.Contains(found.Output, "pkg/main_test.go") || !strings.Contains(found.Output, "root_test.go") || strings.Contains(found.Output, "ignored_test.go") {
 		t.Fatalf("find_files result = %#v, %v", found, err)
+	}
+}
+
+// TestEditFileNormalizesCRLF 验证 edit_file 在 CRLF 文件上使用 LF 的 old_text 也能正确替换，
+// 且回写后保持 CRLF 换行风格。
+func TestEditFileNormalizesCRLF(t *testing.T) {
+	dir := t.TempDir()
+	target := fmt.Sprintf("%s/note.txt", dir)
+	if err := os.WriteFile(target, []byte("alpha red panda\r\nsecond line\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolCtx := &registry.ToolContext{WorkingDir: dir}
+
+	res, err := runEditFileHandler(context.Background(), toolCtx, map[string]any{
+		"path": "note.txt", "old_text": "red panda\nsecond", "new_text": "scarlet panda\nsecond",
+	})
+	if err != nil || res.Status != "completed" {
+		t.Fatalf("edit result = %#v, %v", res, err)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw); got != "alpha scarlet panda\r\nsecond line\r\n" {
+		t.Fatalf("expected CRLF preserved, got %q", got)
+	}
+}
+
+// TestEditFileConvertsLFWhenNewTextHasCRLF 验证 new_text 携带 CRLF 时，在 LF 文件上会被统一为 LF。
+func TestEditFileConvertsLFWhenNewTextHasCRLF(t *testing.T) {
+	dir := t.TempDir()
+	target := fmt.Sprintf("%s/note.txt", dir)
+	if err := os.WriteFile(target, []byte("alpha red panda\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolCtx := &registry.ToolContext{WorkingDir: dir}
+
+	res, err := runEditFileHandler(context.Background(), toolCtx, map[string]any{
+		"path": "note.txt", "old_text": "red panda", "new_text": "scarlet panda\r\nsecond",
+	})
+	if err != nil || res.Status != "completed" {
+		t.Fatalf("edit result = %#v, %v", res, err)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw); got != "alpha scarlet panda\nsecond\n" {
+		t.Fatalf("expected LF preserved, got %q", got)
+	}
+}
+
+// TestEditFileRejectsOversizedFile 验证 edit_file 拒绝超过大小上限的文件。
+func TestEditFileRejectsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	target := fmt.Sprintf("%s/big.txt", dir)
+	// 构造一个超过 maxEditFileBytes 的文件。
+	big := make([]byte, internal.MaxEditFileBytes+1)
+	if err := os.WriteFile(target, big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolCtx := &registry.ToolContext{WorkingDir: dir}
+
+	res, err := runEditFileHandler(context.Background(), toolCtx, map[string]any{
+		"path": "big.txt", "old_text": "x", "new_text": "y",
+	})
+	if err == nil {
+		t.Fatal("expected error for oversized file")
+	}
+	if res.Status != "failed" {
+		t.Fatalf("expected status failed, got %s", res.Status)
+	}
+}
+
+// TestEditFileReplaceAll 验证 replace_all 替换所有匹配项。
+func TestEditFileReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	target := fmt.Sprintf("%s/note.txt", dir)
+	if err := os.WriteFile(target, []byte("foo foo foo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolCtx := &registry.ToolContext{WorkingDir: dir}
+
+	res, err := runEditFileHandler(context.Background(), toolCtx, map[string]any{
+		"path": "note.txt", "old_text": "foo", "new_text": "bar", "replace_all": true,
+	})
+	if err != nil || res.Status != "completed" {
+		t.Fatalf("edit result = %#v, %v", res, err)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw); got != "bar bar bar\n" {
+		t.Fatalf("expected all replaced, got %q", got)
+	}
+}
+
+// TestEditFileRejectsAmbiguousWithoutReplaceAll 验证存在多个匹配且未开启 replace_all 时报错。
+func TestEditFileRejectsAmbiguousWithoutReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	target := fmt.Sprintf("%s/note.txt", dir)
+	if err := os.WriteFile(target, []byte("foo foo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolCtx := &registry.ToolContext{WorkingDir: dir}
+
+	res, err := runEditFileHandler(context.Background(), toolCtx, map[string]any{
+		"path": "note.txt", "old_text": "foo", "new_text": "bar",
+	})
+	if err == nil {
+		t.Fatal("expected error for ambiguous old_text")
+	}
+	if res.Status != "failed" {
+		t.Fatalf("expected status failed, got %s", res.Status)
+	}
+	raw, _ := os.ReadFile(target)
+	if string(raw) != "foo foo\n" {
+		t.Fatalf("file should not be modified, got %q", raw)
 	}
 }

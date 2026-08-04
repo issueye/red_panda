@@ -21,6 +21,51 @@ func TestParseDuckDuckGoHTML(t *testing.T) {
 	}
 }
 
+func TestCleanDuckDuckGoItem(t *testing.T) {
+	// 折叠连续空白、去除尾部省略号/分隔符。
+	cleaned := cleanDuckDuckGoItem(webSearchItem{
+		Title:   "  Red\n   Panda  ... ",
+		Snippet: "A   great   article…",
+	})
+	if cleaned.Title != "Red Panda" {
+		t.Errorf("Title = %q, want %q", cleaned.Title, "Red Panda")
+	}
+	if cleaned.Snippet != "A great article" {
+		t.Errorf("Snippet = %q, want %q", cleaned.Snippet, "A great article")
+	}
+
+	// 摘要与标题重复时清空摘要。
+	dup := cleanDuckDuckGoItem(webSearchItem{Title: "Same", Snippet: "Same"})
+	if dup.Snippet != "" {
+		t.Errorf("dup Snippet = %q, want empty", dup.Snippet)
+	}
+
+	// 保留业务相关句号，仅去除尾部冗余标点；连续空白被折叠为单空格。
+	keep := cleanDuckDuckGoItem(webSearchItem{Title: "Go.  Guide.", Snippet: "Learn Go. Now."})
+	if keep.Title != "Go. Guide." {
+		t.Errorf("keep.Title = %q, want %q", keep.Title, "Go. Guide.")
+	}
+}
+
+func TestParseDuckDuckGoJSONAppliesCleaning(t *testing.T) {
+	body := `{"Results":[{"Text":"Red   Panda  ...","FirstURL":"https://example.com/a"},{"Text":"Dup","FirstURL":"https://example.com/b"}]}`
+	items, err := parseDuckDuckGoJSON([]byte(body), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %#v", items)
+	}
+	// 标题被折叠空白并去除尾部省略号。
+	if items[0].Title != "Red Panda" {
+		t.Errorf("items[0].Title = %q, want %q", items[0].Title, "Red Panda")
+	}
+	// 摘要与标题重复时被清空。
+	if items[1].Snippet != "" {
+		t.Errorf("items[1].Snippet = %q, want empty", items[1].Snippet)
+	}
+}
+
 func TestHandlerWebSearchViaDuckDuckGo(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, `<a class="result__a" href="https://example.com">Example</a><a class="result__snippet">Result text</a>`)

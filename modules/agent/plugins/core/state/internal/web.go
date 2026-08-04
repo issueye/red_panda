@@ -1,4 +1,4 @@
-﻿package internal
+package internal
 
 import (
 	"context"
@@ -47,9 +47,9 @@ func runWebSearch(ctx context.Context, tc *registry.ToolContext, args map[string
 	opts := effectiveWebSearchOptionsForPlugin(tc)
 
 	var (
-		items  []webSearchItem
-		source string
-		answer string
+		items   []webSearchItem
+		source  string
+		answer  string
 		lastErr error
 	)
 
@@ -271,10 +271,11 @@ func parseDuckDuckGoHTML(body string, maxResults int) []webSearchItem {
 		if rawURL == "" {
 			continue
 		}
-		item := webSearchItem{Title: title, URL: rawURL}
+		item := webSearchItem{Title: cleanHTMLText(title), URL: rawURL}
 		if i < len(snippetMatches) {
 			item.Snippet = cleanHTMLText(snippetMatches[i][1])
 		}
+		item = cleanDuckDuckGoItem(item)
 		items = append(items, item)
 	}
 	return items
@@ -380,7 +381,7 @@ func parseDuckDuckGoJSON(body []byte, maxResults int) ([]webSearchItem, error) {
 			// Use snippet as title.
 			title = snippet
 		}
-		items = append(items, webSearchItem{Title: title, URL: rawURL, Snippet: snippet})
+		items = append(items, cleanDuckDuckGoItem(webSearchItem{Title: title, URL: rawURL, Snippet: snippet}))
 	}
 
 	if parsed.AbstractText != "" || parsed.AbstractURL != "" {
@@ -552,6 +553,56 @@ func cleanHTMLText(value string) string {
 	value = strings.ReplaceAll(value, "\u00a0", " ")
 	value = htmlNewlineRE.ReplaceAllString(value, "\n\n")
 	return strings.TrimSpace(value)
+}
+
+// cleanDuckDuckGoItem 对单个 DDG 搜索结果条目做数据清洗：
+// 折叠连续空白、去除尾部省略号/分隔符、清理标题与摘要中的冗余标点，
+// 并去除与标题重复的摘要，避免给模型返回脏数据。
+func cleanDuckDuckGoItem(item webSearchItem) webSearchItem {
+	item.Title = strings.TrimSpace(collapseDuckDuckGoWhitespace(item.Title))
+	item.Snippet = strings.TrimSpace(collapseDuckDuckGoWhitespace(item.Snippet))
+	item.Title = trimTrailingEllipsis(item.Title)
+	item.Snippet = trimTrailingEllipsis(item.Snippet)
+	// 若摘要与标题完全重复，则清空摘要，减少冗余信息。
+	if item.Snippet != "" && item.Snippet == item.Title {
+		item.Snippet = ""
+	}
+	return item
+}
+
+// trimTrailingEllipsis 去除字符串末尾的省略号（中英文省略号或连续 3 个及以上点号），
+// 保留业务相关的单个句号。
+func trimTrailingEllipsis(value string) string {
+	value = strings.TrimRight(value, " \t")
+	// 统计末尾连续点号数量。
+	dotCount := 0
+	for i := len(value) - 1; i >= 0 && value[i] == '.'; i-- {
+		dotCount++
+	}
+	// 中英文省略号单字符（按 rune 计数）。
+	runes := []rune(value)
+	ellipsisLen := 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		if runes[i] == '…' || runes[i] == '⋯' {
+			ellipsisLen++
+		} else {
+			break
+		}
+	}
+	if ellipsisLen > 0 {
+		value = strings.TrimRight(string(runes[:len(runes)-ellipsisLen]), " \t")
+	} else if dotCount >= 3 {
+		value = strings.TrimRight(value[:len(value)-dotCount], " \t")
+	}
+	return value
+}
+
+// collapseDuckDuckGoWhitespace 将连续空白（含换行、制表符、CR）折叠为单个空格。
+func collapseDuckDuckGoWhitespace(value string) string {
+	value = strings.ReplaceAll(value, "\u00a0", " ")
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return htmlWhitespaceRE.ReplaceAllString(value, " ")
 }
 
 func decodeCommonEntities(value string) string {
