@@ -9,7 +9,6 @@ const SELF_MANAGED_TOOL_NAMES = new Set([
   'shell.exec',
   'web.search',
   'web.fetch',
-  'skill.run',
 	'worker.delegate',
 	'worker.cancel',
 	'worker.send',

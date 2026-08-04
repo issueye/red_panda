@@ -9,23 +9,25 @@ import (
 	protows "redpanda/protocol/ws"
 )
 
-func TestEnsureBuiltinCodingSkillCreatesMissingFile(t *testing.T) {
+func TestEnsureBuiltinSkillsCreatesMissingFiles(t *testing.T) {
 	root := t.TempDir()
-	if err := ensureBuiltinCodingSkill(root); err != nil {
+	if err := ensureBuiltinSkills(root); err != nil {
 		t.Fatal(err)
 	}
 
-	target := filepath.Join(root, ".codex", "skills", "coding", "SKILL.md")
-	content, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != string(builtinCodingSkill) || !strings.Contains(string(content), "name: coding") {
-		t.Fatalf("unexpected builtin skill content: %q", content)
+	for _, skill := range builtinSkills {
+		target := filepath.Join(root, ".codex", "skills", skill.name, "SKILL.md")
+		content, err := os.ReadFile(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(content) != string(skill.content) || !strings.Contains(string(content), "name: "+skill.name) {
+			t.Fatalf("unexpected builtin %s skill content: %q", skill.name, content)
+		}
 	}
 }
 
-func TestEnsureBuiltinCodingSkillIsIdempotentAndPreservesExisting(t *testing.T) {
+func TestEnsureBuiltinSkillsIsIdempotentAndPreservesExisting(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, ".codex", "skills", "coding", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -35,7 +37,7 @@ func TestEnsureBuiltinCodingSkillIsIdempotentAndPreservesExisting(t *testing.T) 
 	if err := os.WriteFile(target, custom, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureBuiltinCodingSkill(root); err != nil {
+	if err := ensureBuiltinSkills(root); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(target)
@@ -45,12 +47,12 @@ func TestEnsureBuiltinCodingSkillIsIdempotentAndPreservesExisting(t *testing.T) 
 	if string(content) != string(custom) {
 		t.Fatalf("existing skill was overwritten: %q", content)
 	}
-	if err := ensureBuiltinCodingSkill(root); err != nil {
+	if err := ensureBuiltinSkills(root); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestRunAdmissionEnsuresBuiltinCodingSkill(t *testing.T) {
+func TestRunAdmissionEnsuresBuiltinSkills(t *testing.T) {
 	root := t.TempDir()
 	_, service := newRunServiceTestFixture(t)
 	if _, err := service.admitRun(protows.RunStartPayload{
@@ -61,7 +63,9 @@ func TestRunAdmissionEnsuresBuiltinCodingSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(root, ".codex", "skills", "coding", "SKILL.md")); err != nil {
-		t.Fatalf("run admission did not install builtin coding skill: %v", err)
+	for _, name := range []string{"coding", "brainstorming", "frontend-design", "automation-workflows"} {
+		if _, err := os.Stat(filepath.Join(root, ".codex", "skills", name, "SKILL.md")); err != nil {
+			t.Fatalf("run admission did not install builtin %s skill: %v", name, err)
+		}
 	}
 }

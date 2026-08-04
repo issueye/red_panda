@@ -11,12 +11,31 @@ import (
 //go:embed assets/coding/SKILL.md
 var builtinCodingSkill []byte
 
-const builtinCodingSkillName = "coding"
+//go:embed assets/brainstorming/SKILL.md
+var builtinBrainstormingSkill []byte
 
-// ensureBuiltinCodingSkill installs the Gateway-bundled coding skill only
-// when the active workspace does not already provide one. Existing workspace
-// content is user-owned and is never overwritten.
-func ensureBuiltinCodingSkill(workspaceRoot string) error {
+//go:embed assets/frontend-design/SKILL.md
+var builtinFrontendDesignSkill []byte
+
+//go:embed assets/automation-workflows/SKILL.md
+var builtinAutomationWorkflowsSkill []byte
+
+type builtinSkillDefinition struct {
+	name    string
+	content []byte
+}
+
+var builtinSkills = []builtinSkillDefinition{
+	{name: "coding", content: builtinCodingSkill},
+	{name: "brainstorming", content: builtinBrainstormingSkill},
+	{name: "frontend-design", content: builtinFrontendDesignSkill},
+	{name: "automation-workflows", content: builtinAutomationWorkflowsSkill},
+}
+
+// ensureBuiltinSkills installs Gateway-bundled skills only when the active
+// workspace does not already provide them. Existing workspace content is
+// user-owned and is never overwritten.
+func ensureBuiltinSkills(workspaceRoot string) error {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot == "" {
 		return nil
@@ -45,8 +64,17 @@ func ensureBuiltinCodingSkill(workspaceRoot string) error {
 	}
 	realRoot = filepath.Clean(realRoot)
 
-	targetDir := filepath.Join(root, ".codex", "skills", builtinCodingSkillName)
-	if err := ensureBuiltinSkillDirectory(realRoot, root, targetDir); err != nil {
+	for _, skill := range builtinSkills {
+		if err := ensureBuiltinSkill(realRoot, root, skill); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureBuiltinSkill(realRoot, lexicalRoot string, skill builtinSkillDefinition) error {
+	targetDir := filepath.Join(lexicalRoot, ".codex", "skills", skill.name)
+	if err := ensureBuiltinSkillDirectory(realRoot, lexicalRoot, targetDir); err != nil {
 		return err
 	}
 	target := filepath.Join(targetDir, "SKILL.md")
@@ -62,19 +90,19 @@ func ensureBuiltinCodingSkill(workspaceRoot string) error {
 	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if os.IsExist(err) {
 		// Another run may have initialized the same workspace concurrently.
-		return ensureBuiltinCodingSkill(workspaceRoot)
+		return ensureBuiltinSkill(realRoot, lexicalRoot, skill)
 	}
 	if err != nil {
-		return fmt.Errorf("create builtin %s skill: %w", builtinCodingSkillName, err)
+		return fmt.Errorf("create builtin %s skill: %w", skill.name, err)
 	}
-	if _, err := file.Write(builtinCodingSkill); err != nil {
+	if _, err := file.Write(skill.content); err != nil {
 		_ = file.Close()
 		_ = os.Remove(target)
-		return fmt.Errorf("write builtin %s skill: %w", builtinCodingSkillName, err)
+		return fmt.Errorf("write builtin %s skill: %w", skill.name, err)
 	}
 	if err := file.Close(); err != nil {
 		_ = os.Remove(target)
-		return fmt.Errorf("close builtin %s skill: %w", builtinCodingSkillName, err)
+		return fmt.Errorf("close builtin %s skill: %w", skill.name, err)
 	}
 	return nil
 }

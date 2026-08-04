@@ -24,7 +24,7 @@ func (r RunService) admitRun(payload protows.RunStartPayload) (runAdmission, err
 	if err != nil {
 		return runAdmission{}, err
 	}
-	if err := ensureBuiltinCodingSkill(session.WorkspaceRoot); err != nil {
+	if err := ensureBuiltinSkills(session.WorkspaceRoot); err != nil {
 		return runAdmission{}, err
 	}
 

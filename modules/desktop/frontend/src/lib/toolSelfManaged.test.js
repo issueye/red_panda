@@ -14,7 +14,6 @@ describe('toolSelfManaged', () => {
     assert.equal(isSelfManagedTool('shell.exec'), true);
     assert.equal(isSelfManagedTool('web.search'), true);
     assert.equal(isSelfManagedTool('web.fetch'), true);
-    assert.equal(isSelfManagedTool('skill.run'), true);
   });
 
   it('normalizes double-underscore names', () => {

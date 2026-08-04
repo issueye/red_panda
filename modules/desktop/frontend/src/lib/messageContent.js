@@ -46,7 +46,6 @@ const TOOL_DISPLAY_NAMES = {
   'worker.receive': 'Receive from Worker',
   'memory.create': 'Create memory',
   'memory.search': 'Search memory',
-  'skill.run': 'Run skill',
 };
 
 /**
