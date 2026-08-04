@@ -3,6 +3,21 @@ import { expect, test } from '@playwright/test';
 test('Restored workflow panels render permissions tools and Worker assignments', async ({ page }) => {
   await page.goto('/workflow-fixture.html');
 
+  expect(await page.evaluate(() => {
+    const styles = getComputedStyle(document.documentElement);
+    return {
+      background: styles.getPropertyValue('--color-bg').trim(),
+      mutedSurface: styles.getPropertyValue('--color-surface-muted').trim(),
+      primaryText: styles.getPropertyValue('--color-text').trim(),
+      conversationText: styles.getPropertyValue('--color-conversation-text').trim(),
+    };
+  })).toEqual({
+    background: '#fafbfc',
+    mutedSurface: '#f7f8fa',
+    primaryText: '#070b12',
+    conversationText: '#030712',
+  });
+
   // Main tab only shows root-facing rows (user + reasoning + root assistant + root tool/permission).
   await expect(page.getByTestId('message-row')).toHaveCount(2);
   await expect(page.getByText('Restore previous session state')).toBeVisible();
@@ -200,7 +215,7 @@ test('Chat messages keep the user avatar and omit the assistant avatar', async (
     borderStyle: 'none',
   });
   expect(await page.locator('.message-plain').evaluateAll((items) => (
-    items.every((item) => getComputedStyle(item).color === 'rgb(8, 15, 28)')
+    items.every((item) => getComputedStyle(item).color === 'rgb(3, 7, 18)')
   ))).toBe(true);
 
   const toolGroup = page.getByTestId('tool-execution-group');
